@@ -10,7 +10,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { Item, ItemListParams, ItemStatus, ItemSummary, Limits, Page } from './types';
+import type { Item, ItemListParams, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -28,6 +28,8 @@ export const qk = {
   itemQuery: (params: ItemListParams) => ['items', 'list', 'query', params] as const,
   item: (id: string) => ['items', 'detail', id] as const,
   testCases: (itemId: string) => ['testcases', itemId] as const,
+  solutions: (itemId: string) => ['solutions', itemId] as const,
+  preferences: ['settings', 'preferences'] as const,
   submissions: (itemId: string) => ['submissions', 'list', itemId] as const,
   submission: (id: string) => ['submissions', 'detail', id] as const,
 };
@@ -103,6 +105,51 @@ export function useTestCases(itemId: string, enabled = true) {
     queryFn: ({ signal }) => api.testCases.list(itemId, signal),
     select: (data) => data.items,
     enabled,
+  });
+}
+
+export function useSolutions(itemId: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.solutions(itemId),
+    queryFn: ({ signal }) => api.solutions.list(itemId, signal),
+    select: (data) => data.items,
+    enabled,
+  });
+}
+
+/** What the server uses until the user changes something (docs/api.md, "Preferences"). */
+export const DEFAULT_PREFERENCES: Preferences = {
+  hideTestCases: true,
+  editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
+};
+
+/**
+ * The user's preferences. Until they have loaded (and if they cannot be
+ * loaded) the defaults apply, so nothing waits on them.
+ */
+export function usePreferences(): Preferences {
+  const query = useQuery({ queryKey: qk.preferences, queryFn: ({ signal }) => api.preferences.get(signal), staleTime: 60_000 });
+  return query.data ?? DEFAULT_PREFERENCES;
+}
+
+/** Change preferences. The change applies at once and is rolled back if the server rejects it. */
+export function useUpdatePreferences() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (change: PreferencesUpdate) => api.preferences.put(change),
+    onMutate: async (change) => {
+      await qc.cancelQueries({ queryKey: qk.preferences });
+      const previous = qc.getQueryData<Preferences>(qk.preferences);
+      const base = previous ?? DEFAULT_PREFERENCES;
+      qc.setQueryData<Preferences>(qk.preferences, { ...base, ...change, editor: { ...base.editor, ...change.editor } });
+      return { previous };
+    },
+    onError: (_err, _change, ctx) => {
+      qc.setQueryData(qk.preferences, ctx?.previous);
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData(qk.preferences, saved);
+    },
   });
 }
 

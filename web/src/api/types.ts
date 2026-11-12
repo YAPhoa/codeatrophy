@@ -80,6 +80,7 @@ export interface Limits {
   /** Bounds on the contents of an uploaded bundle; beyond them the server answers `413`. */
   maxImportUncompressedBytes: number;
   maxImportEntries: number;
+  maxImportCollections: number;
   /** Largest JSON request body. */
   maxRequestBytes: number;
   /** Largest `limit` of a paginated list. */
@@ -116,6 +117,9 @@ export interface Limits {
   /** Applies to an export's `name` and `author`. */
   maxBundleNameChars: number;
   maxBundleDescriptionChars: number;
+  maxSolutionsPerItem: number;
+  maxSolutionNameChars: number;
+  maxSolutionNotesChars: number;
 }
 
 export interface Stats {
@@ -142,7 +146,13 @@ export interface ProblemSpec {
   memoryLimitKb: number;
   compare: CompareMode;
   starterCode: Record<string, string>;
-  referenceSolution: SourceCode | null;
+  /**
+   * A view of the saved solution marked as the reference, or `null`. When
+   * read it carries that solution's `id`; when written only `language` and
+   * `source` count (the reference solution is updated in place, or created),
+   * and `null` removes the mark without deleting the solution.
+   */
+  referenceSolution: (SourceCode & { id?: string }) | null;
 }
 
 export interface ItemSource {
@@ -163,6 +173,8 @@ export interface ItemSummary {
   variantOf: string | null;
   variantCount: number;
   testCaseCount: number;
+  /** How many solutions are saved for the item; `0` for readings. */
+  solutionCount: number;
   lastVerdict: Verdict | null;
   revision: number;
   createdAt: string;
@@ -280,6 +292,38 @@ export interface VerifyResult {
   stderr: string;
   timeMs: number;
 }
+
+// ---- Solutions --------------------------------------------------------------
+
+/** A saved solution to a problem. At most one per item is the reference solution. */
+export interface Solution {
+  id: string;
+  itemId: string;
+  name: string;
+  language: string;
+  source: string;
+  /** Markdown. */
+  notes: string;
+  isReference: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SolutionInput {
+  name: string;
+  language: string;
+  source: string;
+  notes?: string;
+  isReference?: boolean;
+  /**
+   * Checked like on `PATCH /items/{id}`. Relevant when the write changes the
+   * reference solution (its language or source, or which solution it is),
+   * because that is item content.
+   */
+  expectedRevision?: number;
+}
+
+export type SolutionPatch = Partial<SolutionInput>;
 
 // ---- Collections and tags -------------------------------------------------
 
@@ -509,6 +553,31 @@ export interface AiTestResponse {
   error: string | null;
 }
 
+// ---- Preferences ------------------------------------------------------------
+
+export interface EditorPreferences {
+  autocomplete: boolean;
+  closeBrackets: boolean;
+  matchBrackets: boolean;
+  lineWrapping: boolean;
+  tabSize: 2 | 4 | 8;
+  /** Pixels, 10–24. */
+  fontSize: number;
+}
+
+/** How the user likes the app to behave; stored on the server so it follows them across browsers. */
+export interface Preferences {
+  /** Keep the content of non-sample test cases out of sight until the user asks to see it. */
+  hideTestCases: boolean;
+  editor: EditorPreferences;
+}
+
+/** Body of `PUT /settings/preferences`: any subset, at any depth. */
+export interface PreferencesUpdate {
+  hideTestCases?: boolean;
+  editor?: Partial<EditorPreferences>;
+}
+
 // ---- Import and export ----------------------------------------------------
 
 export type ExportScope = 'all' | 'collection' | 'items';
@@ -540,7 +609,7 @@ export type ImportChange =
   | 'limits'
   | 'compare'
   | 'starterCode'
-  | 'referenceSolution'
+  | 'solutions'
   | 'testCases';
 
 export interface ImportPreviewItem {

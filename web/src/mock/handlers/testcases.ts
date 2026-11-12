@@ -1,4 +1,4 @@
-// Test case endpoints, including verification against the reference solution.
+// Test case endpoints, including verification against a saved solution.
 
 import type { SourceCode, TestCase, TestCaseInput, VerifyResult } from '../../api/types';
 import type { MockDb, StoredItem } from '../db';
@@ -16,7 +16,7 @@ import {
   ok,
   Validator,
 } from '../http';
-import { detectBehaviour, failureFor, resourceUsage } from '../judge';
+import { compileOutputFor, detectBehaviour, failureFor, perturbOutput, resourceUsage, wrongAnswerHits } from '../judge';
 import { hash32, isLanguage, sleep } from '../util';
 import { checkRevision, insertTestCase, parseTestCaseInput, tooManyCases } from './items';
 
@@ -65,19 +65,21 @@ function bulkCases(db: MockDb, req: Req) {
   if (kept + inputs.length > LIMITS.maxTestCasesPerItem) v.add('cases', tooManyCases);
   v.check();
 
+  // The reference solution is one of the item's saved solutions: the write
+  // updates it in place or saves a new one. A different language or source
+  // is a content change and raises the revision; the test cases themselves
+  // only move `updatedAt`.
+  const before = db.referenceView(item.id);
+  const referenceStored = reference !== null && db.writeReference(item.id, reference);
+
   if (raw.replace === true) {
     for (const c of db.casesOf(item.id)) db.truth.delete(c.id);
     db.testCases = db.testCases.filter((c) => c.itemId !== item.id);
   }
   for (const input of inputs) insertTestCase(db, item.id, input);
   const hadCases = kept > 0 || raw.replace === true;
-  // A reference solution is item content: storing a different one raises the
-  // revision. The test cases themselves only move `updatedAt`.
-  const current = item.problem?.referenceSolution ?? null;
-  if (reference && item.problem && (current?.language !== reference.language || current.source !== reference.source)) {
-    item.problem.referenceSolution = reference;
-    db.touch(item);
-  } else if (inputs.length > 0 || (raw.replace === true && hadCases)) db.touchCases(item);
+  if (referenceStored) db.recordSolutionChange(item, before);
+  else if (inputs.length > 0 || (raw.replace === true && hadCases)) db.touchCases(item);
   return ok({ items: db.casesOf(item.id).map((c) => ({ ...c })) });
 }
 
@@ -136,10 +138,16 @@ function reorderCases(db: MockDb, req: Req) {
 }
 
 /**
- * "Run" the reference solution on every case. Nothing is executed: the
- * solution is assumed to print the stored expected output, except for cases
- * with an entry in `db.truth`, and except when the solution carries one of
- * the judge's failure markers.
+ * "Run" a saved solution — the reference solution unless the request names
+ * another — on every case. Nothing is executed: the solution is assumed to
+ * print the stored expected output, except for cases with an entry in
+ * `db.truth`, and except when the solution carries one of the judge's
+ * failure markers.
+ *
+ * Only a run with the reference solution changes anything: it marks the
+ * cases it confirms as verified, clears the mark on those it does not, and
+ * with `updateExpected` replaces mismatching expected outputs. A run with
+ * another solution is a check that reports results only.
  */
 async function verify(db: MockDb, req: Req) {
   const item = problemOf(db, req.params.id!);
@@ -147,11 +155,22 @@ async function verify(db: MockDb, req: Req) {
   if (raw.updateExpected !== undefined && typeof raw.updateExpected !== 'boolean') {
     throw invalid('updateExpected', 'must be a boolean');
   }
+  const solutionId = raw.solutionId ?? null;
+  if (solutionId !== null && typeof solutionId !== 'string') throw invalid('solutionId', 'must be a string or null');
+  const reference =
+    solutionId === null ? db.referenceOf(item.id) : db.solutions.find((s) => s.id === solutionId && s.itemId === item.id);
+  if (!reference) {
+    throw solutionId === null
+      ? invalid('referenceSolution', 'is not set on this problem')
+      : invalid('solutionId', 'is not a solution of this item');
+  }
+  const authoritative = reference.isReference;
+  if (raw.updateExpected === true && !authoritative) {
+    throw invalid('updateExpected', 'only the reference solution can replace expected outputs');
+  }
   // Nothing is changed when the engine is missing or cannot be reached.
   if (db.options.judge === 'none') throw judgeUnavailable();
   if (db.options.judge === 'down') throw judgeUnavailable('the judge engine is not reachable');
-  const reference = item.problem?.referenceSolution;
-  if (!reference) throw invalid('referenceSolution', 'is not set on this problem');
 
   const cases = db.casesOf(item.id);
   for (let i = 0; i < cases.length; i++) await sleep(db.delay('verifyCase'));
@@ -161,8 +180,18 @@ async function verify(db: MockDb, req: Req) {
   let casesChanged = false;
   const results: VerifyResult[] = cases.map((tc, i) => {
     const usage = resourceUsage(reference.language, hash32(`${tc.id}:verify`));
-    const failure = failureFor(behaviour, i, cases.length, reference.language, limits);
+    // A solution that does not build, or an engine that fails, fails every case.
+    const failure =
+      behaviour === 'ce'
+        ? { verdict: 'compile_error' as const, stderr: compileOutputFor(reference.language), timeMs: 0 }
+        : behaviour === 'ie'
+          ? { verdict: 'internal_error' as const, stderr: '', timeMs: 0 }
+          : failureFor(behaviour, i, cases.length, reference.language, limits);
     if (failure) {
+      if (authoritative && tc.verified) {
+        tc.verified = false;
+        casesChanged = true;
+      }
       return {
         testCaseId: tc.id,
         ok: false,
@@ -173,9 +202,12 @@ async function verify(db: MockDb, req: Req) {
         timeMs: failure.timeMs ?? usage.timeMs,
       };
     }
-    const actual = db.truth.get(tc.id) ?? tc.expectedStdout;
+    const right = db.truth.get(tc.id) ?? tc.expectedStdout;
+    const actual = behaviour === 'wrong' && wrongAnswerHits(i, cases.length) ? perturbOutput(right) : right;
     const matches = outputsMatch(actual, tc.expectedStdout, item.problem!.compare);
-    if (matches) {
+    if (!authoritative) {
+      // A check with another solution reports and changes nothing.
+    } else if (matches) {
       if (!tc.verified) {
         tc.verified = true;
         casesChanged = true;
@@ -184,7 +216,11 @@ async function verify(db: MockDb, req: Req) {
       tc.expectedStdout = actual;
       tc.verified = true;
       tc.updatedAt = db.now();
-      db.truth.delete(tc.id);
+      if (actual === right) db.truth.delete(tc.id);
+      else db.truth.set(tc.id, right);
+      casesChanged = true;
+    } else if (tc.verified) {
+      tc.verified = false;
       casesChanged = true;
     }
     return {

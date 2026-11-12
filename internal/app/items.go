@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // ItemQuery is the set of filters for listing items, as accepted by both
@@ -216,6 +216,11 @@ func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item,
 		if err := tx.InsertItem(&it); err != nil {
 			return err
 		}
+		if ref := refOf(&it); ref != nil {
+			if err := a.writeReference(tx, it.ID, ref); err != nil {
+				return err
+			}
+		}
 		for i := range cases {
 			if err := tx.InsertTestCase(&cases[i]); err != nil {
 				return err
@@ -296,6 +301,13 @@ func (a *App) saveItem(tx store.Tx, before, after *domain.Item) error {
 	if contentChanged {
 		after.Revision = before.Revision + 1
 		after.UpdatedAt = a.clock()
+	}
+	// The reference solution is a view of a saved solution; persist a
+	// change to it there.
+	if !domain.RefEqual(refOf(before), refOf(after)) {
+		if err := a.writeReference(tx, after.ID, refOf(after)); err != nil {
+			return err
+		}
 	}
 	return tx.UpdateItem(after)
 }
@@ -430,6 +442,22 @@ func (a *App) EditItemText(ctx context.Context, id string, in EditTextInput) (do
 // DeleteItem deletes an item with its test cases and submissions.
 func (a *App) DeleteItem(ctx context.Context, id string) error {
 	return a.store.Write(ctx, func(tx store.Tx) error {
+		// Variants lose their link, which is a content change for them.
+		variants, _, err := tx.ListItems(store.ItemFilter{VariantOf: id})
+		if err != nil {
+			return err
+		}
+		for _, v := range variants {
+			before, err := tx.GetItem(v.ID)
+			if err != nil {
+				return err
+			}
+			after := before
+			after.VariantOf = nil
+			if err := a.saveItem(tx, &before, &after); err != nil {
+				return err
+			}
+		}
 		ok, err := tx.DeleteItem(id)
 		if err != nil {
 			return err

@@ -44,6 +44,7 @@ const item: Item = {
   variantOf: null,
   variantCount: 0,
   testCaseCount: 1,
+  solutionCount: 0,
   lastVerdict: null,
   revision: 4,
   createdAt: '2026-01-01T00:00:00Z',
@@ -179,7 +180,8 @@ describe('mergeForms', () => {
 const limits: Limits = {
   maxImportBytes: 52428800,
   maxImportUncompressedBytes: 209715200,
-  maxImportEntries: 20000,
+  maxImportEntries: 1000000,
+  maxImportCollections: 10000,
   maxRequestBytes: 33554432,
   maxPageSize: 200,
   maxSourceBytes: 65536,
@@ -208,6 +210,9 @@ const limits: Limits = {
   maxApiKeyChars: 1000,
   maxBundleNameChars: 200,
   maxBundleDescriptionChars: 5000,
+  maxSolutionsPerItem: 50,
+  maxSolutionNameChars: 100,
+  maxSolutionNotesChars: 5000,
 };
 
 describe('validateForm', () => {

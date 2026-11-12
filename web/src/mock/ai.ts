@@ -649,7 +649,7 @@ export function proposeTestCases(
   language: string,
 ): AiTestCasesResponse {
   const existing = db.casesOf(item.id);
-  const reference = item.problem?.referenceSolution;
+  const reference = db.referenceOf(item.id);
   const judge = db.options.judge;
   const verifying = judge === 'ok';
 
@@ -686,7 +686,7 @@ export function proposeTestCases(
   return {
     referenceSolution:
       reference && reference.language === language
-        ? { ...reference }
+        ? { language, source: reference.source }
         : { language, source: genericSolution(language) },
     verification: {
       attempted: judge !== 'none',

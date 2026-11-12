@@ -32,12 +32,14 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge"
 )
 
 // Config configures the adapter.
@@ -106,6 +108,8 @@ type catalog struct {
 	ids       map[string]int    // canonical id -> Judge0 language id
 	multiFile int               // id of "Multi-file program", 0 if absent
 	binDirs   map[string]string // java/kotlin -> directory of the compiler
+	runCmds   map[string]string // canonical id -> Judge0 run command
+	maxFileKb int               // server's MAX_MAX_FILE_SIZE, 0 if unknown
 	javaBin   string            // directory of the java launcher
 	maxMemKb  int
 	maxWall   float64
@@ -206,7 +210,8 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 	if err := e.do(ctx, http.MethodGet, "/languages", nil, &list); err != nil {
 		return nil, err
 	}
-	c := &catalog{ids: map[string]int{}, binDirs: map[string]string{}, maxWall: 20, maxCPU: 15, maxBatch: 20}
+	c := &catalog{ids: map[string]int{}, binDirs: map[string]string{}, runCmds: map[string]string{},
+		maxWall: 20, maxCPU: 15, maxBatch: 20}
 	names := map[string]string{}
 	for _, l := range list {
 		if multiFileRe.MatchString(l.Name) {
@@ -235,6 +240,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		MaxWallTimeLimit       float64 `json:"max_wall_time_limit"`
 		MaxCPUTimeLimit        float64 `json:"max_cpu_time_limit"`
 		MaxSubmissionBatchSize int     `json:"max_submission_batch_size"`
+		MaxMaxFileSize         int     `json:"max_max_file_size"`
 		EnableBatched          *bool   `json:"enable_batched_submissions"`
 	}
 	if err := e.do(ctx, http.MethodGet, "/config_info", nil, &conf); err == nil {
@@ -246,26 +252,31 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 			c.maxCPU = conf.MaxCPUTimeLimit
 		}
 		c.maxBatch = conf.MaxSubmissionBatchSize
+		c.maxFileKb = conf.MaxMaxFileSize
 		if conf.EnableBatched != nil && !*conf.EnableBatched {
 			c.maxBatch = 0
 		}
 	}
 
-	// Java and Kotlin run as multi-file programs with explicit JVM flags;
-	// the toolchain locations come from the server's own commands.
-	if !e.cfg.UseCgroups && c.multiFile != 0 {
-		for _, lang := range []string{"java", "kotlin"} {
-			id, ok := c.ids[lang]
-			if !ok {
-				continue
-			}
-			var detail struct {
-				CompileCmd string `json:"compile_cmd"`
-				RunCmd     string `json:"run_cmd"`
-			}
-			if err := e.do(ctx, http.MethodGet, "/languages/"+strconv.Itoa(id), nil, &detail); err != nil {
-				continue
-			}
+	// Each language's run command is needed to recognise the shell's
+	// crash report in stderr. Java and Kotlin also run as multi-file
+	// programs with explicit JVM flags; the toolchain locations come from
+	// the server's own commands.
+	for _, p := range languagePatterns {
+		id, ok := c.ids[p.id]
+		if !ok {
+			continue
+		}
+		var detail struct {
+			CompileCmd string `json:"compile_cmd"`
+			RunCmd     string `json:"run_cmd"`
+		}
+		if err := e.do(ctx, http.MethodGet, "/languages/"+strconv.Itoa(id), nil, &detail); err != nil {
+			continue
+		}
+		c.runCmds[p.id] = detail.RunCmd
+		lang := p.id
+		if (lang == "java" || lang == "kotlin") && !e.cfg.UseCgroups && c.multiFile != 0 {
 			if f := strings.Fields(detail.CompileCmd); len(f) > 0 && strings.HasPrefix(f[0], "/") {
 				c.binDirs[lang] = path.Dir(f[0])
 			}
@@ -275,9 +286,9 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 				}
 			}
 		}
-		if c.javaBin == "" {
-			c.javaBin = c.binDirs["java"]
-		}
+	}
+	if c.javaBin == "" {
+		c.javaBin = c.binDirs["java"]
 	}
 
 	e.mu.Lock()
@@ -299,6 +310,7 @@ type submissionRequest struct {
 	PerProcessMemory bool    `json:"enable_per_process_and_thread_memory_limit"`
 	RedirectStderr   bool    `json:"redirect_stderr_to_stdout"`
 	EnableNetwork    bool    `json:"enable_network"`
+	MaxFileSize      int     `json:"max_file_size,omitempty"`
 }
 
 type submissionStatus struct {
@@ -353,13 +365,14 @@ func (e *Engine) buildRequest(c *catalog, req judge.ExecRequest) (submissionRequ
 		MemoryLimit:      req.MemoryLimitKb,
 		PerProcessTime:   !e.cfg.UseCgroups,
 		PerProcessMemory: !e.cfg.UseCgroups,
+		MaxFileSize:      maxOutputKb(c),
 	}
 	if e.cfg.UseCgroups {
 		return e.capMemory(c, out), nil
 	}
 	out.MemoryLimit = req.MemoryLimitKb + e.cfg.MemoryAllowanceKb[req.Language]
 	if req.Language == "java" || req.Language == "kotlin" {
-		if c.multiFile != 0 && c.binDirs[req.Language] != "" && c.javaBin != "" {
+		if e.usesMultiFile(c, req.Language) {
 			files, err := jvmProject(c, req)
 			if err != nil {
 				return out, err
@@ -381,10 +394,42 @@ func (e *Engine) capMemory(c *catalog, r submissionRequest) submissionRequest {
 	return r
 }
 
+// maxOutputKb is the largest output file a program may write, sized so that
+// an output as large as the largest expected output (plus headroom) fits,
+// within the server's ceiling.
+func maxOutputKb(c *catalog) int {
+	kb := domain.MaxTestCaseBytes/1024 + 1024
+	if c.maxFileKb > 0 && kb > c.maxFileKb {
+		kb = c.maxFileKb
+	}
+	return kb
+}
+
+// usesMultiFile reports whether a request runs as a multi-file program.
+func (e *Engine) usesMultiFile(c *catalog, lang string) bool {
+	return !e.cfg.UseCgroups && (lang == "java" || lang == "kotlin") && c.multiFile != 0 &&
+		c.binDirs[lang] != "" && c.javaBin != ""
+}
+
+func jvmRunLine(c *catalog, req judge.ExecRequest) string {
+	run := fmt.Sprintf("%s/java %s -Xmx%dk", c.javaBin, jvmFlags, req.MemoryLimitKb)
+	if req.Language == "kotlin" {
+		return run + " -jar main.jar"
+	}
+	return run + " Main"
+}
+
+// runCommand is the command line Judge0's run script executes for req.
+func (e *Engine) runCommand(c *catalog, req judge.ExecRequest) string {
+	if e.usesMultiFile(c, req.Language) {
+		return jvmRunLine(c, req)
+	}
+	return c.runCmds[req.Language]
+}
+
 // jvmProject builds the multi-file program archive for Java or Kotlin.
 func jvmProject(c *catalog, req judge.ExecRequest) (string, error) {
-	java := c.javaBin + "/java"
-	run := fmt.Sprintf("%s %s -Xmx%dk", java, jvmFlags, req.MemoryLimitKb)
+	run := strings.TrimSuffix(strings.TrimSuffix(jvmRunLine(c, req), " Main"), " -jar main.jar")
 	files := map[string]string{}
 	switch req.Language {
 	case "java":
@@ -456,65 +501,84 @@ func (e *Engine) Execute(ctx context.Context, req judge.ExecRequest) (judge.Exec
 }
 
 // ExecuteBatch implements judge.BatchEngine using Judge0's batch endpoints.
-func (e *Engine) ExecuteBatch(ctx context.Context, reqs []judge.ExecRequest) ([]judge.ExecResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, e.cfg.Timeout)
-	defer cancel()
+// Chunks run one after the other; the adapter's Timeout applies to each
+// chunk, counted from its creation, just as it applies to one single
+// execution. Results are reported as they finish. After a chunk fails, or
+// when continueFn says so, no further chunks are started.
+func (e *Engine) ExecuteBatch(ctx context.Context, reqs []judge.ExecRequest, continueFn func() bool,
+	onDone func(i int, r judge.ExecResult, err error)) error {
 	c, err := e.catalog(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if c.maxBatch <= 1 {
-		return nil, errors.New("judge0: batched submissions are disabled")
+		return errors.New("judge0: batched submissions are disabled")
 	}
-	out := make([]judge.ExecResult, 0, len(reqs))
+	ok := true
 	for start := 0; start < len(reqs); start += c.maxBatch {
-		chunk := reqs[start:min(start+c.maxBatch, len(reqs))]
-		res, err := e.executeChunk(ctx, c, chunk)
-		if err != nil {
-			return nil, err
+		end := min(start+c.maxBatch, len(reqs))
+		if !ok || (continueFn != nil && !continueFn()) {
+			for i := start; i < end; i++ {
+				onDone(i, judge.ExecResult{}, judge.ErrNotRun)
+			}
+			continue
 		}
-		out = append(out, res...)
+		ok = e.executeChunk(ctx, c, reqs[start:end], func(i int, r judge.ExecResult, err error) { onDone(start+i, r, err) })
 	}
-	return out, nil
+	return nil
 }
 
-func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.ExecRequest) ([]judge.ExecResult, error) {
+// executeChunk runs one batch and reports every request through onDone. It
+// returns false if the engine failed for any of them.
+func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.ExecRequest,
+	onDone func(i int, r judge.ExecResult, err error)) bool {
+	ctx, cancel := context.WithTimeout(ctx, e.cfg.Timeout)
+	defer cancel()
+	reported := make([]bool, len(reqs))
+	failRest := func(err error) bool {
+		for i := range reqs {
+			if !reported[i] {
+				reported[i] = true
+				onDone(i, judge.ExecResult{}, err)
+			}
+		}
+		return false
+	}
 	bodies := make([]submissionRequest, len(reqs))
 	for i, r := range reqs {
 		b, err := e.buildRequest(c, r)
 		if err != nil {
-			return nil, err
+			return failRest(err)
 		}
 		bodies[i] = b
 	}
 	var created []map[string]any
 	if err := e.do(ctx, http.MethodPost, "/submissions/batch?base64_encoded=true",
 		map[string]any{"submissions": bodies}, &created); err != nil {
-		return nil, err
+		return failRest(err)
 	}
 	if len(created) != len(reqs) {
-		return nil, fmt.Errorf("judge0: batch returned %d tokens for %d submissions", len(created), len(reqs))
+		return failRest(fmt.Errorf("judge0: batch returned %d tokens for %d submissions", len(created), len(reqs)))
 	}
 	tokens := make([]string, len(created))
 	for i, cr := range created {
 		tok, _ := cr["token"].(string)
 		if tok == "" {
 			b, _ := json.Marshal(cr)
-			return nil, fmt.Errorf("judge0: batch submission rejected: %s", truncate(string(b), 300))
+			return failRest(fmt.Errorf("judge0: batch submission rejected: %s", truncate(string(b), 300)))
 		}
 		tokens[i] = tok
 	}
-	results := make([]*judge.ExecResult, len(reqs))
 	pending := len(reqs)
 	delay := 100 * time.Millisecond
 	for pending > 0 {
 		if err := sleep(ctx, delay); err != nil {
-			return nil, err
+			return failRest(err)
 		}
 		var want []string
 		var idx []int
-		for i, r := range results {
-			if r == nil {
+		for i := range reqs {
+			if !reported[i] {
 				want = append(want, tokens[i])
 				idx = append(idx, i)
 			}
@@ -524,25 +588,22 @@ func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.Exec
 		}
 		if err := e.do(ctx, http.MethodGet, "/submissions/batch?base64_encoded=true&tokens="+strings.Join(want, ",")+
 			"&fields="+resultFields, nil, &got); err != nil {
-			return nil, err
+			return failRest(err)
 		}
 		if len(got.Submissions) != len(want) {
-			return nil, errors.New("judge0: batch status returned an unexpected number of submissions")
+			return failRest(errors.New("judge0: batch status returned an unexpected number of submissions"))
 		}
 		for j, s := range got.Submissions {
 			if s.Status.ID > 2 {
-				r := e.convert(reqs[idx[j]], s)
-				results[idx[j]] = &r
+				i := idx[j]
+				reported[i] = true
 				pending--
+				onDone(i, e.convert(reqs[i], s), nil)
 			}
 		}
 		delay = min(delay*2, e.cfg.PollInterval)
 	}
-	out := make([]judge.ExecResult, len(results))
-	for i, r := range results {
-		out[i] = *r
-	}
-	return out, nil
+	return true
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -607,13 +668,14 @@ func (e *Engine) convert(req judge.ExecRequest, r submissionResponse) judge.Exec
 			out.Message = r.Status.Description
 		}
 		if e.cfg.UseCgroups {
-			out.Message += " (cgroup accounting needs a cgroup v1 host; set CODEATHROPY_JUDGE0_CGROUPS=false on cgroup v2 hosts)"
+			out.Message += " (cgroup accounting needs a cgroup v1 host; set CODEATROPHY_JUDGE0_CGROUPS=false on cgroup v2 hosts)"
 		}
 	default: // runtime errors: 7-12 (signals, non-zero exit), 14 exec format error
 		out.Status = judge.StatusRuntimeError
 		if out.Message == "" {
 			out.Message = r.Status.Description
 		}
+		e.stripShellReport(req, &out)
 		if hasMemoryMarker(out) {
 			out.Status = judge.StatusMemoryLimit
 		}
@@ -741,4 +803,66 @@ func unb64(p *string) string {
 		return *p
 	}
 	return string(b)
+}
+
+// Crash reports. Judge0 runs programs from a bash script named "run"; when
+// the program dies from a signal, bash appends a job report such as
+//
+//	run: line 1:     3 Aborted                 (core dumped) LD_LIBRARY_PATH=/usr/local/gcc-9.2.0/lib64 ./a.out
+//
+// to stderr. It is noise to the user and leaks sandbox paths, so it is
+// removed, but only when every check passes: it is the last line; it has
+// exactly bash's form; the signal it names matches the exit code (128+N);
+// and the command is the language's own run command. Anything else is left
+// untouched. The signal description moves to Message.
+
+var signalNames = map[string]int{
+	"Hangup": 1, "Quit": 3, "Illegal instruction": 4, "Trace/breakpoint trap": 5, "Aborted": 6, "Bus error": 7,
+	"Floating point exception": 8, "Killed": 9, "User defined signal 1": 10, "Segmentation fault": 11,
+	"User defined signal 2": 12, "Alarm clock": 14, "Terminated": 15, "CPU time limit exceeded": 24,
+	"File size limit exceeded": 25, "Bad system call": 31,
+}
+
+var shellReportRe = func() *regexp.Regexp {
+	names := make([]string, 0, len(signalNames))
+	for n := range signalNames {
+		names = append(names, regexp.QuoteMeta(n))
+	}
+	slices.Sort(names)
+	return regexp.MustCompile(`^run: line [0-9]+: +[0-9]+ (` + strings.Join(names, "|") + `)( +\(core dumped\))? +(\S.*)$`)
+}()
+
+func (e *Engine) stripShellReport(req judge.ExecRequest, out *judge.ExecResult) {
+	e.mu.Lock()
+	c := e.cat
+	e.mu.Unlock()
+	if c == nil || out.ExitCode == nil {
+		return
+	}
+	cmd := e.runCommand(c, req)
+	if cmd == "" {
+		return
+	}
+	body := strings.TrimSuffix(out.Stderr, "\n")
+	last := body
+	prefix := ""
+	if i := strings.LastIndexByte(body, '\n'); i >= 0 {
+		prefix, last = body[:i+1], body[i+1:]
+	}
+	m := shellReportRe.FindStringSubmatch(last)
+	if m == nil {
+		return
+	}
+	sig, ok := signalNames[m[1]]
+	if !ok || *out.ExitCode != 128+sig {
+		return
+	}
+	if strings.Join(strings.Fields(m[3]), " ") != strings.Join(strings.Fields(cmd), " ") {
+		return
+	}
+	out.Stderr = prefix
+	out.Message = m[1]
+	if m[2] != "" {
+		out.Message += " (core dumped)"
+	}
 }

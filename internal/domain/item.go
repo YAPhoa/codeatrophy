@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -39,8 +38,11 @@ type Source struct {
 	Note *string `json:"note"`
 }
 
-// Solution is a program in a given language.
+// Solution is a program in a given language. As problem.referenceSolution
+// it is a view of the saved solution marked as reference, and carries that
+// solution's id; elsewhere the id is empty and omitted.
 type Solution struct {
+	ID       string `json:"id,omitempty"`
 	Language string `json:"language"`
 	Source   string `json:"source"`
 }
@@ -78,6 +80,7 @@ type ItemSummary struct {
 	VariantOf     *string     `json:"variantOf"`
 	VariantCount  int         `json:"variantCount"`
 	TestCaseCount int         `json:"testCaseCount"`
+	SolutionCount int         `json:"solutionCount"`
 	LastVerdict   *Verdict    `json:"lastVerdict"`
 	Revision      int         `json:"revision"`
 	CreatedAt     time.Time   `json:"createdAt"`
@@ -196,17 +199,23 @@ func (f FieldErrors) Merge(prefix string, other FieldErrors) {
 	}
 }
 
-// First returns a deterministic "field: message" summary of the errors.
+// First returns a deterministic, readable summary of the errors: the first
+// field in order as "field: message", followed by how many more there are.
 func (f FieldErrors) First() string {
 	keys := make([]string, 0, len(f))
 	for k := range f {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	if len(keys) == 0 {
+	switch len(keys) {
+	case 0:
 		return "invalid input"
+	case 1:
+		return keys[0] + ": " + f[keys[0]]
+	case 2:
+		return keys[0] + ": " + f[keys[0]] + " (and 1 more problem)"
 	}
-	return keys[0] + " " + f[keys[0]]
+	return fmt.Sprintf("%s: %s (and %d more problems)", keys[0], f[keys[0]], len(keys)-1)
 }
 
 // ApplyItemInput merges in onto it (merge semantics). It does not handle
@@ -358,8 +367,8 @@ func ValidateTag(t string) string {
 	if n < 1 || n > MaxTagChars {
 		return fmt.Sprintf("must be 1-%d characters", MaxTagChars)
 	}
-	if strings.ContainsRune(t, '/') || strings.ContainsFunc(t, unicode.IsControl) {
-		return "must not contain / or control characters"
+	if strings.ContainsRune(t, '/') || !IsSingleLine(t) {
+		return "must be a single line without / or control characters"
 	}
 	return ""
 }
@@ -413,6 +422,8 @@ func ValidateItem(it *Item, lim Limits) FieldErrors {
 		} else {
 			errs.Add("title", fmt.Sprintf("must be at most %d characters", MaxTitleChars))
 		}
+	} else if !IsSingleLine(it.Title) {
+		errs.Add("title", SingleLineMessage)
 	}
 	if utf8.RuneCountInString(it.Summary) > MaxSummaryChars {
 		errs.Add("summary", fmt.Sprintf("must be at most %d characters", MaxSummaryChars))
@@ -543,7 +554,7 @@ func ContentEqual(a, b *Item) bool {
 				return false
 			}
 		}
-		if !ptrEq(p.ReferenceSolution, q.ReferenceSolution) {
+		if !RefEqual(p.ReferenceSolution, q.ReferenceSolution) {
 			return false
 		}
 	}

@@ -19,7 +19,7 @@ import (
 
 	_ "modernc.org/sqlite" // driver
 
-	"codeathropy/internal/store"
+	"codeatrophy/internal/store"
 )
 
 //go:embed migrations/*.sql
@@ -107,6 +107,12 @@ func (db *DB) run(ctx context.Context, conn *sql.DB, readOnly bool, fn func(stor
 			return
 		}
 		if cerr := sqlTx.Commit(); cerr != nil {
+			if ctx.Err() != nil {
+				// database/sql rolls the transaction back when its context
+				// ends; report that rather than the failed commit.
+				err = ctx.Err()
+				return
+			}
 			err = fmt.Errorf("commit: %w", cerr)
 		}
 	}()

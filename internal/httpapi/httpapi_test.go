@@ -15,15 +15,15 @@ import (
 	"testing/fstest"
 	"time"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/ai/aitest"
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/httpapi"
-	"codeathropy/internal/judge/judgetest"
-	"codeathropy/internal/secrets"
-	"codeathropy/internal/store/sqlite"
-	"codeathropy/internal/webui"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/aitest"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/httpapi"
+	"codeatrophy/internal/judge/judgetest"
+	"codeatrophy/internal/secrets"
+	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/webui"
 )
 
 type client struct {
@@ -32,7 +32,11 @@ type client struct {
 	ai  *aitest.Provider
 }
 
-func newServer(t *testing.T) *client {
+// lastHandler is the handler of the most recent newServer, for tests that
+// call it directly.
+var lastHandler http.Handler
+
+func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "h.db"))
@@ -61,8 +65,13 @@ func newServer(t *testing.T) *client {
 		"favicon.svg":     {Data: []byte("<svg/>")},
 	})
 	mcp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("mcp")) })
-	srv := httptest.NewServer(httpapi.New(httpapi.Options{App: a, Web: web, MCP: mcp, MCPPath: "/mcp",
-		AllowedOrigins: []string{"https://allowed.example"}}))
+	o := httpapi.Options{App: a, Web: web, MCP: mcp, MCPPath: "/mcp",
+		AllowedOrigins: []string{"https://allowed.example"}}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	lastHandler = httpapi.New(o)
+	srv := httptest.NewServer(lastHandler)
 	t.Cleanup(func() {
 		srv.Close()
 		a.Stop()
@@ -246,7 +255,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
 		"maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
-		"maxRequestBytes"} {
+		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
@@ -255,7 +264,9 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
 	}
 	for k, want := range map[string]float64{"maxGeneratedTestCases": 30, "maxSummaryChars": 5000, "maxTextBytes": 1048576,
-		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608} {
+		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
+		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxImportCollections": 10000,
+		"maxImportEntries": 1000000} {
 		if lim[k] != want {
 			t.Errorf("limits.%s = %v, want %v", k, lim[k], want)
 		}
@@ -351,7 +362,7 @@ func multipartBody(t *testing.T, data []byte, strategy string) (string, *bytes.B
 	if strategy != "" {
 		mw.WriteField("strategy", strategy)
 	}
-	fw, _ := mw.CreateFormFile("file", "b.codeathropy.zip")
+	fw, _ := mw.CreateFormFile("file", "b.codeatrophy.zip")
 	fw.Write(data)
 	mw.Close()
 	return mw.FormDataContentType(), &buf
@@ -375,7 +386,7 @@ func TestExportImportEndpoints(t *testing.T) {
 	c.expect("POST", api+"/items", `{"type":"reading","title":"Raft"}`, 201)
 	r := c.expect("POST", api+"/export", `{"scope":"all","name":"My Notes"}`, 200)
 	if r.header.Get("Content-Type") != "application/zip" ||
-		r.header.Get("Content-Disposition") != `attachment; filename=my-notes.codeathropy.zip` {
+		r.header.Get("Content-Disposition") != `attachment; filename=my-notes.codeatrophy.zip` {
 		t.Errorf("export headers: %v", r.header)
 	}
 	if _, err := zip.NewReader(bytes.NewReader(r.body), int64(len(r.body))); err != nil {
@@ -435,4 +446,146 @@ func TestCollectionsAndTagsEndpoints(t *testing.T) {
 	c.expect("DELETE", api+"/tags/systems", "", 204)
 	c.expect("DELETE", api+"/tags/systems", "", 404)
 	c.expect("DELETE", api+"/collections/"+a, "", 204)
+}
+
+// hostDo sends a request with the given Host header.
+func (c *client) hostDo(method, path, host string, headers ...string) response {
+	c.t.Helper()
+	req, _ := http.NewRequest(method, c.srv.URL+path, nil)
+	req.Host = host
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return response{resp.StatusCode, resp.Header, b}
+}
+
+// The Host header is checked on /api/ and /mcp before anything else, so a
+// page on a rebound DNS name cannot reach the API even as a same-origin
+// request.
+func TestHostAllowList(t *testing.T) {
+	c := newServer(t, func(o *httpapi.Options) { o.AllowedHosts = []string{"lan.example", "box.home.arpa"} })
+	for _, host := range []string{"localhost", "localhost:8081", "127.0.0.1:9", "[::1]:8080", "app.localhost", "lan.example:8080", "BOX.home.arpa"} {
+		if r := c.hostDo("GET", api+"/meta", host); r.status != 200 {
+			t.Errorf("%s: %d %s", host, r.status, r.body)
+		}
+	}
+	for _, host := range []string{"evil.example", "evil.example:8081", "192.168.1.20:8081", "lan.example.evil.example", "[::2]"} {
+		for _, path := range []string{api + "/meta", "/mcp"} {
+			r := c.hostDo("GET", path, host)
+			if r.status != 403 || r.errorCode(t) != "forbidden" {
+				t.Errorf("%s %s: %d %s", host, path, r.status, r.body)
+				continue
+			}
+			if msg := r.json(t)["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "CODEATROPHY_ALLOWED_HOSTS") {
+				t.Errorf("the message names the setting: %s", msg)
+			}
+		}
+	}
+	// A forged same-origin request (Origin matching the forged Host) is refused too.
+	if r := c.hostDo("POST", api+"/items", "evil.example", "Origin", "http://evil.example"); r.status != 403 {
+		t.Errorf("rebound same-origin POST: %d", r.status)
+	}
+	// The UI itself is served for any host.
+	if r := c.hostDo("GET", "/", "evil.example"); r.status != 200 {
+		t.Errorf("UI: %d", r.status)
+	}
+	// An allowed host's origin may write.
+	body := `{"type":"reading","title":"x"}`
+	if r := c.do("POST", api+"/items", body, "Origin", "http://lan.example:8080"); r.status != 201 {
+		t.Errorf("allowed host origin: %d %s", r.status, r.body)
+	}
+	// The origin check compares with the configured set, not the Host header.
+	if r := c.do("POST", api+"/items", body, "Origin", "http://other.example"); r.status != 403 {
+		t.Errorf("unlisted origin: %d", r.status)
+	}
+	star := newServer(t, func(o *httpapi.Options) { o.AllowedHosts = []string{"*"} })
+	if r := star.hostDo("GET", api+"/meta", "anything.example"); r.status != 200 {
+		t.Errorf("* accepts any host: %d", r.status)
+	}
+}
+
+func TestSolutionsEndpoints(t *testing.T) {
+	c := newServer(t)
+	it := c.expect("POST", api+"/items", `{"type":"problem","title":"P","problem":{"referenceSolution":{"language":"python","source":"sum"}}}`, 201).json(t)
+	id := it["id"].(string)
+	ref := it["problem"].(map[string]any)["referenceSolution"].(map[string]any)
+	if ref["id"] == nil || ref["language"] != "python" {
+		t.Fatalf("referenceSolution view: %v", ref)
+	}
+	list := c.expect("GET", api+"/items/"+id+"/solutions", "", 200).json(t)["items"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["name"] != "Reference solution" || list[0].(map[string]any)["isReference"] != true {
+		t.Fatalf("solutions: %v", list)
+	}
+	other := c.expect("POST", api+"/items/"+id+"/solutions", `{"name":"Brute force","language":"python","source":"echo","notes":"slow"}`, 201).json(t)
+	if other["isReference"] != false || other["itemId"] != id {
+		t.Errorf("created: %v", other)
+	}
+	sid := other["id"].(string)
+	// Switching the reference is item content.
+	c.expect("PATCH", api+"/solutions/"+sid, `{"isReference":true,"expectedRevision":99}`, 409)
+	c.expect("PATCH", api+"/solutions/"+sid, `{"isReference":true,"expectedRevision":1}`, 200)
+	got := c.expect("GET", api+"/items/"+id, "", 200).json(t)
+	if got["revision"] != float64(2) || got["problem"].(map[string]any)["referenceSolution"].(map[string]any)["id"] != sid {
+		t.Errorf("after switching: %v", got)
+	}
+	if r := c.do("PATCH", api+"/solutions/"+sid, `{"name":"two\u2028lines"}`); r.status != 422 {
+		t.Errorf("multi-line name: %d", r.status)
+	}
+	if r := c.do("POST", api+"/items/"+id+"/testcases/verify", `{"solutionId":"nope"}`); r.status != 422 {
+		t.Errorf("unknown solutionId: %d", r.status)
+	}
+	c.expect("POST", api+"/items/"+id+"/testcases/verify", `{"solutionId":"`+list[0].(map[string]any)["id"].(string)+`"}`, 200)
+	c.expect("DELETE", api+"/solutions/"+sid, "", 204)
+	c.expect("DELETE", api+"/solutions/"+sid, "", 404)
+	if got := c.expect("GET", api+"/items/"+id, "", 200).json(t); got["problem"].(map[string]any)["referenceSolution"] != nil {
+		t.Errorf("deleting the reference leaves none: %v", got["problem"])
+	}
+	reading := c.expect("POST", api+"/items", `{"type":"reading","title":"R"}`, 201).json(t)["id"].(string)
+	c.expect("GET", api+"/items/"+reading+"/solutions", "", 422)
+}
+
+func TestPreferencesEndpoints(t *testing.T) {
+	c := newServer(t)
+	def := c.expect("GET", api+"/settings/preferences", "", 200).json(t)
+	ed := def["editor"].(map[string]any)
+	if def["hideTestCases"] != true || ed["tabSize"] != float64(4) || ed["fontSize"] != float64(14) || ed["lineWrapping"] != false ||
+		ed["autocomplete"] != true || ed["closeBrackets"] != true || ed["matchBrackets"] != true {
+		t.Errorf("defaults: %v", def)
+	}
+	got := c.expect("PUT", api+"/settings/preferences", `{"editor":{"tabSize":2}}`, 200).json(t)
+	if got["editor"].(map[string]any)["tabSize"] != float64(2) || got["editor"].(map[string]any)["fontSize"] != float64(14) || got["hideTestCases"] != true {
+		t.Errorf("deep merge: %v", got)
+	}
+	for _, bad := range []string{`{"editor":{"tabSize":3}}`, `{"editor":{"fontSize":25}}`, `{"theme":"dark"}`,
+		`{"editor":{"tabSize":8,"vim":true}}`, `{"hideTestCases":"yes"}`, `{"editor":true}`, `[]`} {
+		if r := c.do("PUT", api+"/settings/preferences", bad); r.status != 422 && r.status != 400 {
+			t.Errorf("%s: %d", bad, r.status)
+		}
+	}
+	// Nothing from a rejected request is saved.
+	if got := c.expect("GET", api+"/settings/preferences", "", 200).json(t); got["editor"].(map[string]any)["tabSize"] != float64(2) {
+		t.Errorf("a rejected PUT changed something: %v", got)
+	}
+}
+
+// A request whose client has gone away is not reported as a server error.
+func TestCanceledRequestIsNotAnInternalError(t *testing.T) {
+	newServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, path := range []string{api + "/meta", api + "/items/00000000-0000-4000-8000-000000000001", api + "/items"} {
+		req := httptest.NewRequest("GET", path, nil).WithContext(ctx)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		lastHandler.ServeHTTP(rec, req)
+		if rec.Code != 499 {
+			t.Errorf("%s: %d for a canceled request: %s", path, rec.Code, rec.Body)
+		}
+	}
 }

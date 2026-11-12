@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // problemItem loads an item and checks that it is a problem.

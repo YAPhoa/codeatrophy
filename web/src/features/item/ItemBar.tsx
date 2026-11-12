@@ -9,8 +9,9 @@ import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl } from
 import { libraryHref, useItemActions } from './itemActions';
 
 /**
- * The compact header of a problem's pages: title, the Solve / Test cases
- * switch, and the organising controls (status, favorite, collections, more).
+ * The compact header of a problem's pages: title, the Solve / Test cases /
+ * Solutions switch, and the organising controls (status, favorite,
+ * collections, more).
  */
 export function ItemBar({ item }: { item: Item }) {
   const { data: collections = [] } = useCollections();
@@ -31,6 +32,9 @@ export function ItemBar({ item }: { item: Item }) {
         </NavLink>
         <NavLink to={`/items/${item.id}/tests`} className={({ isActive }) => cx('tab', isActive && 'is-selected')}>
           Test cases <span className="tab-count">{item.testCaseCount}</span>
+        </NavLink>
+        <NavLink to={`/items/${item.id}/solutions`} className={({ isActive }) => cx('tab', isActive && 'is-selected')}>
+          Solutions <span className="tab-count">{item.solutionCount}</span>
         </NavLink>
       </nav>
       <span className="spacer" />

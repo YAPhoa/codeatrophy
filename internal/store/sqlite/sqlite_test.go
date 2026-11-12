@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 func openTest(t *testing.T) *DB {
@@ -61,8 +61,13 @@ func TestItemRoundTrip(t *testing.T) {
 	url, raw := "https://x.test", "raw text"
 	it.Difficulty, it.Source.URL, it.RawInput, it.Notes, it.Favorite = &d, &url, &raw, "notes", true
 	it.Problem.StarterCode = map[string]string{"python": "print()"}
-	it.Problem.ReferenceSolution = &domain.Solution{Language: "python", Source: "print(1)"}
-	write(t, db, func(tx store.Tx) error { return tx.InsertItem(&it) })
+	write(t, db, func(tx store.Tx) error {
+		if err := tx.InsertItem(&it); err != nil {
+			return err
+		}
+		return tx.InsertSolution(&domain.ItemSolution{ID: "s1", ItemID: "i1", Name: "Reference solution",
+			Language: "python", Source: "print(1)", IsReference: true, CreatedAt: now, UpdatedAt: now})
+	})
 	got := read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("i1") })
 	if got.Title != "Two Sum" || *got.Difficulty != d || *got.Source.URL != url || *got.RawInput != raw ||
 		!got.Favorite || got.Notes != "notes" || got.Problem.StarterCode["python"] != "print()" ||

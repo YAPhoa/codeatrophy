@@ -97,12 +97,43 @@ export function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${trim(ms / 1000)} s`;
 }
 
+/**
+ * How long a run took, for display. When a program is stopped for exceeding
+ * the time limit, the measured time is the moment it was stopped — the limit
+ * plus the judge's grace period — which says nothing about how long it would
+ * have run. Show it as exceeding the limit instead.
+ */
+export function formatRunTime(timeMs: number, verdict: Verdict | null, timeLimitMs: number | undefined): string {
+  if (timeLimitMs != null && (verdict === 'time_limit_exceeded' || timeMs > timeLimitMs)) return `> ${formatMs(timeLimitMs)}`;
+  return formatMs(timeMs);
+}
+
 function trim(n: number): string {
   return n >= 100 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, '');
 }
 
 export function plural(n: number, one: string, many: string = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * One line about a problem's test cases. While hidden cases are concealed
+ * the line says how many there are and how many are shown as examples —
+ * "7 test cases · 2 shown as examples" — without implying anything about the
+ * rest.
+ */
+export function describeCases(total: number, samples: number, hiding: boolean): string {
+  if (total === 0) return 'No test cases';
+  const count = plural(total, 'test case');
+  if (!hiding) return `${count} · ${plural(samples, 'sample')}, ${total - samples} hidden`;
+  if (samples === 0) return `${count} · none shown as examples`;
+  if (samples === total) return `${count} · ${total === 1 ? 'shown as an example' : 'all shown as examples'}`;
+  return `${count} · ${samples} shown as ${samples === 1 ? 'an example' : 'examples'}`;
+}
+
+/** "Ran 7 test cases — 5 passed": what a finished run or submission covered. */
+export function describeRun(mode: 'run' | 'submit', total: number, passed: number): string {
+  return `Ran ${plural(total, mode === 'submit' ? 'test case' : 'sample case')} — ${passed === total && total > 1 ? 'all' : passed} passed`;
 }
 
 /** Rough reading time for Markdown text, in minutes (at least 1). */
@@ -123,7 +154,7 @@ const CHANGE_LABEL: Record<string, string> = {
   limits: 'time and memory limits',
   compare: 'output comparison',
   starterCode: 'starter code',
-  referenceSolution: 'reference solution',
+  solutions: 'solutions',
   testCases: 'test cases',
 };
 

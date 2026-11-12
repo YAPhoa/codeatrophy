@@ -35,6 +35,15 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
     ],
   },
   {
+    title: 'Panes: minimise or restore',
+    rows: [
+      [[MOD, 'B'], 'Navigation'],
+      [[MOD, 'E'], 'Problem statement'],
+      [[MOD, 'J'], 'Tests and results'],
+      [[MOD, 'Shift', 'M'], 'Everything around the editor'],
+    ],
+  },
+  {
     title: 'Capture and editing',
     rows: [
       [[MOD, 'Enter'], 'Draft with AI (while typing the input)'],

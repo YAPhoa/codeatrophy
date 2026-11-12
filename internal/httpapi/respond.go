@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 // maxJSONBody bounds JSON request bodies.
@@ -56,7 +57,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_, _ = w.Write(buf.Bytes())
 }
 
+// statusClientClosed records a request whose client went away before it was
+// answered (nobody receives the response).
+const statusClientClosed = 499
+
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		s.log.Debug("request canceled by the client", "method", r.Method, "path", r.URL.Path)
+		w.WriteHeader(statusClientClosed)
+		return
+	}
 	ae := app.AsError(err)
 	if ae.Code == app.CodeInternal {
 		s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"codeathropy/internal/ai"
+	"codeatrophy/internal/ai"
 )
 
 func TestGenerateWithJSONSchema(t *testing.T) {

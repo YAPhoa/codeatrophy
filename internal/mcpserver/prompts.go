@@ -9,9 +9,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 func registerPrompts(s *mcp.Server, a *app.App) {
@@ -43,7 +43,7 @@ func registerPrompts(s *mcp.Server, a *app.App) {
 		}
 		st := styleFor(ctx, a, preset)
 		env := ai.NewEnvelope(append(ai.StyleTexts(st), text)...)
-		task := `Turn the text in the ` + ai.BlockUserInput + ` block into a complete Codeathropy item and save it. ` + kind + `
+		task := `Turn the text in the ` + ai.BlockUserInput + ` block into a complete Codeatrophy item and save it. ` + kind + `
 
 1. Call get_overview to see existing collections and tags, and search_items to check that the item does not exist yet.
 2. Write the item following the authoring guide above. Keep everything the text states; fill the gaps with sensible, conventional choices.

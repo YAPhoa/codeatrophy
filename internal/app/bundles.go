@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"codeathropy/internal/bundle"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/bundle"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // ExportInput is the body of POST /export.
@@ -73,7 +73,8 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 	b := &bundle.Bundle{Meta: bundle.Meta{
 		Name: strings.TrimSpace(in.Name), Description: in.Description, Author: in.Author,
 		FormatVersion: bundle.FormatVersion, CreatedAt: a.clock(),
-		GeneratorName: "codeathropy", GeneratorVersion: a.version,
+		GeneratorName: "codeatrophy", GeneratorVersion: a.version,
+		Includes: &bundle.Includes{Solutions: includeSolutions, HiddenTests: includeHidden},
 	}}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var itemIDs []string
@@ -97,7 +98,7 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 					ParentID: c.ParentID, Position: c.Position, ItemIDs: members})
 			}
 			if b.Meta.Name == "" {
-				b.Meta.Name = "Codeathropy library"
+				b.Meta.Name = "Codeatrophy library"
 			}
 		case "collection":
 			all, err := tx.ListCollections()
@@ -147,7 +148,7 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 			}
 			itemIDs = ids
 			if b.Meta.Name == "" {
-				b.Meta.Name = "Codeathropy library"
+				b.Meta.Name = "Codeatrophy library"
 			}
 		}
 		for _, id := range itemIDs {
@@ -156,12 +157,16 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 				return err
 			}
 			var cases []domain.TestCase
+			var sols []domain.ItemSolution
 			if it.Type == domain.TypeProblem {
 				if cases, err = tx.ListTestCases(id); err != nil {
 					return err
 				}
+				if sols, err = tx.ListSolutions(id); err != nil {
+					return err
+				}
 			}
-			b.Items = append(b.Items, bundle.FromDomain(it, cases, includeSolutions, includeHidden))
+			b.Items = append(b.Items, bundle.FromDomain(it, cases, sols, includeSolutions, includeHidden))
 		}
 		return nil
 	})
@@ -175,7 +180,7 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 	if err := bundle.Write(&buf, b); err != nil {
 		return ExportResult{}, err
 	}
-	return ExportResult{Filename: bundle.Slug(b.Meta.Name) + ".codeathropy.zip", Data: buf.Bytes(), Items: len(b.Items)}, nil
+	return ExportResult{Filename: bundle.Slug(b.Meta.Name) + ".codeatrophy.zip", Data: buf.Bytes(), Items: len(b.Items)}, nil
 }
 
 // Import strategies for changed items.
@@ -285,7 +290,7 @@ func (a *App) toDomain(it bundle.Item, id string, now time.Time) domain.Item {
 	if it.Type == domain.TypeProblem && it.Problem != nil {
 		d.Problem = &domain.ProblemSpec{
 			TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb, Compare: it.Problem.Compare,
-			StarterCode: map[string]string{}, ReferenceSolution: it.Problem.ReferenceSolution,
+			StarterCode: map[string]string{},
 		}
 		for k, v := range it.Problem.StarterCode {
 			d.Problem.StarterCode[k] = v
@@ -306,9 +311,32 @@ type itemPlan struct {
 }
 
 // plan compares the bundle with the library by id.
-func (a *App) plan(tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]bool, error) {
+func (a *App) plan(ctx context.Context, tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]bool, error) {
+	inBundle := make(map[string]bool, len(b.Items))
+	var targets []string
+	for _, it := range b.Items {
+		inBundle[it.ID] = true
+		if it.VariantOf != nil {
+			targets = append(targets, *it.VariantOf)
+		}
+	}
+	// A variantOf link to an item in neither the bundle nor the library is
+	// dropped on import; drop it before comparing too, so that re-importing
+	// the same bundle is "unchanged".
+	exists, err := tx.ExistingItemIDs(targets)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range b.Items {
+		if v := b.Items[i].VariantOf; v != nil && !inBundle[*v] && !exists[*v] {
+			b.Items[i].VariantOf = nil
+		}
+	}
 	plans := make([]itemPlan, 0, len(b.Items))
 	for _, it := range b.Items {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		local, err := tx.GetItem(it.ID)
 		if errors.Is(err, store.ErrNotFound) {
 			plans = append(plans, itemPlan{item: it, state: "new", changes: []string{}})
@@ -318,29 +346,36 @@ func (a *App) plan(tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]bool, 
 			return nil, nil, err
 		}
 		var cases []domain.TestCase
+		var sols []domain.ItemSolution
 		if local.Type == domain.TypeProblem {
 			if cases, err = tx.ListTestCases(it.ID); err != nil {
 				return nil, nil, err
 			}
+			if sols, err = tx.ListSolutions(it.ID); err != nil {
+				return nil, nil, err
+			}
 		}
 		// Compare over the same fields the bundle carries.
-		mine := bundle.FromDomain(local, cases, it.HasSolution(), !it.SamplesOnly())
+		mine := bundle.FromDomain(local, cases, sols, it.HasSolutions(), it.HasHiddenTests())
 		state, changes := "changed", bundle.Changes(&mine, &it)
 		if bundle.ContentHash(&mine) == bundle.ContentHash(&it) {
 			state, changes = "unchanged", []string{}
-		} else if mine.Type != it.Type && len(changes) == 0 {
-			changes = []string{"type"}
 		}
 		l := local
 		plans = append(plans, itemPlan{item: it, state: state, local: &l, changes: changes})
 	}
+	all, err := tx.ListCollections()
+	if err != nil {
+		return nil, nil, err
+	}
+	have := make(map[string]bool, len(all))
+	for _, c := range all {
+		have[c.ID] = true
+	}
 	existing := map[string]bool{}
 	for _, c := range b.Collections {
-		_, err := tx.GetCollection(c.ID)
-		if err == nil {
+		if have[c.ID] {
 			existing[c.ID] = true
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return nil, nil, err
 		}
 	}
 	return plans, existing, nil
@@ -363,7 +398,7 @@ func (a *App) PreviewImport(ctx context.Context, data []byte) (ImportPreview, er
 		out.Bundle.CreatedAt = &t
 	}
 	err = a.store.Read(ctx, func(tx store.Tx) error {
-		plans, existing, err := a.plan(tx, b)
+		plans, existing, err := a.plan(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -405,7 +440,7 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 	}
 	res := ImportResult{Warnings: warnings}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		plans, existing, err := a.plan(tx, b)
+		plans, existing, err := a.plan(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -422,6 +457,9 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 			if err := a.insertBundleCases(tx, id, it.TestCases, 0, now); err != nil {
 				return err
 			}
+			if err := a.insertBundleSolutions(tx, id, it.Solutions, now); err != nil {
+				return err
+			}
 			if variant != nil {
 				d.VariantOf = variant
 				linkVariants = append(linkVariants, d)
@@ -429,6 +467,9 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 			return nil
 		}
 		for _, p := range plans {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			id := p.item.ID
 			finalID[id] = id
 			switch p.state {
@@ -461,8 +502,12 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 				}
 			}
 		}
-		// Variant links are kept when the target exists in the library.
+		// Variant links are kept when the target exists in the library. A
+		// link to an item duplicated by this import points at the copy.
 		for _, d := range linkVariants {
+			if target, ok := finalID[*d.VariantOf]; ok {
+				d.VariantOf = &target
+			}
 			ok, err := tx.ExistingItemIDs([]string{*d.VariantOf})
 			if err != nil {
 				return err
@@ -484,9 +529,15 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 		if err != nil {
 			return err
 		}
+		childCount := map[string]int{} // parent id ("" for the top level) -> children
+		for _, c := range all {
+			childCount[parentKey(c.ParentID)]++
+		}
 		created := map[string]bool{}
-		order := collectionOrder(b.Collections)
-		for _, c := range order {
+		for _, c := range collectionOrder(b.Collections) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			members := make([]string, 0, len(c.ItemIDs))
 			for _, iid := range c.ItemIDs {
 				members = append(members, finalID[iid])
@@ -502,15 +553,17 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 				parent = nil
 			}
 			nc := domain.Collection{ID: c.ID, Name: c.Name, Description: c.Description, ParentID: parent,
-				Position: len(siblings(all, parent, "")), CreatedAt: now, UpdatedAt: now}
+				Position: childCount[parentKey(parent)], CreatedAt: now, UpdatedAt: now}
 			if err := tx.InsertCollection(&nc); err != nil {
 				return err
 			}
-			all = append(all, nc)
+			childCount[parentKey(parent)]++
 			created[c.ID] = true
 			res.CollectionsCreated++
-			if err := tx.AddCollectionItems(c.ID, members); err != nil {
-				return err
+			if len(members) > 0 {
+				if err := tx.AddCollectionItems(c.ID, members); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -521,34 +574,47 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 	return res, nil
 }
 
+func parentKey(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // collectionOrder sorts bundle collections so that parents come before
-// children, and siblings follow their bundle positions.
+// children, and siblings follow their bundle positions. It runs in
+// O(n log n); parent cycles were already broken by the reader.
 func collectionOrder(cs []bundle.Collection) []bundle.Collection {
-	inBundle := map[string]bool{}
+	inBundle := make(map[string]bool, len(cs))
 	for _, c := range cs {
 		inBundle[c.ID] = true
 	}
-	var out []bundle.Collection
-	var visit func(parent *string)
-	visit = func(parent *string) {
-		var level []bundle.Collection
-		for _, c := range cs {
-			p := c.ParentID
-			if p != nil && !inBundle[*p] {
-				p = nil
-			}
-			if samePtr(p, parent) {
-				level = append(level, c)
-			}
+	children := map[string][]int{}
+	for i, c := range cs {
+		p := ""
+		if c.ParentID != nil && inBundle[*c.ParentID] {
+			p = *c.ParentID
 		}
-		slices.SortStableFunc(level, func(x, y bundle.Collection) int { return x.Position - y.Position })
-		for _, c := range level {
-			out = append(out, c)
-			id := c.ID
-			visit(&id)
+		children[p] = append(children[p], i)
+	}
+	for _, idx := range children {
+		slices.SortStableFunc(idx, func(x, y int) int { return cs[x].Position - cs[y].Position })
+	}
+	// A depth-first walk emitting each node before its children.
+	out := make([]bundle.Collection, 0, len(cs))
+	var walk []int
+	for k := len(children[""]) - 1; k >= 0; k-- {
+		walk = append(walk, children[""][k])
+	}
+	for len(walk) > 0 {
+		i := walk[len(walk)-1]
+		walk = walk[:len(walk)-1]
+		out = append(out, cs[i])
+		kids := children[cs[i].ID]
+		for k := len(kids) - 1; k >= 0; k-- {
+			walk = append(walk, kids[k])
 		}
 	}
-	visit(nil)
 	return out
 }
 
@@ -568,16 +634,16 @@ func (a *App) insertBundleCases(tx store.Tx, itemID string, cases []bundle.TestC
 }
 
 // overwrite replaces a local item's content with the bundle's, keeping
-// personal state and submissions, and keeping the local reference solution
-// and hidden test cases when the bundle does not carry them.
+// personal state and submissions, and keeping the local solutions and hidden
+// test cases when the bundle does not carry them.
 func (a *App) overwrite(tx store.Tx, p itemPlan, now time.Time, links *[]domain.Item) error {
 	local := *p.local
 	next := a.toDomain(p.item, local.ID, now)
 	next.Status, next.Favorite, next.Notes, next.RawInput = local.Status, local.Favorite, local.Notes, local.RawInput
 	next.CreatedAt = local.CreatedAt
-	next.Revision = local.Revision + 1
-	if next.Problem != nil && !p.item.HasSolution() && local.Problem != nil {
-		next.Problem.ReferenceSolution = local.Problem.ReferenceSolution
+	next.Revision = local.Revision
+	if overwriteChangesContent(p) {
+		next.Revision++
 	}
 	variant := next.VariantOf
 	next.VariantOf = nil
@@ -585,7 +651,7 @@ func (a *App) overwrite(tx store.Tx, p itemPlan, now time.Time, links *[]domain.
 		return err
 	}
 	var keepHidden []domain.TestCase
-	if next.Type == domain.TypeProblem && p.item.SamplesOnly() {
+	if next.Type == domain.TypeProblem && !p.item.HasHiddenTests() {
 		cur, err := tx.ListTestCases(local.ID)
 		if err != nil {
 			return err
@@ -594,6 +660,14 @@ func (a *App) overwrite(tx store.Tx, p itemPlan, now time.Time, links *[]domain.
 			if !c.IsSample {
 				keepHidden = append(keepHidden, c)
 			}
+		}
+	}
+	if p.item.HasSolutions() || next.Type != domain.TypeProblem {
+		if err := tx.DeleteSolutions(local.ID); err != nil {
+			return err
+		}
+		if err := a.insertBundleSolutions(tx, local.ID, p.item.Solutions, now); err != nil {
+			return err
 		}
 	}
 	if err := tx.DeleteTestCases(local.ID); err != nil {
@@ -615,4 +689,37 @@ func (a *App) overwrite(tx store.Tx, p itemPlan, now time.Time, links *[]domain.
 		*links = append(*links, next)
 	}
 	return nil
+}
+
+func (a *App) insertBundleSolutions(tx store.Tx, itemID string, sols []bundle.Solution, now time.Time) error {
+	for _, s := range sols {
+		sol := domain.ItemSolution{ID: newID(), ItemID: itemID, Name: s.Name, Language: s.Language, Source: s.Source,
+			Notes: s.Notes, IsReference: s.IsReference, CreatedAt: now, UpdatedAt: now}
+		if err := tx.InsertSolution(&sol); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// overwriteChangesContent reports whether overwriting with the bundle item
+// changes the local item's own content (and so its revision): any changed
+// field other than test cases and solutions, or a different reference
+// solution when the bundle carries solutions.
+func overwriteChangesContent(p itemPlan) bool {
+	for _, c := range p.changes {
+		if c != "testCases" && c != "solutions" {
+			return true
+		}
+	}
+	if !p.item.HasSolutions() {
+		return false
+	}
+	var bundleRef *domain.Solution
+	for _, s := range p.item.Solutions {
+		if s.IsReference {
+			bundleRef = &domain.Solution{Language: s.Language, Source: s.Source}
+		}
+	}
+	return !domain.RefEqual(refOf(p.local), bundleRef)
 }

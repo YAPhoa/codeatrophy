@@ -1,6 +1,6 @@
-# Codeathropy web UI
+# Codeatrophy web UI
 
-The single-page app served by the Codeathropy server. It talks to the server
+The single-page app served by the Codeatrophy server. It talks to the server
 only through the HTTP API described in [`docs/api.md`](../docs/api.md), which
 is the contract between the two: change a request or response shape there,
 in the server handlers, and in `src/api/types.ts` together.
@@ -30,7 +30,7 @@ Requires Node 22 and npm 10.
 elsewhere with an environment variable:
 
 ```sh
-CODEATHROPY_BACKEND_URL=http://localhost:9090 npm run dev
+CODEATROPHY_BACKEND_URL=http://localhost:9090 npm run dev
 ```
 
 In production the Go server serves `dist/` from `/`, the API from `/api/v1`
@@ -59,7 +59,9 @@ browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
 | `mcp-token` / `mcp-off` | MCP endpoint requires a token / is disabled |
 | `mcp-url` | The server reports a public MCP URL (`meta.mcp.url`) instead of leaving it to the page origin |
 | `ai-env` | The Anthropic model, base URL and key come from the server's environment rather than saved settings |
-| `forbidden` | Every state-changing request answers `403 forbidden`, as when a reverse proxy hides the server's own address |
+| `forbidden` | Every request, reads included, answers `403 forbidden`: the server does not recognise the host it is addressed by, so the app cannot even start |
+| `forbidden-writes` | Only state-changing requests answer `403 forbidden`, as when a reverse proxy hides the page's origin |
+| `show-tests` | The "Hide test cases by default" preference starts switched off |
 | `empty` | Start with an empty library and no style presets |
 | `no-styles` | Seed library, but no style presets |
 | `fast` / `instant` | Short / no artificial delays |
@@ -85,11 +87,11 @@ For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
 `502 upstream_error`. In Settings, an API key containing `bad` or a base URL
 containing `unreachable` makes the connection test fail.
 
-The running mock is exposed as `window.__codeathropyMock`. To exercise the
+The running mock is exposed as `window.__codeatrophyMock`. To exercise the
 "changed elsewhere" flow, open an item's edit page, run
 
 ```js
-__codeathropyMock.externalEdit('<item id>')
+__codeatrophyMock.externalEdit('<item id>')
 ```
 
 in the console (it edits the item and bumps its revision, as an assistant
@@ -98,8 +100,10 @@ connected over MCP would), then save.
 ## Browser smoke tests
 
 `npm run test:e2e` runs a short Playwright suite (`e2e/smoke.spec.ts`) over
-the flows the product stands on: capture → draft → revise → save, a judged
-submission with a failing case, and filing selected items into a collection.
+the flows the product stands on: capture → draft → revise → save; the coding
+workspace with a judged submission, a hidden failing case and its panes;
+keeping an accepted submission as a solution and making it the reference;
+preferences taking effect; and filing selected items into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a
 third-party origin. It is separate from `npm test`.
@@ -128,8 +132,10 @@ src/
     capture/      paste → AI draft → review → save; variants; "what next"
     item/         item page dispatch, shared header and controls, editor form,
                   edit page with revision-conflict handling, notes, variants
-    solve/        problem workspace: editor, run / submit, results, history
-    tests/        test-case management, reference solution, AI generation
+    solve/        problem workspace: editor, run / submit, the tests and
+                  results drawer, history
+    solutions/    saved solutions of a problem, the reference solution
+    tests/        test-case management, verification, AI generation
     reader/       long-form reading view
     tags/ share/ settings/
   lib/        framework-free logic: filters ⇄ URL, form ⇄ API mapping and
@@ -158,8 +164,31 @@ A few conventions worth knowing:
   changed elsewhere and merges field by field; nothing is overwritten
   silently. Only content changes move an item's revision: personal state
   (status, favorite, notes), collection membership and test-case edits do
-  not, and are saved without it. Saving test cases together with a reference
-  solution does carry it, because the solution is content.
+  not, and are saved without it. Whatever changes the reference solution does
+  carry it, because that solution is content: saving test cases together with
+  one, editing the solution that is the reference, or choosing another.
+- **A problem keeps any number of solutions; one may be the reference.** Only
+  the reference solution verifies test cases: running it sets and clears
+  "verified" marks and can replace expected outputs. Any other solution can be
+  run against the cases as a check that changes nothing. Solutions are
+  spoilers, so their code is not rendered until asked for.
+- **The editor is the primary surface of the workspace.** It fills the column
+  beside the statement; test cases, results and custom input live in a drawer
+  below it that is a slim bar until something is run. The statement, the
+  drawer and the navigation can each be minimised (the shortcuts dialog, `?`,
+  lists the keys); what is minimised and the pane sizes are remembered in
+  `localStorage`, per browser.
+- **Preferences live on the server** (`/settings/preferences`), so they follow
+  the user between browsers; only the theme is local. `usePreferences()`
+  returns them, with the defaults until they have loaded. Every CodeMirror
+  editor goes through `src/ui/CodeEditor.tsx`, which applies the editor
+  preferences itself — callers pass nothing.
+- **Hidden test cases stay hidden.** With that preference on, the content of
+  non-sample cases — and their names — is not rendered in the workspace, in
+  results or on the test-management page until the user reveals it, and a
+  reveal lasts for the visit. Counts, verdicts, time and memory are always
+  shown. Anything new that displays test data has to honour this
+  (`useReveal()` in `features/solve`).
 - **Item bodies are untrusted.** They can come from imported bundles. The
   Markdown renderer never turns raw HTML into elements, drops unsafe URLs,
   and does not load remote images until asked. `src/ui/Markdown.test.tsx`

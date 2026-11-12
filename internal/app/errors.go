@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // Code is a machine-readable error code shared by every transport.

@@ -16,6 +16,8 @@ import {
   Monitor,
   Moon,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   Search,
@@ -41,11 +43,14 @@ import { Kbd } from '../ui/misc';
 import { useToast } from '../ui/Toast';
 
 /** MIME type used when dragging library rows onto a collection. */
-export const DRAG_ITEMS = 'application/x-codeathropy-items';
+export const DRAG_ITEMS = 'application/x-codeatrophy-items';
 
 interface SidebarProps {
   meta: Meta;
   open: boolean;
+  /** Show the narrow rail of icons instead of the full navigation. */
+  minimised: boolean;
+  onToggleMinimised: () => void;
   onClose: () => void;
   onOpenPalette: () => void;
   onOpenShortcuts: () => void;
@@ -67,6 +72,15 @@ function NavEntry({ to, icon, label, count, active }: NavEntryProps) {
       </span>
       <span className="grow truncate">{label}</span>
       {count != null && <span className="nav-count">{count}</span>}
+    </Link>
+  );
+}
+
+/** One destination in the minimised navigation: an icon whose name is its tooltip and accessible name. */
+function RailEntry({ to, icon, label, active }: Omit<NavEntryProps, 'count'>) {
+  return (
+    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={label} title={label}>
+      {icon}
     </Link>
   );
 }
@@ -183,7 +197,7 @@ const THEME_ICON: Record<ThemePreference, ReactNode> = {
   dark: <Moon size={15} />,
 };
 
-export function Sidebar({ meta, open, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
+export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { collectionId } = useParams();
@@ -211,6 +225,67 @@ export function Sidebar({ meta, open, onClose, onOpenPalette, onOpenShortcuts }:
 
   const judgeState = !meta.judge.enabled ? 'off' : meta.judge.healthy ? 'ok' : 'down';
 
+  const themeMenu = (
+    <MenuButton
+      variant="ghost"
+      size="sm"
+      label={`Theme: ${theme}`}
+      align="end"
+      icon={THEME_ICON[theme]}
+      items={(['system', 'light', 'dark'] as const).map((t) => ({
+        label: t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark',
+        icon: THEME_ICON[t],
+        hint: t === theme ? 'current' : undefined,
+        onSelect: () => setThemePreference(t),
+      }))}
+    />
+  );
+  const aiTitle = meta.ai.enabled ? `AI drafting: ${meta.ai.model ?? 'on'}` : 'AI drafting is not set up';
+  const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
+
+  if (minimised) {
+    // The rail keeps the destinations one click away; collections need the room of the full navigation.
+    return (
+      <aside className="sidebar is-rail" aria-label="Navigation">
+        <Link to="/" className="rail-brand" aria-label="Codeatrophy: all items" title="Codeatrophy">
+          <span className="brand-mark" aria-hidden="true">
+            <Code2 size={15} strokeWidth={2.6} />
+          </span>
+        </Link>
+        <IconButton label={`Expand navigation (${MOD}+B)`} size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
+        <Link to="/new" className="rail-item rail-new" aria-label="New item" title="New item (C)">
+          <Plus size={16} />
+        </Link>
+        <button type="button" className="rail-item" onClick={onOpenPalette} aria-label="Search and commands" title={`Search and commands (${MOD}+K)`}>
+          <Search size={16} />
+        </button>
+        <nav className="rail-nav" aria-label="Sections">
+          <RailEntry to="/" icon={<Library size={16} />} label="All items" active={onLibrary && !type && !fav && !uncollected} />
+          <RailEntry to="/?type=problem" icon={<Code2 size={16} />} label="Problems" active={onLibrary && type === 'problem' && !fav && !uncollected} />
+          <RailEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" active={onLibrary && type === 'reading' && !fav && !uncollected} />
+          <RailEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
+          <span className="rail-sep" aria-hidden="true" />
+          <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} />
+          <RailEntry to="/import" icon={<Upload size={16} />} label="Import" active={location.pathname === '/import'} />
+          <RailEntry to="/export" icon={<Download size={16} />} label="Export" active={location.pathname === '/export'} />
+          <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={location.pathname === '/settings'} />
+        </nav>
+        <div className="rail-foot">
+          <Link to="/settings#ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
+            <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
+            <span aria-hidden="true">AI</span>
+          </Link>
+          <Link to="/settings#judge" className="rail-svc" title={judgeTitle} aria-label={judgeTitle}>
+            <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
+            <span aria-hidden="true">Judge</span>
+          </Link>
+          <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={15} />} onClick={onOpenShortcuts} />
+          {themeMenu}
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className={cx('sidebar', open && 'is-open')} aria-label="Navigation">
       <div className="sidebar-head">
@@ -218,8 +293,9 @@ export function Sidebar({ meta, open, onClose, onOpenPalette, onOpenShortcuts }:
           <span className="brand-mark" aria-hidden="true">
             <Code2 size={15} strokeWidth={2.6} />
           </span>
-          Codeathropy
+          Codeatrophy
         </Link>
+        <IconButton className="sidebar-minimise" label={`Minimise navigation (${MOD}+B)`} size="sm" icon={<PanelLeftClose size={16} />} onClick={onToggleMinimised} />
         <IconButton className="sidebar-close" label="Close navigation" size="sm" icon={<X size={16} />} onClick={onClose} />
       </div>
 
@@ -294,33 +370,17 @@ export function Sidebar({ meta, open, onClose, onOpenPalette, onOpenShortcuts }:
       </nav>
 
       <div className="sidebar-foot">
-        <Link to="/settings#ai" className="svc" title={meta.ai.enabled ? `AI drafting: ${meta.ai.model ?? 'on'}` : 'AI drafting is not set up'}>
+        <Link to="/settings#ai" className="svc" title={aiTitle}>
           <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
           AI<span className="sr-only">: {meta.ai.enabled ? 'on' : 'off'}</span>
         </Link>
-        <Link
-          to="/settings#judge"
-          className="svc"
-          title={judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured'}
-        >
+        <Link to="/settings#judge" className="svc" title={judgeTitle}>
           <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
           Judge<span className="sr-only">: {judgeState === 'ok' ? 'healthy' : judgeState === 'down' ? 'not responding' : 'off'}</span>
         </Link>
         <span className="spacer" />
         <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={15} />} onClick={onOpenShortcuts} />
-        <MenuButton
-          variant="ghost"
-          size="sm"
-          label={`Theme: ${theme}`}
-          align="end"
-          icon={THEME_ICON[theme]}
-          items={(['system', 'light', 'dark'] as const).map((t) => ({
-            label: t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark',
-            icon: THEME_ICON[t],
-            hint: t === theme ? 'current' : undefined,
-            onSelect: () => setThemePreference(t),
-          }))}
-        />
+        {themeMenu}
       </div>
     </aside>
   );

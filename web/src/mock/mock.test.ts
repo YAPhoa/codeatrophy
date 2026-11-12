@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, setTransport } from '../api/client';
 import type { Submission } from '../api/types';
 import type { MockOptions, MockServer } from './index';
-import { JUDGE_LANGUAGES, LIMITS } from './db';
-import { buildBundleZip, createMockServer, optionsFromFlags, seedIds } from './index';
+import { DEFAULT_PREFERENCES, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
+import { buildBundleZip, createMockServer, optionsFromFlags, parseBundleZip, seedIds } from './index';
+import { TLE_GRACE_MS } from './judge';
+import { readZip } from './zip';
 
 let server: MockServer;
 
@@ -38,7 +40,7 @@ async function judged(id: string): Promise<{ final: Submission; seen: Submission
   throw new Error('submission never completed');
 }
 
-const zipFile = (bytes: Uint8Array<ArrayBuffer>, name = 'bundle.codeathropy.zip') =>
+const zipFile = (bytes: Uint8Array<ArrayBuffer>, name = 'bundle.codeatrophy.zip') =>
   new File([bytes], name, { type: 'application/zip' });
 
 async function exportAll(): Promise<File> {
@@ -51,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setTransport(() => Promise.reject(new Error('no transport')));
 });
 
@@ -70,7 +73,8 @@ describe('meta and stats', () => {
     expect(meta.limits).toMatchObject({
       maxImportBytes: 52428800,
       maxImportUncompressedBytes: 209715200,
-      maxImportEntries: 20000,
+      maxImportEntries: 1000000,
+      maxImportCollections: 10000,
       maxRequestBytes: 33554432,
       maxPageSize: 200,
       maxSourceBytes: 65536,
@@ -88,6 +92,9 @@ describe('meta and stats', () => {
       maxTestCasesPerItem: 1000,
       maxTestDataBytes: 8388608,
       maxTestCaseNameChars: 200,
+      maxSolutionsPerItem: 50,
+      maxSolutionNameChars: 100,
+      maxSolutionNotesChars: 5000,
       maxDraftTextChars: 50000,
       maxInstructionChars: 2000,
       maxPreviousDraftBytes: 2097152,
@@ -100,7 +107,7 @@ describe('meta and stats', () => {
       maxBundleNameChars: 200,
       maxBundleDescriptionChars: 5000,
     });
-    expect(Object.keys(meta.limits)).toHaveLength(31);
+    expect(Object.keys(meta.limits)).toHaveLength(35);
     expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
     expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
       'c GCC 9.2.0',
@@ -146,6 +153,18 @@ describe('meta and stats', () => {
     expect(Object.keys(stats.items.byDifficulty).sort()).toEqual(['easy', 'hard', 'medium', 'none']);
     expect(stats.collections).toBe(8);
     expect(stats.submissions.total).toBeGreaterThan(10);
+  });
+
+  it('counts only submit-mode submissions as accepted', async () => {
+    const before = (await api.stats()).submissions;
+    const source = 'print("ok")';
+    const run = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source, mode: 'run', stdin: null });
+    expect((await judged(run.id)).final.verdict).toBe('accepted');
+    expect((await api.stats()).submissions).toEqual({ total: before.total + 1, accepted: before.accepted });
+
+    const submit = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source, mode: 'submit', stdin: null });
+    expect((await judged(submit.id)).final.verdict).toBe('accepted');
+    expect((await api.stats()).submissions).toEqual({ total: before.total + 2, accepted: before.accepted + 1 });
   });
 });
 
@@ -479,7 +498,9 @@ describe('test cases', () => {
     await api.testCases.bulk(itemId, { cases: [{ expectedStdout: 'x' }], referenceSolution: solution, expectedRevision: before.revision });
     const stored = await api.items.get(itemId);
     expect(stored.revision).toBe(before.revision + 1);
-    expect(stored.problem?.referenceSolution).toEqual({ language: 'python', source: 'print(42)\n' });
+    // The write lands on the solution that is the reference, in place.
+    expect(stored.problem?.referenceSolution).toEqual({ id: before.problem!.referenceSolution!.id, language: 'python', source: 'print(42)\n' });
+    expect(stored.solutionCount).toBe(before.solutionCount);
 
     // Storing the same solution again is not a content change.
     await api.testCases.bulk(itemId, { cases: [], referenceSolution: { language: 'python', source: 'print(42)\n' } });
@@ -519,7 +540,7 @@ describe('test cases', () => {
     });
     expect(replaced.items).toHaveLength(1);
     const after = await api.items.get(itemId);
-    expect(after.problem?.referenceSolution).toEqual({ language: 'go', source: 'package main' });
+    expect(after.problem?.referenceSolution).toMatchObject({ language: 'go', source: 'package main' });
     expect(after.revision).toBeGreaterThan(before.revision);
   });
 
@@ -560,6 +581,325 @@ describe('test cases', () => {
     expect(down.status).toBe(503);
     expect(down.code).toBe('judge_unavailable');
     expect((await api.testCases.list(itemId)).items).toEqual(before);
+  });
+
+  it('clears verified on cases the reference solution no longer confirms', async () => {
+    const itemId = seedIds.items.twoSum;
+    const reference = seedIds.solutions.twoSumHashMap;
+    expect((await api.testCases.list(itemId)).items.every((c) => c.verified)).toBe(true);
+
+    // The reference now times out on the last case.
+    await api.solutions.update(reference, { source: 'while True: pass  # MOCK:TLE' });
+    // Changing the reference solution does not reset the marks by itself.
+    expect((await api.testCases.list(itemId)).items.every((c) => c.verified)).toBe(true);
+
+    const { results } = await api.testCases.verify(itemId, false);
+    const last = results[results.length - 1]!;
+    expect(last).toMatchObject({ ok: false, matches: false, verdict: 'time_limit_exceeded' });
+    const cases = (await api.testCases.list(itemId)).items;
+    expect(cases.map((c) => c.verified)).toEqual([true, true, true, true, true, false]);
+
+    // A wrong output clears the mark as well.
+    await api.solutions.update(reference, { source: 'print(0)  # MOCK:WA' });
+    const wrong = await api.testCases.verify(itemId, false);
+    expect(wrong.results.map((r) => r.matches)).toEqual([true, false, true, true, false, true]);
+    expect((await api.testCases.list(itemId)).items.map((c) => c.verified)).toEqual([true, false, true, true, false, true]);
+  });
+
+  it('runs another solution as a check that changes nothing', async () => {
+    const itemId = seedIds.items.mergeIntervals;
+    const wrongId = seedIds.testCases.mergeIntervalsWrongExpected;
+    const other = await api.solutions.create(itemId, { name: 'Second opinion', language: 'python', source: 'print(1)' });
+    const before = await api.items.get(itemId);
+    const casesBefore = (await api.testCases.list(itemId)).items;
+    expect(casesBefore.find((c) => c.id === wrongId)?.verified).toBe(false);
+
+    const { results } = await api.testCases.verify(itemId, false, other.id);
+    expect(results).toHaveLength(casesBefore.length);
+    expect(results.filter((r) => !r.matches).map((r) => r.testCaseId)).toEqual([wrongId]);
+    // No verified mark is set or cleared, and the item is not touched.
+    expect((await api.testCases.list(itemId)).items).toEqual(casesBefore);
+    expect(await api.items.get(itemId)).toEqual(before);
+
+    // Only the reference solution can replace expected outputs.
+    const refused = await failure(api.testCases.verify(itemId, true, other.id));
+    expect(refused.status).toBe(422);
+    expect(refused.fields).toHaveProperty('updateExpected');
+    expect((await api.testCases.list(itemId)).items).toEqual(casesBefore);
+
+    // Naming the reference solution explicitly is the same as naming none.
+    const reference = before.problem!.referenceSolution!.id!;
+    await api.testCases.verify(itemId, true, reference);
+    expect((await api.testCases.list(itemId)).items.find((c) => c.id === wrongId)).toMatchObject({ verified: true, expectedStdout: '2\n1 9\n10 12\n' });
+  });
+
+  it('reports how a chosen solution fails, and rejects a solution of another item', async () => {
+    const itemId = seedIds.items.twoSum;
+    // The seed brute force is too slow for the last case.
+    const slow = await api.testCases.verify(itemId, false, seedIds.solutions.twoSumBruteForce);
+    expect(slow.results.map((r) => r.ok)).toEqual([true, true, true, true, true, false]);
+    expect(slow.results[5]).toMatchObject({ verdict: 'time_limit_exceeded', matches: false, actualStdout: '' });
+    expect((await api.testCases.list(itemId)).items.every((c) => c.verified)).toBe(true);
+
+    const broken = await api.solutions.create(itemId, { name: 'Does not build', language: 'cpp', source: 'int main() { MOCK:CE }' });
+    const built = await api.testCases.verify(itemId, false, broken.id);
+    expect(built.results.every((r) => !r.ok && r.verdict === 'compile_error' && r.stderr !== '')).toBe(true);
+
+    const foreign = await failure(api.testCases.verify(itemId, false, seedIds.solutions.coinChangeTable));
+    expect(foreign.status).toBe(422);
+    expect(foreign.fields).toHaveProperty('solutionId');
+    expect((await failure(api.testCases.verify(itemId, false, 'no-such-solution'))).status).toBe(422);
+  });
+});
+
+describe('solutions', () => {
+  const twoSum = seedIds.items.twoSum;
+
+  it('lists the reference solution first, then oldest first', async () => {
+    const { items } = await api.solutions.list(twoSum);
+    expect(items.map((s) => s.id)).toEqual([seedIds.solutions.twoSumHashMap, seedIds.solutions.twoSumBruteForce, seedIds.solutions.twoSumCpp]);
+    expect(items.map((s) => s.isReference)).toEqual([true, false, false]);
+    expect(Object.keys(items[0]!).sort()).toEqual(['createdAt', 'id', 'isReference', 'itemId', 'language', 'name', 'notes', 'source', 'updatedAt']);
+    expect(items[0]).toMatchObject({ itemId: twoSum, name: 'Hash map, one pass', language: 'python' });
+
+    // Marking another one moves it to the front; the rest keep their age order.
+    await api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true });
+    expect((await api.solutions.list(twoSum)).items.map((s) => s.id)).toEqual([
+      seedIds.solutions.twoSumCpp,
+      seedIds.solutions.twoSumHashMap,
+      seedIds.solutions.twoSumBruteForce,
+    ]);
+  });
+
+  it('reports the reference solution on the item, with its id, and counts solutions', async () => {
+    const item = await api.items.get(twoSum);
+    const [reference] = (await api.solutions.list(twoSum)).items;
+    expect(item.solutionCount).toBe(3);
+    expect(item.problem?.referenceSolution).toEqual({ id: reference!.id, language: reference!.language, source: reference!.source });
+
+    const listed = await api.items.list({ id: [twoSum, seedIds.items.rateLimiter, seedIds.items.capTheorem] });
+    const count = (id: string) => listed.items.find((i) => i.id === id)?.solutionCount;
+    expect(count(twoSum)).toBe(3);
+    expect(count(seedIds.items.rateLimiter)).toBe(0);
+    expect(count(seedIds.items.capTheorem)).toBe(0);
+    expect((await api.items.get(seedIds.items.rateLimiter)).problem?.referenceSolution).toBeNull();
+  });
+
+  it('creates with defaults, trims the name and normalises line endings', async () => {
+    const created = await api.solutions.create(twoSum, { name: '  Sorting first  ', language: 'ruby', source: 'puts 1\r\nputs 2\r\n' });
+    expect(created).toMatchObject({ itemId: twoSum, name: 'Sorting first', language: 'ruby', source: 'puts 1\nputs 2\n', notes: '', isReference: false });
+    expect(created.createdAt).toBe(created.updatedAt);
+    const { items } = await api.solutions.list(twoSum);
+    expect(items[items.length - 1]?.id).toBe(created.id);
+    expect((await api.items.get(twoSum)).solutionCount).toBe(4);
+  });
+
+  it('validates input with per-field messages', async () => {
+    const missing = await failure(api.solutions.create(twoSum, {} as never));
+    expect(missing.status).toBe(422);
+    expect(Object.keys(missing.fields).sort()).toEqual(['language', 'name', 'source']);
+
+    const base = { name: 'x', language: 'python', source: 'print(1)' };
+    const field = async (patch: Record<string, unknown>) => Object.keys((await failure(api.solutions.create(twoSum, { ...base, ...patch } as never))).fields);
+    expect(await field({ name: '   ' })).toEqual(['name']);
+    expect(await field({ name: 'n'.repeat(LIMITS.maxSolutionNameChars + 1) })).toEqual(['name']);
+    expect(await field({ name: 'two\nlines' })).toEqual(['name']);
+    expect(await field({ language: 'brainfuck' })).toEqual(['language']);
+    expect(await field({ source: '  \n' })).toEqual(['source']);
+    expect(await field({ source: 'x'.repeat(LIMITS.maxSourceBytes + 1) })).toEqual(['source']);
+    expect(await field({ notes: 'n'.repeat(LIMITS.maxSolutionNotesChars + 1) })).toEqual(['notes']);
+    expect(await field({ isReference: 'yes' })).toEqual(['isReference']);
+    // At the limits, and whether or not a judge offers the language, it is accepted.
+    start({ judge: 'none' });
+    const ok = await api.solutions.create(twoSum, {
+      name: 'n'.repeat(LIMITS.maxSolutionNameChars),
+      language: 'kotlin',
+      source: 'fun main() {}',
+      notes: 'n'.repeat(LIMITS.maxSolutionNotesChars),
+    });
+    expect(ok.language).toBe('kotlin');
+
+    const patch = await failure(api.solutions.update(ok.id, { name: '', source: '' }));
+    expect(Object.keys(patch.fields).sort()).toEqual(['name', 'source']);
+    expect((await api.solutions.list(twoSum)).items.find((s) => s.id === ok.id)?.source).toBe('fun main() {}');
+  });
+
+  it('is rejected for a reading and unknown ids', async () => {
+    const reading = seedIds.items.capTheorem;
+    expect((await failure(api.solutions.list(reading))).status).toBe(422);
+    expect((await failure(api.solutions.create(reading, { name: 'x', language: 'python', source: 'x' }))).status).toBe(422);
+    expect((await failure(api.solutions.list('no-such-item'))).status).toBe(404);
+    expect((await failure(api.solutions.update('no-such-solution', { name: 'x' }))).status).toBe(404);
+    expect((await failure(api.solutions.remove('no-such-solution'))).status).toBe(404);
+  });
+
+  it('keeps at most one reference solution per item', async () => {
+    const created = await api.solutions.create(twoSum, { name: 'New reference', language: 'go', source: 'package main', isReference: true });
+    expect(created.isReference).toBe(true);
+    let list = (await api.solutions.list(twoSum)).items;
+    expect(list.filter((s) => s.isReference).map((s) => s.id)).toEqual([created.id]);
+    expect((await api.items.get(twoSum)).problem?.referenceSolution).toEqual({ id: created.id, language: 'go', source: 'package main' });
+
+    await api.solutions.update(seedIds.solutions.twoSumBruteForce, { isReference: true });
+    list = (await api.solutions.list(twoSum)).items;
+    expect(list.filter((s) => s.isReference).map((s) => s.id)).toEqual([seedIds.solutions.twoSumBruteForce]);
+    // Another item's reference is not affected.
+    expect((await api.items.get(seedIds.items.coinChange)).problem?.referenceSolution?.id).toBe(seedIds.solutions.coinChangeTable);
+  });
+
+  it('raises the revision only when what the item reports as its reference changes', async () => {
+    const start = await api.items.get(twoSum);
+    const revision = async () => (await api.items.get(twoSum)).revision;
+    const reference = seedIds.solutions.twoSumHashMap;
+    const other = seedIds.solutions.twoSumBruteForce;
+
+    // Other saved solutions, and the reference's name and notes, are outside the revision.
+    const added = await api.solutions.create(twoSum, { name: 'Scratch', language: 'python', source: 'print(1)' });
+    await api.solutions.update(other, { name: 'Brute force, renamed', source: 'print(2)', language: 'ruby', notes: 'changed' });
+    await api.solutions.update(reference, { name: 'Renamed reference', notes: 'new notes' });
+    await api.solutions.remove(added.id);
+    expect(await revision()).toBe(start.revision);
+    // They still count as a modification of the item.
+    expect((await api.items.get(twoSum)).updatedAt > start.updatedAt).toBe(true);
+
+    // The reference's language or source is item content.
+    await api.solutions.update(reference, { source: 'print(3)' });
+    expect(await revision()).toBe(start.revision + 1);
+    await api.solutions.update(reference, { language: 'ruby' });
+    expect(await revision()).toBe(start.revision + 2);
+    // So is which solution it is: switching, unmarking, marking, creating as reference, deleting it.
+    await api.solutions.update(other, { isReference: true });
+    expect(await revision()).toBe(start.revision + 3);
+    await api.solutions.update(other, { isReference: false });
+    expect(await revision()).toBe(start.revision + 4);
+    expect((await api.items.get(twoSum)).problem?.referenceSolution).toBeNull();
+    await api.solutions.update(other, { isReference: true });
+    expect(await revision()).toBe(start.revision + 5);
+    const fresh = await api.solutions.create(twoSum, { name: 'Fresh', language: 'python', source: 'print(4)', isReference: true });
+    expect(await revision()).toBe(start.revision + 6);
+    await api.solutions.remove(fresh.id);
+    expect(await revision()).toBe(start.revision + 7);
+    expect((await api.items.get(twoSum)).problem?.referenceSolution).toBeNull();
+
+    // A request that leaves every field as it was changes nothing, not even a timestamp.
+    const before = await api.items.get(twoSum);
+    const [first] = (await api.solutions.list(twoSum)).items;
+    const same = await api.solutions.update(first!.id, { name: first!.name, source: first!.source, isReference: first!.isReference });
+    expect(same).toEqual(first);
+    expect(await api.items.get(twoSum)).toEqual(before);
+  });
+
+  it('does not reset verified marks when the reference changes', async () => {
+    await api.solutions.update(seedIds.solutions.twoSumHashMap, { source: 'print(5)' });
+    await api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true });
+    expect((await api.testCases.list(twoSum)).items.every((c) => c.verified)).toBe(true);
+  });
+
+  it('checks expectedRevision on writes', async () => {
+    const item = await api.items.get(twoSum);
+    const reference = seedIds.solutions.twoSumHashMap;
+
+    const staleCreate = await failure(
+      api.solutions.create(twoSum, { name: 'x', language: 'python', source: 'x', isReference: true, expectedRevision: item.revision + 3 }),
+    );
+    expect(staleCreate.status).toBe(409);
+    expect(staleCreate.isRevisionConflict).toBe(true);
+    expect(staleCreate.currentRevision).toBe(item.revision);
+    const stalePatch = await failure(api.solutions.update(reference, { source: 'print(6)', expectedRevision: item.revision - 1 }));
+    expect(stalePatch.isRevisionConflict).toBe(true);
+    // Nothing was written.
+    expect(await api.items.get(twoSum)).toEqual(item);
+    expect((await api.solutions.list(twoSum)).items).toHaveLength(3);
+
+    const saved = await api.solutions.update(reference, { source: 'print(6)', expectedRevision: item.revision });
+    expect(saved.source).toBe('print(6)');
+    expect((await api.items.get(twoSum)).revision).toBe(item.revision + 1);
+    // The revision the caller read is now stale for the next reference change.
+    expect((await failure(api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true, expectedRevision: item.revision }))).status).toBe(409);
+    await api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true, expectedRevision: item.revision + 1 });
+    expect((await api.items.get(twoSum)).revision).toBe(item.revision + 2);
+  });
+
+  it('refuses one more than the limit with a conflict', async () => {
+    const itemId = seedIds.items.rateLimiter;
+    for (let i = 0; i < LIMITS.maxSolutionsPerItem; i++) {
+      await api.solutions.create(itemId, { name: `Attempt ${i + 1}`, language: 'python', source: `print(${i})` });
+    }
+    const err = await failure(api.solutions.create(itemId, { name: 'One too many', language: 'python', source: 'print()' }));
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('conflict');
+    expect(err.isRevisionConflict).toBe(false);
+    // Writing a reference solution to an item that has none would need a new one, too.
+    const viaItem = await failure(api.items.update(itemId, { problem: { referenceSolution: { language: 'python', source: 'print()' } } }));
+    expect(viaItem.status).toBe(409);
+    expect((await api.items.get(itemId)).solutionCount).toBe(LIMITS.maxSolutionsPerItem);
+  });
+
+  it('writes problem.referenceSolution through to the saved solution', async () => {
+    // Updates the reference solution in place; an id in the written value is ignored.
+    const before = await api.items.get(twoSum);
+    const patched = await api.items.update(twoSum, {
+      problem: { referenceSolution: { id: seedIds.solutions.twoSumCpp, language: 'go', source: 'package main\r\n' } },
+    });
+    expect(patched.problem?.referenceSolution).toEqual({ id: seedIds.solutions.twoSumHashMap, language: 'go', source: 'package main\n' });
+    expect(patched.revision).toBe(before.revision + 1);
+    expect(patched.solutionCount).toBe(3);
+    const [reference] = (await api.solutions.list(twoSum)).items;
+    expect(reference).toMatchObject({ id: seedIds.solutions.twoSumHashMap, name: 'Hash map, one pass', language: 'go', source: 'package main\n', isReference: true });
+
+    // Writing the same value again is not a change.
+    expect((await api.items.update(twoSum, { problem: { referenceSolution: { language: 'go', source: 'package main\n' } } })).revision).toBe(before.revision + 1);
+
+    // null only removes the mark; the solution stays saved.
+    const cleared = await api.items.update(twoSum, { problem: { referenceSolution: null } });
+    expect(cleared.problem?.referenceSolution).toBeNull();
+    expect(cleared.solutionCount).toBe(3);
+    expect(cleared.revision).toBe(before.revision + 2);
+    expect((await api.solutions.list(twoSum)).items.some((s) => s.isReference)).toBe(false);
+
+    // With no reference, a write creates one under the standard name.
+    const again = await api.items.update(twoSum, { problem: { referenceSolution: { language: 'python', source: 'print(7)' } } });
+    expect(again.solutionCount).toBe(4);
+    const created = (await api.solutions.list(twoSum)).items[0]!;
+    expect(created).toMatchObject({ name: REFERENCE_SOLUTION_NAME, language: 'python', source: 'print(7)', notes: '', isReference: true });
+    expect(again.problem?.referenceSolution?.id).toBe(created.id);
+  });
+
+  it('saves a reference solution given at creation or through a bulk test-case save', async () => {
+    const made = await api.items.create({
+      type: 'problem',
+      title: 'With a solution',
+      problem: { referenceSolution: { language: 'python', source: 'print(8)' } },
+    });
+    expect(made.solutionCount).toBe(1);
+    expect(made.revision).toBe(1);
+    const [only] = (await api.solutions.list(made.id)).items;
+    expect(only).toMatchObject({ name: REFERENCE_SOLUTION_NAME, isReference: true, source: 'print(8)' });
+    expect(made.problem?.referenceSolution).toEqual({ id: only!.id, language: 'python', source: 'print(8)' });
+
+    const bare = await api.items.create({ type: 'problem', title: 'Without one' });
+    expect(bare.solutionCount).toBe(0);
+    await api.testCases.bulk(bare.id, { cases: [{ expectedStdout: '1\n' }], referenceSolution: { language: 'cpp', source: 'int main() {}' } });
+    const after = await api.items.get(bare.id);
+    expect(after.solutionCount).toBe(1);
+    expect(after.revision).toBe(2);
+    expect((await api.solutions.list(bare.id)).items[0]).toMatchObject({ name: REFERENCE_SOLUTION_NAME, language: 'cpp', isReference: true });
+  });
+
+  it('deletes a solution, and all of them with their item', async () => {
+    await api.solutions.remove(seedIds.solutions.twoSumBruteForce);
+    expect((await api.solutions.list(twoSum)).items.map((s) => s.id)).toEqual([seedIds.solutions.twoSumHashMap, seedIds.solutions.twoSumCpp]);
+    expect((await failure(api.solutions.remove(seedIds.solutions.twoSumBruteForce))).status).toBe(404);
+
+    // Deleting the reference solution leaves the item without one.
+    await api.solutions.remove(seedIds.solutions.twoSumHashMap);
+    const item = await api.items.get(twoSum);
+    expect(item.problem?.referenceSolution).toBeNull();
+    expect(item.solutionCount).toBe(1);
+
+    await api.items.remove(twoSum);
+    expect(server.db.solutions.some((s) => s.itemId === twoSum)).toBe(false);
+    expect((await failure(api.solutions.update(seedIds.solutions.twoSumCpp, { name: 'x' }))).status).toBe(404);
   });
 });
 
@@ -698,6 +1038,27 @@ describe('submissions', () => {
     expect(history.items[0]).not.toHaveProperty('results');
   });
 
+  it('can report more than one result between two polls', async () => {
+    vi.useFakeTimers();
+    const queued = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source: 'print(1)', mode: 'submit', stdin: null });
+    expect(queued.totalCount).toBe(6);
+    // Step the judge one timer at a time and watch the stored submission, so that no state is missed.
+    const stored = server.db.submissions.find((s) => s.id === queued.id)!;
+    const lengths = [stored.results.length];
+    for (let i = 0; i < 50 && stored.status !== 'completed'; i++) {
+      vi.advanceTimersToNextTimer();
+      lengths.push(stored.results.length);
+    }
+    expect(stored.status).toBe('completed');
+    const jumps = lengths.slice(1).map((n, i) => n - lengths[i]!);
+    expect(lengths[0]).toBe(0);
+    expect(lengths[lengths.length - 1]).toBe(6);
+    expect(jumps.every((j) => j >= 0 && j <= 2)).toBe(true);
+    // Some results arrived together.
+    expect(jumps).toContain(2);
+    expect(stored.passedCount).toBe(6);
+  });
+
   it('marks the item done on an accepted submit, but not on a run', async () => {
     const run = await api.submissions.create(lru, { language: 'go', source: 'package main', mode: 'run', stdin: null });
     const ran = (await judged(run.id)).final;
@@ -728,6 +1089,10 @@ describe('submissions', () => {
     const tle = await go('// MOCK:TLE');
     expect(tle.verdict).toBe('time_limit_exceeded');
     expect(tle.passedCount).toBe(tle.totalCount - 1);
+    // The reported time is when the engine stopped the program: later than the limit.
+    const limit = (await api.items.get(lru)).problem!.timeLimitMs;
+    expect(tle.results[tle.results.length - 1]!.timeMs).toBe(limit + TLE_GRACE_MS);
+    expect(tle.timeMs).toBeGreaterThan(limit);
 
     const ie = await go('// MOCK:IE');
     expect(ie.verdict).toBe('internal_error');
@@ -1180,16 +1545,128 @@ describe('AI settings', () => {
     expect(local.error).toContain('unreachable.lan');
     expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(false);
   });
+
+  it('drops a saved key when the base URL moves to another origin', async () => {
+    // Same origin, different path: the key stays.
+    let next = await api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://api.anthropic.com/v1' } } });
+    expect(next.providers.anthropic).toMatchObject({ apiKeySet: true, apiKeyHint: '…x7Qa' });
+
+    // Another origin without a key in the same request: the key is gone, and
+    // the active provider would no longer be ready, so nothing is saved.
+    const refused = await failure(api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://gateway.example.org/anthropic' } } }));
+    expect(refused.status).toBe(422);
+    expect((await api.settings.getAi()).providers.anthropic).toMatchObject({ baseUrl: 'https://api.anthropic.com/v1', apiKeySet: true });
+
+    // With the key for the new server in the same request, it is saved.
+    next = await api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://gateway.example.org/anthropic', apiKey: 'sk-gw-key-WXYZ' } } });
+    expect(next.providers.anthropic).toMatchObject({ baseUrl: 'https://gateway.example.org/anthropic', apiKeyHint: '…WXYZ', ready: true });
+
+    // Not the active provider: the save goes through and the key is deleted.
+    next = await api.settings.putAi({ providers: { openai_compatible: { model: 'gpt-x', baseUrl: 'https://openrouter.example/api/v1', apiKey: 'sk-or-1234' } } });
+    expect(next.providers.openai_compatible).toMatchObject({ apiKeySet: true, ready: true });
+    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: 'http://localhost:11434/v1' } } });
+    expect(next.providers.openai_compatible).toMatchObject({ baseUrl: 'http://localhost:11434/v1', apiKeySet: false, apiKeyHint: null, apiKeySource: null });
+    // Clearing the base URL falls back to the default one, which is another origin again.
+    await api.settings.putAi({ providers: { openai_compatible: { apiKey: 'sk-local-0000' } } });
+    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: null } } });
+    expect(next.providers.openai_compatible).toMatchObject({ baseUrl: null, apiKeySet: false });
+  });
+
+  it('needs a key for the default OpenAI endpoint, but not for another one', async () => {
+    let next = await api.settings.putAi({ providers: { openai_compatible: { model: 'gpt-x' } } });
+    expect(next.providers.openai_compatible).toMatchObject({ model: 'gpt-x', baseUrl: null, apiKeySet: false, ready: false });
+    const err = await failure(api.settings.putAi({ activeProvider: 'openai_compatible' }));
+    expect(err.fields.activeProvider).toMatch(/API key/);
+    expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(false);
+
+    next = await api.settings.putAi({ providers: { openai_compatible: { apiKey: 'sk-openai-9876' } } });
+    expect(next.providers.openai_compatible.ready).toBe(true);
+
+    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: 'http://localhost:1234/v1' } } });
+    expect(next.providers.openai_compatible).toMatchObject({ apiKeySet: false, ready: true });
+    expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(true);
+  });
+
+  it('tests another base URL only with a key typed into the same request', async () => {
+    // The saved key is not sent to a server it was not saved for.
+    const elsewhere = await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://gateway.example.org/anthropic' });
+    expect(elsewhere.ok).toBe(false);
+    expect(elsewhere.error).toMatch(/key/i);
+    expect(elsewhere.error).not.toContain('x7Qa');
+    expect((await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://gateway.example.org/anthropic', apiKey: 'sk-gw-typed' })).ok).toBe(true);
+    // The same origin under another path still uses the saved key.
+    expect((await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v2' })).ok).toBe(true);
+    // A local endpoint needs no key at all.
+    expect((await api.settings.testAi({ provider: 'openai_compatible', model: 'qwen', baseUrl: 'http://localhost:11434/v1' })).ok).toBe(true);
+    // Nothing was saved by any of this.
+    expect((await api.settings.getAi()).providers.anthropic).toMatchObject({ baseUrl: null, apiKeyHint: '…x7Qa' });
+  });
+});
+
+describe('preferences', () => {
+  it('returns every key with the documented defaults', async () => {
+    const prefs = await api.preferences.get();
+    expect(prefs).toEqual({
+      hideTestCases: true,
+      editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
+    });
+    expect(prefs).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it('merges an update at any depth and returns the whole document', async () => {
+    let prefs = await api.preferences.put({ hideTestCases: false });
+    expect(prefs).toEqual({ ...DEFAULT_PREFERENCES, hideTestCases: false });
+    prefs = await api.preferences.put({ editor: { fontSize: 18, lineWrapping: true } });
+    expect(prefs).toEqual({ hideTestCases: false, editor: { ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true } });
+    prefs = await api.preferences.put({ editor: { tabSize: 2 }, hideTestCases: true });
+    expect(prefs.editor).toEqual({ ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true, tabSize: 2 });
+    expect(await api.preferences.put({})).toEqual(prefs);
+    expect(await api.preferences.get()).toEqual(prefs);
+    // The defaults themselves were not modified by any of this.
+    start();
+    expect(await api.preferences.get()).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it('rejects an unknown key or an out-of-range value and saves nothing', async () => {
+    const bad: [Record<string, unknown>, string][] = [
+      [{ hideTestCases: 'yes' }, 'hideTestCases'],
+      [{ theme: 'dark' }, 'theme'],
+      [{ editor: { minimap: true } }, 'editor.minimap'],
+      [{ editor: { tabSize: 3 } }, 'editor.tabSize'],
+      [{ editor: { fontSize: 9 } }, 'editor.fontSize'],
+      [{ editor: { fontSize: 25 } }, 'editor.fontSize'],
+      [{ editor: { fontSize: 13.5 } }, 'editor.fontSize'],
+      [{ editor: { autocomplete: null } }, 'editor.autocomplete'],
+      [{ editor: 'none' }, 'editor'],
+    ];
+    for (const [body, field] of bad) {
+      const err = await failure(api.preferences.put(body as never));
+      expect(err.status, field).toBe(422);
+      expect(Object.keys(err.fields), field).toEqual([field]);
+    }
+    // One bad value rejects the whole update, valid parts included.
+    const mixed = await failure(api.preferences.put({ hideTestCases: false, editor: { fontSize: 20, tabSize: 5 as never } }));
+    expect(mixed.status).toBe(422);
+    expect(await api.preferences.get()).toEqual(DEFAULT_PREFERENCES);
+    // The bounds themselves are accepted.
+    expect((await api.preferences.put({ editor: { fontSize: 10 } })).editor.fontSize).toBe(10);
+    expect((await api.preferences.put({ editor: { fontSize: 24, tabSize: 8 } })).editor).toMatchObject({ fontSize: 24, tabSize: 8 });
+  });
+
+  it('can start with test cases shown', async () => {
+    start(optionsFromFlags(['show-tests', 'instant']));
+    expect(await api.preferences.get()).toEqual({ ...DEFAULT_PREFERENCES, hideTestCases: false });
+  });
 });
 
 describe('export and import', () => {
   it('round-trips the whole library as unchanged', async () => {
     const { blob, filename } = await api.bundle.export({ scope: 'all', includeSolutions: true, includeHiddenTests: true });
-    expect(filename).toBe('codeathropy-library.codeathropy.zip');
+    expect(filename).toBe('codeatrophy-library.codeatrophy.zip');
     expect(blob.size).toBeGreaterThan(1000);
 
     const preview = await api.bundle.preview(new File([blob], filename!));
-    expect(preview.bundle).toMatchObject({ name: 'Codeathropy library', formatVersion: 1 });
+    expect(preview.bundle).toMatchObject({ name: 'Codeatrophy library', formatVersion: 1 });
     expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 24 });
     expect(preview.collections).toHaveLength(8);
     expect(preview.collections.every((c) => c.state === 'existing')).toBe(true);
@@ -1211,7 +1688,7 @@ describe('export and import', () => {
       includeSolutions: true,
       includeHiddenTests: true,
     });
-    expect(subtree.filename).toBe('systems-reading.codeathropy.zip');
+    expect(subtree.filename).toBe('systems-reading.codeatrophy.zip');
     const preview = await api.bundle.preview(new File([subtree.blob], 'a.zip'));
     expect(preview.collections.map((c) => c.name).sort()).toEqual(['Databases', 'Distributed systems', 'Systems reading']);
     expect(preview.items).toHaveLength(6);
@@ -1223,12 +1700,115 @@ describe('export and import', () => {
       includeSolutions: true,
       includeHiddenTests: true,
     });
-    expect(picked.filename).toBe('two-picks.codeathropy.zip');
+    expect(picked.filename).toBe('two-picks.codeatrophy.zip');
     const picks = await api.bundle.preview(new File([picked.blob], 'b.zip'));
     expect(picks.items).toHaveLength(2);
     expect(picks.collections).toEqual([]);
 
     expect((await failure(api.bundle.export({ scope: 'items', itemIds: [], includeSolutions: true, includeHiddenTests: true }))).status).toBe(422);
+    // A collection or item that does not exist is a validation error, not a 404.
+    const noCollection = await failure(api.bundle.export({ scope: 'collection', collectionId: 'nope', includeSolutions: true, includeHiddenTests: true }));
+    expect(noCollection.status).toBe(422);
+    expect(noCollection.fields).toHaveProperty('collectionId');
+    const noItem = await failure(
+      api.bundle.export({ scope: 'items', itemIds: [seedIds.items.twoSum, 'nope'], includeSolutions: true, includeHiddenTests: true }),
+    );
+    expect(noItem.status).toBe(422);
+  });
+
+  it('writes solutions as files, and says what the export includes', async () => {
+    const twoSum = seedIds.items.twoSum;
+    const full = await api.bundle.export({ scope: 'items', itemIds: [twoSum, seedIds.items.rateLimiter], includeSolutions: true, includeHiddenTests: true });
+    const bytes = new Uint8Array(await full.blob.arrayBuffer());
+    const entries = new Map((await readZip(bytes)).map((e) => [e.path, new TextDecoder().decode(e.data)]));
+    const manifest = JSON.parse(entries.get('bundle.json')!) as { includes: unknown; items: { id: string; path: string }[] };
+    expect(manifest.includes).toEqual({ solutions: true, hiddenTests: true });
+
+    const dir = manifest.items.find((i) => i.id === twoSum)!.path;
+    const index = JSON.parse(entries.get(`${dir}/solutions/solutions.json`)!) as { solutions: Record<string, unknown>[] };
+    expect(index.solutions.map((x) => [x.name, x.language, x.file, x.reference])).toEqual([
+      ['Hash map, one pass', 'python', '01-hash-map-one-pass.py', true],
+      ['Brute force', 'python', '02-brute-force.py', false],
+      ['Hash map, one pass (C++)', 'cpp', '03-hash-map-one-pass-c.cpp', false],
+    ]);
+    expect(index.solutions[0]!.notes).toContain('O(n)');
+    const stored = (await api.solutions.list(twoSum)).items;
+    expect(entries.get(`${dir}/solutions/03-hash-map-one-pass-c.cpp`)).toBe(stored[2]!.source);
+    // The reference solution is no longer part of item.json.
+    expect(entries.get(`${dir}/item.json`)).not.toContain('referenceSolution');
+    // A problem without solutions still says so, which is different from "not exported".
+    const bare = manifest.items.find((i) => i.id === seedIds.items.rateLimiter)!.path;
+    expect(JSON.parse(entries.get(`${bare}/solutions/solutions.json`)!)).toEqual({ solutions: [] });
+
+    const parsed = await parseBundleZip(bytes);
+    expect(parsed.includes).toEqual({ solutions: true, hiddenTests: true });
+    expect(parsed.items.find((i) => i.id === twoSum)?.solutions).toHaveLength(3);
+    expect(parsed.items.find((i) => i.id === seedIds.items.rateLimiter)?.solutions).toEqual([]);
+
+    const partial = await api.bundle.export({ scope: 'items', itemIds: [twoSum], includeSolutions: false, includeHiddenTests: false });
+    const partialBytes = new Uint8Array(await partial.blob.arrayBuffer());
+    const paths = (await readZip(partialBytes)).map((e) => e.path);
+    expect(paths.some((path) => path.includes('/solutions/'))).toBe(false);
+    const sparse = await parseBundleZip(partialBytes);
+    expect(sparse.includes).toEqual({ solutions: false, hiddenTests: false });
+    expect(sparse.items[0]?.solutions).toBeUndefined();
+    expect(sparse.items[0]?.testCases).toHaveLength(2);
+  });
+
+  it('compares solutions only when the bundle carries them', async () => {
+    const twoSum = seedIds.items.twoSum;
+    const full = await exportAll();
+    const partial = await api.bundle.export({ scope: 'all', includeSolutions: false, includeHiddenTests: true });
+    const without = new File([partial.blob], 'without-solutions.zip');
+    const changesOf = async (file: File) => (await api.bundle.preview(file)).items.find((i) => i.id === twoSum);
+
+    // Notes, names, order of the reference mark and membership of the list all count.
+    await api.solutions.update(seedIds.solutions.twoSumBruteForce, { notes: 'Rewritten notes.' });
+    expect(await changesOf(full)).toMatchObject({ state: 'changed', changes: ['solutions'] });
+    expect(await changesOf(without)).toMatchObject({ state: 'unchanged', changes: [] });
+
+    await api.solutions.update(seedIds.solutions.twoSumBruteForce, { notes: (await parseBundleZip(new Uint8Array(await full.arrayBuffer()))).items.find((i) => i.id === twoSum)!.solutions![1]!.notes });
+    expect(await changesOf(full)).toMatchObject({ state: 'unchanged' });
+    await api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true });
+    expect((await changesOf(full))?.changes).toEqual(['solutions']);
+    await api.solutions.remove(seedIds.solutions.twoSumCpp);
+    expect((await changesOf(full))?.changes).toEqual(['solutions']);
+    expect((await changesOf(without))?.state).toBe('unchanged');
+  });
+
+  it('replaces solutions on overwrite, and copies them to a duplicate', async () => {
+    const twoSum = seedIds.items.twoSum;
+    const bundle = await exportAll();
+    const original = (await api.solutions.list(twoSum)).items;
+
+    await api.solutions.remove(seedIds.solutions.twoSumCpp);
+    await api.solutions.update(seedIds.solutions.twoSumHashMap, { source: 'print("local edit")' });
+    const mine = await api.solutions.create(twoSum, { name: 'Local only', language: 'go', source: 'package main', isReference: true });
+    const before = await api.items.get(twoSum);
+
+    const result = await api.bundle.import(bundle, 'overwrite');
+    expect(result).toMatchObject({ updated: 1, created: 0, duplicated: 0 });
+    const restored = (await api.solutions.list(twoSum)).items;
+    const content = (list: typeof restored) => list.map((x) => [x.name, x.language, x.source, x.notes, x.isReference]);
+    expect(content(restored)).toEqual(content(original));
+    expect(restored.some((x) => x.id === mine.id)).toBe(false);
+    const after = await api.items.get(twoSum);
+    expect(after.solutionCount).toBe(3);
+    expect(after.problem?.referenceSolution).toMatchObject({ language: 'python', source: original[0]!.source });
+    expect(after.revision).toBeGreaterThan(before.revision);
+    expect((await api.bundle.preview(bundle)).counts.changed).toBe(0);
+
+    // A duplicate is a separate item with its own copies.
+    await api.solutions.update(restored[1]!.id, { name: 'Renamed locally' });
+    const duplicated = await api.bundle.import(bundle, 'duplicate');
+    expect(duplicated.duplicated).toBe(1);
+    const copies = (await api.items.list({ q: 'Two Sum', limit: 50 })).items.filter((i) => i.title === after.title && i.id !== twoSum);
+    expect(copies).toHaveLength(1);
+    const copied = (await api.solutions.list(copies[0]!.id)).items;
+    expect(content(copied)).toEqual(content(original));
+    expect(copied.every((x) => x.itemId === copies[0]!.id && !restored.some((r) => r.id === x.id))).toBe(true);
+    expect(copies[0]!.solutionCount).toBe(3);
+    expect((await api.solutions.list(twoSum)).items[1]?.name).toBe('Renamed locally');
   });
 
   it('previews and applies each strategy for changed items', async () => {
@@ -1303,7 +1883,7 @@ describe('export and import', () => {
       'limits',
       'compare',
       'starterCode',
-      'referenceSolution',
+      'solutions',
       'testCases',
     ]);
     expect(preview.counts.changed).toBe(1);
@@ -1329,6 +1909,13 @@ describe('export and import', () => {
     const item = await api.items.get(seedIds.items.twoSum);
     expect(item.testCaseCount).toBe(6);
     expect(item.problem?.referenceSolution).not.toBeNull();
+    // The bundle carried no solutions, so the local ones are all still there.
+    expect(item.solutionCount).toBe(3);
+    expect((await api.solutions.list(item.id)).items.map((x) => x.id)).toEqual([
+      seedIds.solutions.twoSumHashMap,
+      seedIds.solutions.twoSumBruteForce,
+      seedIds.solutions.twoSumCpp,
+    ]);
     const cases = (await api.testCases.list(item.id)).items;
     expect(cases.map((c) => c.position)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(cases.slice(0, 2).every((c) => c.isSample)).toBe(true);
@@ -1354,8 +1941,11 @@ describe('export and import', () => {
             memoryLimitKb: 65536,
             compare: 'exact',
             starterCode: { python: 'print()\n' },
-            referenceSolution: null,
           },
+          solutions: [
+            { name: 'Loop', language: 'python', source: 'print(1)\r\n', notes: 'Straightforward.', isReference: true },
+            { name: 'In Go', language: 'go', source: 'package main\n', notes: '', isReference: false },
+          ],
           testCases: [{ name: 'One', stdin: '1\n', expectedStdout: '1\n', isSample: true }],
         },
       ],
@@ -1375,7 +1965,54 @@ describe('export and import', () => {
     const item = await api.items.get('99999999-0000-4000-8000-000000000001');
     expect(item).toMatchObject({ tags: ['warm-up'], variantOf: null, collectionIds: ['99999999-0000-4000-8000-0000000000c1'] });
     expect(item.problem).toMatchObject({ compare: 'exact', timeLimitMs: 1000 });
+    expect(item.solutionCount).toBe(2);
+    const solutions = (await api.solutions.list(item.id)).items;
+    expect(solutions.map((s) => [s.name, s.language, s.isReference])).toEqual([
+      ['Loop', 'python', true],
+      ['In Go', 'go', false],
+    ]);
+    expect(solutions[0]).toMatchObject({ source: 'print(1)\n', notes: 'Straightforward.' });
+    expect(item.problem?.referenceSolution).toEqual({ id: solutions[0]!.id, language: 'python', source: 'print(1)\n' });
     expect((await api.bundle.preview(zipFile(bytes))).counts.unchanged).toBe(1);
+  });
+
+  it('skips broken solutions in a bundle with a warning each', async () => {
+    const bytes = buildBundleZip({
+      name: 'Odd solutions',
+      items: [
+        {
+          id: '99999999-0000-4000-8000-000000000002',
+          type: 'problem',
+          title: 'Echo',
+          summary: '',
+          difficulty: null,
+          tags: [],
+          source: { url: null, note: null },
+          variantOf: null,
+          body: 'Print the input.',
+          problem: { timeLimitMs: 1000, memoryLimitKb: 65536, compare: 'tokens', starterCode: {} },
+          solutions: [
+            { name: 'First', language: 'python', source: 'print(input())', notes: '', isReference: true },
+            { name: 'Second reference', language: 'python', source: 'print(input())', notes: '', isReference: true },
+            { name: 'Unknown language', language: 'brainfuck', source: ',.', notes: '', isReference: false },
+            { name: 'Empty', language: 'go', source: '   ', notes: '', isReference: false },
+          ],
+          testCases: [],
+        },
+      ],
+    });
+    const preview = await api.bundle.preview(zipFile(bytes));
+    expect(preview.items[0]).toMatchObject({ state: 'new' });
+    expect(preview.warnings.filter((w) => w.includes('solutions/solutions.json'))).toHaveLength(3);
+    expect(preview.warnings.some((w) => /more than one reference solution/.test(w))).toBe(true);
+    expect(preview.warnings.some((w) => /unknown language/.test(w))).toBe(true);
+
+    await api.bundle.import(zipFile(bytes), 'skip');
+    const saved = (await api.solutions.list('99999999-0000-4000-8000-000000000002')).items;
+    expect(saved.map((x) => [x.name, x.isReference])).toEqual([
+      ['First', true],
+      ['Second reference', false],
+    ]);
   });
 
   it('rejects files that are not bundles', async () => {
@@ -1405,14 +2042,26 @@ describe('routing', () => {
     expect((await server.fetch(`/api/v1/items/${seedIds.items.twoSum}`, { method: 'PUT', body: '{}' })).status).toBe(405);
   });
 
-  it('refuses state-changing requests under the forbidden scenario', async () => {
-    start(optionsFromFlags(['forbidden', 'instant']));
+  it('refuses state-changing requests from another origin under forbidden-writes', async () => {
+    start(optionsFromFlags(['forbidden-writes', 'instant']));
     expect((await api.items.list()).total).toBeGreaterThan(0);
     const err = await failure(api.items.update(seedIds.items.twoSum, { favorite: true }));
     expect(err.status).toBe(403);
     expect(err.code).toBe('forbidden');
-    expect(err.message).toMatch(/CODEATHROPY_ALLOWED_ORIGINS/);
+    expect(err.message).toMatch(/CODEATROPHY_ALLOWED_ORIGINS/);
     expect((await failure(api.collections.create({ name: 'x' }))).code).toBe('forbidden');
+  });
+
+  it('refuses every request, reads included, for a host that is not accepted', async () => {
+    start(optionsFromFlags(['forbidden', 'instant']));
+    const meta = await failure(api.meta());
+    expect(meta.status).toBe(403);
+    expect(meta.code).toBe('forbidden');
+    expect(meta.message).toMatch(/CODEATROPHY_PUBLIC_URL/);
+    expect(meta.message).toMatch(/CODEATROPHY_ALLOWED_HOSTS/);
+    expect((await failure(api.items.list())).code).toBe('forbidden');
+    expect((await failure(api.preferences.get())).code).toBe('forbidden');
+    expect((await failure(api.items.update(seedIds.items.twoSum, { favorite: true }))).code).toBe('forbidden');
   });
 
   it('keeps externalEdit a content change', async () => {

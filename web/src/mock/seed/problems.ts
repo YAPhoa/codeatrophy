@@ -40,7 +40,7 @@ export interface SeedProblem {
   variantOf?: string;
   /** Languages that get starter code. */
   languages: string[];
-  /** Reference solution, in Python. */
+  /** Source of the reference solution, in Python. Its name and the other saved solutions are in ./solutions. */
   reference?: string;
   cases: SeedCase[];
   /** Keys of the collections it belongs to. */

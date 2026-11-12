@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"slices"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // ListCollections returns every collection, flat.

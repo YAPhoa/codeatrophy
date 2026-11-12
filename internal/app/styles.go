@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // ListStylePresets lists presets, default first, then by name.

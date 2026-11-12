@@ -11,11 +11,12 @@ import { bundleRoutes } from './handlers/bundles';
 import { itemRoutes } from './handlers/items';
 import { organiseRoutes } from './handlers/organise';
 import { settingsRoutes } from './handlers/settings';
+import { solutionRoutes } from './handlers/solutions';
 import { styleRoutes } from './handlers/styles';
 import { submissionRoutes } from './handlers/submissions';
 import { testCaseRoutes } from './handlers/testcases';
 import type { Handler, Reply, Req } from './http';
-import { badRequest, forbidden, HttpError, methodNotAllowed, notFound } from './http';
+import { badRequest, forbidden, forbiddenHost, HttpError, methodNotAllowed, notFound } from './http';
 import { seedDatabase, seedStyles } from './seed';
 import { abortError, sleep } from './util';
 
@@ -23,7 +24,7 @@ export type { MockOptions } from './db';
 export { MockDb } from './db';
 export { seedIds } from './seed';
 export { buildBundleZip, parseBundleZip } from './bundle';
-export type { BundleCollection, BundleData, BundleItem, BundleTestCase } from './bundle';
+export type { BundleCollection, BundleData, BundleItem, BundleSolution, BundleTestCase } from './bundle';
 
 export interface MockServer {
   /** Drop-in for `fetch`, answering requests under `/api/v1`. */
@@ -84,6 +85,7 @@ export function createMockServer(options: MockOptions = {}): MockServer {
   const routes = [
     ...itemRoutes(db),
     ...testCaseRoutes(db),
+    ...solutionRoutes(db),
     ...organiseRoutes(db),
     ...submissionRoutes(db),
     ...aiRoutes(db),
@@ -97,8 +99,11 @@ export function createMockServer(options: MockOptions = {}): MockServer {
     const method = (init.method ?? 'GET').toUpperCase();
     if (!url.pathname.startsWith(`${API_PREFIX}/`)) throw notFound('route');
     const path = url.pathname.slice(API_PREFIX.length).replace(/\/+$/, '');
-    // The origin check comes before routing, as server middleware would run it.
-    if (db.options.forbidden && !['GET', 'HEAD', 'OPTIONS'].includes(method)) throw forbidden();
+    // The host and origin checks come before routing, as server middleware would run them.
+    if (db.options.forbidden === 'host') {
+      throw forbiddenHost(typeof location !== 'undefined' && location.host ? location.host : url.host);
+    }
+    if (db.options.forbidden === 'origin' && !['GET', 'HEAD', 'OPTIONS'].includes(method)) throw forbidden();
 
     let params: Record<string, string> = {};
     let pathKnown = false;
@@ -171,12 +176,14 @@ const FLAGS = [
   'mcp-off',
   'mcp-url',
   'forbidden',
+  'forbidden-writes',
   'empty',
   'no-styles',
+  'show-tests',
   'fast',
   'instant',
 ] as const;
-const STORAGE_KEY = 'codeathropy:mock';
+const STORAGE_KEY = 'codeatrophy:mock';
 
 /** Translate scenario flags (from `?mock=`) into server options. */
 export function optionsFromFlags(flags: readonly string[]): MockOptions {
@@ -190,14 +197,15 @@ export function optionsFromFlags(flags: readonly string[]): MockOptions {
     speed: has('instant') ? 'instant' : has('fast') ? 'fast' : 'normal',
     publicUrl: has('mcp-url'),
     aiSource: has('ai-env') ? 'environment' : 'settings',
-    forbidden: has('forbidden'),
+    forbidden: has('forbidden') ? 'host' : has('forbidden-writes') ? 'origin' : false,
+    hideTestCases: !has('show-tests'),
   };
 }
 
 declare global {
   interface Window {
     /** The API mock, present only under `npm run dev:mock`. */
-    __codeathropyMock?: MockServer;
+    __codeatrophyMock?: MockServer;
   }
 }
 
@@ -224,7 +232,7 @@ export function installMock(): void {
 
   const server = createMockServer(optionsFromFlags(flags));
   setTransport(server.fetch);
-  window.__codeathropyMock = server;
+  window.__codeatrophyMock = server;
   console.info(
     `[mock] Using the in-memory API mock (${flags.length > 0 ? `flags: ${flags.join(', ')}` : 'default scenario'}). ` +
       'State resets on reload. Scenarios: ?mock=' +

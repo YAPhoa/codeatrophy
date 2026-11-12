@@ -9,10 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/grader"
-	"codeathropy/internal/judge"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/grader"
+	"codeatrophy/internal/judge"
+	"codeatrophy/internal/store"
 )
 
 // JudgeStatus describes the judge engine for clients.
@@ -457,16 +457,25 @@ type VerifyResponse struct {
 	Results []VerifyResult `json:"results"`
 }
 
-// VerifyTestCases runs the reference solution against every test case,
+// VerifyTestCases runs a saved solution (the reference solution unless
+// solutionID names another) against every test case,
 // marks matching cases verified and, with updateExpected, replaces expected
 // outputs that differ.
-func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected bool) (VerifyResponse, error) {
+func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected bool, solutionID string) (VerifyResponse, error) {
 	var it domain.Item
 	var cases []domain.TestCase
+	var ref domain.Solution
+	var isRef bool
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
 		if it, err = problemItem(tx, itemID); err != nil {
 			return err
+		}
+		if ref, isRef, err = solutionFor(tx, &it, solutionID); err != nil {
+			return err
+		}
+		if updateExpected && !isRef {
+			return errField("updateExpected", "only applies when verifying with the reference solution")
 		}
 		cases, err = tx.ListTestCases(itemID)
 		return err
@@ -474,10 +483,6 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	if err != nil {
 		return VerifyResponse{}, err
 	}
-	if it.Problem.ReferenceSolution == nil {
-		return VerifyResponse{}, errField("referenceSolution", "the problem has no reference solution")
-	}
-	ref := *it.Problem.ReferenceSolution
 	if err := a.requireLanguage(ctx, ref.Language); err != nil {
 		return VerifyResponse{}, err
 	}
@@ -518,6 +523,10 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		r.Matches = r.OK && grader.Match(it.Problem.Compare, c.ExpectedStdout, e.Result.Stdout)
 		resp.Results[i] = r
 	}
+	if !isRef {
+		// Any other solution is only checked against the cases.
+		return resp, nil
+	}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
 		cur, err := tx.GetItem(itemID)
 		if err != nil {
@@ -525,25 +534,33 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		}
 		changed := false
 		now := a.clock()
+		if cur.Problem == nil || !domain.RefEqual(cur.Problem.ReferenceSolution, &ref) {
+			return nil // the reference solution changed meanwhile
+		}
 		for i, c := range cases {
 			r := resp.Results[i]
-			if !r.OK {
-				continue
+			if execs[i].Err != nil {
+				continue // the engine failed; that says nothing about the case
 			}
 			tc, err := tx.GetTestCase(c.ID)
 			if err != nil || tc.Stdin != c.Stdin || tc.ExpectedStdout != c.ExpectedStdout {
 				continue // deleted or edited meanwhile
 			}
+			fixable := r.OK && !r.Matches && updateExpected &&
+				utf8.ValidString(r.ActualStdout) && len(r.ActualStdout) <= domain.MaxTestCaseBytes
 			switch {
-			case r.Matches && !tc.Verified:
-				tc.Verified = true
-			case !r.Matches && updateExpected:
-				if !utf8.ValidString(r.ActualStdout) || len(r.ActualStdout) > domain.MaxTestCaseBytes {
+			case fixable:
+				tc.ExpectedStdout, tc.Verified = r.ActualStdout, true
+			case r.OK && r.Matches:
+				if tc.Verified {
 					continue
 				}
-				tc.ExpectedStdout, tc.Verified = r.ActualStdout, true
+				tc.Verified = true
 			default:
-				continue
+				if !tc.Verified {
+					continue
+				}
+				tc.Verified = false
 			}
 			tc.UpdatedAt = now
 			if err := tx.UpdateTestCase(&tc); err != nil {

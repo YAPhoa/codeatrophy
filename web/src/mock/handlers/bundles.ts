@@ -6,13 +6,13 @@ import { buildBundleZip, BundleError, contentHash, parseBundleZip } from '../bun
 import type { MockDb, StoredCollection, StoredItem } from '../db';
 import { atMostChars, charCount, LIMITS, normaliseTags } from '../db';
 import type { Handler, Req } from '../http';
-import { badRequest, invalid, isStringArray, notFound, objectBody, ok, tooLarge } from '../http';
+import { badRequest, invalid, isStringArray, objectBody, ok, tooLarge } from '../http';
 import { sleep, slugify, uuid } from '../util';
 import { insertTestCase } from './items';
 
 const STRATEGIES: readonly ImportStrategy[] = ['skip', 'overwrite', 'duplicate'];
 
-/** An item's shareable content, optionally without its solution or hidden tests. */
+/** An item's shareable content, optionally without its solutions or hidden tests. */
 function toBundleItem(db: MockDb, item: StoredItem, includeSolutions: boolean, includeHiddenTests: boolean): BundleItem {
   return {
     id: item.id,
@@ -32,9 +32,20 @@ function toBundleItem(db: MockDb, item: StoredItem, includeSolutions: boolean, i
           memoryLimitKb: item.problem.memoryLimitKb,
           compare: item.problem.compare,
           starterCode: { ...item.problem.starterCode },
-          referenceSolution: includeSolutions ? item.problem.referenceSolution : null,
         }
       : null,
+    // Left out entirely, rather than written as an empty list, when not exported.
+    ...(item.problem && includeSolutions
+      ? {
+          solutions: db.solutionsOf(item.id).map((s) => ({
+            name: s.name,
+            language: s.language,
+            source: s.source,
+            notes: s.notes,
+            isReference: s.isReference,
+          })),
+        }
+      : {}),
     testCases: db
       .casesOf(item.id)
       .filter((c) => includeHiddenTests || c.isSample)
@@ -70,14 +81,14 @@ async function exportBundle(db: MockDb, req: Req) {
 
   let items: StoredItem[];
   let collections: StoredCollection[] = [];
-  let defaultName = 'Codeathropy library';
+  let defaultName = 'Codeatrophy library';
   if (scope === 'all') {
     items = [...db.items.values()];
     collections = db.sortedCollections();
   } else if (scope === 'collection') {
     if (typeof raw.collectionId !== 'string') throw invalid('collectionId', 'is required when scope is collection');
     const top = db.collections.find((c) => c.id === raw.collectionId);
-    if (!top) throw notFound('collection');
+    if (!top) throw invalid('collectionId', 'does not exist');
     const ids = [top.id, ...db.descendants(top.id)];
     collections = db.sortedCollections().filter((c) => ids.includes(c.id));
     const memberIds = new Set(collections.flatMap((c) => c.itemIds));
@@ -87,12 +98,9 @@ async function exportBundle(db: MockDb, req: Req) {
     if (!isStringArray(raw.itemIds) || raw.itemIds.length === 0) {
       throw invalid('itemIds', 'must list at least one item when scope is items');
     }
-    const wanted = raw.itemIds;
-    items = wanted.flatMap((id) => {
-      const item = db.items.get(id);
-      return item ? [item] : [];
-    });
-    if (items.length === 0) throw invalid('itemIds', 'does not match any item');
+    const missing = raw.itemIds.findIndex((id) => !db.items.has(id));
+    if (missing !== -1) throw invalid(`itemIds.${missing}`, 'does not exist');
+    items = [...new Set(raw.itemIds)].map((id) => db.items.get(id)!);
   }
   items.sort((a, b) => (a.createdAt === b.createdAt ? a.seq - b.seq : a.createdAt < b.createdAt ? -1 : 1));
 
@@ -105,6 +113,7 @@ async function exportBundle(db: MockDb, req: Req) {
     description: (raw.description as string | undefined) ?? '',
     author: (raw.author as string | undefined) ?? '',
     createdAt: db.now(),
+    includes: { solutions: includeSolutions, hiddenTests: includeHiddenTests },
     items: items.map((item) => toBundleItem(db, item, includeSolutions, includeHiddenTests)),
     collections: collections.map(
       (c): BundleCollection => ({
@@ -124,7 +133,7 @@ async function exportBundle(db: MockDb, req: Req) {
       bytes,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${slugify(name)}.codeathropy.zip"`,
+        'Content-Disposition': `attachment; filename="${slugify(name)}.codeatrophy.zip"`,
       },
     },
   };
@@ -149,17 +158,17 @@ async function readUpload(req: Req): Promise<ParsedBundle> {
 
 /**
  * Compare a bundle item with the library. The local item is hashed over the
- * same fields the bundle carries: if the bundle has no reference solution, or
- * only sample tests, the local solution and hidden tests are left out.
+ * same fields the bundle carries: if the bundle carries no solutions, or
+ * only sample tests, the local solutions and hidden tests are left out.
  */
 function comparison(db: MockDb, incoming: BundleItem): { local: BundleItem; incoming: BundleItem } | null {
   const stored = db.items.get(incoming.id);
   if (!stored) return null;
   const samplesOnly = incoming.testCases.every((c) => c.isSample);
-  const hasSolution = incoming.problem?.referenceSolution != null;
+  const hasSolutions = incoming.solutions !== undefined;
   // A link to an item this library does not have would be dropped on import, so it is not a difference.
   const variantOf = incoming.variantOf !== null && db.items.has(incoming.variantOf) ? incoming.variantOf : null;
-  return { local: toBundleItem(db, stored, hasSolution, !samplesOnly), incoming: { ...incoming, variantOf } };
+  return { local: toBundleItem(db, stored, hasSolutions, !samplesOnly), incoming: { ...incoming, variantOf } };
 }
 
 function classify(db: MockDb, incoming: BundleItem): ImportItemState {
@@ -181,10 +190,8 @@ function changesOf(db: MockDb, bundled: BundleItem): string[] {
   const { local, incoming } = pair;
   const cases = (item: BundleItem) =>
     item.type === 'problem' ? item.testCases.map((c) => [c.name, c.stdin, c.expectedStdout, c.isSample]) : [];
-  const solution = (item: BundleItem) => {
-    const ref = item.problem?.referenceSolution;
-    return ref ? [ref.language, ref.source] : null;
-  };
+  const solutions = (item: BundleItem) =>
+    item.solutions?.map((s) => [s.name, s.language, s.source, s.notes, s.isReference]) ?? null;
   const checks: [string, boolean][] = [
     ['type', local.type === incoming.type],
     ['title', local.title === incoming.title],
@@ -200,7 +207,7 @@ function changesOf(db: MockDb, bundled: BundleItem): string[] {
     ],
     ['compare', local.problem?.compare === incoming.problem?.compare],
     ['starterCode', sameJson(sortedEntries(local.problem?.starterCode), sortedEntries(incoming.problem?.starterCode))],
-    ['referenceSolution', sameJson(solution(local), solution(incoming))],
+    ['solutions', sameJson(solutions(local), solutions(incoming))],
     ['testCases', sameJson(cases(local), cases(incoming))],
   ];
   return checks.filter(([, same]) => !same).map(([field]) => field);
@@ -267,6 +274,7 @@ function createFromBundle(db: MockDb, incoming: BundleItem, id: string): StoredI
     seq: db.nextSeq(),
   };
   db.items.set(id, item);
+  for (const s of incoming.solutions ?? []) db.insertSolution(id, s, now);
   for (const c of incoming.testCases) insertTestCase(db, id, c);
   return item;
 }
@@ -279,10 +287,13 @@ function overwrite(db: MockDb, local: StoredItem, incoming: BundleItem): void {
   local.tags = [...incoming.tags];
   local.source = { ...incoming.source };
   local.variantOf = incoming.variantOf;
-  if (incoming.problem && local.problem) {
-    // A bundle exported without solutions must not erase the local one.
-    const referenceSolution = incoming.problem.referenceSolution ?? local.problem.referenceSolution;
-    local.problem = { ...structuredClone(incoming.problem), referenceSolution };
+  if (incoming.problem && local.problem) local.problem = structuredClone(incoming.problem);
+  // Solutions are replaced by the bundle's; a bundle exported without
+  // solutions must not erase the local ones.
+  if (incoming.solutions) {
+    db.solutions = db.solutions.filter((s) => s.itemId !== local.id);
+    const now = db.now();
+    for (const s of incoming.solutions) db.insertSolution(local.id, s, now);
   }
   // Likewise, local hidden cases survive a bundle that carries samples only.
   const samplesOnly = incoming.testCases.every((c) => c.isSample);

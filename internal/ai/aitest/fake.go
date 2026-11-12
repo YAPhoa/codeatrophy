@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"codeathropy/internal/ai"
+	"codeatrophy/internal/ai"
 )
 
 // Provider is a scriptable ai.Provider that records every request.

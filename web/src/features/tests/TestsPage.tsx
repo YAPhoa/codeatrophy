@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDown, ArrowUp, Check, CircleSlash, FlaskConical, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, CircleSlash, Eye, EyeOff, FlaskConical, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
-import { qk, useItem, useMeta, useTestCases } from '../../api/queries';
-import type { Item, SourceCode, TestCase, VerifyResult } from '../../api/types';
+import { qk, useItem, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
+import type { Item, Solution, TestCase, VerifyResult } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { ORIGIN_LABEL, VERDICT_LABEL, formatBytes, plural } from '../../lib/format';
 import { byteLength } from '../../lib/itemForm';
-import { LANGUAGES, languageLabel } from '../../lib/languages';
+import { languageLabel } from '../../lib/languages';
 import { moveIndex } from '../../lib/tree';
 import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
-import { CodeEditor } from '../../ui/CodeEditor';
 import { useConfirm } from '../../ui/Dialog';
 import { DiffView } from '../../ui/DiffView';
 import { Checkbox, Field, TextField } from '../../ui/Field';
@@ -19,6 +18,8 @@ import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } fro
 import { useToast } from '../../ui/Toast';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
+import { WriteProblems } from '../solutions/parts';
+import { useSolutionWrite } from '../solutions/solutionWrites';
 
 export default function TestsPage() {
   const { id = '' } = useParams();
@@ -60,11 +61,11 @@ const draftOf = (c: TestCase): CaseDraft => ({ name: c.name, stdin: c.stdin, exp
 const sameDraft = (a: CaseDraft, b: CaseDraft): boolean =>
   a.name === b.name && a.stdin === b.stdin && a.expectedStdout === b.expectedStdout && a.isSample === b.isSample && a.verified === b.verified;
 
-function sameSolution(a: SourceCode | null, b: SourceCode | null): boolean {
-  return a === b || (a !== null && b !== null && a.language === b.language && a.source === b.source);
-}
+/** How a solution is referred to in the results of a verification run with it. */
+const solutionPhrase = (s: Pick<Solution, 'name' | 'isReference'>): string => (s.isReference ? 'the reference solution' : `“${s.name}”`);
+const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** Manage a problem's test cases and reference solution, and verify one against the other. */
+/** Manage a problem's test cases, and verify their expected outputs by running a saved solution. */
 function TestsManager({ item }: { item: Item }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -88,10 +89,28 @@ function TestsManager({ item }: { item: Item }) {
   const [busy, setBusy] = useState(false);
   const [caseError, setCaseError] = useState<unknown>(null);
   const [verify, setVerify] = useState<Map<string, VerifyResult> | null>(null);
+  // The solution the results in `verify` came from.
+  const [verifiedBy, setVerifiedBy] = useState<Solution | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<unknown>(null);
 
   const selected = selectedId && selectedId !== NEW ? (cases.find((c) => c.id === selectedId) ?? null) : null;
+
+  // With "hide test cases" on, the content of non-sample cases stays out of
+  // the page until the user asks for it; asking once reveals everything for
+  // this visit. Sample cases are part of the statement, and cases added
+  // during the visit were typed by the user, so neither is concealed.
+  const hideCases = usePreferences().hideTestCases;
+  const [revealed, setRevealed] = useState(false);
+  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
+  const concealing = hideCases && !revealed && cases.some((c) => !c.isSample && !added.has(c.id));
+  const selectedConcealed = concealing && selected !== null && !selected.isSample && !added.has(selected.id);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const reveal = () => {
+    setRevealed(true);
+    // The button that was pressed is about to go; hand the focus to what replaces it.
+    requestAnimationFrame(() => editorRef.current?.focus());
+  };
 
   // Select the first case once loaded, and follow the selection when the list changes.
   useEffect(() => {
@@ -152,6 +171,7 @@ function TestsManager({ item }: { item: Item }) {
     try {
       if (selectedId === NEW) {
         const created = await api.testCases.create(item.id, { ...draft, origin: 'manual' });
+        setAdded((prev) => new Set(prev).add(created.id));
         await refresh();
         setSelectedId(created.id);
         load(draftOf(created));
@@ -217,73 +237,60 @@ function TestsManager({ item }: { item: Item }) {
     }
   };
 
-  // ---- Reference solution ----
-  const stored = item.problem?.referenceSolution ?? null;
-  const languageOptions = useMemo(() => {
-    const judge = meta?.judge.languages.map((l) => l.id) ?? [];
-    return judge.length > 0 ? judge : LANGUAGES.map((l) => l.id);
-  }, [meta]);
-  const [solution, setSolution] = useState<SourceCode>(() => stored ?? { language: languageOptions.includes('python') ? 'python' : (languageOptions[0] ?? 'python'), source: '' });
-  const [solutionBase, setSolutionBase] = useState<SourceCode | null>(stored);
-  const [solutionBusy, setSolutionBusy] = useState(false);
-  const [solutionError, setSolutionError] = useState<unknown>(null);
-  const [solutionConflict, setSolutionConflict] = useState<Item | null>(null);
-  const solutionDirty = !sameSolution(solution.source.trim() === '' ? null : solution, solutionBase);
+  // ---- Solutions: the reference, and the one to verify against ----
+  const limits = useLimits();
+  const solutionsQuery = useSolutions(item.id);
+  const solutions = useMemo(() => solutionsQuery.data ?? [], [solutionsQuery.data]);
+  const reference = solutions.find((s) => s.isReference) ?? null;
+  // The solution chosen under "Verify against". Until one is chosen it is the reference.
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const target = solutions.find((s) => s.id === pickedId) ?? reference ?? solutions[0] ?? null;
+  const referenceWrite = useSolutionWrite(item);
 
-  // Pick up a solution stored from elsewhere (AI generation, another tab) while this one is untouched.
-  useEffect(() => {
-    if (!solutionDirty && !sameSolution(stored, solutionBase)) {
-      setSolutionBase(stored);
-      if (stored) setSolution(stored);
-    }
-  }, [stored, solutionBase, solutionDirty]);
-
-  const saveSolution = async (revision: number = item.revision, retried = false): Promise<void> => {
-    const value = solution.source.trim() === '' ? null : solution;
-    setSolutionBusy(true);
-    setSolutionError(null);
-    try {
-      const updated = await api.items.update(item.id, { problem: { referenceSolution: value }, expectedRevision: revision });
-      qc.setQueryData(qk.item(item.id), updated);
-      setSolutionBase(value);
-      setSolutionConflict(null);
-      setVerify(null);
-      toast.success(value ? 'Reference solution saved' : 'Reference solution removed');
-    } catch (e) {
-      if (isApiError(e) && e.isRevisionConflict) {
-        try {
-          const latest = await api.items.get(item.id);
-          qc.setQueryData(qk.item(item.id), latest);
-          // Someone changed the item while this solution was being edited. If
-          // the stored solution is still the one this edit started from, the
-          // other change was to a different field and saving overwrites
-          // nothing; otherwise the two solutions are put side by side.
-          if (!retried && sameSolution(latest.problem?.referenceSolution ?? null, solutionBase)) {
-            await saveSolution(latest.revision, true);
-            return;
-          }
-          setSolutionConflict(latest);
-        } catch (inner) {
-          setSolutionError(inner);
-        }
-      } else {
-        setSolutionError(e);
-      }
-    } finally {
-      setSolutionBusy(false);
-    }
+  const pickTarget = (id: string) => {
+    setPickedId(id);
+    // Results belong to the solution that produced them.
+    setVerify(null);
+    setVerifiedBy(null);
+    setVerifyError(null);
   };
 
+  // Which solution is the reference is part of the problem's content, so the
+  // change is checked against the item's revision.
+  const makeReference = (solution: Solution) =>
+    referenceWrite.run({
+      write: (expectedRevision) => api.solutions.update(solution.id, { isReference: true, ...(expectedRevision !== undefined ? { expectedRevision } : {}) }),
+      checked: true,
+      done: () => {
+        // Results of a check with it were not a verification; run it again as the reference.
+        setVerify(null);
+        setVerifiedBy(null);
+        toast.success(`“${solution.name}” is now the reference solution`);
+      },
+    });
+
   // ---- Verification ----
+  //
+  // Only a run of the reference solution changes anything: it marks the cases
+  // it reproduces as verified, clears the mark on those it does not, and can
+  // replace differing expected outputs. A run of any other solution is a
+  // check that reports results and leaves the cases as they are.
   const runVerify = async (updateExpected: boolean) => {
+    if (!target) return;
+    const by = target;
+    if (updateExpected && !by.isReference) return;
     setVerifying(true);
     setVerifyError(null);
     try {
-      const res = await api.testCases.verify(item.id, updateExpected);
+      // The reference solution is asked for as such (no id), so the run is a
+      // reference run whatever was changed elsewhere in the meantime.
+      const res = await api.testCases.verify(item.id, updateExpected, by.isReference ? null : by.id);
       setVerify(new Map(res.results.map((r) => [r.testCaseId, r])));
-      await refresh();
-      if (updateExpected) {
-        toast.success('Expected outputs updated from the reference solution');
+      setVerifiedBy(by);
+      if (by.isReference) {
+        // Verified marks were set and cleared, and outputs possibly replaced.
+        await Promise.all([refresh(), qc.invalidateQueries({ queryKey: qk.solutions(item.id) })]);
+        if (updateExpected) toast.success('Expected outputs updated from the reference solution');
       }
     } catch (e) {
       setVerifyError(e);
@@ -292,20 +299,35 @@ function TestsManager({ item }: { item: Item }) {
     }
   };
 
-  // When the stored case changes underneath an unmodified editor (expected
-  // outputs rewritten by a verification, a verified flag set), show the new state.
+  // When the stored case changes underneath the editor (a verification that
+  // sets or clears "verified", or rewrites the expected output), take over
+  // the new state — field by field, so that what the user has edited and not
+  // yet saved is kept and only the untouched fields follow the stored case.
   useEffect(() => {
-    if (!selected || !base || dirty) return;
+    if (!selected || !base || !draft) return;
     const stored = draftOf(selected);
-    if (!sameDraft(stored, base)) load(stored);
-  }, [selected, base, dirty]);
+    if (sameDraft(stored, base)) return;
+    setBase(stored);
+    setDraft({
+      name: draft.name === base.name ? stored.name : draft.name,
+      stdin: draft.stdin === base.stdin ? stored.stdin : draft.stdin,
+      expectedStdout: draft.expectedStdout === base.expectedStdout ? stored.expectedStdout : draft.expectedStdout,
+      isSample: draft.isSample === base.isSample ? stored.isSample : draft.isSample,
+      verified: draft.verified === base.verified ? stored.verified : draft.verified,
+    });
+  }, [selected, base, draft]);
 
   const results = verify ? cases.map((c) => verify.get(c.id)).filter((r): r is VerifyResult => !!r) : [];
   const mismatched = results.filter((r) => r.ok && !r.matches).length;
   const failed = results.filter((r) => !r.ok).length;
   const matched = results.filter((r) => r.ok && r.matches).length;
   const selectedVerify = selected && verify ? verify.get(selected.id) : undefined;
-  const canVerify = judgeOn && solutionBase !== null && !solutionDirty && cases.length > 0;
+  const canVerify = judgeOn && target !== null && cases.length > 0;
+  // The solution the shown results came from, as it was when it ran: only a
+  // run of the reference solution marks cases and may replace their outputs.
+  const ranWith = verifiedBy;
+  const who = ranWith ? solutionPhrase(ranWith) : 'the solution';
+  const referenceRun = ranWith?.isReference ?? false;
 
   return (
     <div className="workspace">
@@ -318,6 +340,11 @@ function TestsManager({ item }: { item: Item }) {
               {cases.length === 0 ? 'none yet' : `${plural(cases.filter((c) => c.isSample).length, 'sample')} · ${cases.filter((c) => !c.isSample).length} hidden · ${cases.filter((c) => c.verified).length} verified`}
             </span>
             <span className="spacer" />
+            {concealing && (
+              <Button icon={<Eye size={14} />} onClick={reveal} title="Show the inputs and expected outputs of hidden cases">
+                Show test cases
+              </Button>
+            )}
             <Button
               icon={<Plus size={14} />}
               onClick={() => void select(NEW)}
@@ -362,20 +389,22 @@ function TestsManager({ item }: { item: Item }) {
               <ol className="case-list card" aria-label="Test cases">
                 {cases.map((c, i) => {
                   const v = verify?.get(c.id);
+                  // A name can give a case away as much as its input, so a concealed case goes by its number.
+                  const name = concealing && !c.isSample && !added.has(c.id) ? '' : c.name;
                   return (
                     <li key={c.id} className={cx('case-row', selectedId === c.id && 'is-selected')}>
                       <button type="button" className="case-row-main" onClick={() => void select(c.id)} aria-current={selectedId === c.id || undefined}>
                         <span className="case-no">{i + 1}</span>
-                        <span className="grow truncate">{c.name || <span className="muted">Unnamed</span>}</span>
+                        <span className="grow truncate">{name || <span className="muted">{name === c.name ? 'Unnamed' : 'Hidden case'}</span>}</span>
                         {c.isSample && <Badge tone="accent">sample</Badge>}
                         {c.origin !== 'manual' && <Badge>{ORIGIN_LABEL[c.origin]}</Badge>}
                         {v ? (
                           v.ok && v.matches ? (
-                            <Badge tone="ok" title="The reference solution produces this expected output">
+                            <Badge tone="ok" title={`${capitalize(who)} produces this expected output`}>
                               <Check size={11} /> matches
                             </Badge>
                           ) : v.ok ? (
-                            <Badge tone="danger" title="The reference solution produces a different output">
+                            <Badge tone="danger" title={`${capitalize(who)} produces a different output`}>
                               <AlertTriangle size={11} /> differs
                             </Badge>
                           ) : (
@@ -384,15 +413,15 @@ function TestsManager({ item }: { item: Item }) {
                             </Badge>
                           )
                         ) : c.verified ? (
-                          <Badge tone="ok" title="Expected output confirmed by running the reference solution">
+                          <Badge tone="ok" title="Expected output confirmed, by running the reference solution or by hand">
                             <ShieldCheck size={11} /> verified
                           </Badge>
                         ) : (
                           <Badge title="Expected output has not been confirmed by execution">unverified</Badge>
                         )}
                       </button>
-                      <IconButton size="sm" label={`Move ${c.name || `case ${i + 1}`} up`} icon={<ArrowUp size={13} />} disabled={i === 0} onClick={() => void move(i, -1)} />
-                      <IconButton size="sm" label={`Move ${c.name || `case ${i + 1}`} down`} icon={<ArrowDown size={13} />} disabled={i === cases.length - 1} onClick={() => void move(i, 1)} />
+                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} up`} icon={<ArrowUp size={13} />} disabled={i === 0} onClick={() => void move(i, -1)} />
+                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} down`} icon={<ArrowDown size={13} />} disabled={i === cases.length - 1} onClick={() => void move(i, 1)} />
                     </li>
                   );
                 })}
@@ -406,8 +435,23 @@ function TestsManager({ item }: { item: Item }) {
                 )}
               </ol>
 
-              <div className="case-editor card card-pad">
-                {draft ? (
+              <div className="case-editor card card-pad" ref={editorRef} tabIndex={-1} role="group" aria-label="Selected test case">
+                {selectedConcealed ? (
+                  <div className="case-concealed">
+                    <EyeOff size={20} className="case-concealed-icon" aria-hidden="true" />
+                    <h3 className="case-concealed-title">The content of this case is hidden</h3>
+                    <p className="muted">
+                      Inputs and expected outputs of hidden test cases are kept out of sight so that managing them does not give the problem away. Sample cases stay visible, and you can add a case
+                      without showing the others.
+                    </p>
+                    <div className="case-concealed-actions">
+                      <Button icon={<Eye size={14} />} onClick={reveal}>
+                        Show test cases
+                      </Button>
+                      <Link to="/settings#preferences">Turn this off in Settings</Link>
+                    </div>
+                  </div>
+                ) : draft ? (
                   <form
                     className="stack"
                     onSubmit={(e) => {
@@ -432,24 +476,24 @@ function TestsManager({ item }: { item: Item }) {
                     </div>
                     {base && (draft.stdin !== base.stdin || draft.expectedStdout !== base.expectedStdout) && base.verified && !draft.verified && (
                       <p className="field-hint">
-                        The input or expected output changed, so “Verified” was cleared. Verify against the reference solution again, or tick it yourself if you have confirmed the new output.
+                        The input or expected output changed, so “Verified” was cleared. Verify the cases again, or tick it yourself if you have confirmed the new output.
                       </p>
                     )}
                     {selectedVerify && !dirty && (
                       <div className="verify-detail">
                         {selectedVerify.ok && selectedVerify.matches && (
-                          <Callout tone="ok" title="The reference solution produces exactly this output" />
+                          <Callout tone="ok" title={`${capitalize(who)} produces exactly this output`} />
                         )}
                         {selectedVerify.ok && !selectedVerify.matches && (
                           <>
-                            <Callout tone="danger" title="The reference solution produces a different output">
+                            <Callout tone="danger" title={`${capitalize(who)} produces a different output`}>
                               Either the stored expected output is wrong, or the solution is. Decide which before trusting this case.
                             </Callout>
-                            <DiffView expected={draft.expectedStdout} actual={selectedVerify.actualStdout} mode={item.problem?.compare} leftLabel="Stored expected output" rightLabel="Reference solution output" variant="before-after" />
+                            <DiffView expected={draft.expectedStdout} actual={selectedVerify.actualStdout} mode={item.problem?.compare} leftLabel="Stored expected output" rightLabel={ranWith && !ranWith.isReference ? `Output of “${ranWith.name}”` : 'Reference solution output'} variant="before-after" />
                           </>
                         )}
                         {!selectedVerify.ok && (
-                          <Callout tone="warn" title={`The reference solution did not finish on this input: ${VERDICT_LABEL[selectedVerify.verdict]}`}>
+                          <Callout tone="warn" title={`${capitalize(who)} did not finish on this input: ${VERDICT_LABEL[selectedVerify.verdict]}`}>
                             {selectedVerify.stderr ? <pre className="code-block code-block-wrap">{selectedVerify.stderr}</pre> : 'No error output was captured.'}
                           </Callout>
                         )}
@@ -481,99 +525,83 @@ function TestsManager({ item }: { item: Item }) {
           <section className="section" aria-labelledby="solution-title">
             <div className="section-head">
               <h2 id="solution-title" className="section-title">
-                Reference solution
+                Verification
               </h2>
-              <span className="muted">A known-correct program. Running it is how expected outputs are verified. It is never shown while solving.</span>
+              <span className="muted">Running a saved solution on every case is how expected outputs are verified.</span>
             </div>
-            <div className="card solution-card">
-              <div className="editor-toolbar">
-                <label htmlFor="solution-language" className="sr-only">
-                  Language of the reference solution
-                </label>
-                <select
-                  id="solution-language"
-                  className="input input-sm select solve-language"
-                  value={solution.language}
-                  onChange={(e) => setSolution({ ...solution, language: e.target.value })}
+            {solutionsQuery.isPending ? (
+              <PageLoading />
+            ) : solutionsQuery.isError ? (
+              <ErrorState compact error={solutionsQuery.error} onRetry={() => void solutionsQuery.refetch()} />
+            ) : target === null ? (
+              <div className="card">
+                <EmptyState
+                  compact
+                  icon={<ShieldCheck size={18} />}
+                  title="No saved solutions yet"
+                  actions={
+                    <LinkButton to={`/items/${item.id}/solutions?add`} icon={<Plus size={14} />}>
+                      Add a solution
+                    </LinkButton>
+                  }
                 >
-                  {Array.from(new Set([...languageOptions, solution.language])).map((l) => (
-                    <option key={l} value={l}>
-                      {languageLabel(l, meta?.judge.languages)}
-                    </option>
-                  ))}
-                </select>
-                <span className="spacer" />
-                {solutionDirty && solutionBase && (
-                  <Button size="sm" variant="ghost" onClick={() => setSolution(solutionBase)} disabled={solutionBusy}>
-                    Revert
+                  Verifying needs a known-correct program to run. Save one on the Solutions page, or from the Solve page once your code is accepted, and mark it as the reference solution.
+                </EmptyState>
+              </div>
+            ) : (
+              <div className="card verify-panel">
+                <div className="verify-panel-row">
+                  <span className="verify-panel-label">Reference solution</span>
+                  {reference ? (
+                    <span className="verify-panel-value">
+                      <strong>{reference.name}</strong> <span className="muted">{languageLabel(reference.language, meta?.judge.languages)}</span>
+                    </span>
+                  ) : (
+                    <span className="verify-panel-value muted">None chosen. Pick a solution below and use it as the reference.</span>
+                  )}
+                  <Link to={`/items/${item.id}/solutions`} className="nowrap">
+                    {reference ? 'Edit on the Solutions page' : 'Open the Solutions page'}
+                  </Link>
+                </div>
+                <div className="verify-panel-row">
+                  <label htmlFor="verify-solution" className="verify-panel-label">
+                    Verify against
+                  </label>
+                  <select id="verify-solution" className="input select verify-select" value={target.id} onChange={(e) => pickTarget(e.target.value)} disabled={verifying}>
+                    {solutions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {languageLabel(s.language, meta?.judge.languages)}
+                        {s.isReference ? ' — reference' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <Button icon={<ShieldCheck size={14} />} onClick={() => void runVerify(false)} busy={verifying} disabled={!canVerify}>
+                    {target.isReference ? 'Verify expected outputs' : 'Check against this solution'}
                   </Button>
-                )}
-                <Button size="sm" variant={solutionDirty ? 'primary' : 'default'} icon={<Save size={13} />} onClick={() => void saveSolution()} busy={solutionBusy} disabled={!solutionDirty}>
-                  Save solution
-                </Button>
-              </div>
-              <div className="solution-editor">
-                <CodeEditor
-                  key={solution.language}
-                  value={solution.source}
-                  onChange={(v) => setSolution({ ...solution, source: v })}
-                  language={solution.language}
-                  ariaLabel="Reference solution"
-                  placeholder="Paste or write a correct solution that reads stdin and writes stdout."
-                />
-              </div>
-            </div>
-            {solutionError != null && <ErrorCallout error={solutionError} title="Could not save the solution" onRetry={() => void saveSolution()} />}
-            {solutionConflict && (
-              <Callout
-                tone="warn"
-                role="alert"
-                title="The reference solution was changed elsewhere"
-                actions={
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        const theirs = solutionConflict.problem?.referenceSolution ?? null;
-                        setSolutionBase(theirs);
-                        setSolution(theirs ?? { ...solution, source: '' });
-                        setSolutionConflict(null);
-                      }}
-                    >
-                      Load their version
+                  {!target.isReference && (
+                    <Button onClick={() => void makeReference(target)} busy={referenceWrite.busy} disabled={verifying}>
+                      Use as reference
                     </Button>
-                    <Button size="sm" onClick={() => void saveSolution(solutionConflict.revision, true)}>
-                      Keep mine and save
-                    </Button>
-                  </>
-                }
-              >
-                Another tab, or an assistant connected over MCP, saved a different solution while you were editing. Yours is still in the editor and nothing was overwritten.
-              </Callout>
+                  )}
+                </div>
+                <p className="verify-panel-note muted">
+                  {!judgeOn ? (
+                    <>
+                      Needs a judge engine to run the solution. <Link to="/settings#judge">Judge status</Link>
+                    </>
+                  ) : cases.length === 0 ? (
+                    'Add test cases first.'
+                  ) : verifying ? (
+                    `Running ${solutionPhrase(target)} on every case…`
+                  ) : target.isReference ? (
+                    'Runs the reference solution on every case and compares its output with the stored expected output. Cases that match are marked verified; cases that differ or fail lose the mark.'
+                  ) : (
+                    `“${target.name}” is not the reference solution, so this is only a check: it runs on every case and the results are shown, but “Verified” marks and expected outputs stay as they are. To verify with it, use it as the reference.`
+                  )}
+                </p>
+              </div>
             )}
-
-            <div className="verify-bar">
-              <Button icon={<ShieldCheck size={14} />} onClick={() => void runVerify(false)} busy={verifying} disabled={!canVerify}>
-                Verify against reference solution
-              </Button>
-              <span className="muted">
-                {!judgeOn ? (
-                  <>
-                    Needs a judge engine to run the solution. <Link to="/settings#judge">Judge status</Link>
-                  </>
-                ) : solutionBase === null ? (
-                  'Save a reference solution first.'
-                ) : solutionDirty ? (
-                  'Save the solution to verify with it.'
-                ) : cases.length === 0 ? (
-                  'Add test cases first.'
-                ) : verifying ? (
-                  'Running the solution on every case…'
-                ) : (
-                  'Runs the solution on every case and compares its output with the stored expected output.'
-                )}
-              </span>
-            </div>
+            <WriteProblems write={referenceWrite} limits={limits} title="Could not change the reference solution" consequence="Saving anyway makes the chosen solution the reference." />
             {verifyError != null && <ErrorCallout error={verifyError} title="Verification could not run" onRetry={() => void runVerify(false)} />}
             {verify && results.length > 0 && (
               <Callout
@@ -581,11 +609,14 @@ function TestsManager({ item }: { item: Item }) {
                 role="status"
                 title={
                   mismatched + failed === 0
-                    ? `All ${plural(matched, 'case')} match the reference solution and are marked verified`
+                    ? referenceRun
+                      ? `All ${plural(matched, 'case')} match the reference solution and are marked verified`
+                      : `${capitalize(who)} reproduces the expected output of all ${plural(matched, 'case')}`
                     : `${matched} of ${results.length} match · ${mismatched} differ · ${failed} failed to run`
                 }
                 actions={
-                  mismatched > 0 ? (
+                  // Only the reference solution's output can become the expected output.
+                  mismatched > 0 && referenceRun && reference !== null && reference.id === ranWith?.id ? (
                     <Button
                       size="sm"
                       disabled={verifying}
@@ -603,6 +634,8 @@ function TestsManager({ item }: { item: Item }) {
                   ) : undefined
                 }
               >
+                {!referenceRun && ranWith && `This was a check against “${ranWith.name}”, which is not the reference solution: “Verified” marks and expected outputs were not changed. `}
+                {referenceRun && mismatched + failed > 0 && 'Cases that differ or failed are no longer marked verified. '}
                 {mismatched + failed > 0 && 'Open a marked case in the list above to compare the two outputs or see the error.'}
               </Callout>
             )}

@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 // Limits bound what Read accepts.
@@ -185,7 +185,11 @@ func (r *reader) parse() (*Bundle, error) {
 		Description   string     `json:"description"`
 		Author        string     `json:"author"`
 		CreatedAt     *time.Time `json:"createdAt"`
-		Generator     struct {
+		Includes      *struct {
+			Solutions   *bool `json:"solutions"`
+			HiddenTests *bool `json:"hiddenTests"`
+		} `json:"includes"`
+		Generator struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"generator"`
@@ -205,8 +209,8 @@ func (r *reader) parse() (*Bundle, error) {
 			ItemIDs     []string `json:"itemIds"`
 		} `json:"collections"`
 	}
-	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &m); err != nil {
-		return nil, formatErr("bundle.json is malformed: %v", err)
+	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &m); err != nil {
+		return nil, formatErr("bundle.json: %s", jsonProblem(err))
 	}
 	if m.Format == nil || *m.Format != FormatName {
 		return nil, formatErr("bundle.json: format must be %q", FormatName)
@@ -217,12 +221,20 @@ func (r *reader) parse() (*Bundle, error) {
 	if *m.FormatVersion > FormatVersion {
 		return nil, formatErr("bundle format version %d is newer than this server supports (%d)", *m.FormatVersion, FormatVersion)
 	}
+	if len(m.Collections) > domain.MaxBundleCollections {
+		return nil, &LimitError{Msg: fmt.Sprintf("bundle has more than %d collections", domain.MaxBundleCollections)}
+	}
 	b := &Bundle{Meta: Meta{
 		Name: m.Name, Description: m.Description, Author: m.Author, FormatVersion: *m.FormatVersion,
 		GeneratorName: m.Generator.Name, GeneratorVersion: m.Generator.Version,
 	}}
 	if m.CreatedAt != nil {
 		b.Meta.CreatedAt = m.CreatedAt.UTC()
+	}
+	if inc := m.Includes; inc != nil && inc.Solutions != nil && inc.HiddenTests != nil {
+		b.Meta.Includes = &Includes{Solutions: *inc.Solutions, HiddenTests: *inc.HiddenTests}
+	} else if inc != nil {
+		r.warn("bundle.json: includes needs both solutions and hiddenTests; ignored")
 	}
 	seen := map[string]bool{}
 	for _, e := range m.Items {
@@ -244,6 +256,7 @@ func (r *reader) parse() (*Bundle, error) {
 		if !ok {
 			continue
 		}
+		r.applyIncludes(&it, b.Meta.Includes)
 		it.StoredHash = e.ContentHash
 		if e.ContentHash != "" && e.ContentHash != ContentHash(&it) {
 			r.warn("%s: content hash does not match the files; the files are used", dir)
@@ -302,30 +315,73 @@ func (r *reader) parse() (*Bundle, error) {
 	return b, nil
 }
 
-// breakCycles moves collections that are part of a parent cycle to the top
-// level.
+// breakCycles removes parent cycles by cutting, for each cycle, the parent
+// link that closes it, so collections hanging off a cycle keep their place.
+// It runs in linear time.
 func (r *reader) breakCycles(b *Bundle) {
-	byID := map[string]*Collection{}
+	byID := make(map[string]*Collection, len(b.Collections))
 	for i := range b.Collections {
 		byID[b.Collections[i].ID] = &b.Collections[i]
 	}
+	const (
+		unvisited = iota
+		onPath
+		done
+	)
+	state := make(map[string]int, len(b.Collections))
 	for i := range b.Collections {
-		c := &b.Collections[i]
-		visited := map[string]bool{c.ID: true}
-		for p := c.ParentID; p != nil; {
-			parent, ok := byID[*p]
+		var path []*Collection
+		for c := &b.Collections[i]; c != nil && state[c.ID] == unvisited; {
+			state[c.ID] = onPath
+			path = append(path, c)
+			if c.ParentID == nil {
+				break
+			}
+			parent, ok := byID[*c.ParentID]
 			if !ok {
 				c.ParentID = nil
 				break
 			}
-			if visited[parent.ID] {
-				r.warn("bundle.json: collection %s is part of a parent cycle; placed at the top level", c.ID)
+			if state[parent.ID] == onPath {
+				r.warn("bundle.json: collections %s and %s form a parent cycle; %s placed at the top level", c.ID, parent.ID, c.ID)
 				c.ParentID = nil
 				break
 			}
-			visited[parent.ID] = true
-			p = parent.ParentID
+			c = parent
 		}
+		for _, c := range path {
+			state[c.ID] = done
+		}
+	}
+}
+
+// applyIncludes sets what an item carries, from the bundle's includes or,
+// when a bundle does not say, inferred from its files.
+func (r *reader) applyIncludes(it *Item, inc *Includes) {
+	if it.Type != domain.TypeProblem {
+		return
+	}
+	if inc == nil {
+		it.HiddenTestsIncluded = anyHidden(it.TestCases)
+		return
+	}
+	it.HiddenTestsIncluded = inc.HiddenTests
+	if !inc.HiddenTests && anyHidden(it.TestCases) {
+		r.warn("%s: hidden test cases in a bundle exported without them; ignored", it.Dir)
+		var samples []TestCase
+		for _, tc := range it.TestCases {
+			if tc.IsSample {
+				samples = append(samples, tc)
+			}
+		}
+		it.TestCases = samples
+	}
+	switch {
+	case inc.Solutions && !it.SolutionsIncluded:
+		it.SolutionsIncluded, it.Solutions = true, []Solution{}
+	case !inc.Solutions && it.SolutionsIncluded:
+		r.warn("%s: solutions in a bundle exported without them; ignored", it.Dir)
+		it.SolutionsIncluded, it.Solutions = false, nil
 	}
 }
 
@@ -350,18 +406,14 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 		CreatedAt *time.Time `json:"createdAt"`
 		UpdatedAt *time.Time `json:"updatedAt"`
 		Problem   *struct {
-			TimeLimitMs       *int              `json:"timeLimitMs"`
-			MemoryLimitKb     *int              `json:"memoryLimitKb"`
-			Compare           *string           `json:"compare"`
-			Starter           map[string]string `json:"starter"`
-			ReferenceSolution *struct {
-				Language string `json:"language"`
-				Path     string `json:"path"`
-			} `json:"referenceSolution"`
+			TimeLimitMs   *int              `json:"timeLimitMs"`
+			MemoryLimitKb *int              `json:"memoryLimitKb"`
+			Compare       *string           `json:"compare"`
+			Starter       map[string]string `json:"starter"`
 		} `json:"problem"`
 	}
-	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &j); err != nil {
-		r.warn("%s/item.json: malformed (%v); item skipped", dir, err)
+	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &j); err != nil {
+		r.warn("%s/item.json: %s; item skipped", dir, jsonProblem(err))
 		return Item{}, false
 	}
 	if strings.ToLower(j.ID) != id {
@@ -375,11 +427,15 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 		return Item{}, false
 	}
 	if n := utf8.RuneCountInString(it.Title); n < 1 || n > domain.MaxTitleChars {
-		r.warn("%s/item.json: invalid title; item skipped", dir)
+		r.warn("%s/item.json: title must be 1-%d characters; item skipped", dir, domain.MaxTitleChars)
+		return Item{}, false
+	}
+	if !domain.IsSingleLine(it.Title) {
+		r.warn("%s/item.json: title %s; item skipped", dir, domain.SingleLineMessage)
 		return Item{}, false
 	}
 	if utf8.RuneCountInString(it.Summary) > domain.MaxSummaryChars {
-		r.warn("%s/item.json: summary too long; ignored", dir)
+		r.warn("%s/item.json: summary longer than %d characters; ignored", dir, domain.MaxSummaryChars)
 		it.Summary = ""
 	}
 	if j.Difficulty != nil {
@@ -440,10 +496,13 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 	}
 
 	if body, ok := r.file(dir + "/body.md"); ok {
-		if s, ok := textOK(body); ok && len(s) <= domain.MaxTextBytes {
+		switch s, ok := textOK(body); {
+		case !ok:
+			r.warn("%s/body.md: not valid UTF-8; body left empty", dir)
+		case len(domain.NormalizeText(s)) > domain.MaxTextBytes:
+			r.warn("%s/body.md: larger than %d bytes; body left empty", dir, domain.MaxTextBytes)
+		default:
 			it.Body = domain.NormalizeText(s)
-		} else {
-			r.warn("%s/body.md: not valid UTF-8 or too large; ignored", dir)
 		}
 	} else {
 		r.warn("%s/body.md: missing; body left empty", dir)
@@ -492,20 +551,14 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 				}
 				p.StarterCode[lang] = src
 			}
-			if rs := jp.ReferenceSolution; rs != nil {
-				if !domain.KnownLanguage(rs.Language) {
-					r.warn("%s/item.json: unknown language %q in reference solution; ignored", dir, rs.Language)
-				} else if src, ok := r.source(dir, rs.Path); ok {
-					if strings.TrimSpace(src) == "" {
-						r.warn("%s/%s: empty reference solution; ignored", dir, rs.Path)
-					} else {
-						p.ReferenceSolution = &domain.Solution{Language: rs.Language, Source: src}
-					}
-				}
-			}
 		}
 		it.Problem = p
-		it.TestCases = r.readTests(dir)
+		if it.TestCases, ok = r.readTests(dir); !ok {
+			return Item{}, false
+		}
+		if it.Solutions, it.SolutionsIncluded, ok = r.readSolutions(dir); !ok {
+			return Item{}, false
+		}
 	}
 	return it, true
 }
@@ -529,10 +582,13 @@ func (r *reader) source(dir, rel string) (string, bool) {
 	return s, true
 }
 
-func (r *reader) readTests(dir string) []TestCase {
+// readTests reads an item's test cases. It returns false when tests.json
+// is malformed, in which case the item cannot be imported safely (an
+// overwrite would replace the local cases with none).
+func (r *reader) readTests(dir string) ([]TestCase, bool) {
 	raw, ok := r.file(dir + "/tests/tests.json")
 	if !ok {
-		return nil
+		return nil, true
 	}
 	var tj struct {
 		Cases []struct {
@@ -544,9 +600,9 @@ func (r *reader) readTests(dir string) []TestCase {
 			Verified bool    `json:"verified"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &tj); err != nil {
-		r.warn("%s/tests/tests.json: malformed (%v); tests ignored", dir, err)
-		return nil
+	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &tj); err != nil {
+		r.warn("%s/tests/tests.json: %s; item skipped", dir, jsonProblem(err))
+		return nil, false
 	}
 	var out []TestCase
 	for i, c := range tj.Cases {
@@ -554,10 +610,10 @@ func (r *reader) readTests(dir string) []TestCase {
 			r.warn("%s/tests/tests.json: more than %d cases; the rest are ignored", dir, domain.MaxTestCasesPerItem)
 			break
 		}
-		in, ok1 := r.testFile(dir, c.Input)
-		exp, ok2 := r.testFile(dir, c.Output)
-		if !ok1 || !ok2 {
-			r.warn("%s/tests/tests.json: case %d refers to a missing file; skipped", dir, i+1)
+		in, msg1 := r.testFile(dir, c.Input)
+		exp, msg2 := r.testFile(dir, c.Output)
+		if msg := msg1 + msg2; msg != "" {
+			r.warn("%s/tests/tests.json: case %d: %s; skipped", dir, i+1, strings.TrimSuffix(msg1+"; "+msg2, "; "))
 			continue
 		}
 		tc := TestCase{Name: domain.NormalizeText(c.Name), Stdin: in, ExpectedStdout: exp, IsSample: c.Sample, Origin: domain.OriginImport, Verified: c.Verified}
@@ -574,18 +630,40 @@ func (r *reader) readTests(dir string) []TestCase {
 		}
 		out = append(out, tc)
 	}
-	return out
+	return out, true
 }
 
-func (r *reader) testFile(dir, name string) (string, bool) {
+// testFile reads a test input or output; the second result is "" or a
+// description of the problem.
+func (r *reader) testFile(dir, name string) (string, string) {
 	if name == "" || strings.ContainsAny(name, `/\`) {
-		return "", false
+		return "", fmt.Sprintf("invalid file name %q", name)
 	}
 	data, ok := r.file(dir + "/tests/" + name)
-	if !ok || len(data) > domain.MaxTestCaseBytes {
-		return "", false
+	switch {
+	case !ok:
+		return "", fmt.Sprintf("file %s is missing", name)
+	case len(data) > domain.MaxTestCaseBytes:
+		return "", fmt.Sprintf("file %s is larger than %d bytes", name, domain.MaxTestCaseBytes)
+	case !utf8.Valid(data):
+		// Test data travels as JSON strings in the API, which cannot hold
+		// invalid UTF-8; importing it would alter it silently.
+		return "", fmt.Sprintf("file %s is not valid UTF-8", name)
 	}
-	return string(data), true
+	return string(data), ""
+}
+
+// jsonProblem describes a JSON decoding error.
+func jsonProblem(err error) string {
+	var te *domain.TypeError
+	if errors.As(err, &te) {
+		return te.Error()
+	}
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		return fmt.Sprintf("malformed JSON at byte %d: %v", se.Offset, se)
+	}
+	return "malformed JSON: " + err.Error()
 }
 
 // IsFormatError reports whether err means the archive is not a valid bundle.
@@ -598,4 +676,63 @@ func IsFormatError(err error) bool {
 func IsLimitError(err error) bool {
 	var le *LimitError
 	return errors.As(err, &le)
+}
+
+// readSolutions reads solutions/solutions.json. Its absence means the bundle
+// was exported without solutions.
+// readSolutions reads an item's solutions; included is false when the
+// bundle carries none for it. ok is false when solutions.json is malformed:
+// the item is then skipped, since an overwrite would replace the local
+// solutions with none.
+func (r *reader) readSolutions(dir string) (sols []Solution, included, ok bool) {
+	raw, found := r.file(dir + "/solutions/solutions.json")
+	if !found {
+		return nil, false, true
+	}
+	var sj struct {
+		Solutions []struct {
+			Name      string `json:"name"`
+			Language  string `json:"language"`
+			File      string `json:"file"`
+			Notes     string `json:"notes"`
+			Reference bool   `json:"reference"`
+		} `json:"solutions"`
+	}
+	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &sj); err != nil {
+		r.warn("%s/solutions/solutions.json: %s; item skipped", dir, jsonProblem(err))
+		return nil, false, false
+	}
+	out := []Solution{}
+	haveRef := false
+	for i, e := range sj.Solutions {
+		if len(out) >= domain.MaxSolutionsPerItem {
+			r.warn("%s/solutions/solutions.json: more than %d solutions; the rest are ignored", dir, domain.MaxSolutionsPerItem)
+			break
+		}
+		if !domain.KnownLanguage(e.Language) {
+			r.warn("%s/solutions/solutions.json: solution %d has unknown language %q; skipped", dir, i+1, e.Language)
+			continue
+		}
+		if e.File == "" || strings.ContainsAny(e.File, `/\`) {
+			r.warn("%s/solutions/solutions.json: solution %d has an invalid file name; skipped", dir, i+1)
+			continue
+		}
+		src, ok := r.source(dir, "solutions/"+e.File)
+		if !ok {
+			continue
+		}
+		s := domain.ItemSolution{Name: e.Name, Language: e.Language, Source: src, Notes: e.Notes}
+		if fe := domain.ValidateItemSolution(&s, domain.Limits{MaxSourceBytes: r.lim.MaxSourceBytes}); len(fe) > 0 {
+			r.warn("%s/solutions/solutions.json: solution %d: %s; skipped", dir, i+1, fe.First())
+			continue
+		}
+		ref := e.Reference
+		if ref && haveRef {
+			r.warn("%s/solutions/solutions.json: more than one reference solution; only the first is kept as reference", dir)
+			ref = false
+		}
+		haveRef = haveRef || ref
+		out = append(out, Solution{Name: s.Name, Language: s.Language, Source: s.Source, Notes: s.Notes, IsReference: ref})
+	}
+	return out, true, true
 }

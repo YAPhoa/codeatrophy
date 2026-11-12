@@ -7,15 +7,15 @@ import type {
   Difficulty,
   ItemSource,
   ItemType,
-  SourceCode,
   TestOrigin,
 } from '../api/types';
+import { LIMITS } from './db';
 import { sha256Hex } from './sha256';
 import { isLanguage, LANGUAGE_EXTENSIONS, slugify } from './util';
 import type { ZipEntry } from './zip';
 import { readZip, writeZip, ZipError } from './zip';
 
-export const BUNDLE_FORMAT = 'codeathropy.bundle';
+export const BUNDLE_FORMAT = 'codeatrophy.bundle';
 export const BUNDLE_FORMAT_VERSION = 1;
 
 export interface BundleTestCase {
@@ -27,12 +27,19 @@ export interface BundleTestCase {
   verified?: boolean;
 }
 
+export interface BundleSolution {
+  name: string;
+  language: string;
+  source: string;
+  notes: string;
+  isReference: boolean;
+}
+
 export interface BundleProblem {
   timeLimitMs: number;
   memoryLimitKb: number;
   compare: CompareMode;
   starterCode: Record<string, string>;
-  referenceSolution: SourceCode | null;
 }
 
 export interface BundleItem {
@@ -47,6 +54,12 @@ export interface BundleItem {
   body: string;
   /** `null` for a reading. */
   problem: BundleProblem | null;
+  /**
+   * A problem's saved solutions, in listing order. Absent when the bundle
+   * does not carry solutions (it was exported without them) — which is not
+   * the same as `[]`, a problem that has none — and for a reading.
+   */
+  solutions?: BundleSolution[];
   testCases: BundleTestCase[];
   createdAt?: string;
   updatedAt?: string;
@@ -61,12 +74,23 @@ export interface BundleCollection {
   itemIds: string[];
 }
 
+/** What an export was asked to carry (`includes` in `bundle.json`). */
+export interface BundleIncludes {
+  solutions: boolean;
+  hiddenTests: boolean;
+}
+
 export interface BundleData {
   name: string;
   description?: string;
   author?: string;
   createdAt?: string;
   formatVersion?: number;
+  /**
+   * Defaults to what the items show: solutions count as included unless a
+   * problem comes without a `solutions` list, hidden tests always.
+   */
+  includes?: BundleIncludes;
   items: BundleItem[];
   collections?: BundleCollection[];
 }
@@ -105,10 +129,17 @@ export function contentHash(item: Omit<BundleItem, 'id' | 'createdAt' | 'updated
       memoryLimitKb: item.problem.memoryLimitKb,
       compare: item.problem.compare,
       starterCode: item.problem.starterCode,
-      referenceSolution: item.problem.referenceSolution
-        ? { language: item.problem.referenceSolution.language, source: item.problem.referenceSolution.source }
-        : null,
     };
+    // Solutions left out of the export are left out of the hash too.
+    if (item.solutions) {
+      doc.solutions = item.solutions.map((s) => ({
+        name: s.name,
+        language: s.language,
+        source: s.source,
+        notes: s.notes,
+        isReference: s.isReference,
+      }));
+    }
     doc.testCases = item.testCases.map((c) => ({
       name: c.name,
       stdin: c.stdin,
@@ -154,17 +185,23 @@ export function buildBundleZip(data: BundleData): Uint8Array<ArrayBuffer> {
         starter[language] = `starter/${language}.${extensionOf(language)}`;
         add(`${dir}/${starter[language]}`, source);
       }
-      const ref = item.problem.referenceSolution;
-      if (ref) add(`${dir}/solution/reference.${extensionOf(ref.language)}`, ref.source);
       meta.problem = {
         timeLimitMs: item.problem.timeLimitMs,
         memoryLimitKb: item.problem.memoryLimitKb,
         compare: item.problem.compare,
         starter,
-        referenceSolution: ref
-          ? { language: ref.language, path: `solution/reference.${extensionOf(ref.language)}` }
-          : null,
       };
+      // Written even when the list is empty, so that "has no solutions" and
+      // "exported without solutions" stay distinguishable to a reader.
+      if (item.solutions) {
+        const width = Math.max(2, String(item.solutions.length).length);
+        const solutions = item.solutions.map((s, i) => {
+          const file = `${String(i + 1).padStart(width, '0')}-${slugify(s.name)}.${extensionOf(s.language)}`;
+          add(`${dir}/solutions/${file}`, s.source);
+          return { name: s.name, language: s.language, file, notes: s.notes, reference: s.isReference };
+        });
+        add(`${dir}/solutions/solutions.json`, json({ solutions }));
+      }
       if (item.testCases.length > 0) {
         const cases = item.testCases.map((c, i) => {
           const stem = String(i + 1).padStart(2, '0');
@@ -194,7 +231,11 @@ export function buildBundleZip(data: BundleData): Uint8Array<ArrayBuffer> {
     description: data.description ?? '',
     author: data.author ?? '',
     createdAt,
-    generator: { name: 'codeathropy', version: '0.1.0-mock' },
+    generator: { name: 'codeatrophy', version: '0.1.0-mock' },
+    includes: data.includes ?? {
+      solutions: !data.items.some((item) => item.type === 'problem' && item.solutions === undefined),
+      hiddenTests: true,
+    },
     items: index,
     collections: data.collections ?? [],
   };
@@ -207,6 +248,8 @@ export interface ParsedBundle {
   author: string;
   formatVersion: number;
   createdAt: string;
+  /** As written by the exporter; `null` for a bundle that does not say. Informational: the files decide. */
+  includes: BundleIncludes | null;
   items: BundleItem[];
   collections: BundleCollection[];
   warnings: string[];
@@ -216,6 +259,86 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
 const nullableText = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null);
+
+const unixLines = (value: string) => value.replace(/\r\n?/g, '\n');
+
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+
+/**
+ * Read an item's `solutions/solutions.json`. Its absence means the bundle
+ * was exported without solutions, which is reported as `undefined`.
+ */
+function readSolutions(
+  dir: string,
+  read: (path: string) => string | undefined,
+  readJson: (path: string) => unknown,
+  warnings: string[],
+): BundleSolution[] | undefined {
+  const path = `${dir}/solutions/solutions.json`;
+  const doc = readJson(path);
+  if (doc === undefined) return undefined;
+  if (!isRecord(doc) || !Array.isArray(doc.solutions)) {
+    warnings.push(`${path}: malformed; solutions ignored`);
+    return undefined;
+  }
+  const out: BundleSolution[] = [];
+  for (const [i, entry] of doc.solutions.entries()) {
+    const label = `${path}: solution ${i + 1}`;
+    if (out.length >= LIMITS.maxSolutionsPerItem) {
+      warnings.push(`${path}: more than ${LIMITS.maxSolutionsPerItem} solutions; the rest are ignored`);
+      break;
+    }
+    if (!isRecord(entry)) {
+      warnings.push(`${label} is malformed; skipped`);
+      continue;
+    }
+    // The language comes from `language`, never from the file extension.
+    const language = entry.language;
+    if (!isLanguage(language)) {
+      warnings.push(`${label} has unknown language ${JSON.stringify(language ?? null)}; skipped`);
+      continue;
+    }
+    const file = entry.file;
+    if (typeof file !== 'string' || file === '' || file.includes('/') || file.includes('\\') || file === '..') {
+      warnings.push(`${label} has an invalid file name; skipped`);
+      continue;
+    }
+    const source = read(`${dir}/solutions/${file}`);
+    if (source === undefined) {
+      warnings.push(`${dir}/solutions/${file}: solution file is missing; skipped`);
+      continue;
+    }
+    // The same rules as for a solution saved through the API.
+    const name = unixLines(text(entry.name)).trim();
+    const notes = unixLines(text(entry.notes));
+    const problem =
+      name === ''
+        ? 'name is required'
+        : [...name].length > LIMITS.maxSolutionNameChars
+          ? `name must be at most ${LIMITS.maxSolutionNameChars} characters`
+          : CONTROL.test(name)
+            ? 'name must be a single line without control characters'
+            : [...notes].length > LIMITS.maxSolutionNotesChars
+              ? `notes must be at most ${LIMITS.maxSolutionNotesChars} characters`
+              : source.trim() === ''
+                ? 'source is required'
+                : new TextEncoder().encode(source).length > LIMITS.maxSourceBytes
+                  ? `source must be at most ${LIMITS.maxSourceBytes} bytes`
+                  : null;
+    if (problem) {
+      warnings.push(`${label}: ${problem}; skipped`);
+      continue;
+    }
+    let isReference = entry.reference === true;
+    if (isReference && out.some((s) => s.isReference)) {
+      warnings.push(`${path}: more than one reference solution; only the first is kept as reference`);
+      isReference = false;
+    }
+    out.push({ name, language, source: unixLines(source), notes, isReference });
+  }
+  return out;
+}
 
 /**
  * Read a bundle archive. Problems that sink the whole bundle throw a
@@ -328,23 +451,13 @@ export async function parseBundleZip(bytes: Uint8Array): Promise<ParsedBundle> {
         if (src === undefined) warnings.push(`${dir}/${String(path)}: starter file is missing; ignored`);
         else starterCode[language] = src;
       }
-      let referenceSolution: SourceCode | null = null;
-      if (isRecord(problem.referenceSolution)) {
-        const { language, path } = problem.referenceSolution;
-        const src = typeof path === 'string' ? read(`${dir}/${path}`) : undefined;
-        if (!isLanguage(language)) {
-          warnings.push(`${dir}/item.json: unknown language "${String(language)}" for the reference solution; ignored`);
-        } else if (src === undefined) {
-          warnings.push(`${dir}/${String(path)}: reference solution file is missing; ignored`);
-        } else referenceSolution = { language, source: src };
-      }
       item.problem = {
         timeLimitMs: typeof problem.timeLimitMs === 'number' ? problem.timeLimitMs : 2000,
         memoryLimitKb: typeof problem.memoryLimitKb === 'number' ? problem.memoryLimitKb : 262144,
         compare: problem.compare === 'exact' ? 'exact' : 'tokens',
         starterCode,
-        referenceSolution,
       };
+      item.solutions = readSolutions(dir, read, readJson, warnings);
       const tests = readJson(`${dir}/tests/tests.json`);
       if (tests === null) warnings.push(`${dir}/tests/tests.json: malformed; test cases ignored`);
       for (const c of isRecord(tests) && Array.isArray(tests.cases) ? tests.cases : []) {
@@ -400,6 +513,9 @@ export async function parseBundleZip(bytes: Uint8Array): Promise<ParsedBundle> {
     author: text(manifest.author),
     formatVersion,
     createdAt: text(manifest.createdAt),
+    includes: isRecord(manifest.includes)
+      ? { solutions: manifest.includes.solutions !== false, hiddenTests: manifest.includes.hiddenTests !== false }
+      : null,
     items,
     collections,
     warnings,

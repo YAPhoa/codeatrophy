@@ -2,7 +2,7 @@
 // unavailable (private mode, quota) and stored JSON can be stale or corrupt;
 // neither should ever break the UI.
 
-const PREFIX = 'codeathropy:';
+const PREFIX = 'codeatrophy:';
 
 function store(): Storage | null {
   try {

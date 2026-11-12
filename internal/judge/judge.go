@@ -71,11 +71,23 @@ type Engine interface {
 }
 
 // BatchEngine is an optional optimisation: engines that can execute several
-// programs in one round trip implement it. Results are in request order.
+// programs in fewer round trips implement it.
+//
+// ExecuteBatch calls onDone exactly once for every request index, as results
+// become available (possibly in groups). If continueFn returns false the
+// engine stops submitting further work; requests it did not start are
+// reported with ErrNotRun. A non-nil return value means the batch could not
+// be started at all and no onDone call was made; the caller may fall back to
+// single executions.
 type BatchEngine interface {
 	Engine
-	ExecuteBatch(ctx context.Context, reqs []ExecRequest) ([]ExecResult, error)
+	ExecuteBatch(ctx context.Context, reqs []ExecRequest, continueFn func() bool,
+		onDone func(i int, r ExecResult, err error)) error
 }
+
+// ErrNotRun marks a request that was not executed because an earlier one
+// failed at the engine.
+var ErrNotRun = errors.New("not run: the judge engine failed on an earlier execution")
 
 // ErrUnsupportedLanguage is returned by Execute for a language the engine
 // does not offer.

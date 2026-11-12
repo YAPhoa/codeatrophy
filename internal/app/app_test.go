@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/ai/aitest"
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/judge/judgetest"
-	"codeathropy/internal/secrets"
-	"codeathropy/internal/store/sqlite"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/aitest"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge/judgetest"
+	"codeatrophy/internal/secrets"
+	"codeatrophy/internal/store/sqlite"
 )
 
 type env struct {
@@ -442,7 +442,8 @@ func TestTestCaseOperations(t *testing.T) {
 }
 
 func TestDeleteItemClearsVariantLinks(t *testing.T) {
-	e := newEnv(t)
+	clock := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	e := newEnv(t, func(o *app.Options) { o.Now = func() time.Time { return clock } })
 	orig := e.problem(t, "")
 	v := must(e.app.CreateItem(e.ctx, input(t, `{"type":"problem","title":"Variant","variantOf":"`+orig.ID+`"}`)))
 	if got := must(e.app.GetItem(e.ctx, orig.ID)); got.VariantCount != 1 {
@@ -452,11 +453,14 @@ func TestDeleteItemClearsVariantLinks(t *testing.T) {
 	if page.Total != 1 || page.Items[0].ID != v.ID {
 		t.Errorf("variantOf filter: %+v", page)
 	}
+	clock = clock.Add(time.Minute)
 	if err := e.app.DeleteItem(e.ctx, orig.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := must(e.app.GetItem(e.ctx, v.ID)); got.VariantOf != nil {
-		t.Error("variantOf not cleared")
+	// Losing the link is a content change for the variant.
+	if got := must(e.app.GetItem(e.ctx, v.ID)); got.VariantOf != nil || got.Revision != v.Revision+1 || !got.UpdatedAt.Equal(clock) {
+		t.Errorf("variant after its original was deleted: variantOf %v, revision %d -> %d, updatedAt %v",
+			got.VariantOf, v.Revision, got.Revision, got.UpdatedAt)
 	}
 	wantCode(t, e.app.DeleteItem(e.ctx, orig.ID), app.CodeNotFound)
 }
@@ -479,5 +483,14 @@ func TestItemJSONShape(t *testing.T) {
 	}
 	if !strings.HasSuffix(m["createdAt"].(string), "Z") || strings.Contains(m["createdAt"].(string), ".") {
 		t.Errorf("timestamp format: %v", m["createdAt"])
+	}
+}
+
+// wantField fails unless err is a validation error naming field.
+func wantField(t *testing.T, err error, field string) {
+	t.Helper()
+	e := wantCode(t, err, app.CodeValidation)
+	if _, ok := e.Fields[field]; !ok {
+		t.Fatalf("validation error %v does not name %q", err, field)
 	}
 }

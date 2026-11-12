@@ -3,12 +3,14 @@ package grader
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/judge"
-	"codeathropy/internal/judge/judgetest"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge"
+	"codeatrophy/internal/judge/judgetest"
 )
 
 func strp(s string) *string { return &s }
@@ -153,13 +155,13 @@ type batchFake struct {
 	batches int
 }
 
-func (b *batchFake) ExecuteBatch(ctx context.Context, reqs []judge.ExecRequest) ([]judge.ExecResult, error) {
+func (b *batchFake) ExecuteBatch(ctx context.Context, reqs []judge.ExecRequest, cont func() bool,
+	onDone func(int, judge.ExecResult, error)) error {
 	b.batches++
-	out := make([]judge.ExecResult, len(reqs))
 	for i, r := range reqs {
-		out[i] = judgetest.Script(r)
+		onDone(i, judgetest.Script(r), nil)
 	}
-	return out, nil
+	return nil
 }
 
 func TestRunAllUsesBatchEngine(t *testing.T) {
@@ -190,5 +192,84 @@ func TestGradeUnavailableCases(t *testing.T) {
 	out = New(judgetest.New(), 2).Grade(context.Background(), Program{Language: "python", Source: "compile_error"}, domain.CompareTokens, cs, nil)
 	if out.Verdict != domain.VerdictCompileError || len(out.Results) != 0 || out.Passed != 0 || out.TimeMs != nil {
 		t.Errorf("compile error: %+v", out)
+	}
+}
+
+// failingEngine fails every execution after the first n at the engine.
+type failingEngine struct {
+	*judgetest.Engine
+	okFirst int
+	calls   atomic.Int64
+}
+
+func (f *failingEngine) Execute(ctx context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+	if int(f.calls.Add(1)) > f.okFirst {
+		return judge.ExecResult{}, errors.New("judge0: context deadline exceeded")
+	}
+	return judgetest.Script(req), nil
+}
+
+func TestRunAllStopsAfterEngineFailure(t *testing.T) {
+	f := &failingEngine{Engine: judgetest.New(), okFirst: 1}
+	g := New(f, 1) // sequential, so the failure is seen before the rest start
+	out := g.Grade(context.Background(), Program{Language: "python", Source: "sum"}, domain.CompareTokens,
+		cases("1 2", "3", "2 2", "4", "3 3", "6", "4 4", "8"), nil)
+	if f.calls.Load() != 2 {
+		t.Errorf("engine called %d times; it should stop after the first failure", f.calls.Load())
+	}
+	if out.Verdict != domain.VerdictInternalError || out.Passed != 1 || len(out.Results) != 4 ||
+		out.Error == nil || !strings.Contains(*out.Error, "deadline") {
+		t.Fatalf("got %+v", out)
+	}
+	notRun, failed := 0, 0
+	for _, r := range out.Results[1:] {
+		switch {
+		case strings.Contains(r.Stderr, "not run"):
+			notRun++
+		case r.Verdict == domain.VerdictInternalError:
+			failed++
+		}
+	}
+	if failed != 1 || notRun != 2 {
+		t.Errorf("one case fails at the engine and the others are not run: failed=%d notRun=%d %+v", failed, notRun, out.Results)
+	}
+	// The very first execution failing stops everything.
+	f2 := &failingEngine{Engine: judgetest.New()}
+	New(f2, 4).Grade(context.Background(), Program{Language: "python", Source: "sum"}, domain.CompareTokens,
+		cases("1", "1", "2", "2", "3", "3"), nil)
+	if f2.calls.Load() != 1 {
+		t.Errorf("engine called %d times after the first failed", f2.calls.Load())
+	}
+}
+
+// partialBatch finishes the first k requests of a batch and fails the rest.
+type partialBatch struct {
+	*judgetest.Engine
+	k       int
+	batched atomic.Int64
+}
+
+func (p *partialBatch) ExecuteBatch(ctx context.Context, reqs []judge.ExecRequest, cont func() bool,
+	onDone func(int, judge.ExecResult, error)) error {
+	for i, r := range reqs {
+		p.batched.Add(1)
+		if i < p.k {
+			onDone(i, judgetest.Script(r), nil)
+		} else {
+			onDone(i, judge.ExecResult{}, errors.New("timeout"))
+		}
+	}
+	return nil
+}
+
+func TestBatchFailureKeepsFinishedResults(t *testing.T) {
+	p := &partialBatch{Engine: judgetest.New(), k: 2}
+	out := New(p, 2).Grade(context.Background(), Program{Language: "python", Source: "sum"}, domain.CompareTokens,
+		cases("1 1", "2", "2 2", "4", "3 3", "6", "4 4", "8", "5 5", "10"), nil)
+	if p.Calls() != 1 || p.batched.Load() != 4 {
+		t.Errorf("no case may be re-executed: single=%d batched=%d", p.Calls(), p.batched.Load())
+	}
+	if out.Passed != 3 || out.Results[1].Verdict != domain.VerdictAccepted || out.Results[3].Verdict != domain.VerdictInternalError {
+		t.Errorf("finished results must be kept: %+v", out.Results)
 	}
 }

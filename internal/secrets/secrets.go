@@ -42,12 +42,17 @@ func NewBox(key []byte) (*Box, error) {
 }
 
 // Encrypt returns a printable ciphertext for plaintext.
-func (b *Box) Encrypt(plaintext string) (string, error) {
+func (b *Box) Encrypt(plaintext string) (string, error) { return b.EncryptBound(plaintext, "") }
+
+// EncryptBound encrypts plaintext bound to context: the ciphertext only
+// decrypts with the same context (it is AEAD additional data). Use it to tie
+// a secret to what it may be used for, e.g. the origin an API key belongs to.
+func (b *Box) EncryptBound(plaintext, context string) (string, error) {
 	nonce := make([]byte, b.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	sealed := b.aead.Seal(nonce, nonce, []byte(plaintext), []byte(prefix))
+	sealed := b.aead.Seal(nonce, nonce, []byte(plaintext), []byte(prefix+context))
 	return prefix + base64.RawStdEncoding.EncodeToString(sealed), nil
 }
 
@@ -56,7 +61,10 @@ func (b *Box) Encrypt(plaintext string) (string, error) {
 var ErrDecrypt = errors.New("cannot decrypt stored secret (was the secret key changed?)")
 
 // Decrypt reverses Encrypt.
-func (b *Box) Decrypt(ciphertext string) (string, error) {
+func (b *Box) Decrypt(ciphertext string) (string, error) { return b.DecryptBound(ciphertext, "") }
+
+// DecryptBound reverses EncryptBound; it fails unless context matches.
+func (b *Box) DecryptBound(ciphertext, context string) (string, error) {
 	if !strings.HasPrefix(ciphertext, prefix) {
 		return "", ErrDecrypt
 	}
@@ -65,7 +73,7 @@ func (b *Box) Decrypt(ciphertext string) (string, error) {
 		return "", ErrDecrypt
 	}
 	nonce, sealed := raw[:b.aead.NonceSize()], raw[b.aead.NonceSize():]
-	plain, err := b.aead.Open(nil, nonce, sealed, []byte(prefix))
+	plain, err := b.aead.Open(nil, nonce, sealed, []byte(prefix+context))
 	if err != nil {
 		return "", ErrDecrypt
 	}
@@ -96,7 +104,7 @@ func LoadKey(envValue, dataDir string) ([]byte, string, error) {
 	if strings.TrimSpace(envValue) != "" {
 		k, err := ParseKey(envValue)
 		if err != nil {
-			return nil, "", fmt.Errorf("CODEATHROPY_SECRET_KEY: %w", err)
+			return nil, "", fmt.Errorf("CODEATROPHY_SECRET_KEY: %w", err)
 		}
 		return k, "environment", nil
 	}

@@ -1,8 +1,8 @@
-// AI settings endpoints.
+// Settings endpoints: the AI provider and the user's preferences.
 
 import type { AiProviderId } from '../../api/types';
 import type { MockDb, ProviderConfig } from '../db';
-import { AI_DEFAULTS, AI_PROVIDERS, atMostChars, charCount, LIMITS } from '../db';
+import { AI_DEFAULTS, AI_PROVIDERS, atMostChars, charCount, LIMITS, sameOrigin } from '../db';
 import type { Handler, Req } from '../http';
 import { invalid, isRecord, objectBody, ok, Validator } from '../http';
 import { sleep } from '../util';
@@ -48,6 +48,8 @@ function putSettings(db: MockDb, req: Req) {
           continue;
         }
         const config: ProviderConfig = next.providers[id];
+        const baseUrlBefore = config.savedBaseUrl ?? config.envBaseUrl ?? AI_DEFAULTS[id].baseUrl;
+        let keySupplied = false;
         const model = optionalText(update.model, `providers.${id}.model`, v);
         if (model != null && charCount(model) > LIMITS.maxModelIdChars) {
           v.add(`providers.${id}.model`, atMostChars(LIMITS.maxModelIdChars));
@@ -62,8 +64,16 @@ function putSettings(db: MockDb, req: Req) {
           const apiKey = optionalText(update.apiKey, `providers.${id}.apiKey`, v);
           if (apiKey != null && charCount(apiKey) > LIMITS.maxApiKeyChars) {
             v.add(`providers.${id}.apiKey`, atMostChars(LIMITS.maxApiKeyChars));
-          } else if (apiKey != null) config.savedKey = apiKey;
+          } else if (apiKey != null) {
+            config.savedKey = apiKey;
+            keySupplied = true;
+          }
         }
+        // A saved key belongs to the server it was saved for: pointing the
+        // provider at a different origin drops it, unless this same request
+        // brings the key for the new one.
+        const baseUrlAfter = config.savedBaseUrl ?? config.envBaseUrl ?? AI_DEFAULTS[id].baseUrl;
+        if (!keySupplied && !sameOrigin(baseUrlBefore, baseUrlAfter)) config.savedKey = null;
       }
     }
   }
@@ -82,7 +92,9 @@ function putSettings(db: MockDb, req: Req) {
       'activeProvider',
       next.activeProvider === 'anthropic'
         ? 'cannot be selected: the provider needs an API key'
-        : 'cannot be selected: the provider needs a model and a base URL',
+        : db.effectiveModel(next.activeProvider) === null
+          ? 'cannot be selected: the provider needs a model and a base URL'
+          : 'cannot be selected: the provider needs an API key for this base URL',
     );
   }
   return ok(db.aiSettings());
@@ -95,16 +107,28 @@ async function testSettings(db: MockDb, req: Req) {
   const provider = raw.provider;
   const v = new Validator();
   const model = optionalText(raw.model, 'model', v) ?? db.effectiveModel(provider) ?? AI_DEFAULTS[provider].model;
-  const baseUrl =
-    optionalText(raw.baseUrl, 'baseUrl', v) ?? db.effectiveBaseUrl(provider) ?? AI_DEFAULTS[provider].baseUrl;
-  const key = optionalText(raw.apiKey, 'apiKey', v) ?? db.effectiveKey(provider);
+  const configuredBaseUrl = db.effectiveBaseUrl(provider) ?? AI_DEFAULTS[provider].baseUrl;
+  const baseUrl = optionalText(raw.baseUrl, 'baseUrl', v) ?? configuredBaseUrl;
+  // The configured key is never sent to a server other than the one it was
+  // set up for: a test against a different origin uses only a key typed into
+  // this request.
+  const typedKey = optionalText(raw.apiKey, 'apiKey', v) ?? null;
+  const elsewhere = !sameOrigin(baseUrl, configuredBaseUrl);
+  const key = typedKey ?? (elsewhere ? null : db.effectiveKey(provider));
   v.check();
 
   await sleep(db.delay('aiTest'));
   const failure = (error: string) => ok({ ok: false, model, latencyMs: null, error });
   if (baseUrl !== null && !isHttpUrl(baseUrl)) return failure(`invalid base URL "${baseUrl}"`);
   if (model === null) return failure('No model is set for this provider.');
-  if (provider === 'anthropic' && key === null) return failure('No API key is configured for this provider.');
+  const keyRequired = provider === 'anthropic' || sameOrigin(baseUrl, AI_DEFAULTS[provider].baseUrl);
+  if (keyRequired && key === null) {
+    return failure(
+      elsewhere && db.effectiveKey(provider) !== null
+        ? 'No API key was sent: the configured key is only used with the base URL it was set up for. Enter a key to test this URL.'
+        : 'No API key is configured for this provider.',
+    );
+  }
   if (baseUrl !== null && /unreachable/i.test(baseUrl)) {
     const host = new URL(baseUrl).host;
     return failure(`Could not reach ${host}: dial tcp: lookup ${host.replace(/:\d+$/, '')}: no such host`);
@@ -119,10 +143,64 @@ async function testSettings(db: MockDb, req: Req) {
   return ok({ ok: true, model, latencyMs: 380 + Math.floor(Math.random() * 500), error: null });
 }
 
+// ---- Preferences --------------------------------------------------------------
+
+type PreferenceRule = { kind: 'boolean' } | { kind: 'oneOf'; values: readonly number[] } | { kind: 'range'; min: number; max: number };
+
+/** Every preference by dotted path. The defaults are `DEFAULT_PREFERENCES` in ../db. */
+const PREFERENCE_RULES: Readonly<Record<string, PreferenceRule>> = {
+  hideTestCases: { kind: 'boolean' },
+  'editor.autocomplete': { kind: 'boolean' },
+  'editor.closeBrackets': { kind: 'boolean' },
+  'editor.matchBrackets': { kind: 'boolean' },
+  'editor.lineWrapping': { kind: 'boolean' },
+  'editor.tabSize': { kind: 'oneOf', values: [2, 4, 8] },
+  'editor.fontSize': { kind: 'range', min: 10, max: 24 },
+};
+
+function preferenceProblem(rule: PreferenceRule, value: unknown): string | null {
+  if (rule.kind === 'boolean') return typeof value === 'boolean' ? null : 'must be a boolean';
+  if (typeof value !== 'number' || !Number.isInteger(value)) return 'must be an integer';
+  if (rule.kind === 'oneOf') return rule.values.includes(value) ? null : `must be one of ${rule.values.join(', ')}`;
+  return value >= rule.min && value <= rule.max ? null : `must be between ${rule.min} and ${rule.max}`;
+}
+
+/** Merge a partial preferences document, at any depth. One bad key or value rejects the whole update. */
+function putPreferences(db: MockDb, req: Req) {
+  const v = new Validator();
+  const updates: [string[], unknown][] = [];
+  const walk = (prefix: string[], node: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(node)) {
+      const parts = [...prefix, key];
+      const path = parts.join('.');
+      const rule = PREFERENCE_RULES[path];
+      if (rule) {
+        const problem = preferenceProblem(rule, value);
+        if (problem) v.add(path, problem);
+        else updates.push([parts, value]);
+      } else if (Object.keys(PREFERENCE_RULES).some((known) => known.startsWith(`${path}.`))) {
+        if (!isRecord(value)) v.add(path, 'must be an object');
+        else walk(parts, value);
+      } else v.add(path, 'unknown preference');
+    }
+  };
+  walk([], objectBody(req));
+  v.check();
+
+  for (const [parts, value] of updates) {
+    let target = db.preferences as unknown as Record<string, unknown>;
+    for (const part of parts.slice(0, -1)) target = target[part] as Record<string, unknown>;
+    target[parts[parts.length - 1]!] = value;
+  }
+  return ok(structuredClone(db.preferences));
+}
+
 export function settingsRoutes(db: MockDb): [string, string, Handler][] {
   return [
     ['GET', '/settings/ai', () => ok(db.aiSettings())],
     ['PUT', '/settings/ai', (req) => putSettings(db, req)],
     ['POST', '/settings/ai/test', (req) => testSettings(db, req)],
+    ['GET', '/settings/preferences', () => ok(structuredClone(db.preferences))],
+    ['PUT', '/settings/preferences', (req) => putPreferences(db, req)],
   ];
 }

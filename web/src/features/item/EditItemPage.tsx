@@ -172,7 +172,7 @@ function EditForm({ initial }: { initial: Item }) {
         <span className="spacer" />
         {base.type === 'problem' && (
           <Link to={`/items/${base.id}/tests`} className="muted">
-            Test cases and the reference solution are edited separately
+            Test cases and solutions are edited separately
           </Link>
         )}
         <Button variant="ghost" onClick={() => navigate(`/items/${base.id}`)} disabled={saving}>
@@ -314,7 +314,7 @@ function EditForm({ initial }: { initial: Item }) {
             )}
 
             {merge.theirs.length === 0 && merge.overlapping.length === 0 && (
-              <p className="muted">The other change did not touch any field shown in this form (it may have been to the test cases or the reference solution). Merging is safe.</p>
+              <p className="muted">The other change did not touch any field shown in this form (it may have been to the reference solution). Merging is safe.</p>
             )}
 
             {merge.mine.length > 0 && (

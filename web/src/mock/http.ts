@@ -18,8 +18,16 @@ export class HttpError extends Error {
 }
 
 export const badRequest = (message: string) => new HttpError(400, 'bad_request', message);
+/** A state-changing request from a web page on an origin the server does not accept. */
 export const forbidden = () =>
-  new HttpError(403, 'forbidden', 'cross-origin requests are not allowed; set CODEATHROPY_ALLOWED_ORIGINS to allow this origin');
+  new HttpError(403, 'forbidden', 'cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin');
+/** Any request that reaches the server under a host name it does not accept. */
+export const forbiddenHost = (host: string) =>
+  new HttpError(
+    403,
+    'forbidden',
+    `requests for host ${JSON.stringify(host)} are not accepted; set CODEATROPHY_PUBLIC_URL to the URL you reach this server at, or add the host to CODEATROPHY_ALLOWED_HOSTS`,
+  );
 /** The server answers an unsupported method on a known path with a JSON `405` whose code is `bad_request`. */
 export const methodNotAllowed = (method: string) =>
   new HttpError(405, 'bad_request', `method ${method} is not allowed for this path`);

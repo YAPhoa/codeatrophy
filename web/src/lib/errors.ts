@@ -24,6 +24,50 @@ export function sentence(message: string): string {
   return /[.!?…]$/.test(first) ? first : `${first}.`;
 }
 
+/** True when a 403 is about the host name the request was addressed to, rather than the page it came from. */
+function isHostRefusal(serverMessage: string): boolean {
+  if (/ALLOWED_HOSTS/.test(serverMessage)) return true;
+  return /\bhost\b/i.test(serverMessage) && !/\borigin\b/i.test(serverMessage);
+}
+
+/**
+ * A 403 has two causes, and both are a matter of server configuration rather
+ * than of anything the user did:
+ *
+ * - The server answers only requests addressed to a host name it knows
+ *   (loopback, its public URL, an allowed host). This applies to every
+ *   request, so the page may fail to load at all.
+ * - The server accepts changes only from pages on its own origin. Reaching
+ *   that from the app itself means the server sees a different address than
+ *   the browser does, which a reverse proxy rewriting the Host header causes.
+ *
+ * The server's message names the setting to change, so it is shown first;
+ * the explanation of what to do follows.
+ */
+function describeForbidden(serverMessage: string): ErrorView {
+  const said = sentence(serverMessage);
+  const lead = said ? `${said} ` : '';
+  const namesSetting = /CODEATROPHY_[A-Z_]+/.test(serverMessage);
+  const here = typeof window === 'undefined' ? null : window.location;
+  if (isHostRefusal(serverMessage)) {
+    const fix = namesSetting
+      ? 'Whoever runs the server needs to change that setting and restart it.'
+      : 'Whoever runs the server needs to set CODEATROPHY_PUBLIC_URL to this address, or add the host name to CODEATROPHY_ALLOWED_HOSTS, and restart it.';
+    return {
+      title: 'The server does not answer at this address',
+      message: `${lead}It only answers requests addressed to a host name it has been told about, and ${here ? here.host : 'this one'} is not among them. ${fix}`,
+      action: 'retry',
+    };
+  }
+  const fix = namesSetting
+    ? 'Whoever runs the server needs to change that setting and restart it.'
+    : 'Whoever runs the server needs to set CODEATROPHY_PUBLIC_URL to this address, or add it to CODEATROPHY_ALLOWED_ORIGINS, and restart it.';
+  return {
+    title: 'The server refused this change',
+    message: `${lead}It does not recognise ${here ? here.origin : 'this address'} as its own address, which usually means a reverse proxy sits in front of it. ${fix} Nothing was changed.`,
+  };
+}
+
 export function describeError(err: unknown): ErrorView {
   if (!(err instanceof ApiError)) {
     return {
@@ -36,14 +80,7 @@ export function describeError(err: unknown): ErrorView {
     case 'bad_request':
       return { title: 'The request was not understood', message: sentence(err.message) };
     case 'forbidden':
-      // The server only accepts changes from its own origin. Reaching this
-      // from the app itself means the server sees a different address than
-      // the browser does, which is what a reverse proxy that rewrites the
-      // Host header causes.
-      return {
-        title: 'The server refused this change',
-        message: `It does not recognise ${typeof window === 'undefined' ? 'this address' : window.location.origin} as its own address, which usually means a reverse proxy sits in front of it. Whoever runs the server needs to set CODEATHROPY_PUBLIC_URL to this address, or add it to CODEATHROPY_ALLOWED_ORIGINS, and restart. Nothing was changed.`,
-      };
+      return describeForbidden(err.message);
     case 'not_found':
       return { title: 'Not found', message: 'It may have been deleted, or the link is out of date.' };
     case 'conflict':
@@ -89,7 +126,7 @@ export function describeError(err: unknown): ErrorView {
     case 'network':
       return {
         title: 'Cannot reach the server',
-        message: 'Check that Codeathropy is running and that you are connected to it.',
+        message: 'Check that Codeatrophy is running and that you are connected to it.',
         action: 'retry',
       };
     case 'aborted':
@@ -106,7 +143,11 @@ export function errorLine(err: unknown): string {
     return err.isRevisionConflict ? view.title : sentence(err.message) || view.title;
   }
   if (err instanceof ApiError && err.code === 'forbidden') {
-    return `${view.title}: it does not recognise this page’s address as its own. The server’s CODEATHROPY_PUBLIC_URL or CODEATHROPY_ALLOWED_ORIGINS needs to include it.`;
+    // The full explanation is too long for one line; the server's message names the setting.
+    if (/CODEATROPHY_[A-Z_]+/.test(err.message)) return `${view.title}: ${sentence(err.message)}`;
+    return isHostRefusal(err.message)
+      ? `${view.title}. The server’s CODEATROPHY_PUBLIC_URL or CODEATROPHY_ALLOWED_HOSTS needs to include this host name.`
+      : `${view.title}: it does not recognise this page’s address as its own. The server’s CODEATROPHY_PUBLIC_URL or CODEATROPHY_ALLOWED_ORIGINS needs to include it.`;
   }
   return view.message ? `${view.title}. ${view.message}` : view.title;
 }

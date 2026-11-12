@@ -8,9 +8,10 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge"
 )
 
 // DefaultConcurrency is the number of executions run in parallel for one
@@ -87,15 +88,22 @@ func (e Execution) CompileFailed() bool {
 
 // RunAll executes the program once per input. The first input runs alone so
 // that a compile error is detected once; in that case every execution
-// reports the compile error and the remaining inputs are not run. onDone, if
-// non-nil, is called (sequentially) as each execution finishes.
+// reports the compile error and the remaining inputs are not run. After the
+// first engine failure (unreachable, timed out) no further executions are
+// started: the inputs not yet run report judge.ErrNotRun. Results already
+// finished are always kept. onDone, if non-nil, is called (sequentially) as
+// each execution finishes.
 func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone func(i int, e Execution)) []Execution {
 	out := make([]Execution, len(stdins))
 	if len(stdins) == 0 {
 		return out
 	}
 	var mu sync.Mutex
+	var failed atomic.Bool
 	done := func(i int, e Execution) {
+		if e.Err != nil && !errors.Is(e.Err, judge.ErrNotRun) {
+			failed.Store(true)
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		out[i] = e
@@ -103,6 +111,8 @@ func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone 
 			onDone(i, e)
 		}
 	}
+	notRun := func(i int) { done(i, Execution{Err: judge.ErrNotRun}) }
+
 	first := g.exec(ctx, p, stdins[0])
 	if first.CompileFailed() {
 		for i := range stdins {
@@ -118,19 +128,23 @@ func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone 
 	if len(rest) == 0 {
 		return out
 	}
+	if failed.Load() {
+		for i := range rest {
+			notRun(i + 1)
+		}
+		return out
+	}
 	if be, ok := g.Engine.(judge.BatchEngine); ok {
 		reqs := make([]judge.ExecRequest, len(rest))
 		for i, in := range rest {
 			reqs[i] = request(p, in)
 		}
-		results, err := be.ExecuteBatch(ctx, reqs)
-		if err == nil && len(results) == len(rest) {
-			for i, r := range results {
-				done(i+1, Execution{Result: r})
-			}
+		err := be.ExecuteBatch(ctx, reqs, func() bool { return !failed.Load() && ctx.Err() == nil },
+			func(i int, r judge.ExecResult, err error) { done(i+1, Execution{Result: r, Err: err}) })
+		if err == nil {
 			return out
 		}
-		// Fall back to single executions.
+		// The batch could not be started; fall back to single executions.
 	}
 	sem := make(chan struct{}, max(1, g.Concurrency))
 	var wg sync.WaitGroup
@@ -145,6 +159,10 @@ func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone 
 				return
 			}
 			defer func() { <-sem }()
+			if failed.Load() {
+				notRun(i + 1)
+				return
+			}
 			done(i+1, g.exec(ctx, p, in))
 		}()
 	}
@@ -225,8 +243,11 @@ func Verdict(mode domain.CompareMode, e Execution, expected *string) domain.Verd
 func ErrorMessage(e Execution) string {
 	switch {
 	case e.Err != nil:
+		if errors.Is(e.Err, judge.ErrNotRun) {
+			return e.Err.Error()
+		}
 		if errors.Is(e.Err, context.Canceled) || errors.Is(e.Err, context.DeadlineExceeded) {
-			return "execution was cancelled or timed out"
+			return "the execution was cancelled or timed out"
 		}
 		return e.Err.Error()
 	case e.Result.Status == judge.StatusInternalError:
@@ -283,7 +304,7 @@ func (g *Grader) Grade(ctx context.Context, p Program, mode domain.CompareMode, 
 			compileOutput = e.Result.CompileOutput
 		}
 		r := caseResult(mode, cases[i], e)
-		if r.Verdict == domain.VerdictInternalError && firstErr == "" {
+		if r.Verdict == domain.VerdictInternalError && firstErr == "" && !errors.Is(e.Err, judge.ErrNotRun) {
 			firstErr = ErrorMessage(e)
 		}
 		results[i] = &r

@@ -4,7 +4,7 @@ A bundle is a portable snapshot of part of a library: items, their test
 cases, and the collections that organise them. It is the unit of import,
 export and sharing.
 
-Format name `codeathropy.bundle`, **format version 1**.
+Format name `codeatrophy.bundle`, **format version 1**.
 
 ## Goals
 
@@ -19,7 +19,7 @@ Format name `codeathropy.bundle`, **format version 1**.
 
 ## Container
 
-A zip archive, conventionally named `<name>.codeathropy.zip`. Paths use `/`,
+A zip archive, conventionally named `<name>.codeatrophy.zip`. Paths use `/`,
 are relative, and must not contain `..` segments or be absolute. Text files
 are UTF-8 without a byte-order mark. Readers must ignore files and JSON fields
 they do not recognise.
@@ -38,8 +38,10 @@ items/
     starter/
       python.py
       cpp.cpp
-    solution/
-      reference.py
+    solutions/
+      solutions.json
+      01-hash-map-one-pass.py
+      02-brute-force.cpp
     tests/
       tests.json
       01.in
@@ -59,13 +61,14 @@ them and locate items through `bundle.json`.
 
 ```json
 {
-  "format": "codeathropy.bundle",
+  "format": "codeatrophy.bundle",
   "formatVersion": 1,
   "name": "DP study plan",
   "description": "",
   "author": "",
   "createdAt": "2026-01-31T12:00:00Z",
-  "generator": { "name": "codeathropy", "version": "0.1.0" },
+  "generator": { "name": "codeatrophy", "version": "0.1.0" },
+  "includes": { "solutions": true, "hiddenTests": true },
   "items": [
     { "id": "0193b2f0-...", "path": "items/two-sum-0193b2f0", "type": "problem", "title": "Two Sum", "contentHash": "sha256:9f2c..." }
   ],
@@ -90,6 +93,16 @@ them and locate items through `bundle.json`.
   `parentId` refers to another collection in this bundle or is `null`; a
   collection whose parent was not exported is written with `parentId: null`.
 - `collections` is `[]` for an item-selection export.
+- `includes` records what the export carried for every problem in it:
+  `solutions` is `false` when solutions were left out, `hiddenTests` is
+  `false` when only sample test cases were exported. Readers use it to tell
+  "left out" from "absent": with `solutions: true`, a problem without
+  `solutions/solutions.json` has no solutions; with `solutions: false`, its
+  local solutions are kept on import. Solutions or non-sample cases found in
+  a bundle whose `includes` says they were left out are ignored with a
+  warning. When `includes` is absent (a hand-made bundle), readers infer it
+  per problem: solutions are included if `solutions/solutions.json` exists,
+  hidden tests if any case has `sample: false`.
 
 ## `item.json`
 
@@ -109,8 +122,7 @@ them and locate items through `bundle.json`.
     "timeLimitMs": 2000,
     "memoryLimitKb": 262144,
     "compare": "tokens",
-    "starter": { "python": "starter/python.py", "cpp": "starter/cpp.cpp" },
-    "referenceSolution": { "language": "python", "path": "solution/reference.py" }
+    "starter": { "python": "starter/python.py", "cpp": "starter/cpp.cpp" }
   }
 }
 ```
@@ -118,11 +130,34 @@ them and locate items through `bundle.json`.
 - The Markdown body is always in `body.md` next to `item.json`.
 - `problem` is present only when `type` is `problem`. Paths inside it are
   relative to the item directory.
-- `referenceSolution` is `null` or absent when the bundle was exported without
-  solutions.
 - `variantOf` may name an item that is not in the bundle. On import the link
-  is kept if that item exists in the target library and dropped otherwise.
+  is kept if that item exists in the target library and dropped otherwise;
+  a dropped link is set to `null` before the content hash is compared, so
+  importing the same bundle again finds the item `unchanged`.
 - Field values follow the same rules as the HTTP API (`docs/api.md`).
+
+## `solutions/solutions.json`
+
+Written for every problem when solutions are included — with an empty
+`solutions` list for a problem that has none — and absent when the bundle
+was exported without solutions (`includes.solutions: false`), in which case
+the whole `solutions/` directory is absent.
+
+```json
+{
+  "solutions": [
+    { "name": "Hash map, one pass", "language": "python", "file": "01-hash-map-one-pass.py", "notes": "O(n) time, O(n) space.", "reference": true },
+    { "name": "Brute force", "language": "cpp", "file": "02-brute-force.cpp", "notes": "", "reference": false }
+  ]
+}
+```
+
+Order in `solutions` is the order they are listed in. `file` is a file name
+inside `solutions/` holding the source; writers name it
+`<two-digit index>-<slug-of-name>.<extension for the language>`, and readers
+take the language from `language`, never from the extension. At most one
+entry has `reference: true`; if several do, a reader keeps the first and
+reports a warning.
 
 ## `tests/tests.json`
 
@@ -147,6 +182,11 @@ exporting library; an importer stores it as-is.
 When a bundle is exported without hidden tests, only cases with
 `sample: true` are written.
 
+`.in` and `.out` files must be valid UTF-8 (test data is text). A case whose
+file is missing, larger than `limits.maxTestDataBytes`, or not valid UTF-8 is
+skipped with a warning naming the file and the reason; the rest of the item
+is imported.
+
 ## Content hash
 
 `contentHash` identifies an item's shareable content. It lets an importer
@@ -161,15 +201,16 @@ RFC 8785 (only `"`, `\` and control characters are escaped), containing
 ```
 type, title, summary, difficulty, tags (sorted), source, variantOf, body,
 problem: { timeLimitMs, memoryLimitKb, compare,
-           starterCode: { <language>: <source> },
-           referenceSolution: { language, source } | null },
-testCases: [ { name, stdin, expectedStdout, isSample } ]   (in order)
+           starterCode: { <language>: <source> } },
+solutions: [ { name, language, source, notes, isReference } ]   (in order)
+testCases: [ { name, stdin, expectedStdout, isSample } ]       (in order)
 ```
 
 Ids, timestamps, `origin`, `verified` and everything personal are excluded.
-`problem` and `testCases` are omitted for readings. The hash always describes
-what is *in the bundle*: if solutions or hidden tests were left out of the
-export, they are left out of the hash too.
+`problem`, `solutions` and `testCases` are omitted for readings. The hash
+always describes what is *in the bundle*: if solutions or hidden tests were
+left out of the export, they are left out of the hash too (`solutions` is
+then omitted entirely, as opposed to `[]` for a problem that has none).
 
 A reader must not trust the stored `contentHash`; it recomputes the hash from
 the files and uses the stored value only as an integrity check, reporting a
@@ -187,15 +228,17 @@ For each item in the bundle, compared with the target library by `id`:
 
 To decide `unchanged` vs `changed`, the importer computes the local item's
 hash over the same fields the bundle contains. If the bundle carries no
-reference solution or only sample tests, the local solution and hidden tests
-are ignored for the comparison — and preserved by an overwrite.
+solutions or only sample tests, the local solutions and hidden tests are
+ignored for the comparison — and preserved by an overwrite.
 
 Strategies for `changed` items:
 
 - `skip` — keep the local item.
 - `overwrite` — replace content with the bundle's. Personal state and
   submissions are kept. Test cases are replaced, except that local hidden
-  cases survive when the bundle has samples only.
+  cases survive when the bundle has samples only. Solutions are replaced by
+  the bundle's, except that local solutions survive when the bundle was
+  exported without solutions.
 - `duplicate` — create a separate item with a new id, leaving the local one
   alone.
 
@@ -203,7 +246,19 @@ Collections are matched by id and created when missing, preserving the
 bundle's nesting. For a collection that already exists, its name, description
 and place in the tree are left as they are locally, and bundle members that
 are not yet members are appended in bundle order. Items imported under the
-`duplicate` strategy take the place of their originals in bundle collections.
+`duplicate` strategy take the place of their originals in bundle collections,
+and a bundle item whose `variantOf` names an item duplicated in the same
+import points at the new copy.
+
+An `overwrite` increases the local item's revision only when its content
+other than test cases changes; replacing only test cases moves its
+`updatedAt` and leaves the revision alone. For a `changed` item, an importer
+reports which content fields differ, `type` first when the type differs.
+
+Collection parents that form a cycle are reported and broken by cutting the
+edge that closes the cycle (the collection reached last on the walk keeps
+its place; the one whose parent link closes the loop becomes a root).
+Collections that merely descend from a cycle keep their parents.
 
 New items start with default personal state (`todo`, not favorite, no notes).
 
@@ -214,9 +269,30 @@ An import is atomic: it is applied completely or not at all.
 A reader rejects the whole bundle if `bundle.json` is missing or malformed,
 the format name or version is unsupported, any path escapes the archive root,
 or the archive exceeds the size limits (compressed size, total uncompressed
-size, entry count). Problems confined to one item — a missing file, an
-unknown language id in starter code, an invalid field value — skip that item
-or field and are reported as warnings.
+size, entry count, number of collections). The error says which: for a
+malformed `bundle.json`, the field and the expected type, or the position of
+the syntax error. This server publishes its limits in `GET /api/v1/meta`
+(`maxImportBytes`, `maxImportUncompressedBytes`, `maxImportEntries`,
+`maxImportCollections`). The entry and collection limits are high enough for
+an export of any library the instance can hold, but the byte limits follow
+the operator's `CODEATROPHY_MAX_IMPORT_BYTES`: restoring a large export into
+another instance may need that raised.
+
+Problems confined to one item are reported as warnings that name the file
+and say what is wrong, and skip as little as possible:
+
+| Problem | Effect |
+| --- | --- |
+| `item.json` missing, not JSON, or with a wrongly typed field | The item is skipped (and dropped from collections) |
+| `id` in `item.json` differs from `bundle.json`, or `type` is not `problem`/`reading` | The item is skipped |
+| `title` missing, too long or not a single line | The item is skipped |
+| `body.md` missing, not valid UTF-8 or larger than `maxTextBytes` | The body is empty |
+| Invalid optional field (`summary`, `difficulty`, a limit, `compare`, a tag, `source`, `variantOf`) | That field takes its default; extra tags beyond the limit are dropped |
+| Unknown language, or missing/too large/non-UTF-8 source file, in `starter` | That language's starter code is skipped |
+| A solution with an unknown language, invalid name, or missing/too large/non-UTF-8 file | That solution is skipped |
+| `solutions.json` or `tests.json` not JSON or with a wrongly typed field | The item is skipped (importing it without them could replace the local ones with none) |
+| A test case file missing, too large or non-UTF-8 | That case is skipped |
+| Stored `contentHash` differs from the recomputed one | Warning only |
 
 ## Versioning
 
