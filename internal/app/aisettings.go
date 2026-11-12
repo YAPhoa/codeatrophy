@@ -3,13 +3,15 @@ package app
 import (
 	"context"
 	"errors"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // ProviderDefaults are what a provider uses when no model or base URL is set.
@@ -87,6 +89,41 @@ func (a *App) envFor(provider string) (model, baseURL, key string) {
 	return "", "", ""
 }
 
+// originOf returns the scheme://host[:port] of a URL, lower-cased with the
+// default port elided, or "" for an unparsable URL.
+func originOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme, host := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host
+}
+
+// effectiveBase is the base URL a provider will actually call.
+func (a *App) effectiveBase(provider, baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	return a.defaultBaseURL(provider)
+}
+
+// keyContext binds a stored key to its provider and origin (AEAD
+// additional data), so it never decrypts for any other.
+func keyContext(provider, origin string) string { return provider + "\n" + origin }
+
+// resolve returns a provider's effective settings. An API key is only ever
+// used with the origin it belongs to: a saved key with the origin it was
+// saved for, an environment key with the environment (or default) base URL.
 func (a *App) resolve(tx store.Tx, provider string) (resolvedProvider, error) {
 	var r resolvedProvider
 	envModel, envBase, envKey := a.envFor(provider)
@@ -104,21 +141,54 @@ func (a *App) resolve(tx store.Tx, provider string) (resolvedProvider, error) {
 	} else if envBase != "" {
 		r.baseURL, r.baseURLSource = envBase, "environment"
 	}
-	if v, ok, err := tx.GetSetting(providerKey(provider, "api_key")); err != nil {
+	origin := originOf(a.effectiveBase(provider, r.baseURL))
+	stored, storedOrigin, err := a.storedKey(tx, provider)
+	if err != nil {
 		return r, err
-	} else if ok {
-		plain, err := a.secrets.Decrypt(v)
-		if err != nil {
-			r.decryptFailed = true
-			a.log.Warn("a stored API key cannot be decrypted; it is ignored", "provider", provider)
-		} else {
-			r.apiKey, r.keySource = plain, "settings"
-		}
 	}
-	if r.apiKey == "" && envKey != "" {
+	if stored != "" && storedOrigin == origin {
+		r.apiKey, r.keySource = stored, "settings"
+	}
+	if r.apiKey == "" && envKey != "" && originOf(a.effectiveBase(provider, envBase)) == origin {
 		r.apiKey, r.keySource = envKey, "environment"
 	}
 	return r, nil
+}
+
+// storedKey returns the saved key and the origin it is bound to.
+func (a *App) storedKey(tx store.Tx, provider string) (key, origin string, err error) {
+	ct, ok, err := tx.GetSetting(providerKey(provider, "api_key"))
+	if err != nil || !ok {
+		return "", "", err
+	}
+	origin, _, err = tx.GetSetting(providerKey(provider, "api_key_origin"))
+	if err != nil {
+		return "", "", err
+	}
+	plain, derr := a.secrets.DecryptBound(ct, keyContext(provider, origin))
+	if derr != nil {
+		a.log.Warn("a stored API key cannot be decrypted; it is ignored", "provider", provider)
+		return "", "", nil
+	}
+	return plain, origin, nil
+}
+
+func (a *App) saveKey(tx store.Tx, provider, key, origin string) error {
+	ct, err := a.secrets.EncryptBound(key, keyContext(provider, origin))
+	if err != nil {
+		return err
+	}
+	if err := tx.SetSetting(providerKey(provider, "api_key"), ct); err != nil {
+		return err
+	}
+	return tx.SetSetting(providerKey(provider, "api_key_origin"), origin)
+}
+
+func (a *App) deleteKey(tx store.Tx, provider string) error {
+	if err := tx.DeleteSetting(providerKey(provider, "api_key")); err != nil {
+		return err
+	}
+	return tx.DeleteSetting(providerKey(provider, "api_key_origin"))
 }
 
 func (a *App) defaultModel(provider string) string {
@@ -148,7 +218,12 @@ func (a *App) ready(provider string, r resolvedProvider) bool {
 	case ai.ProviderAnthropic:
 		return r.apiKey != ""
 	case ai.ProviderOpenAICompatible:
-		return base != ""
+		// A key is optional for local servers, but the default (public
+		// OpenAI) endpoint needs one.
+		if base == "" {
+			return false
+		}
+		return r.apiKey != "" || originOf(base) != originOf(a.defaultBaseURL(provider))
 	}
 	return false
 }
@@ -262,35 +337,49 @@ func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISetti
 	var out AISettings
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		for p, pi := range in.Providers {
-			set := func(field string, o domain.Opt[string], secret bool) error {
+			_, storedOrigin, err := a.storedKey(tx, p)
+			if err != nil {
+				return err
+			}
+			set := func(field string, o domain.Opt[string]) error {
 				if !o.Set {
 					return nil
 				}
 				v := strings.TrimSpace(o.Val)
-				if o.Null || (v == "" && !secret) {
+				if o.Null || v == "" {
 					return tx.DeleteSetting(providerKey(p, field))
-				}
-				if v == "" {
-					// An empty key is treated like an omitted one.
-					return nil
-				}
-				if secret {
-					enc, err := a.secrets.Encrypt(v)
-					if err != nil {
-						return err
-					}
-					v = enc
 				}
 				return tx.SetSetting(providerKey(p, field), v)
 			}
-			if err := set("model", pi.Model, false); err != nil {
+			if err := set("model", pi.Model); err != nil {
 				return err
 			}
-			if err := set("base_url", pi.BaseURL, false); err != nil {
+			if err := set("base_url", pi.BaseURL); err != nil {
 				return err
 			}
-			if err := set("api_key", pi.APIKey, true); err != nil {
+			after, err := a.resolve(tx, p)
+			if err != nil {
 				return err
+			}
+			origin := originOf(a.effectiveBase(p, after.baseURL))
+			switch key := strings.TrimSpace(pi.APIKey.Val); {
+			case pi.APIKey.Set && pi.APIKey.Null:
+				if err := a.deleteKey(tx, p); err != nil {
+					return err
+				}
+			case pi.APIKey.Set && key != "":
+				// A new key belongs to the base URL it is saved with.
+				if err := a.saveKey(tx, p, key, origin); err != nil {
+					return err
+				}
+			default:
+				// Omitted (or empty) key: a stored key never follows the
+				// base URL to another origin.
+				if storedOrigin != "" && storedOrigin != origin {
+					if err := a.deleteKey(tx, p); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		if in.ActiveProvider.Set {
@@ -304,7 +393,7 @@ func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISetti
 			return err
 		}
 		if in.ActiveProvider.HasValue() && in.ActiveProvider.Val != "" && !out.Providers[in.ActiveProvider.Val].Ready {
-			return errField("activeProvider", "the provider is not ready: it needs a model"+
+			return errField("activeProvider", "the provider is not ready — it needs a model"+
 				map[string]string{ai.ProviderAnthropic: " and an API key", ai.ProviderOpenAICompatible: " and a base URL"}[in.ActiveProvider.Val])
 		}
 		return nil
@@ -420,6 +509,11 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 		r.model, r.modelSource = v, "request"
 	}
 	if v := strings.TrimSpace(in.BaseURL.Val); in.BaseURL.HasValue() && v != "" {
+		if originOf(v) != originOf(a.effectiveBase(in.Provider, r.baseURL)) {
+			// A saved or environment key is never sent to another origin;
+			// only a key given in this request may be.
+			r.apiKey, r.keySource = "", ""
+		}
 		r.baseURL, r.baseURLSource = v, "request"
 	}
 	if v := strings.TrimSpace(in.APIKey.Val); in.APIKey.HasValue() && v != "" {
@@ -436,7 +530,7 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 		if cfg.Model == "" {
 			return fail("no model is configured")
 		}
-		return fail("no API key is configured")
+		return fail("no API key is configured for this base URL")
 	}
 	factory, ok := a.providers[in.Provider]
 	if !ok {

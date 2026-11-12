@@ -88,9 +88,33 @@ describe('describeError', () => {
 
   it('explains a refused cross-origin change in terms of the server configuration', () => {
     const err = new ApiError(403, 'forbidden', 'cross-origin requests are not allowed');
-    expect(describeError(err).message).toMatch(/CODEATHROPY_PUBLIC_URL/);
-    expect(describeError(err).message).toMatch(/CODEATHROPY_ALLOWED_ORIGINS/);
+    expect(describeError(err).message).toMatch(/CODEATROPHY_PUBLIC_URL/);
+    expect(describeError(err).message).toMatch(/CODEATROPHY_ALLOWED_ORIGINS/);
     expect(errorLine(err)).toMatch(/refused/);
+  });
+
+  it('explains a refused host name, which can stop the page from loading at all', () => {
+    const plain = new ApiError(403, 'forbidden', 'host not allowed');
+    expect(describeError(plain).title).toMatch(/does not answer at this address/);
+    expect(describeError(plain).message).toMatch(/CODEATROPHY_ALLOWED_HOSTS/);
+    expect(describeError(plain).message).toMatch(/CODEATROPHY_PUBLIC_URL/);
+    expect(describeError(plain).action).toBe('retry');
+    expect(errorLine(plain)).toMatch(/CODEATROPHY_ALLOWED_HOSTS/);
+  });
+
+  it('leads with the server’s own message when it names the setting to change', () => {
+    const host = new ApiError(403, 'forbidden', 'host "library.example" is not allowed; add it to CODEATROPHY_ALLOWED_HOSTS or set CODEATROPHY_PUBLIC_URL');
+    const view = describeError(host);
+    expect(view.title).toMatch(/does not answer at this address/);
+    expect(view.message.startsWith('Host "library.example" is not allowed')).toBe(true);
+    expect(view.message.match(/CODEATROPHY_ALLOWED_HOSTS/g)).toHaveLength(1);
+    expect(view.message).toMatch(/change that setting and restart/);
+    expect(errorLine(host)).toMatch(/library\.example/);
+
+    const origin = new ApiError(403, 'forbidden', 'origin https://library.example is not allowed; set CODEATROPHY_ALLOWED_ORIGINS');
+    expect(describeError(origin).title).toMatch(/refused this change/);
+    expect(describeError(origin).message).toMatch(/^Origin https:\/\/library\.example is not allowed/);
+    expect(describeError(origin).message).toMatch(/Nothing was changed/);
   });
 
   it('points to the right place for unavailable services', () => {
@@ -163,7 +187,7 @@ describe('mcpConnection', () => {
   it('builds the endpoint and commands', () => {
     const c = mcpConnection(mcpUrl({ path: '/mcp', url: null }, 'http://localhost:8080/'), false);
     expect(c.url).toBe('http://localhost:8080/mcp');
-    expect(c.claudeCommand).toBe('claude mcp add --transport http codeathropy http://localhost:8080/mcp');
+    expect(c.claudeCommand).toBe('claude mcp add --transport http codeatrophy http://localhost:8080/mcp');
     expect(c.stdioCommand).toBe('npx mcp-remote http://localhost:8080/mcp');
   });
 

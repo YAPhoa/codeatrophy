@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,6 +26,8 @@ type Config struct {
 	AllowedOrigins []string
 	// PublicURL is the externally visible base URL, e.g. https://code.example.com.
 	PublicURL string
+	// AllowedHosts are extra Host header values accepted on /api/ and /mcp.
+	AllowedHosts []string
 
 	MaxImportBytes int64
 	MaxSourceBytes int
@@ -67,6 +70,7 @@ type MCPConfig struct {
 	Enabled        bool
 	Token          string
 	AllowedOrigins []string
+	MaxSessions    int
 }
 
 // Load reads the configuration from the environment.
@@ -128,17 +132,18 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Addr:           get("CODEATHROPY_ADDR", ":8080"),
-		DataDir:        get("CODEATHROPY_DATA_DIR", "./data"),
-		SecretKey:      getenv("CODEATHROPY_SECRET_KEY"),
-		LogFormat:      strings.ToLower(get("CODEATHROPY_LOG_FORMAT", "text")),
-		AllowedOrigins: list("CODEATHROPY_ALLOWED_ORIGINS"),
-		PublicURL:      strings.TrimRight(get("CODEATHROPY_PUBLIC_URL", ""), "/"),
-		MaxImportBytes: int64(getInt("CODEATHROPY_MAX_IMPORT_BYTES", 50<<20)),
-		MaxSourceBytes: getInt("CODEATHROPY_MAX_SOURCE_BYTES", 64<<10),
+		Addr:           get("CODEATROPHY_ADDR", ":8080"),
+		DataDir:        get("CODEATROPHY_DATA_DIR", "./data"),
+		SecretKey:      getenv("CODEATROPHY_SECRET_KEY"),
+		LogFormat:      strings.ToLower(get("CODEATROPHY_LOG_FORMAT", "text")),
+		AllowedOrigins: list("CODEATROPHY_ALLOWED_ORIGINS"),
+		PublicURL:      strings.TrimRight(get("CODEATROPHY_PUBLIC_URL", ""), "/"),
+		AllowedHosts:   list("CODEATROPHY_ALLOWED_HOSTS"),
+		MaxImportBytes: int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", 50<<20)),
+		MaxSourceBytes: getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
 	}
-	c.DBPath = get("CODEATHROPY_DB_PATH", filepath.Join(c.DataDir, "codeathropy.db"))
-	switch strings.ToLower(get("CODEATHROPY_LOG_LEVEL", "info")) {
+	c.DBPath = get("CODEATROPHY_DB_PATH", filepath.Join(c.DataDir, "codeatrophy.db"))
+	switch strings.ToLower(get("CODEATROPHY_LOG_LEVEL", "info")) {
 	case "debug":
 		c.LogLevel = slog.LevelDebug
 	case "info":
@@ -148,70 +153,71 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	case "error":
 		c.LogLevel = slog.LevelError
 	default:
-		errs = append(errs, fmt.Errorf("CODEATHROPY_LOG_LEVEL: must be debug, info, warn or error"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_LOG_LEVEL: must be debug, info, warn or error"))
 	}
 	if c.LogFormat != "text" && c.LogFormat != "json" {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_LOG_FORMAT: must be text or json"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_LOG_FORMAT: must be text or json"))
 	}
 	if c.PublicURL != "" {
 		if u, err := url.Parse(c.PublicURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			errs = append(errs, fmt.Errorf("CODEATHROPY_PUBLIC_URL: must be an absolute http(s) URL"))
+			errs = append(errs, fmt.Errorf("CODEATROPHY_PUBLIC_URL: must be an absolute http(s) URL"))
 		} else {
 			// The public origin may send state-changing requests.
 			c.AllowedOrigins = append(c.AllowedOrigins, u.Scheme+"://"+u.Host)
 		}
 	}
 	if c.MaxImportBytes < 1<<10 {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_MAX_IMPORT_BYTES: too small"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_IMPORT_BYTES: too small"))
 	}
 	if c.MaxSourceBytes < 1<<10 || c.MaxSourceBytes > 16<<20 {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_MAX_SOURCE_BYTES: must be between 1024 and 16777216"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_SOURCE_BYTES: must be between 1024 and 16777216"))
 	}
 
 	c.Judge = JudgeConfig{
-		Engine:          strings.ToLower(get("CODEATHROPY_JUDGE_ENGINE", "none")),
-		Workers:         getInt("CODEATHROPY_JUDGE_WORKERS", 2),
-		Concurrency:     getInt("CODEATHROPY_JUDGE_CONCURRENCY", 4),
-		Judge0URL:       get("CODEATHROPY_JUDGE0_URL", "http://judge0-server:2358"),
-		Judge0AuthToken: getenv("CODEATHROPY_JUDGE0_AUTH_TOKEN"),
-		Judge0Cgroups:   getBool("CODEATHROPY_JUDGE0_CGROUPS", false),
-		Judge0Timeout:   getDur("CODEATHROPY_JUDGE0_TIMEOUT", 5*time.Minute),
+		Engine:          strings.ToLower(get("CODEATROPHY_JUDGE_ENGINE", "none")),
+		Workers:         getInt("CODEATROPHY_JUDGE_WORKERS", 2),
+		Concurrency:     getInt("CODEATROPHY_JUDGE_CONCURRENCY", 4),
+		Judge0URL:       get("CODEATROPHY_JUDGE0_URL", "http://judge0-server:2358"),
+		Judge0AuthToken: getenv("CODEATROPHY_JUDGE0_AUTH_TOKEN"),
+		Judge0Cgroups:   getBool("CODEATROPHY_JUDGE0_CGROUPS", false),
+		Judge0Timeout:   getDur("CODEATROPHY_JUDGE0_TIMEOUT", 5*time.Minute),
 	}
 	if c.Judge.Engine != "none" && c.Judge.Engine != "judge0" {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_JUDGE_ENGINE: must be none or judge0"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_JUDGE_ENGINE: must be none or judge0"))
 	}
 	if c.Judge.Workers < 1 || c.Judge.Concurrency < 1 {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_JUDGE_WORKERS and CODEATHROPY_JUDGE_CONCURRENCY must be at least 1"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_JUDGE_WORKERS and CODEATROPHY_JUDGE_CONCURRENCY must be at least 1"))
 	}
-	if v := get("CODEATHROPY_JUDGE0_MEMORY_ALLOWANCES", ""); v != "" {
+	if v := get("CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES", ""); v != "" {
 		m, err := parseIntMap(v)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("CODEATHROPY_JUDGE0_MEMORY_ALLOWANCES: %w", err))
+			errs = append(errs, fmt.Errorf("CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES: %w", err))
 		}
 		c.Judge.Judge0MemoryAllowanceKb = m
 	}
 
 	c.AI = AIConfig{
-		Provider:         strings.ToLower(get("CODEATHROPY_AI_PROVIDER", "")),
-		Timeout:          getDur("CODEATHROPY_AI_TIMEOUT", 5*time.Minute),
-		AnthropicAPIKey:  get("CODEATHROPY_ANTHROPIC_API_KEY", get("ANTHROPIC_API_KEY", "")),
-		AnthropicModel:   get("CODEATHROPY_ANTHROPIC_MODEL", ""),
-		AnthropicBaseURL: get("CODEATHROPY_ANTHROPIC_BASE_URL", ""),
-		OpenAIAPIKey:     get("CODEATHROPY_OPENAI_API_KEY", get("OPENAI_API_KEY", "")),
-		OpenAIModel:      get("CODEATHROPY_OPENAI_MODEL", ""),
-		OpenAIBaseURL:    get("CODEATHROPY_OPENAI_BASE_URL", ""),
+		Provider:         strings.ToLower(get("CODEATROPHY_AI_PROVIDER", "")),
+		Timeout:          getDur("CODEATROPHY_AI_TIMEOUT", 5*time.Minute),
+		AnthropicAPIKey:  get("CODEATROPHY_ANTHROPIC_API_KEY", get("ANTHROPIC_API_KEY", "")),
+		AnthropicModel:   get("CODEATROPHY_ANTHROPIC_MODEL", ""),
+		AnthropicBaseURL: get("CODEATROPHY_ANTHROPIC_BASE_URL", ""),
+		OpenAIAPIKey:     get("CODEATROPHY_OPENAI_API_KEY", get("OPENAI_API_KEY", "")),
+		OpenAIModel:      get("CODEATROPHY_OPENAI_MODEL", ""),
+		OpenAIBaseURL:    get("CODEATROPHY_OPENAI_BASE_URL", ""),
 	}
 	if p := c.AI.Provider; p != "" && p != "none" && p != "anthropic" && p != "openai_compatible" {
-		errs = append(errs, fmt.Errorf("CODEATHROPY_AI_PROVIDER: must be anthropic, openai_compatible or none"))
+		errs = append(errs, fmt.Errorf("CODEATROPHY_AI_PROVIDER: must be anthropic, openai_compatible or none"))
 	}
 	if c.AI.Provider == "none" {
 		c.AI.Provider = ""
 	}
 
 	c.MCP = MCPConfig{
-		Enabled:        getBool("CODEATHROPY_MCP_ENABLED", true),
-		Token:          getenv("CODEATHROPY_MCP_TOKEN"),
-		AllowedOrigins: list("CODEATHROPY_MCP_ALLOWED_ORIGINS"),
+		Enabled:        getBool("CODEATROPHY_MCP_ENABLED", true),
+		Token:          getenv("CODEATROPHY_MCP_TOKEN"),
+		AllowedOrigins: list("CODEATROPHY_MCP_ALLOWED_ORIGINS"),
+		MaxSessions:    getInt("CODEATROPHY_MCP_MAX_SESSIONS", 100),
 	}
 	return c, errors.Join(errs...)
 }
@@ -234,4 +240,43 @@ func parseIntMap(s string) (map[string]int, error) {
 		out[strings.TrimSpace(k)] = n
 	}
 	return out, nil
+}
+
+// HostAllowList is every Host header value the server accepts besides
+// loopback: the hosts of the public URL and of the allowed origins, and the
+// explicitly allowed hosts.
+func (c Config) HostAllowList() []string {
+	var out []string
+	add := func(raw string) {
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			out = append(out, strings.ToLower(u.Hostname()))
+		}
+	}
+	if c.PublicURL != "" {
+		add(c.PublicURL)
+	}
+	for _, o := range append(append([]string{}, c.AllowedOrigins...), c.MCP.AllowedOrigins...) {
+		add(o)
+	}
+	for _, h := range c.AllowedHosts {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			h = host
+		}
+		out = append(out, strings.Trim(h, "[]"))
+	}
+	return dedupe(out)
+}
+
+// dedupe drops repeated values, keeping the first occurrence.
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	out := in[:0]
+	for _, s := range in {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }

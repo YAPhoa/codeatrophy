@@ -1,6 +1,6 @@
-# Codeathropy
+# Codeatrophy
 
-Codeathropy is a self-hosted web app for keeping a personal library of coding
+Codeatrophy is a self-hosted web app for keeping a personal library of coding
 challenges and technical readings. Items can be written by hand or drafted by
 an AI provider from a rough or incomplete snippet. Coding problems carry test
 cases and are run against a pluggable judge engine. Any part of the library
@@ -14,7 +14,7 @@ the HTTP API and the MCP endpoint) plus the judge engine's containers.
 
 | Path | Contents |
 | --- | --- |
-| `cmd/codeathropy/` | Server entry point |
+| `cmd/codeatrophy/` | Server entry point |
 | `internal/` | Go packages: application services, HTTP API, MCP server, storage, AI providers, judge engines, grading, bundles |
 | `web/` | Web UI (TypeScript, React, Vite) |
 | `docs/` | Architecture, HTTP API reference, MCP server, bundle format |

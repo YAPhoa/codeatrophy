@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -14,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 // Prefix is where the API is mounted.
@@ -28,6 +30,10 @@ type Options struct {
 	// AllowedOrigins are extra origins allowed to send state-changing
 	// requests, in addition to the server's own and loopback origins.
 	AllowedOrigins []string
+	// AllowedHosts are the Host header values (host names or addresses,
+	// without port) accepted on /api/ and /mcp in addition to loopback
+	// names and addresses. "*" accepts any host.
+	AllowedHosts []string
 	// MCP is mounted at MCPPath when non-nil.
 	MCP     http.Handler
 	MCPPath string
@@ -40,6 +46,7 @@ type Server struct {
 	app     *app.App
 	log     *slog.Logger
 	origins []string
+	hosts   []string
 	api     *http.ServeMux
 	mcp     http.Handler
 	mcpPath string
@@ -48,7 +55,7 @@ type Server struct {
 
 // New returns the root HTTP handler.
 func New(opts Options) *Server {
-	s := &Server{app: opts.App, log: opts.Logger, origins: opts.AllowedOrigins, mcp: opts.MCP,
+	s := &Server{app: opts.App, log: opts.Logger, origins: opts.AllowedOrigins, hosts: opts.AllowedHosts, mcp: opts.MCP,
 		mcpPath: opts.MCPPath, web: opts.Web, api: http.NewServeMux()}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -87,6 +94,11 @@ func (s *Server) routes() {
 	s.handle("PUT /items/{id}/testcases/order", s.orderTestCases)
 	s.handle("POST /items/{id}/testcases/verify", s.verifyTestCases)
 	s.handle("PATCH /testcases/{id}", s.updateTestCase)
+
+	s.handle("GET /items/{id}/solutions", s.listSolutions)
+	s.handle("POST /items/{id}/solutions", s.createSolution)
+	s.handle("PATCH /solutions/{id}", s.updateSolution)
+	s.handle("DELETE /solutions/{id}", s.deleteSolution)
 	s.handle("DELETE /testcases/{id}", s.deleteTestCase)
 
 	s.handle("GET /collections", s.listCollections)
@@ -114,6 +126,8 @@ func (s *Server) routes() {
 	s.handle("GET /settings/ai", s.getAISettings)
 	s.handle("PUT /settings/ai", s.putAISettings)
 	s.handle("POST /settings/ai/test", s.testAISettings)
+	s.handle("GET /settings/preferences", s.getPreferences)
+	s.handle("PUT /settings/preferences", s.putPreferences)
 
 	s.handle("GET /styles", s.listStyles)
 	s.handle("POST /styles", s.createStyle)
@@ -171,17 +185,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Referrer-Policy", "no-referrer")
 
 	path := r.URL.Path
+	isAPI := path == "/api" || strings.HasPrefix(path, "/api/")
+	isMCP := path == s.mcpPath || strings.HasPrefix(path, s.mcpPath+"/")
+	if (isAPI || isMCP) && !HostAllowed(r.Host, s.hosts) {
+		writeJSON(rec, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden, Message: hostMessage(r.Host)}})
+		return
+	}
 	switch {
-	case path == "/api" || strings.HasPrefix(path, "/api/"):
+	case isAPI:
 		h.Set("Cache-Control", "no-store")
 		setDeadlines(rec, path)
 		if !safeMethod(r.Method) && !s.originAllowed(r, s.origins) {
 			writeJSON(rec, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden,
-				Message: "cross-origin requests are not allowed; set CODEATHROPY_ALLOWED_ORIGINS to allow this origin"}})
+				Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
 			return
 		}
 		s.api.ServeHTTP(rec, r)
-	case path == s.mcpPath || strings.HasPrefix(path, s.mcpPath+"/"):
+	case isMCP:
 		// MCP streams are long-lived: no deadline (and clear any left on a
 		// kept-alive connection by an earlier request).
 		rc := http.NewResponseController(rec)
@@ -228,13 +248,47 @@ func setDeadlines(w http.ResponseWriter, path string) {
 	_ = rc.SetReadDeadline(time.Now().Add(d))
 }
 
+// HostAllowed reports whether a request's Host header is acceptable: a
+// loopback name or address (any port), or one of allowed. This blocks DNS
+// rebinding, where a hostile page re-points its own host name at this
+// server and then reads from it as same-origin.
+func HostAllowed(hostport string, allowed []string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	for _, a := range allowed {
+		if a == "*" || strings.EqualFold(strings.TrimSuffix(a, "."), host) {
+			return true
+		}
+	}
+	return false
+}
+
+func hostMessage(host string) string {
+	return fmt.Sprintf("requests for host %q are not accepted; set CODEATROPHY_PUBLIC_URL to the URL you reach this "+
+		"server at, or add the host to CODEATROPHY_ALLOWED_HOSTS", host)
+}
+
 func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
 }
 
-// OriginAllowed reports whether a request's Origin header (if any) is the
-// server's own origin, a loopback origin, or in allowed.
-func OriginAllowed(r *http.Request, allowed []string) bool {
+// OriginAllowed reports whether a request's Origin header (if any) is
+// acceptable: a loopback origin, one of allowedOrigins, or an origin whose
+// host is in allowedHosts. It never compares against the request's own Host
+// header, which an attacker controls under DNS rebinding.
+func OriginAllowed(r *http.Request, allowedOrigins, allowedHosts []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
@@ -243,13 +297,15 @@ func OriginAllowed(r *http.Request, allowed []string) bool {
 		return false
 	}
 	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
-	if strings.EqualFold(u.Host, r.Host) {
-		return true
-	}
 	host := u.Hostname()
+	for _, h := range allowedHosts {
+		if h != "*" && strings.EqualFold(strings.TrimSuffix(h, "."), host) {
+			return true
+		}
+	}
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
@@ -257,7 +313,7 @@ func OriginAllowed(r *http.Request, allowed []string) bool {
 		return true
 	}
 	o := strings.TrimRight(origin, "/")
-	for _, a := range allowed {
+	for _, a := range allowedOrigins {
 		if strings.EqualFold(a, o) {
 			return true
 		}
@@ -266,7 +322,7 @@ func OriginAllowed(r *http.Request, allowed []string) bool {
 }
 
 func (s *Server) originAllowed(r *http.Request, allowed []string) bool {
-	return OriginAllowed(r, allowed)
+	return OriginAllowed(r, allowed, s.hosts)
 }
 
 // Handlers.
@@ -447,12 +503,17 @@ func (s *Server) orderTestCases(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) verifyTestCases(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		UpdateExpected bool `json:"updateExpected"`
+		UpdateExpected bool    `json:"updateExpected"`
+		SolutionID     *string `json:"solutionId"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	res, err := s.app.VerifyTestCases(r.Context(), r.PathValue("id"), in.UpdateExpected)
+	solutionID := ""
+	if in.SolutionID != nil {
+		solutionID = *in.SolutionID
+	}
+	res, err := s.app.VerifyTestCases(r.Context(), r.PathValue("id"), in.UpdateExpected, solutionID)
 	if err != nil {
 		return err
 	}
@@ -867,5 +928,70 @@ func (s *Server) importBundle(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) listSolutions(w http.ResponseWriter, r *http.Request) error {
+	l, err := s.app.ListSolutions(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) createSolution(w http.ResponseWriter, r *http.Request) error {
+	var in domain.ItemSolutionInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	sol, err := s.app.CreateSolution(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, sol)
+	return nil
+}
+
+func (s *Server) updateSolution(w http.ResponseWriter, r *http.Request) error {
+	var in domain.ItemSolutionInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	sol, err := s.app.UpdateSolution(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, sol)
+	return nil
+}
+
+func (s *Server) deleteSolution(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteSolution(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) getPreferences(w http.ResponseWriter, r *http.Request) error {
+	p, err := s.app.GetPreferences(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) putPreferences(w http.ResponseWriter, r *http.Request) error {
+	var raw json.RawMessage
+	if err := decode(r, &raw); err != nil {
+		return err
+	}
+	p, err := s.app.UpdatePreferences(r.Context(), raw)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
 	return nil
 }

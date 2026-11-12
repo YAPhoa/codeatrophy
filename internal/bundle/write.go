@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 // JSON shapes of the files in a bundle.
@@ -24,8 +24,14 @@ type bundleJSON struct {
 	Author        string           `json:"author"`
 	CreatedAt     time.Time        `json:"createdAt"`
 	Generator     generatorJSON    `json:"generator"`
+	Includes      *includesJSON    `json:"includes,omitempty"`
 	Items         []itemEntryJSON  `json:"items"`
 	Collections   []collectionJSON `json:"collections"`
+}
+
+type includesJSON struct {
+	Solutions   bool `json:"solutions"`
+	HiddenTests bool `json:"hiddenTests"`
 }
 
 type generatorJSON struct {
@@ -65,16 +71,22 @@ type itemJSON struct {
 }
 
 type problemJSON struct {
-	TimeLimitMs       int               `json:"timeLimitMs"`
-	MemoryLimitKb     int               `json:"memoryLimitKb"`
-	Compare           string            `json:"compare"`
-	Starter           map[string]string `json:"starter"`
-	ReferenceSolution *solutionRefJSON  `json:"referenceSolution"`
+	TimeLimitMs   int               `json:"timeLimitMs"`
+	MemoryLimitKb int               `json:"memoryLimitKb"`
+	Compare       string            `json:"compare"`
+	Starter       map[string]string `json:"starter"`
 }
 
-type solutionRefJSON struct {
-	Language string `json:"language"`
-	Path     string `json:"path"`
+type solutionsJSON struct {
+	Solutions []solutionJSON `json:"solutions"`
+}
+
+type solutionJSON struct {
+	Name      string `json:"name"`
+	Language  string `json:"language"`
+	File      string `json:"file"`
+	Notes     string `json:"notes"`
+	Reference bool   `json:"reference"`
 }
 
 type testsJSON struct {
@@ -132,6 +144,9 @@ func Write(w io.Writer, b *Bundle) error {
 		Items:       []itemEntryJSON{},
 		Collections: []collectionJSON{},
 	}
+	if inc := b.Meta.Includes; inc != nil {
+		manifest.Includes = &includesJSON{Solutions: inc.Solutions, HiddenTests: inc.HiddenTests}
+	}
 	used := map[string]bool{}
 	type pending struct {
 		name string
@@ -173,10 +188,22 @@ func Write(w io.Writer, b *Bundle) error {
 				pj.Starter[lang] = rel
 				files = append(files, pending{dir + "/" + rel, []byte(src)})
 			}
-			if p.ReferenceSolution != nil {
-				rel := "solution/reference." + extension(p.ReferenceSolution.Language)
-				pj.ReferenceSolution = &solutionRefJSON{Language: p.ReferenceSolution.Language, Path: rel}
-				files = append(files, pending{dir + "/" + rel, []byte(p.ReferenceSolution.Source)})
+			if it.SolutionsIncluded {
+				// Written even when empty, so that "no solutions" and
+				// "exported without solutions" stay distinguishable.
+				width := max(2, len(fmt.Sprint(len(it.Solutions))))
+				sj := solutionsJSON{Solutions: []solutionJSON{}}
+				for n, s := range it.Solutions {
+					file := fmt.Sprintf("%0*d-%s.%s", width, n+1, Slug(s.Name), extension(s.Language))
+					sj.Solutions = append(sj.Solutions, solutionJSON{Name: s.Name, Language: s.Language, File: file,
+						Notes: s.Notes, Reference: s.IsReference})
+					files = append(files, pending{dir + "/solutions/" + file, []byte(s.Source)})
+				}
+				data, err := marshalPretty(sj)
+				if err != nil {
+					return err
+				}
+				files = append(files, pending{dir + "/solutions/solutions.json", data})
 			}
 			ij.Problem = pj
 			if len(it.TestCases) > 0 {

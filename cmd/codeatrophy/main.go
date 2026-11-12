@@ -1,4 +1,4 @@
-// Command codeathropy runs the Codeathropy server: the web UI, the HTTP API
+// Command codeatrophy runs the Codeatrophy server: the web UI, the HTTP API
 // and the MCP endpoint.
 package main
 
@@ -15,32 +15,32 @@ import (
 	"syscall"
 	"time"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/ai/anthropic"
-	"codeathropy/internal/ai/openaicompat"
-	"codeathropy/internal/app"
-	"codeathropy/internal/config"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/httpapi"
-	"codeathropy/internal/judge"
-	"codeathropy/internal/judge/judge0"
-	"codeathropy/internal/mcpserver"
-	"codeathropy/internal/secrets"
-	"codeathropy/internal/store/sqlite"
-	"codeathropy/internal/webui"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/anthropic"
+	"codeatrophy/internal/ai/openaicompat"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/config"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/httpapi"
+	"codeatrophy/internal/judge"
+	"codeatrophy/internal/judge/judge0"
+	"codeatrophy/internal/mcpserver"
+	"codeatrophy/internal/secrets"
+	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/webui"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "0.1.0"
 
-const usage = `Usage: codeathropy [command]
+const usage = `Usage: codeatrophy [command]
 
 Commands:
   serve        Run the server (default)
-  healthcheck  Exit 0 if the server at CODEATHROPY_ADDR answers, 1 otherwise
+  healthcheck  Exit 0 if the server at CODEATROPHY_ADDR answers, 1 otherwise
   version      Print the version
 
-Configuration is read from CODEATHROPY_* environment variables; see .env.example.
+Configuration is read from CODEATROPHY_* environment variables; see .env.example.
 `
 
 func main() {
@@ -63,7 +63,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "codeathropy:", err)
+		fmt.Fprintln(os.Stderr, "codeatrophy:", err)
 		os.Exit(1)
 	}
 }
@@ -155,16 +155,17 @@ func serve() error {
 	}
 	defer a.Stop()
 
+	hosts := cfg.HostAllowList()
 	var mcpHandler http.Handler
 	if cfg.MCP.Enabled {
 		mcpOrigins := append(append([]string{}, cfg.AllowedOrigins...), cfg.MCP.AllowedOrigins...)
 		mcpHandler = mcpserver.Handler(mcpserver.Options{
-			App: a, Logger: log, Token: cfg.MCP.Token,
-			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins) },
+			App: a, Logger: log, Token: cfg.MCP.Token, MaxSessions: cfg.MCP.MaxSessions,
+			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})
 	}
 	handler := httpapi.New(httpapi.Options{
-		App: a, Logger: log, AllowedOrigins: cfg.AllowedOrigins,
+		App: a, Logger: log, AllowedOrigins: cfg.AllowedOrigins, AllowedHosts: hosts,
 		MCP: mcpHandler, MCPPath: "/mcp", Web: webui.Handler(),
 	})
 	srv := &http.Server{
@@ -178,7 +179,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	log.Info("codeathropy started", "version", version, "addr", ln.Addr().String(), "data", cfg.DataDir,
+	log.Info("codeatrophy started", "version", version, "addr", ln.Addr().String(), "data", cfg.DataDir,
 		"secretKey", keySource, "judge", cfg.Judge.Engine, "mcp", cfg.MCP.Enabled, "ui", webui.Built())
 
 	errc := make(chan error, 1)
@@ -201,7 +202,7 @@ func serve() error {
 
 // healthcheck requests /api/v1/meta from the local server.
 func healthcheck() error {
-	addr := os.Getenv("CODEATHROPY_ADDR")
+	addr := os.Getenv("CODEATROPHY_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -213,7 +214,14 @@ func healthcheck() error {
 		host = "127.0.0.1"
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://" + net.JoinHostPort(strings.Trim(host, "[]"), port) + httpapi.Prefix + "/meta")
+	req, err := http.NewRequest(http.MethodGet, "http://"+net.JoinHostPort(strings.Trim(host, "[]"), port)+httpapi.Prefix+"/meta", nil)
+	if err != nil {
+		return err
+	}
+	// Whatever address the server listens on, the probe comes from inside
+	// the container: name it as loopback so the Host allow-list accepts it.
+	req.Host = net.JoinHostPort("localhost", port)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

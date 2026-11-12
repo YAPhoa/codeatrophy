@@ -1,6 +1,6 @@
 # Architecture
 
-Codeathropy is a single-user, self-hosted library for coding challenges and
+Codeatrophy is a single-user, self-hosted library for coding challenges and
 technical readings. This document describes the components, the boundaries
 between them, and the reasoning behind the main design decisions.
 
@@ -19,7 +19,7 @@ between them, and the reasoning behind the main design decisions.
                  │   └─ bundle    import / export             │
                  │  store (SQLite)                            │
                  └────────────────────────────────────────────┘
-                   codeathropy server (Go, one binary)
+                   codeatrophy server (Go, one binary)
 ```
 
 The server is the only stateful component the project owns. The judge engine
@@ -37,8 +37,12 @@ same change made through the other.
 - **Item** — one entry in the library. `type` is `problem` (a coding challenge)
   or `reading` (a technical note or article). Both share a title, Markdown
   body, summary, tags, source attribution and personal state (status, favorite,
-  notes). Problems additionally carry limits, starter code, an optional
-  reference solution and test cases.
+  notes). Problems additionally carry limits, starter code, saved solutions
+  and test cases.
+- **Solution** — a saved program for a problem: another approach, another
+  language, a brute force. At most one per problem is the *reference
+  solution*, the one that computes and verifies expected outputs;
+  `problem.referenceSolution` on the item is a view of it.
 - **Test case** — stdin plus expected stdout for a problem. Sample cases are
   shown with the statement and used by "Run"; all cases are used by "Submit".
   Each case records its `origin` (`manual`, `ai`, `import`) and whether its
@@ -63,7 +67,7 @@ bundle update existing items instead of duplicating them.
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/codeathropy` | Entry point: configuration, wiring, subcommands |
+| `cmd/codeatrophy` | Entry point: configuration, wiring, subcommands |
 | `internal/config` | Environment-based configuration |
 | `internal/domain` | Core types and validation; no I/O |
 | `internal/store` | Persistence interface and the SQLite implementation, migrations |
@@ -133,7 +137,11 @@ Consequences of this split:
   engines. Two modes exist: `tokens` (whitespace-insensitive, the default) and
   `exact` (trailing whitespace ignored).
 - Engines may implement an optional batch interface as an optimisation; the
-  grader falls back to bounded-concurrency single executions.
+  grader falls back to bounded-concurrency single executions. Either way a
+  batch streams each result as it finishes, the engine timeout applies to
+  each chunk of work rather than to the whole set, and after the first engine
+  error no further cases are started: the results that finished are kept and
+  the rest are reported as `internal_error`, never re-executed.
 
 The reference engine is [Judge0](https://github.com/judge0/judge0), run as
 additional containers in the Compose stack and reached over its REST API. The
@@ -154,6 +162,16 @@ space. In this mode only the wall-clock limit stops a running program, so the
 adapter keeps it close to the time limit. Operators on cgroup v1 hosts can
 switch cgroup accounting back on. All of this stays inside the Judge0
 adapter: the grader sees the same `ExecResult` statuses from every engine.
+
+The adapter also asks Judge0 for an output-file limit large enough for the
+largest expected output a test case may hold (`maxTestDataBytes`), and the
+Compose stack raises Judge0's own ceiling to match; otherwise a correct
+program printing more than Judge0's 1 MiB default would be cut off. When a
+program is killed by a signal, the shell Judge0 runs it under appends a line
+such as `Segmentation fault (core dumped)` to stderr; the adapter removes that
+line only when it is provably the wrapper's (the exit code is 128 + that
+signal and the line names the exact run command) and reports the signal in
+the result's message instead, so the program's own stderr is kept intact.
 
 Problems are judged on a stdin/stdout basis. That is the model every sandbox
 supports natively and it keeps problems language-agnostic.
@@ -244,6 +262,17 @@ therefore does not expose provider credentials. Keys are write-only through
 the API — responses carry only a "set" flag and the last four characters — and
 are never exposed over MCP, written to logs, or included in bundles.
 
+A key is only ever sent to the origin it was stored for. A saved key is
+stored with the origin (scheme, host, port) of the provider's base URL at the
+time, and that origin is bound into the ciphertext as AEAD additional data,
+so a key cannot be decrypted for another origin even by editing the database.
+Changing the base URL to another origin without entering a new key deletes
+the saved one; an environment key belongs to the environment's (or default)
+base URL; and a connection test against another origin sends only a key
+given in that request. Without this, anyone able to change the settings —
+including a page that got past the request checks — could redirect the
+stored key to a server of their choosing.
+
 With no provider configured the AI endpoints return `ai_unavailable` and the
 UI falls back to manual authoring.
 
@@ -273,8 +302,8 @@ Design points:
   and carry the item `revision` so an assistant never silently overwrites a
   concurrent human edit.
 - **Access.** The endpoint can be disabled, and can require a bearer token.
-  Requests are checked against an allow-list of `Origin` values to block
-  DNS-rebinding from web pages.
+  It shares the HTTP API's request checks (below). Idle sessions are closed
+  after 30 minutes and the number of open sessions is capped.
 
 ## Bundles
 
@@ -305,6 +334,26 @@ the API so UI work does not require the backend.
 server's port is published on loopback only by default: the app has no
 authentication and can execute code, so exposing it beyond the host is an
 explicit operator decision (put it behind a reverse proxy that authenticates).
+
+Because there is no authentication, two request checks protect `/api/` and
+`/mcp` from web pages the user happens to visit:
+
+- **Host allow-list (DNS rebinding).** A page on `attacker.example` can have
+  its DNS name re-pointed at `127.0.0.1`; the browser then treats requests to
+  the local server as same-origin and sends no foreign `Origin` header, so an
+  origin check alone cannot stop it. What the browser does send is
+  `Host: attacker.example`. The server therefore accepts only `Host` values
+  that name it — loopback names and addresses, the host of the public URL,
+  the hosts of the allowed origins, and `CODEATROPHY_ALLOWED_HOSTS` — and
+  checks this before anything else. Reaching the server over the LAN by
+  address or name requires listing it (or setting the public URL).
+- **Origin check (CSRF).** State-changing requests that carry an `Origin`
+  header must come from a loopback origin or the configured allowed origins
+  and hosts. The comparison is against configuration only, never against the
+  request's `Host`, which the attacker controls in the rebinding case.
+
+The container's health check calls the server on loopback with a loopback
+`Host`, so it passes whatever the allow-list holds.
 
 Configuration is by environment variable, documented in `.env.example`.
 

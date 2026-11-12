@@ -86,6 +86,110 @@
   display: none;
 }
 
+/* ---- Minimised navigation: a rail of icons ---- */
+
+.shell.is-rail {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+}
+
+.sidebar.is-rail {
+  align-items: center;
+  gap: 2px;
+  padding: 10px 0 8px;
+}
+
+.rail-brand {
+  display: inline-flex;
+  margin-bottom: 6px;
+  border-radius: 6px;
+}
+
+.rail-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.rail-item:hover {
+  background: var(--surface-3);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.rail-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.rail-new {
+  margin-top: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.rail-new:hover {
+  background: var(--accent-hover);
+  color: var(--on-accent);
+}
+
+.rail-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 0;
+  margin-top: 8px;
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+
+.rail-sep {
+  width: 20px;
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border);
+  flex: none;
+}
+
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+
+.rail-svc {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 36px;
+  padding: 5px 0 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.rail-svc:hover {
+  background: var(--surface-3);
+  color: var(--text-2);
+  text-decoration: none;
+}
+
 .sidebar-actions {
   display: flex;
   flex-direction: column;
@@ -545,6 +649,10 @@ button.nav-twisty:hover {
 
   .sidebar-close {
     display: inline-flex;
+  }
+
+  .sidebar-minimise {
+    display: none;
   }
 
   .drawer-scrim {

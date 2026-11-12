@@ -3,7 +3,7 @@ package ai
 import (
 	"slices"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 // Schema helpers. Every object lists all of its properties as required and
@@ -118,11 +118,12 @@ type ModelDraft struct {
 	Assumptions []string `json:"assumptions"`
 }
 
-// TestCasesSchema is the output schema for test-case generation.
-func TestCasesSchema() map[string]any {
+// TestCasesSchema is the output schema for test-case generation. The
+// reference solution must be in the requested language.
+func TestCasesSchema(language string) map[string]any {
 	return obj(map[string]any{
 		"referenceSolution": obj(map[string]any{
-			"language": enum("Language id", languageIDs()...),
+			"language": enum("Language id; must be the requested language", language),
 			"source":   str("Complete program reading stdin and writing stdout"),
 		}),
 		"cases": array(obj(map[string]any{

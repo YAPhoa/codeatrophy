@@ -140,18 +140,18 @@ describe('request', () => {
 
   it('uploads bundles as multipart without a JSON content type', async () => {
     const calls = stub(() => json({ created: 1, updated: 0, skipped: 0, duplicated: 0, unchanged: 0, collectionsCreated: 0, warnings: [] }));
-    await api.bundle.import(new File(['zip'], 'b.codeathropy.zip'), 'overwrite');
+    await api.bundle.import(new File(['zip'], 'b.codeatrophy.zip'), 'overwrite');
     const body = calls[0]?.init.body as FormData;
     expect(body).toBeInstanceOf(FormData);
     expect(body.get('strategy')).toBe('overwrite');
-    expect((body.get('file') as File).name).toBe('b.codeathropy.zip');
+    expect((body.get('file') as File).name).toBe('b.codeatrophy.zip');
     expect((calls[0]?.init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
   });
 
   it('returns an export as a blob with the file name from Content-Disposition', async () => {
-    stub(() => new Response('PK', { status: 200, headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="dp-study-plan.codeathropy.zip"' } }));
+    stub(() => new Response('PK', { status: 200, headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="dp-study-plan.codeatrophy.zip"' } }));
     const res = await api.bundle.export({ scope: 'all', includeSolutions: true, includeHiddenTests: true });
-    expect(res.filename).toBe('dp-study-plan.codeathropy.zip');
+    expect(res.filename).toBe('dp-study-plan.codeatrophy.zip');
     expect(await res.blob.text()).toBe('PK');
   });
 

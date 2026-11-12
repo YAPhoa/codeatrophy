@@ -1,4 +1,4 @@
-# Codeathropy development tasks. Run `make help` for the list.
+# Codeatrophy development tasks. Run `make help` for the list.
 #
 # Go and Node are used from the host when installed; otherwise the Go and npm
 # targets run inside the official Docker images (Docker is then required).
@@ -9,7 +9,7 @@ SHELL := /bin/bash
 GO_VERSION   ?= 1.27.4
 NODE_VERSION ?= 22
 VERSION      ?= 0.1.0
-BIN          := bin/codeathropy
+BIN          := bin/codeatrophy
 COMPOSE      ?= docker compose
 
 GO_IMAGE   := golang:$(GO_VERSION)-bookworm
@@ -22,7 +22,7 @@ GO_RUN      :=
 GO_PREREQ   :=
 else
 GO_RUN      := docker run --rm -i $(DOCKER_USER) -v "$(CURDIR)":/src -w /src \
-               -v codeathropy-gomod:/cache/mod -v codeathropy-gocache:/cache/build \
+               -v codeatrophy-gomod:/cache/mod -v codeatrophy-gocache:/cache/build \
                -e GOMODCACHE=/cache/mod -e GOCACHE=/cache/build -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
                -e GOTOOLCHAIN=local -e CGO_ENABLED=$(CGO) $(GO_IMAGE)
 GO_PREREQ   := docker-go-cache
@@ -47,19 +47,19 @@ help: ## Show this help
 
 .PHONY: docker-go-cache
 docker-go-cache:
-	@docker volume create codeathropy-gomod >/dev/null
-	@docker volume create codeathropy-gocache >/dev/null
-	@docker run --rm -v codeathropy-gomod:/cache/mod -v codeathropy-gocache:/cache/build $(GO_IMAGE) \
+	@docker volume create codeatrophy-gomod >/dev/null
+	@docker volume create codeatrophy-gocache >/dev/null
+	@docker run --rm -v codeatrophy-gomod:/cache/mod -v codeatrophy-gocache:/cache/build $(GO_IMAGE) \
 		sh -c 'chown $(shell id -u):$(shell id -g) /cache/mod /cache/build'
 
 ## ---- Server ----------------------------------------------------------------
 
 .PHONY: build
-build: web embed build-server ## Build the UI and a server binary with it embedded (bin/codeathropy)
+build: web embed build-server ## Build the UI and a server binary with it embedded (bin/codeatrophy)
 
 .PHONY: build-server
 build-server: $(GO_PREREQ) ## Build the server binary only (serves a placeholder page if the UI was never embedded)
-	$(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/codeathropy
+	$(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/codeatrophy
 
 .PHONY: embed
 embed: ## Copy web/dist into the server's embed directory
@@ -73,7 +73,7 @@ unembed: ## Remove the embedded UI copy (back to the placeholder page)
 
 .PHONY: run
 run: build-server ## Run the server locally with data in ./data (judge engine: none unless configured)
-	CODEATHROPY_DATA_DIR=./data ./$(BIN) serve
+	CODEATROPHY_DATA_DIR=./data ./$(BIN) serve
 
 .PHONY: test
 test: $(GO_PREREQ) ## Run the Go tests

@@ -10,6 +10,7 @@ import { Button, cx } from '../../ui/Button';
 import { TextField } from '../../ui/Field';
 import { Badge, Callout, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
+import { hostOf, movesToAnotherServer, originOf } from './aiKeyBinding';
 
 type Choice = AiProviderId | 'off';
 
@@ -18,7 +19,7 @@ const PROVIDERS: { id: AiProviderId; name: string; text: string; keyOptional: bo
   {
     id: 'openai_compatible',
     name: 'OpenAI-compatible',
-    text: 'Any endpoint that speaks the OpenAI chat-completions API: OpenAI, OpenRouter, Ollama, LM Studio, vLLM… A key is optional for local servers.',
+    text: 'Any endpoint that speaks the OpenAI chat-completions API: OpenAI, OpenRouter, Ollama, LM Studio, vLLM… Hosted services need an API key; a server of your own may not.',
     keyOptional: true,
   },
 ];
@@ -155,13 +156,27 @@ function AiForm({ settings }: { settings: AiSettings }) {
     }
   };
 
-  const keyWillBeSet = form ? form.apiKey.trim() !== '' || (state?.apiKeySet === true && !(form.removeKey && state.apiKeySource === 'settings')) : false;
   const envModel = state ? fromEnv(state.model, state.modelSource) : null;
   const envBaseUrl = state ? fromEnv(state.baseUrl, state.baseUrlSource) : null;
+
+  // A key is tied to the server it was saved for. `currentBaseUrl` is where
+  // requests go now, `nextBaseUrl` where they would go after saving the form.
+  const currentBaseUrl = state?.baseUrl ?? defaults?.baseUrl ?? null;
+  const nextBaseUrl = form ? form.baseUrl.trim() || envBaseUrl || defaults?.baseUrl || null : null;
+  const typedKey = form ? form.apiKey.trim() !== '' : false;
+  const serverChanges = state?.apiKeySet === true && movesToAnotherServer(currentBaseUrl, nextBaseUrl);
+  /** Saving would delete the saved key: it must not be sent to the new server. */
+  const savedKeyDropped = serverChanges && state?.apiKeySource === 'settings' && !typedKey;
+  /** The key in use is the environment's; a connection test against another server does not send it. */
+  const envKeyNotTested = serverChanges && state?.apiKeySource === 'environment' && !typedKey;
+
+  // The hosted OpenAI API always needs a key; other compatible endpoints may not.
+  const keyRequired = info ? !info.keyOptional || (originOf(nextBaseUrl) !== null && originOf(nextBaseUrl) === originOf(defaults?.baseUrl)) : false;
+  const keyWillBeSet = form ? typedKey || (state?.apiKeySet === true && !savedKeyDropped && !(form.removeKey && state.apiKeySource === 'settings')) : false;
   const missing: string[] = [];
   if (provider && form && info) {
     if (!form.model.trim() && !envModel && !defaults?.model) missing.push('a model');
-    if (!info.keyOptional && !keyWillBeSet) missing.push('an API key');
+    if (keyRequired && !keyWillBeSet) missing.push(savedKeyDropped ? `an API key for ${hostOf(nextBaseUrl)}` : 'an API key');
   }
   const fieldErrors = isApiError(saveError) && saveError.code === 'validation_failed' ? saveError.fields : {};
 
@@ -231,19 +246,36 @@ function AiForm({ settings }: { settings: AiSettings }) {
 
           <div className="field">
             <TextField
-              label={info.keyOptional ? 'API key (optional)' : 'API key'}
+              label={serverChanges ? `API key for ${hostOf(nextBaseUrl)}${keyRequired ? '' : ' (optional)'}` : keyRequired ? 'API key' : 'API key (optional)'}
+              required={keyRequired && !keyWillBeSet}
               type="password"
               value={form.apiKey}
               onChange={(v) => setForm({ apiKey: v, removeKey: false })}
-              placeholder={state.apiKeySet ? 'Enter a new key to replace the current one' : 'Paste the key'}
+              placeholder={savedKeyDropped || envKeyNotTested ? 'Paste the key for this server' : state.apiKeySet ? 'Enter a new key to replace the current one' : 'Paste the key'}
               autoComplete="off"
               spellCheck={false}
               maxLength={limits?.maxApiKeyChars}
               error={fieldErrors.apiKey != null ? String(fieldErrors.apiKey) : null}
             />
+            {savedKeyDropped && (
+              <Callout tone="warn" role="status" title="The saved key will not carry over to this server">
+                The saved key belongs to <code>{hostOf(currentBaseUrl)}</code>. A key is never sent to a different server than the one it was saved for, so saving this base URL deletes it, and Test
+                connection runs without it. {keyRequired ? <>Enter the key for <code>{hostOf(nextBaseUrl)}</code> to continue.</> : <>Enter the key for <code>{hostOf(nextBaseUrl)}</code>, or leave the field empty if that server needs none.</>}
+              </Callout>
+            )}
+            {envKeyNotTested && (
+              <Callout tone="info" role="status" title="Test connection will not send the environment’s key">
+                The key in use is set up for <code>{hostOf(currentBaseUrl)}</code>, and a key is never sent to a different server than the one it was saved for. To test{' '}
+                <code>{hostOf(nextBaseUrl)}</code> with a key, enter one here.
+              </Callout>
+            )}
             <div className="key-status">
               <KeyRound size={13} aria-hidden="true" />
-              {form.removeKey && state.apiKeySource === 'settings' ? (
+              {savedKeyDropped ? (
+                <span>
+                  The saved key ending in <code>{(state.apiKeyHint ?? '').replace(/^…/, '')}</code> will be deleted when you save.
+                </span>
+              ) : form.removeKey && state.apiKeySource === 'settings' ? (
                 <>
                   <span>The saved key will be deleted when you save.</span>
                   <button type="button" className="link-btn" onClick={() => setForm({ removeKey: false })}>

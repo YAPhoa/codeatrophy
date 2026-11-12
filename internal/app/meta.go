@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // Meta describes the instance's capabilities.
@@ -63,6 +63,10 @@ type MetaLimits struct {
 	MaxBundleDescriptionChars  int   `json:"maxBundleDescriptionChars"`
 	MaxImportUncompressedBytes int64 `json:"maxImportUncompressedBytes"`
 	MaxImportEntries           int   `json:"maxImportEntries"`
+	MaxImportCollections       int   `json:"maxImportCollections"`
+	MaxSolutionsPerItem        int   `json:"maxSolutionsPerItem"`
+	MaxSolutionNameChars       int   `json:"maxSolutionNameChars"`
+	MaxSolutionNotesChars      int   `json:"maxSolutionNotesChars"`
 	MaxPageSize                int   `json:"maxPageSize"`
 	MaxRequestBytes            int   `json:"maxRequestBytes"`
 }
@@ -117,6 +121,10 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 			MaxBundleDescriptionChars:  domain.MaxBundleDescriptionChars,
 			MaxImportUncompressedBytes: domain.BundleExpansionFactor * a.limits.MaxImportBytes,
 			MaxImportEntries:           domain.MaxBundleEntries,
+			MaxImportCollections:       domain.MaxBundleCollections,
+			MaxSolutionsPerItem:        domain.MaxSolutionsPerItem,
+			MaxSolutionNameChars:       domain.MaxSolutionNameChars,
+			MaxSolutionNotesChars:      domain.MaxSolutionNotesChars,
 			MaxPageSize:                domain.MaxPageSize,
 			MaxRequestBytes:            domain.MaxRequestBytes,
 		},

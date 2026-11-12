@@ -31,6 +31,11 @@ import type {
   List,
   Meta,
   Page,
+  Preferences,
+  PreferencesUpdate,
+  Solution,
+  SolutionInput,
+  SolutionPatch,
   Stats,
   StylePreset,
   StylePresetInput,
@@ -152,7 +157,7 @@ async function toApiError(res: Response): Promise<ApiError> {
   // one comes from something in between (a reverse proxy, the dev proxy) that
   // could not reach it.
   if (res.status >= 500) {
-    return new ApiError(res.status, 'network', 'The Codeathropy server is not reachable.');
+    return new ApiError(res.status, 'network', 'The Codeatrophy server is not reachable.');
   }
   return new ApiError(res.status, 'unknown', `Unexpected response (HTTP ${res.status}).`);
 }
@@ -175,7 +180,7 @@ export async function request<T>(method: string, path: string, opts: RequestOpti
     if (opts.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
       throw new ApiError(0, 'aborted', 'The request was cancelled.');
     }
-    throw new ApiError(0, 'network', 'The Codeathropy server is not reachable.');
+    throw new ApiError(0, 'network', 'The Codeatrophy server is not reachable.');
   }
   if (!res.ok) throw await toApiError(res);
   if (opts.as === 'blob') return { blob: await res.blob(), filename: filenameOf(res) } as T;
@@ -228,11 +233,21 @@ export const api = {
     remove: (id: string) => request<void>('DELETE', `/testcases/${enc(id)}`),
     reorder: (itemId: string, ids: string[]) =>
       request<List<TestCase>>('PUT', `/items/${enc(itemId)}/testcases/order`, { body: { ids } }),
-    verify: (itemId: string, updateExpected: boolean, signal?: AbortSignal) =>
+    /** Runs the reference solution, or the solution named by `solutionId`, on every case. */
+    verify: (itemId: string, updateExpected: boolean, solutionId: string | null = null, signal?: AbortSignal) =>
       request<{ results: VerifyResult[] }>('POST', `/items/${enc(itemId)}/testcases/verify`, {
-        body: { updateExpected },
+        body: { updateExpected, solutionId },
         signal,
       }),
+  },
+
+  solutions: {
+    list: (itemId: string, signal?: AbortSignal) =>
+      request<List<Solution>>('GET', `/items/${enc(itemId)}/solutions`, { signal }),
+    create: (itemId: string, body: SolutionInput) =>
+      request<Solution>('POST', `/items/${enc(itemId)}/solutions`, { body }),
+    update: (id: string, body: SolutionPatch) => request<Solution>('PATCH', `/solutions/${enc(id)}`, { body }),
+    remove: (id: string) => request<void>('DELETE', `/solutions/${enc(id)}`),
   },
 
   collections: {
@@ -282,6 +297,11 @@ export const api = {
     create: (body: StylePresetInput) => request<StylePreset>('POST', '/styles', { body }),
     update: (id: string, body: StylePresetPatch) => request<StylePreset>('PATCH', `/styles/${enc(id)}`, { body }),
     remove: (id: string) => request<void>('DELETE', `/styles/${enc(id)}`),
+  },
+
+  preferences: {
+    get: (signal?: AbortSignal) => request<Preferences>('GET', '/settings/preferences', { signal }),
+    put: (body: PreferencesUpdate) => request<Preferences>('PUT', '/settings/preferences', { body }),
   },
 
   settings: {

@@ -431,6 +431,8 @@ function createItem(db: MockDb, req: Req) {
   if (type === 'reading' && fields.problem != null) v.add('problem', 'must be null for a reading');
   v.check();
 
+  // The reference solution is not stored on the item: it becomes its first saved solution.
+  const { referenceSolution, ...problem } = fields.problem ?? {};
   const now = db.now();
   const item: StoredItem = {
     id: uuid(),
@@ -445,7 +447,7 @@ function createItem(db: MockDb, req: Req) {
     notes: fields.notes ?? '',
     rawInput: fields.rawInput ?? null,
     source: { url: fields.source?.url ?? null, note: fields.source?.note ?? null },
-    problem: type === 'problem' ? { ...structuredClone(DEFAULT_PROBLEM), ...(fields.problem ?? {}) } : null,
+    problem: type === 'problem' ? { ...structuredClone(DEFAULT_PROBLEM), ...problem } : null,
     variantOf: fields.variantOf ?? null,
     revision: 1,
     createdAt: now,
@@ -453,6 +455,7 @@ function createItem(db: MockDb, req: Req) {
     seq: db.nextSeq(),
   };
   db.items.set(item.id, item);
+  if (referenceSolution) db.writeReference(item.id, referenceSolution);
   for (const tc of cases) insertTestCase(db, item.id, tc);
   if (fields.collectionIds) setMembership(db, item.id, fields.collectionIds);
   return created(db.full(item));
@@ -487,16 +490,22 @@ function patchItem(db: MockDb, req: Req) {
   checkRevision(item, raw);
 
   // The revision goes up only when a content field actually changes; a
-  // request that leaves every one of them as it was changes nothing.
-  const content = () => JSON.stringify([item.title, item.summary, item.body, item.difficulty, item.tags, item.source, item.problem, item.variantOf]);
+  // request that leaves every one of them as it was changes nothing. What
+  // `problem.referenceSolution` reports is such a field, although the
+  // solution behind it is stored on its own.
+  const content = () =>
+    JSON.stringify([item.title, item.summary, item.body, item.difficulty, item.tags, item.source, item.problem, item.variantOf, db.referenceView(item.id)]);
   const before = content();
+  const { referenceSolution, ...problem } = fields.problem ?? {};
+  // First, because it is the one step that can still fail (the item may be full).
+  if (referenceSolution !== undefined && item.problem) db.writeReference(item.id, referenceSolution);
   if (fields.title !== undefined) item.title = fields.title;
   if (fields.summary !== undefined) item.summary = fields.summary;
   if (fields.body !== undefined) item.body = fields.body;
   if (fields.difficulty !== undefined) item.difficulty = fields.difficulty;
   if (fields.tags !== undefined) item.tags = fields.tags;
   if (fields.source) item.source = { ...item.source, ...fields.source };
-  if (fields.problem && item.problem) item.problem = { ...item.problem, ...fields.problem };
+  if (fields.problem && item.problem) item.problem = { ...item.problem, ...problem };
   if (fields.variantOf !== undefined) item.variantOf = fields.variantOf;
   if (before !== content()) db.touch(item);
 
@@ -614,7 +623,8 @@ function stats(db: MockDb) {
     tags: new Set([...db.items.values()].flatMap((i) => i.tags)).size,
     submissions: {
       total: db.submissions.length,
-      accepted: db.submissions.filter((s) => s.verdict === 'accepted').length,
+      // Runs against the samples are not attempts at the problem.
+      accepted: db.submissions.filter((s) => s.mode === 'submit' && s.verdict === 'accepted').length,
     },
   };
   for (const item of db.items.values()) {

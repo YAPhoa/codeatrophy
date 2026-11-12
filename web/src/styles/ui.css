@@ -970,6 +970,11 @@ button.chip:hover {
   flex: 1 1 0;
 }
 
+.split-pane[hidden],
+.split-handle[hidden] {
+  display: none;
+}
+
 .split-handle {
   flex: none;
   position: relative;

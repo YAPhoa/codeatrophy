@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/grader"
-	"codeathropy/internal/judge"
-	"codeathropy/internal/secrets"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/grader"
+	"codeatrophy/internal/judge"
+	"codeatrophy/internal/secrets"
+	"codeatrophy/internal/store"
 )
 
 // AIEnv are AI provider values supplied by the environment. Values saved in

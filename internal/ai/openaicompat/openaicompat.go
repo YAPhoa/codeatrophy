@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"codeathropy/internal/ai"
+	"codeatrophy/internal/ai"
 )
 
 // DefaultBaseURL is the OpenAI API endpoint.

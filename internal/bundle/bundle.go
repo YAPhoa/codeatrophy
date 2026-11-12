@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 // Format identification.
 const (
-	FormatName    = "codeathropy.bundle"
+	FormatName    = "codeatrophy.bundle"
 	FormatVersion = 1
 )
 
@@ -28,6 +28,15 @@ type Meta struct {
 	CreatedAt        time.Time
 	GeneratorName    string
 	GeneratorVersion string
+	// Includes records what the export carried. Nil when a bundle does not
+	// say (written by hand or by an older writer); readers then infer it.
+	Includes *Includes
+}
+
+// Includes says whether an export carried solutions and hidden test cases.
+type Includes struct {
+	Solutions   bool
+	HiddenTests bool
 }
 
 // TestCase is a test case as carried by a bundle.
@@ -42,11 +51,19 @@ type TestCase struct {
 
 // Problem holds the problem-only fields of a bundle item.
 type Problem struct {
-	TimeLimitMs       int
-	MemoryLimitKb     int
-	Compare           domain.CompareMode
-	StarterCode       map[string]string
-	ReferenceSolution *domain.Solution
+	TimeLimitMs   int
+	MemoryLimitKb int
+	Compare       domain.CompareMode
+	StarterCode   map[string]string
+}
+
+// Solution is a saved solution as carried by a bundle.
+type Solution struct {
+	Name        string
+	Language    string
+	Source      string
+	Notes       string
+	IsReference bool
 }
 
 // Item is the shareable content of one library item.
@@ -64,6 +81,14 @@ type Item struct {
 	Body       string
 	Problem    *Problem
 	TestCases  []TestCase
+	// Solutions are the item's saved solutions, in order, when
+	// SolutionsIncluded; a bundle exported without solutions carries none
+	// and says so (SolutionsIncluded false).
+	Solutions         []Solution
+	SolutionsIncluded bool
+	// HiddenTestsIncluded is false when only sample test cases were
+	// exported; local hidden cases are then left alone on import.
+	HiddenTestsIncluded bool
 
 	// StoredHash is the contentHash found in bundle.json (read side only).
 	StoredHash string
@@ -71,17 +96,21 @@ type Item struct {
 	Dir string
 }
 
-// HasSolution reports whether the item carries a reference solution.
-func (it *Item) HasSolution() bool { return it.Problem != nil && it.Problem.ReferenceSolution != nil }
+// HasSolutions reports whether the item carries its solutions (possibly
+// none), as opposed to having been exported without them.
+func (it *Item) HasSolutions() bool { return it.Type == domain.TypeProblem && it.SolutionsIncluded }
 
-// SamplesOnly reports whether the item carries no hidden test cases.
-func (it *Item) SamplesOnly() bool {
-	for _, tc := range it.TestCases {
+// HasHiddenTests reports whether the item carries its full test set, as
+// opposed to sample cases only.
+func (it *Item) HasHiddenTests() bool { return it.HiddenTestsIncluded }
+
+func anyHidden(cases []TestCase) bool {
+	for _, tc := range cases {
 		if !tc.IsSample {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // Collection is a collection as carried by a bundle.
@@ -101,11 +130,11 @@ type Bundle struct {
 	Collections []Collection
 }
 
-// FromDomain converts a library item and its test cases into bundle form.
-// includeSolution and includeHidden select what is carried, as for an
-// export; they are also used to compute a local item's hash over the same
-// fields a bundle item contains.
-func FromDomain(it domain.Item, cases []domain.TestCase, includeSolution, includeHidden bool) Item {
+// FromDomain converts a library item with its test cases and solutions into
+// bundle form. includeSolutions and includeHidden select what is carried, as
+// for an export; they are also used to compute a local item's hash over the
+// same fields a bundle item contains.
+func FromDomain(it domain.Item, cases []domain.TestCase, sols []domain.ItemSolution, includeSolutions, includeHidden bool) Item {
 	out := Item{
 		ID: it.ID, Type: it.Type, Title: it.Title, Summary: it.Summary, Difficulty: it.Difficulty,
 		Tags: slices.Clone(it.Tags), Source: it.Source, VariantOf: it.VariantOf,
@@ -122,11 +151,16 @@ func FromDomain(it domain.Item, cases []domain.TestCase, includeSolution, includ
 		for k, v := range it.Problem.StarterCode {
 			p.StarterCode[k] = v
 		}
-		if includeSolution && it.Problem.ReferenceSolution != nil {
-			s := *it.Problem.ReferenceSolution
-			p.ReferenceSolution = &s
+		if includeSolutions {
+			out.SolutionsIncluded = true
+			out.Solutions = []Solution{}
+			for _, s := range sols {
+				out.Solutions = append(out.Solutions, Solution{Name: s.Name, Language: s.Language, Source: s.Source,
+					Notes: s.Notes, IsReference: s.IsReference})
+			}
 		}
 		out.Problem = p
+		out.HiddenTestsIncluded = includeHidden
 		for _, tc := range cases {
 			if !includeHidden && !tc.IsSample {
 				continue
@@ -172,16 +206,21 @@ func ContentHash(it *Item) string {
 		for k, v := range p.StarterCode {
 			starter[k] = v
 		}
-		var ref any
-		if p.ReferenceSolution != nil {
-			ref = map[string]any{"language": p.ReferenceSolution.Language, "source": p.ReferenceSolution.Source}
-		}
 		doc["problem"] = map[string]any{
-			"timeLimitMs":       int64(p.TimeLimitMs),
-			"memoryLimitKb":     int64(p.MemoryLimitKb),
-			"compare":           string(p.Compare),
-			"starterCode":       starter,
-			"referenceSolution": ref,
+			"timeLimitMs":   int64(p.TimeLimitMs),
+			"memoryLimitKb": int64(p.MemoryLimitKb),
+			"compare":       string(p.Compare),
+			"starterCode":   starter,
+		}
+		// Solutions left out of the export are left out of the hash; a
+		// problem without solutions hashes an empty list.
+		if it.SolutionsIncluded {
+			sols := make([]any, len(it.Solutions))
+			for i, s := range it.Solutions {
+				sols[i] = map[string]any{"name": s.Name, "language": s.Language, "source": s.Source,
+					"notes": s.Notes, "isReference": s.IsReference}
+			}
+			doc["solutions"] = sols
 		}
 		cases := make([]any, len(it.TestCases))
 		for i, tc := range it.TestCases {
@@ -232,8 +271,8 @@ func Slug(s string) string {
 }
 
 // Changes lists the content fields in which b differs from a, in the order
-// title, summary, body, difficulty, tags, source, variantOf, limits, compare,
-// starterCode, referenceSolution, testCases. Both items should cover the
+// type, title, summary, body, difficulty, tags, source, variantOf, limits, compare,
+// starterCode, solutions, testCases. Both items should cover the
 // same scope (see FromDomain), so that only what a bundle carries is
 // compared.
 func Changes(a, b *Item) []string {
@@ -243,6 +282,7 @@ func Changes(a, b *Item) []string {
 			out = append(out, name)
 		}
 	}
+	add(a.Type != b.Type, "type")
 	add(a.Title != b.Title, "title")
 	add(a.Summary != b.Summary, "summary")
 	add(a.Body != b.Body, "body")
@@ -263,7 +303,7 @@ func Changes(a, b *Item) []string {
 	add(pa.TimeLimitMs != pb.TimeLimitMs || pa.MemoryLimitKb != pb.MemoryLimitKb, "limits")
 	add(pa.Compare != pb.Compare, "compare")
 	add(!maps.Equal(nonNil(pa.StarterCode), nonNil(pb.StarterCode)), "starterCode")
-	add(!eqPtr(pa.ReferenceSolution, pb.ReferenceSolution), "referenceSolution")
+	add(a.SolutionsIncluded != b.SolutionsIncluded || !slices.Equal(a.Solutions, b.Solutions), "solutions")
 	add(!slices.EqualFunc(a.TestCases, b.TestCases, func(x, y TestCase) bool {
 		return x.Name == y.Name && x.Stdin == y.Stdin && x.ExpectedStdout == y.ExpectedStdout && x.IsSample == y.IsSample
 	}), "testCases")

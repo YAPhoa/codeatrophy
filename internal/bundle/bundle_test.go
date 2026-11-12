@@ -4,11 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 var lim = DefaultLimits(10<<20, 64<<10)
@@ -19,7 +20,7 @@ func sampleBundle() *Bundle {
 	parent := "0193b2f1-0000-7000-8000-000000000001"
 	return &Bundle{
 		Meta: Meta{Name: "DP plan", Author: "me", CreatedAt: time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC),
-			GeneratorName: "codeathropy", GeneratorVersion: "test"},
+			GeneratorName: "codeatrophy", GeneratorVersion: "test", Includes: &Includes{Solutions: true, HiddenTests: true}},
 		Items: []Item{
 			{
 				ID: "0193b2f0-0000-7000-8000-000000000001", Type: domain.TypeProblem, Title: "Two Sum",
@@ -27,8 +28,12 @@ func sampleBundle() *Bundle {
 				Source: domain.Source{URL: &url}, Body: "## Problem\n\n<b>&</b> \u2028 tab\t\"quoted\"",
 				CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 				Problem: &Problem{TimeLimitMs: 2000, MemoryLimitKb: 262144, Compare: domain.CompareTokens,
-					StarterCode:       map[string]string{"python": "import sys\n", "cpp": "#include <iostream>\n"},
-					ReferenceSolution: &domain.Solution{Language: "python", Source: "print(0, 1)\n"}},
+					StarterCode: map[string]string{"python": "import sys\n", "cpp": "#include <iostream>\n"}},
+				Solutions: []Solution{
+					{Name: "Hash map, one pass", Language: "python", Source: "print(0, 1)\n", Notes: "O(n)", IsReference: true},
+					{Name: "Brute force", Language: "cpp", Source: "int main() {}\n"},
+				},
+				SolutionsIncluded: true, HiddenTestsIncluded: true,
 				TestCases: []TestCase{
 					{Name: "Example 1", Stdin: "4\n2 7 11 15\n9\n", ExpectedStdout: "0 1\n", IsSample: true, Origin: domain.OriginManual, Verified: true},
 					{Name: "hidden", Stdin: "2\n1 2\n3\r\n", ExpectedStdout: "0 1", IsSample: false, Origin: domain.OriginAI},
@@ -84,8 +89,12 @@ func TestRoundTrip(t *testing.T) {
 	if p.TestCases[1].Origin != domain.OriginAI || !p.TestCases[0].Verified {
 		t.Error("origin and verified must be kept")
 	}
-	if p.Problem.StarterCode["cpp"] != "#include <iostream>\n" || p.Problem.ReferenceSolution.Source != "print(0, 1)\n" {
-		t.Error("source files not read back")
+	if p.Problem.StarterCode["cpp"] != "#include <iostream>\n" || !p.HasSolutions() || len(p.Solutions) != 2 ||
+		p.Solutions[0] != src.Items[0].Solutions[0] || p.Solutions[1] != src.Items[0].Solutions[1] {
+		t.Errorf("source files not read back: %+v", p.Solutions)
+	}
+	if !p.HasHiddenTests() || got.Meta.Includes == nil || !got.Meta.Includes.Solutions || !got.Meta.Includes.HiddenTests {
+		t.Errorf("includes: %+v", got.Meta.Includes)
 	}
 	if *got.Collections[1].ParentID != src.Collections[0].ID || len(got.Collections[1].ItemIDs) != 2 {
 		t.Errorf("collections: %+v", got.Collections)
@@ -105,7 +114,9 @@ func TestLayoutIsHumanReadable(t *testing.T) {
 		"items/two-sum-0193b2f0/body.md",
 		"items/two-sum-0193b2f0/starter/python.py",
 		"items/two-sum-0193b2f0/starter/cpp.cpp",
-		"items/two-sum-0193b2f0/solution/reference.py",
+		"items/two-sum-0193b2f0/solutions/solutions.json",
+		"items/two-sum-0193b2f0/solutions/01-hash-map-one-pass.py",
+		"items/two-sum-0193b2f0/solutions/02-brute-force.cpp",
 		"items/two-sum-0193b2f0/tests/tests.json",
 		"items/two-sum-0193b2f0/tests/01.in",
 		"items/two-sum-0193b2f0/tests/02.out",
@@ -219,7 +230,7 @@ func zipOf(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-const minimalManifest = `{"format":"codeathropy.bundle","formatVersion":1,"name":"x","items":[],"collections":[]}`
+const minimalManifest = `{"format":"codeatrophy.bundle","formatVersion":1,"name":"x","items":[],"collections":[]}`
 
 func TestRejectsPathTraversal(t *testing.T) {
 	for _, bad := range []string{"../evil.txt", "items/../../etc/passwd", "/abs/path", `..\windows.txt`, `C:\x.txt`, "a/b/../../../c"} {
@@ -230,7 +241,7 @@ func TestRejectsPathTraversal(t *testing.T) {
 		}
 	}
 	// A manifest item path that escapes is skipped with a warning.
-	manifest := `{"format":"codeathropy.bundle","formatVersion":1,"items":[{"id":"0193b2f0-0000-7000-8000-000000000001","path":"../outside"}]}`
+	manifest := `{"format":"codeatrophy.bundle","formatVersion":1,"items":[{"id":"0193b2f0-0000-7000-8000-000000000001","path":"../outside"}]}`
 	b, warnings, err := Read(zipOf(t, map[string]string{"bundle.json": manifest}), lim)
 	if err != nil || len(b.Items) != 0 || !containsWarning(warnings, "invalid path") {
 		t.Errorf("got %v, %v, %v", b, warnings, err)
@@ -262,8 +273,8 @@ func TestRejectsInvalidBundles(t *testing.T) {
 		"no manifest":   zipOf(t, map[string]string{"readme.md": "x"}),
 		"bad json":      zipOf(t, map[string]string{"bundle.json": "{"}),
 		"wrong format":  zipOf(t, map[string]string{"bundle.json": `{"format":"other","formatVersion":1}`}),
-		"newer version": zipOf(t, map[string]string{"bundle.json": `{"format":"codeathropy.bundle","formatVersion":2}`}),
-		"no version":    zipOf(t, map[string]string{"bundle.json": `{"format":"codeathropy.bundle"}`}),
+		"newer version": zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":2}`}),
+		"no version":    zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle"}`}),
 	}
 	for name, data := range cases {
 		if _, _, err := Read(data, lim); !IsFormatError(err) {
@@ -336,14 +347,15 @@ func TestItemLevelProblemsAreWarnings(t *testing.T) {
 func TestPartialExportCarriesNoSolutionOrHiddenTests(t *testing.T) {
 	it := domain.Item{ItemSummary: domain.ItemSummary{ID: "0193b2f0-0000-7000-8000-000000000009", Type: domain.TypeProblem, Title: "P"},
 		Problem: &domain.ProblemSpec{TimeLimitMs: 1000, MemoryLimitKb: 65536, Compare: domain.CompareTokens,
-			StarterCode: map[string]string{}, ReferenceSolution: &domain.Solution{Language: "python", Source: "x"}}}
+			StarterCode: map[string]string{}}}
+	sols := []domain.ItemSolution{{Name: "Reference solution", Language: "python", Source: "x", IsReference: true}}
 	cases := []domain.TestCase{{Name: "s", IsSample: true, Stdin: "1", ExpectedStdout: "1"}, {Name: "h", Stdin: "2", ExpectedStdout: "2"}}
-	full := FromDomain(it, cases, true, true)
-	partial := FromDomain(it, cases, false, false)
-	if !full.HasSolution() || full.SamplesOnly() {
-		t.Error("full export should carry the solution and hidden tests")
+	full := FromDomain(it, cases, sols, true, true)
+	partial := FromDomain(it, cases, sols, false, false)
+	if !full.HasSolutions() || len(full.Solutions) != 1 || !full.HasHiddenTests() {
+		t.Error("full export should carry the solutions and hidden tests")
 	}
-	if partial.HasSolution() || !partial.SamplesOnly() || len(partial.TestCases) != 1 {
+	if partial.HasSolutions() || partial.HasHiddenTests() || len(partial.TestCases) != 1 {
 		t.Error("partial export should carry neither")
 	}
 	if ContentHash(&full) == ContentHash(&partial) {
@@ -354,7 +366,7 @@ func TestPartialExportCarriesNoSolutionOrHiddenTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Items[0].HasSolution() || len(got.Items[0].TestCases) != 1 {
+	if got.Items[0].HasSolutions() || got.Items[0].HasHiddenTests() || len(got.Items[0].TestCases) != 1 {
 		t.Error("partial bundle round trip")
 	}
 }
@@ -366,4 +378,121 @@ func TestSlug(t *testing.T) {
 			t.Errorf("Slug(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// includes in bundle.json says what was exported; without it, a reader
+// infers it from the files.
+func TestIncludesDecideWhatWasExported(t *testing.T) {
+	b := sampleBundle()
+	b.Meta.Includes = &Includes{Solutions: false, HiddenTests: false}
+	it := &b.Items[0]
+	it.SolutionsIncluded, it.Solutions, it.HiddenTestsIncluded = false, nil, false
+	it.TestCases = it.TestCases[:1]
+	got, _, err := Read(write(t, b), lim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := got.Items[0]; p.HasSolutions() || p.HasHiddenTests() {
+		t.Errorf("declared partial export: %+v", p)
+	}
+	// An empty solutions list is not the same as solutions left out.
+	b = sampleBundle()
+	b.Items[0].Solutions = []Solution{}
+	got, _, _ = Read(write(t, b), lim)
+	if p := got.Items[0]; !p.HasSolutions() || len(p.Solutions) != 0 {
+		t.Errorf("exported with no solutions: %+v", p)
+	}
+	if ContentHash(&b.Items[0]) == ContentHash(&sampleBundle().Items[0]) {
+		t.Error("solutions are part of the hash")
+	}
+	// Without includes (an older writer), the files decide.
+	data := write(t, sampleBundle())
+	data = rewriteJSON(t, data, "bundle.json", func(m map[string]any) { delete(m, "includes") })
+	data = drop(t, data, "items/two-sum-0193b2f0/solutions/")
+	got, _, _ = Read(data, lim)
+	if p := got.Items[0]; p.HasSolutions() || !p.HasHiddenTests() {
+		t.Errorf("inferred: solutions %v hidden %v", p.HasSolutions(), p.HasHiddenTests())
+	}
+	// Two references: the first one wins, with a warning.
+	b = sampleBundle()
+	b.Items[0].Solutions[1].IsReference = true
+	got, warnings, _ := Read(write(t, b), lim)
+	if !got.Items[0].Solutions[0].IsReference || got.Items[0].Solutions[1].IsReference || !containsWarning(warnings, "more than one reference") {
+		t.Errorf("two references: %+v %v", got.Items[0].Solutions, warnings)
+	}
+}
+
+// Problems with one item's files are reported with what is wrong; test
+// files that are not UTF-8 are skipped.
+func TestItemFileProblemsSaySpecifically(t *testing.T) {
+	data := write(t, sampleBundle())
+	data = rewrite(t, data, "items/two-sum-0193b2f0/tests/02.in", []byte("\xff\xfe"))
+	data = drop(t, data, "items/two-sum-0193b2f0/tests/01.out")
+	got, warnings, err := Read(data, lim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items[0].TestCases) != 0 {
+		t.Errorf("unreadable cases should be skipped: %+v", got.Items[0].TestCases)
+	}
+	for _, w := range []string{"UTF-8", "missing"} {
+		if !containsWarning(warnings, w) {
+			t.Errorf("missing warning %q in %v", w, warnings)
+		}
+	}
+	// A malformed tests.json or solutions.json skips the item rather than
+	// importing it as having none.
+	for _, f := range []string{"items/two-sum-0193b2f0/tests/tests.json", "items/two-sum-0193b2f0/solutions/solutions.json"} {
+		got, warnings, err := Read(rewrite(t, write(t, sampleBundle()), f, []byte(`{"cases":"many","solutions":7}`)), lim)
+		if err != nil || len(got.Items) != 1 || got.Items[0].Type != domain.TypeReading || !containsWarning(warnings, "item skipped") {
+			t.Errorf("%s malformed: %d items, %v, %v", f, len(got.Items), warnings, err)
+		}
+	}
+	b := sampleBundle()
+	b.Items[1].Title = "two\u2028lines"
+	got, warnings, _ = Read(write(t, b), lim)
+	if len(got.Items) != 1 || !containsWarning(warnings, "single line") {
+		t.Errorf("multi-line title: %d items, %v", len(got.Items), warnings)
+	}
+	data = rewrite(t, write(t, sampleBundle()), "bundle.json", []byte(`{"format":"codeatrophy.bundle","formatVersion":"one"}`))
+	if _, _, err := Read(data, lim); err == nil || !strings.Contains(err.Error(), "formatVersion") {
+		t.Errorf("a wrongly typed field is named: %v", err)
+	}
+}
+
+func rewriteJSON(t *testing.T, data []byte, name string, fn func(map[string]any)) []byte {
+	t.Helper()
+	zr, _ := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	for _, f := range zr.File {
+		if f.Name == name {
+			rc, _ := f.Open()
+			var m map[string]any
+			json.NewDecoder(rc).Decode(&m)
+			rc.Close()
+			fn(m)
+			b, _ := json.Marshal(m)
+			return rewrite(t, data, name, b)
+		}
+	}
+	t.Fatalf("%s not found", name)
+	return nil
+}
+
+// drop removes the files whose names start with prefix.
+func drop(t *testing.T, data []byte, prefix string) []byte {
+	t.Helper()
+	zr, _ := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, prefix) {
+			continue
+		}
+		rc, _ := f.Open()
+		w, _ := zw.Create(f.Name)
+		io.Copy(w, rc)
+		rc.Close()
+	}
+	zw.Close()
+	return buf.Bytes()
 }

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 func names(e *env, t *testing.T, parent *string) string {

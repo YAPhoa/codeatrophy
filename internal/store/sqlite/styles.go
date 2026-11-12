@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 const styleColumns = `id, name, instructions, is_default, created_at, updated_at`

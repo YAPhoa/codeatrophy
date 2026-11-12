@@ -44,6 +44,8 @@ func ValidateCollection(c *Collection) FieldErrors {
 		} else {
 			errs.Add("name", fmt.Sprintf("must be at most %d characters", MaxCollectionNameChars))
 		}
+	} else if !IsSingleLine(c.Name) {
+		errs.Add("name", SingleLineMessage)
 	}
 	if utf8.RuneCountInString(c.Description) > MaxCollectionDescriptionChars {
 		errs.Add("description", "is too long")

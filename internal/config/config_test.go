@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,7 +14,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeathropy.db" || c.LogLevel != slog.LevelInfo ||
+	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
 		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
 		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" {
 		t.Errorf("defaults: %+v", c)
@@ -25,7 +26,7 @@ func TestConventionalKeyFallbacks(t *testing.T) {
 	if c.AI.AnthropicAPIKey != "a" || c.AI.OpenAIAPIKey != "o" {
 		t.Errorf("fallbacks: %+v", c.AI)
 	}
-	c, _ = LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "CODEATHROPY_ANTHROPIC_API_KEY": "b"}))
+	c, _ = LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "CODEATROPHY_ANTHROPIC_API_KEY": "b"}))
 	if c.AI.AnthropicAPIKey != "b" {
 		t.Error("the prefixed variable wins")
 	}
@@ -33,10 +34,10 @@ func TestConventionalKeyFallbacks(t *testing.T) {
 
 func TestParsing(t *testing.T) {
 	c, err := LoadFrom(env(map[string]string{
-		"CODEATHROPY_JUDGE_ENGINE": "Judge0", "CODEATHROPY_JUDGE0_CGROUPS": "true",
-		"CODEATHROPY_JUDGE0_MEMORY_ALLOWANCES": "java=1048576, go=262144",
-		"CODEATHROPY_MCP_ALLOWED_ORIGINS":      "https://a.example/, https://b.example",
-		"CODEATHROPY_AI_PROVIDER":              "none",
+		"CODEATROPHY_JUDGE_ENGINE": "Judge0", "CODEATROPHY_JUDGE0_CGROUPS": "true",
+		"CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java=1048576, go=262144",
+		"CODEATROPHY_MCP_ALLOWED_ORIGINS":      "https://a.example/, https://b.example",
+		"CODEATROPHY_AI_PROVIDER":              "none",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -46,9 +47,9 @@ func TestParsing(t *testing.T) {
 		t.Errorf("parsed: %+v", c)
 	}
 	for k, v := range map[string]string{
-		"CODEATHROPY_JUDGE_ENGINE": "docker", "CODEATHROPY_LOG_LEVEL": "loud", "CODEATHROPY_MCP_ENABLED": "maybe",
-		"CODEATHROPY_JUDGE0_TIMEOUT": "soon", "CODEATHROPY_AI_PROVIDER": "gemini", "CODEATHROPY_JUDGE0_MEMORY_ALLOWANCES": "java",
-		"CODEATHROPY_MAX_SOURCE_BYTES": "10",
+		"CODEATROPHY_JUDGE_ENGINE": "docker", "CODEATROPHY_LOG_LEVEL": "loud", "CODEATROPHY_MCP_ENABLED": "maybe",
+		"CODEATROPHY_JUDGE0_TIMEOUT": "soon", "CODEATROPHY_AI_PROVIDER": "gemini", "CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java",
+		"CODEATROPHY_MAX_SOURCE_BYTES": "10",
 	} {
 		if _, err := LoadFrom(env(map[string]string{k: v})); err == nil {
 			t.Errorf("%s=%s should be rejected", k, v)
@@ -57,11 +58,33 @@ func TestParsing(t *testing.T) {
 }
 
 func TestPublicURL(t *testing.T) {
-	c, err := LoadFrom(env(map[string]string{"CODEATHROPY_PUBLIC_URL": "https://code.example.com/"}))
+	c, err := LoadFrom(env(map[string]string{"CODEATROPHY_PUBLIC_URL": "https://code.example.com/"}))
 	if err != nil || c.PublicURL != "https://code.example.com" || c.AllowedOrigins[0] != "https://code.example.com" {
 		t.Errorf("public URL: %+v %v", c, err)
 	}
-	if _, err := LoadFrom(env(map[string]string{"CODEATHROPY_PUBLIC_URL": "code.example.com"})); err == nil {
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_PUBLIC_URL": "code.example.com"})); err == nil {
 		t.Error("a relative public URL should be rejected")
+	}
+}
+
+// The Host allow-list is the public URL's host, the hosts of the allowed
+// origins, and CODEATROPHY_ALLOWED_HOSTS (ports and brackets dropped).
+func TestHostAllowList(t *testing.T) {
+	c, err := LoadFrom(env(map[string]string{
+		"CODEATROPHY_PUBLIC_URL":          "https://Code.Example.com:8443/",
+		"CODEATROPHY_ALLOWED_ORIGINS":     "http://dev.example:5173",
+		"CODEATROPHY_MCP_ALLOWED_ORIGINS": "https://mcp.example",
+		"CODEATROPHY_ALLOWED_HOSTS":       "nas.local, 192.168.1.20:8080, [fd00::1]",
+		"CODEATROPHY_MCP_MAX_SESSIONS":    "7",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(c.HostAllowList(), ",")
+	if got != "code.example.com,dev.example,mcp.example,nas.local,192.168.1.20,fd00::1" || c.MCP.MaxSessions != 7 {
+		t.Errorf("allow-list %s, max sessions %d", got, c.MCP.MaxSessions)
+	}
+	if d, _ := LoadFrom(env(nil)); len(d.HostAllowList()) != 0 || d.MCP.MaxSessions != 100 {
+		t.Errorf("defaults: %v %d", d.HostAllowList(), d.MCP.MaxSessions)
 	}
 }

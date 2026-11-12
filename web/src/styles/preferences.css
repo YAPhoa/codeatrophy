@@ -1,0 +1,114 @@
+/* Settings → Preferences */
+
+.prefs-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 18px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.prefs-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prefs-group-title {
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+
+.prefs-group .field-hint {
+  max-width: 78ch;
+  line-height: 1.5;
+}
+
+/* A setting with its control on the right; the control drops below the text when there is no room. */
+.prefs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.prefs-row-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.prefs-row-label {
+  display: block;
+  font-weight: 500;
+}
+
+.prefs-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.prefs-number {
+  width: 58px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.prefs-unit {
+  margin-right: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.prefs-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+}
+
+.prefs-preview-code {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.prefs-preview-code.is-wrapped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prefs-preview-code:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.prefs-preview-code .tok-keyword {
+  color: var(--syn-keyword);
+}
+
+.prefs-preview-code .tok-fn {
+  color: var(--syn-fn);
+}
+
+.prefs-preview-code .tok-number {
+  color: var(--syn-number);
+}
+
+.prefs-preview-code .tok-comment {
+  color: var(--syn-comment);
+  font-style: italic;
+}

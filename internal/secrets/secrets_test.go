@@ -84,3 +84,19 @@ func TestLoadKeyGeneratesFileOnce(t *testing.T) {
 		t.Error("invalid environment key accepted")
 	}
 }
+
+func TestBoundSecretsOnlyDecryptInTheirContext(t *testing.T) {
+	box, _ := NewBox(bytes.Repeat([]byte{5}, 32))
+	ct, err := box.EncryptBound("sk-key", "anthropic\nhttps://api.anthropic.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt, err := box.DecryptBound(ct, "anthropic\nhttps://api.anthropic.com"); err != nil || pt != "sk-key" {
+		t.Fatalf("same context: %q %v", pt, err)
+	}
+	for _, other := range []string{"", "anthropic\nhttps://evil.example", "openai_compatible\nhttps://api.anthropic.com"} {
+		if _, err := box.DecryptBound(ct, other); err != ErrDecrypt {
+			t.Errorf("context %q must not decrypt: %v", other, err)
+		}
+	}
+}

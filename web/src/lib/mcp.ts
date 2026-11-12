@@ -24,8 +24,8 @@ export function mcpConnection(url: string, authRequired: boolean): McpConnection
   return {
     url,
     claudeCommand: authRequired
-      ? `claude mcp add --transport http codeathropy ${url} --header "${header}"`
-      : `claude mcp add --transport http codeathropy ${url}`,
+      ? `claude mcp add --transport http codeatrophy ${url} --header "${header}"`
+      : `claude mcp add --transport http codeatrophy ${url}`,
     stdioCommand: authRequired ? `npx mcp-remote ${url} --header "${header}"` : `npx mcp-remote ${url}`,
   };
 }

@@ -54,6 +54,20 @@ func HasDisallowedControl(s string) bool {
 	return false
 }
 
+// SingleLineMessage is the validation message for a field that must be a
+// single line.
+const SingleLineMessage = "must be a single line without control characters"
+
+// IsSingleLine reports whether s has no line or paragraph separator and no
+// control character, tab and newline included (U+0085 NEL is a control
+// character; U+2028 and U+2029 are the Unicode line and paragraph
+// separators).
+func IsSingleLine(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
+	})
+}
+
 // checkText trims s and checks it against a code point range and the
 // control-character rule. It never truncates.
 func checkText(s string, minChars, maxChars int) (string, string) {
@@ -77,8 +91,8 @@ func ValidateStylePreset(p *StylePreset) FieldErrors {
 	var msg string
 	if p.Name, msg = checkText(p.Name, 1, MaxStyleNameChars); msg != "" {
 		errs.Add("name", msg)
-	} else if strings.ContainsAny(p.Name, "\n\t") {
-		errs.Add("name", "must be a single line (no newline or tab)")
+	} else if !IsSingleLine(p.Name) {
+		errs.Add("name", SingleLineMessage)
 	}
 	if p.Instructions, msg = checkText(p.Instructions, 1, MaxStyleInstructionsChars); msg != "" {
 		errs.Add("instructions", msg)

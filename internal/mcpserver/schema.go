@@ -1,6 +1,6 @@
 package mcpserver
 
-import "codeathropy/internal/domain"
+import "codeatrophy/internal/domain"
 
 // JSON Schema helpers for tool input schemas.
 

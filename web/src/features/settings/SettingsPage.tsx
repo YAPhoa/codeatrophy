@@ -5,6 +5,7 @@ import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { setThemePreference, useThemePreference } from '../../lib/theme';
 import { Segmented } from '../../ui/Field';
 import { AiSection } from './AiSection';
+import { PreferencesSection } from './PreferencesSection';
 import { JudgeSection, McpSection } from './ServiceSections';
 import { StylesSection } from './StylesSection';
 
@@ -13,6 +14,7 @@ const SECTIONS = [
   { id: 'styles', label: 'Writing styles' },
   { id: 'judge', label: 'Judge' },
   { id: 'mcp', label: 'MCP' },
+  { id: 'preferences', label: 'Preferences' },
   { id: 'appearance', label: 'Appearance' },
 ] as const;
 
@@ -50,6 +52,7 @@ export default function SettingsPage() {
           <StylesSection />
           <JudgeSection meta={meta} />
           <McpSection meta={meta} />
+          <PreferencesSection />
 
           <section id="appearance" className="settings-section" aria-labelledby="appearance-title">
             <h2 id="appearance-title">Appearance</h2>
@@ -72,7 +75,7 @@ export default function SettingsPage() {
           </section>
 
           <p className="about">
-            Codeathropy {meta.version} · Licensed under AGPL-3.0-only
+            Codeatrophy {meta.version} · Licensed under AGPL-3.0-only
           </p>
         </div>
       </div>

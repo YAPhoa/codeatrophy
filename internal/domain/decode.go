@@ -18,7 +18,7 @@ func (e *TypeError) Error() string {
 	if e.Path == "" {
 		return "the request body must be " + e.Expected
 	}
-	return e.Path + " must be " + e.Expected
+	return e.Path + ": must be " + e.Expected
 }
 
 // DecodeJSON unmarshals data into v. Type mismatches are reported as

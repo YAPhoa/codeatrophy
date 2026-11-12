@@ -7,7 +7,7 @@ import (
 
 // AuthoringConventions are the rules every item follows, whether it was
 // drafted by the built-in AI features or written by an assistant over MCP.
-const AuthoringConventions = `# Codeathropy authoring conventions
+const AuthoringConventions = `# Codeatrophy authoring conventions
 
 An item is either a **problem** (a coding challenge judged on stdin/stdout) or
 a **reading** (a technical note or article).
@@ -248,7 +248,7 @@ func (p TestCasesPrompt) Build() (system, user string) {
 }
 
 const toolGuide = `
-## Working with the Codeathropy tools
+## Working with the Codeatrophy tools
 
 - Start with get_overview to see collections, tags and the languages the judge offers.
 - Search before creating, to avoid duplicates (search_items).
@@ -259,6 +259,10 @@ const toolGuide = `
 - To write tests: call add_test_cases with the inputs (expectedStdout may be a placeholder such as "")
   and the referenceSolution, then verify_test_cases with updateExpected: true so expected outputs come
   from actually running the solution. Check the results for runtime errors before trusting them.
+- A problem can keep several saved solutions (list_solutions, save_solution, delete_solution): other
+  approaches, other languages, a brute force. At most one is the reference solution, which is what
+  computes and verifies expected outputs. To check another solution against the tests, call
+  verify_test_cases with its solutionId; that only reports results and changes nothing.
 - run_code executes code against the sample cases, all cases, or custom stdin and returns the verdict.
 `
 

@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/judge"
-	"codeathropy/internal/judge/judgetest"
-	"codeathropy/internal/store"
-	"codeathropy/internal/store/sqlite"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge"
+	"codeatrophy/internal/judge/judgetest"
+	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/sqlite"
 )
 
 func (e *env) submit(t *testing.T, itemID, js string) domain.Submission {
@@ -186,7 +186,7 @@ func TestVerifyTestCases(t *testing.T) {
 	cases := must(e.app.ListTestCases(e.ctx, it.ID)).Items
 	must(e.app.UpdateTestCase(e.ctx, cases[1].ID, decodeInto[domain.TestCaseInput](t, `{"expectedStdout":"11"}`)))
 
-	res := must(e.app.VerifyTestCases(e.ctx, it.ID, false))
+	res := must(e.app.VerifyTestCases(e.ctx, it.ID, false, ""))
 	if len(res.Results) != 2 || !res.Results[0].OK || !res.Results[0].Matches || res.Results[1].Matches || res.Results[1].ActualStdout != "10\n" ||
 		res.Results[0].Verdict != domain.VerdictExecuted {
 		t.Fatalf("verify: %+v", res.Results)
@@ -195,23 +195,28 @@ func TestVerifyTestCases(t *testing.T) {
 	if !after[0].Verified || after[1].Verified || after[1].ExpectedStdout != "11" {
 		t.Errorf("without updateExpected: %+v", after)
 	}
-	must(e.app.VerifyTestCases(e.ctx, it.ID, true))
+	must(e.app.VerifyTestCases(e.ctx, it.ID, true, ""))
 	after = must(e.app.ListTestCases(e.ctx, it.ID)).Items
 	if !after[1].Verified || after[1].ExpectedStdout != "10\n" {
 		t.Errorf("with updateExpected: %+v", after[1])
 	}
-	// A failing solution reports why and changes nothing.
+	// A failing reference solution reports why and leaves the cases
+	// unverified; their expected output is kept.
 	must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"problem":{"referenceSolution":{"language":"python","source":"crash"}}}`)))
-	res = must(e.app.VerifyTestCases(e.ctx, it.ID, true))
+	res = must(e.app.VerifyTestCases(e.ctx, it.ID, true, ""))
 	if res.Results[0].OK || res.Results[0].Verdict != domain.VerdictRuntimeError || res.Results[0].Stderr == "" {
 		t.Errorf("crashing solution: %+v", res.Results[0])
 	}
+	after = must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if after[0].Verified || after[1].Verified || after[1].ExpectedStdout != "10\n" {
+		t.Errorf("after a failing reference: %+v", after)
+	}
 	noRef := e.problem(t, "")
-	_, err := e.app.VerifyTestCases(e.ctx, noRef.ID, false)
+	_, err := e.app.VerifyTestCases(e.ctx, noRef.ID, false, "")
 	wantCode(t, err, app.CodeValidation)
 	noJudge := newEnv(t, withoutEngine())
 	p := noJudge.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
-	_, err = noJudge.app.VerifyTestCases(noJudge.ctx, p.ID, false)
+	_, err = noJudge.app.VerifyTestCases(noJudge.ctx, p.ID, false, "")
 	wantCode(t, err, app.CodeJudgeUnavailable)
 }
 
@@ -268,7 +273,7 @@ func TestVerifyWithUnreachableEngineChangesNothing(t *testing.T) {
 	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
 	before := must(e.app.GetItem(e.ctx, it.ID))
 	e.engine.SetHealth(errors.New("down"))
-	_, err := e.app.VerifyTestCases(e.ctx, it.ID, true)
+	_, err := e.app.VerifyTestCases(e.ctx, it.ID, true, "")
 	wantCode(t, err, app.CodeJudgeUnavailable)
 	// Healthy probe but failing executions are reported the same way.
 	e.engine.SetHealth(nil)
@@ -276,11 +281,58 @@ func TestVerifyWithUnreachableEngineChangesNothing(t *testing.T) {
 	e.engine.Handler = func(context.Context, judge.ExecRequest) (judge.ExecResult, error) {
 		return judge.ExecResult{}, errors.New("connection reset")
 	}
-	_, err = e.app.VerifyTestCases(e.ctx, it.ID, true)
+	_, err = e.app.VerifyTestCases(e.ctx, it.ID, true, "")
 	wantCode(t, err, app.CodeJudgeUnavailable)
 	after := must(e.app.GetItem(e.ctx, it.ID))
 	cases := must(e.app.ListTestCases(e.ctx, it.ID)).Items
 	if !after.UpdatedAt.Equal(before.UpdatedAt) || cases[0].Verified {
 		t.Error("an unreachable engine must change nothing")
+	}
+}
+
+// Verifying with the reference solution sets verified from the result; any
+// other solution is a check only, and updateExpected needs the reference.
+func TestVerifyWithSolutionID(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, ""))
+	other := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
+		`{"name":"Broken","language":"python","source":"crash"}`)))
+	before := must(e.app.GetItem(e.ctx, it.ID))
+	res := must(e.app.VerifyTestCases(e.ctx, it.ID, false, other.ID))
+	if res.Results[0].OK {
+		t.Errorf("the selected solution was not the one run: %+v", res.Results[0])
+	}
+	cases := must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	after := must(e.app.GetItem(e.ctx, it.ID))
+	if !cases[0].Verified || !cases[1].Verified || !after.UpdatedAt.Equal(before.UpdatedAt) || after.Revision != before.Revision {
+		t.Errorf("a non-reference check changed the item: %+v", cases)
+	}
+	_, err := e.app.VerifyTestCases(e.ctx, it.ID, true, other.ID)
+	wantField(t, err, "updateExpected")
+	_, err = e.app.VerifyTestCases(e.ctx, it.ID, false, "no-such-solution")
+	wantField(t, err, "solutionId")
+	// Passing the reference solution's id behaves like omitting it.
+	sols := must(e.app.ListSolutions(e.ctx, it.ID)).Items
+	must(e.app.UpdateTestCase(e.ctx, cases[0].ID, decodeInto[domain.TestCaseInput](t, `{"expectedStdout":"nope"}`)))
+	must(e.app.VerifyTestCases(e.ctx, it.ID, true, sols[0].ID))
+	cases = must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !sols[0].IsReference || !cases[0].Verified || cases[0].ExpectedStdout == "nope" {
+		t.Errorf("verify with the reference id: %+v", cases[0])
+	}
+}
+
+// stats counts accepted submit-mode submissions only.
+func TestStatsCountsAcceptedSubmissionsOnly(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, "")
+	if run := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run"}`); *run.Verdict != domain.VerdictAccepted {
+		t.Fatalf("a passing sample run: %s", *run.Verdict)
+	}
+	e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"submit"}`)
+	e.submit(t, it.ID, `{"language":"python","source":"crash","mode":"submit"}`)
+	st := must(e.app.Stats(e.ctx))
+	if st.Submissions.Total != 3 || st.Submissions.Accepted != 1 {
+		t.Errorf("submissions: %+v", st.Submissions)
 	}
 }

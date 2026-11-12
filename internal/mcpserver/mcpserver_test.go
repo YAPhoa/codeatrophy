@@ -14,13 +14,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/httpapi"
-	"codeathropy/internal/judge/judgetest"
-	"codeathropy/internal/mcpserver"
-	"codeathropy/internal/secrets"
-	"codeathropy/internal/store/sqlite"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/httpapi"
+	"codeatrophy/internal/judge/judgetest"
+	"codeatrophy/internal/mcpserver"
+	"codeatrophy/internal/secrets"
+	"codeatrophy/internal/store/sqlite"
 )
 
 type fixture struct {
@@ -29,7 +29,7 @@ type fixture struct {
 	ctx context.Context
 }
 
-func newFixture(t *testing.T, token string) *fixture {
+func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "m.db"))
@@ -42,8 +42,12 @@ func newFixture(t *testing.T, token string) *fixture {
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	h := mcpserver.Handler(mcpserver.Options{App: a, Token: token,
-		OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, nil) }})
+	o := mcpserver.Options{App: a, Token: token,
+		OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, nil, nil) }}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	h := mcpserver.Handler(o)
 	srv := httptest.NewServer(h)
 	t.Cleanup(func() {
 		srv.Close()
@@ -109,11 +113,11 @@ func TestToolsListAndAnnotations(t *testing.T) {
 	for _, tool := range res.Tools {
 		names[tool.Name] = tool
 	}
-	want := []string{"get_overview", "search_items", "get_item", "list_test_cases", "get_submission", "list_style_presets",
+	want := []string{"get_overview", "search_items", "get_item", "list_test_cases", "list_solutions", "get_submission", "list_style_presets",
 		"create_item", "update_item", "edit_item_text", "delete_item", "bulk_update_items",
 		"create_collection", "update_collection", "delete_collection", "set_collection_items", "add_items_to_collection",
 		"remove_item_from_collection", "rename_tag", "delete_tag",
-		"add_test_cases", "update_test_case", "delete_test_case", "verify_test_cases", "run_code"}
+		"add_test_cases", "update_test_case", "delete_test_case", "verify_test_cases", "save_solution", "delete_solution", "run_code"}
 	for _, n := range want {
 		if names[n] == nil {
 			t.Errorf("missing tool %s", n)
@@ -368,5 +372,92 @@ func TestPromptDataCannotBreakOut(t *testing.T) {
 	m := nonceRe.FindStringSubmatch(g)
 	if m == nil || strings.Contains(regexp.MustCompile(`(?s)<([a-z_]+)-`+m[1]+`>\n.*?\n</[a-z_]+-`+m[1]+`>`).ReplaceAllString(g, ""), "INJECTED") {
 		t.Error("guide resource: preset text escaped its block")
+	}
+}
+
+func TestSolutionTools(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	it, _ := call(t, s, "create_item", map[string]any{"type": "problem", "title": "A plus B",
+		"testCases": []map[string]any{{"stdin": "1 2", "expectedStdout": "", "isSample": true}}})
+	id := it["id"].(string)
+	// Making a solution the reference is item content: the revision is checked.
+	res, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Sum", "language": "python",
+		"source": "sum", "isReference": true, "expectedRevision": 7})
+	if !isErr || res["error"].(map[string]any)["code"] != "conflict" {
+		t.Errorf("stale revision: %v", res)
+	}
+	ref, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Sum", "language": "python",
+		"source": "sum", "isReference": true, "expectedRevision": 1})
+	if isErr || ref["isReference"] != true || ref["itemId"] != id {
+		t.Fatalf("create reference: %v", ref)
+	}
+	other, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Broken", "language": "python", "source": "crash"})
+	if isErr || other["isReference"] != false {
+		t.Fatalf("create other: %v", other)
+	}
+	renamed, isErr := call(t, s, "save_solution", map[string]any{"id": other["id"], "notes": "fails on purpose"})
+	if isErr || renamed["name"] != "Broken" || renamed["notes"] != "fails on purpose" {
+		t.Errorf("partial update: %v", renamed)
+	}
+	if res, isErr := call(t, s, "save_solution", map[string]any{"name": "x"}); !isErr || res["error"].(map[string]any)["code"] != "validation_failed" {
+		t.Errorf("neither id nor itemId: %v", res)
+	}
+	list, _ := call(t, s, "list_solutions", map[string]any{"itemId": id})
+	if items := list["items"].([]any); len(items) != 2 || items[0].(map[string]any)["id"] != ref["id"] {
+		t.Errorf("list_solutions: %v", list)
+	}
+	full, _ := call(t, s, "get_item", map[string]any{"id": id, "include": []string{"solutions"}})
+	if len(full["solutions"].([]any)) != 2 || full["item"].(map[string]any)["problem"].(map[string]any)["referenceSolution"].(map[string]any)["id"] != ref["id"] {
+		t.Errorf("get_item with solutions: %v", full)
+	}
+	// A non-reference solution is only checked.
+	ver, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": other["id"]})
+	if isErr || ver["results"].([]any)[0].(map[string]any)["ok"] != false {
+		t.Errorf("verify other: %v", ver)
+	}
+	if res, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": other["id"], "updateExpected": true}); !isErr ||
+		res["error"].(map[string]any)["code"] != "validation_failed" {
+		t.Errorf("updateExpected with a non-reference solution: %v", res)
+	}
+	if res, isErr := call(t, s, "delete_solution", map[string]any{"id": other["id"]}); isErr || res["deleted"] != other["id"] {
+		t.Errorf("delete_solution: %v", res)
+	}
+}
+
+// Sessions are capped; a new session beyond the cap is refused cleanly and
+// closing one makes room.
+func TestSessionCap(t *testing.T) {
+	f := newFixture(t, "", func(o *mcpserver.Options) { o.MaxSessions = 2 })
+	a := f.connect(t, "")
+	f.connect(t, "")
+	resp, err := http.Post(f.srv.URL, "application/json", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("third session: %d", resp.StatusCode)
+	}
+	// Existing sessions keep working.
+	if _, err := a.ListTools(f.ctx, nil); err != nil {
+		t.Errorf("open session: %v", err)
+	}
+	a.Close()
+	c := f.connect(t, "")
+	if _, err := c.ListTools(f.ctx, nil); err != nil {
+		t.Errorf("after closing one: %v", err)
+	}
+}
+
+// Idle sessions are closed after the session timeout.
+func TestIdleSessionsExpire(t *testing.T) {
+	f := newFixture(t, "", func(o *mcpserver.Options) { o.MaxSessions = 1; o.SessionTimeout = 200 * time.Millisecond })
+	f.connect(t, "")
+	time.Sleep(600 * time.Millisecond)
+	c := f.connect(t, "")
+	if _, err := c.ListTools(f.ctx, nil); err != nil {
+		t.Errorf("a new session after the idle one expired: %v", err)
 	}
 }

@@ -2,15 +2,16 @@ package app_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
 	"testing"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/judge"
 )
 
 func (e *env) enableAI(t *testing.T) {
@@ -214,7 +215,7 @@ func TestGenerateTestCasesVerification(t *testing.T) {
 	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"EXISTING-SOLUTION"}}`)
 	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
 		return map[string]any{
-			"referenceSolution": map[string]any{"language": "cpp", "source": "sum"},
+			"referenceSolution": map[string]any{"language": "python", "source": "sum"},
 			"cases": []map[string]any{
 				{"name": "small", "rationale": "min", "stdin": "1 1", "predictedStdout": "2", "isSample": true},
 				{"name": "mispredicted", "rationale": "x", "stdin": "2 2", "predictedStdout": "5", "isSample": false},
@@ -321,4 +322,42 @@ func (p *ctxProvider) Generate(ctx context.Context, _ ai.GenerateRequest) (ai.Ge
 	<-ctx.Done()
 	p.sawCancel = true
 	return ai.GenerateResponse{}, ctx.Err()
+}
+
+// The output schema only allows the requested language, and a model that
+// answers in another one is an upstream error.
+func TestGenerateTestCasesLanguageMismatch(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	it := e.problem(t, "")
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
+		return map[string]any{
+			"referenceSolution": map[string]any{"language": "python", "source": "sum"},
+			"cases":             []map[string]any{{"name": "a", "rationale": "r", "stdin": "1 1", "predictedStdout": "2", "isSample": true}},
+		}, nil
+	}
+	_, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"language":"cpp"}`))
+	wantCode(t, err, app.CodeUpstream)
+	b, _ := json.Marshal(e.ai.Last().Schema)
+	if !strings.Contains(string(b), `"enum":["cpp"]`) {
+		t.Errorf("schema does not pin the language: %s", b)
+	}
+}
+
+// The draft text limit counts code points after line-ending normalization,
+// and model-written titles are kept on one line.
+func TestDraftCountsNormalizedText(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	d := draftJSON()
+	d["title"] = "Two Sum\n  again"
+	e.ai.Responses = []any{d}
+	text := strings.Repeat(`a\r\n`, app.MaxDraftTextChars/2) // 1.5x the limit raw, at the limit after \r\n -> \n
+	res := must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"`+text+`"}`)))
+	if res.Draft.Title != "Two Sum again" {
+		t.Errorf("title %q", res.Draft.Title)
+	}
+	if u := e.ai.Last().User; strings.Contains(u, "\r") {
+		t.Error("the model sees normalized text")
+	}
 }

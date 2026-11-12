@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, ChevronRight, CircleSlash, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
-import { qk, useItem, useMeta, useTestCases } from '../../api/queries';
+import { qk, useItem, useLimits, useMeta, useSolutions, useTestCases } from '../../api/queries';
 import type { AiTestCasesResponse, Item, ProposedTestCase } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
@@ -95,7 +95,15 @@ function Generator({ item }: { item: Item }) {
     const judge = meta?.judge.languages.map((l) => l.id) ?? [];
     return (judge.length > 0 ? judge : LANGUAGES.map((l) => l.id)).map((l) => ({ value: l, label: languageLabel(l, meta?.judge.languages) }));
   }, [meta]);
+  // The reference solution is one of the problem's saved solutions. Saving
+  // the proposed one updates it in place, or adds a solution named "Reference
+  // solution" when the problem has none.
   const storedSolution = item.problem?.referenceSolution ?? null;
+  const limits = useLimits();
+  const savedSolutions = useSolutions(item.id).data;
+  const storedName = savedSolutions?.find((s) => s.isReference)?.name ?? null;
+  // Without a reference to update, saving the solution adds one — which a full list does not allow.
+  const noRoom = storedSolution === null && limits !== undefined && item.solutionCount >= limits.maxSolutionsPerItem;
 
   const [count, setCount] = useState(8);
   const [language, setLanguage] = useState(() => {
@@ -109,7 +117,8 @@ function Generator({ item }: { item: Item }) {
   const [samples, setSamples] = useState<boolean[]>([]);
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [replace, setReplace] = useState(false);
-  const [keepSolution, setKeepSolution] = useState(true);
+  const [wantsSolution, setKeepSolution] = useState(true);
+  const keepSolution = wantsSolution && !noRoom;
   const [showSolution, setShowSolution] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -152,8 +161,12 @@ function Generator({ item }: { item: Item }) {
       });
       setConflict(null);
       qc.setQueryData(qk.testCases(item.id), res);
-      await Promise.all([qc.invalidateQueries({ queryKey: qk.item(item.id) }), qc.invalidateQueries({ queryKey: qk.itemLists })]);
-      toast.success(`Saved ${plural(cases.length, 'test case')}`);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.item(item.id) }),
+        qc.invalidateQueries({ queryKey: qk.itemLists }),
+        qc.invalidateQueries({ queryKey: qk.solutions(item.id) }),
+      ]);
+      toast.success(cases.length > 0 ? `Saved ${plural(cases.length, 'test case')}` : 'Saved the reference solution');
       navigate(`/items/${item.id}/tests`);
     } catch (e) {
       if (isApiError(e) && e.isRevisionConflict) {
@@ -319,8 +332,23 @@ function Generator({ item }: { item: Item }) {
                   <Checkbox
                     checked={keepSolution}
                     onChange={setKeepSolution}
+                    disabled={noRoom}
                     label="Save it as the problem’s reference solution"
-                    hint={storedSolution ? 'Replaces the current reference solution.' : 'Needed later to verify or regenerate expected outputs.'}
+                    hint={
+                      noRoom ? (
+                        <>
+                          This problem has no reference solution and already holds the maximum of {limits?.maxSolutionsPerItem.toLocaleString()} saved solutions, so this one cannot be added.{' '}
+                          <Link to={`/items/${item.id}/solutions`}>Manage solutions</Link>
+                        </>
+                      ) : storedSolution ? (
+                        <>
+                          Updates the current reference solution{storedName ? ` “${storedName}”` : ''} in place: its code ({languageName(storedSolution.language)}) is replaced by this one, its name and
+                          notes are kept.
+                        </>
+                      ) : (
+                        'Adds it to the problem’s saved solutions, named “Reference solution” and marked as the reference. Needed later to verify or regenerate expected outputs.'
+                      )
+                    }
                   />
                 </div>
               </div>
@@ -414,7 +442,7 @@ function Generator({ item }: { item: Item }) {
                   }
                 >
                   Another tab, or an assistant connected over MCP, edited it — possibly its statement or its reference solution — after this proposal was generated. Nothing was saved. Saving anyway
-                  stores the selected cases{keepSolution ? ' and replaces the reference solution with the one above' : ''}.
+                  stores the selected cases{keepSolution ? ' and makes the solution above the problem’s reference solution' : ''}.
                 </Callout>
               )}
 

@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 type tools struct {
@@ -70,10 +70,10 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body and revision. include selects optional parts: testCases, submissions (the 10 most recent).",
+		"One item in full, including its body and revision. include selects optional parts: testCases, solutions, submissions (the 10 most recent).",
 		object(props{
 			"id":      str("Item id"),
-			"include": arrayOf(enumStr("", "testCases", "submissions"), "Optional parts to include"),
+			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
 		}, "id"), readOnly, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ID      string   `json:"id"`
@@ -93,6 +93,13 @@ func (t *tools) register(s *mcp.Server) {
 					return nil, err
 				}
 				out["testCases"] = tcs.Items
+			}
+			if slices.Contains(in.Include, "solutions") && it.Type == domain.TypeProblem {
+				sols, err := a.ListSolutions(ctx, in.ID)
+				if err != nil {
+					return nil, err
+				}
+				out["solutions"] = sols.Items
 			}
 			if slices.Contains(in.Include, "submissions") {
 				limit := 10
@@ -115,6 +122,19 @@ func (t *tools) register(s *mcp.Server) {
 				return nil, err
 			}
 			return a.ListTestCases(ctx, in.ItemID)
+		})
+
+	t.add(s, "list_solutions", "List solutions",
+		"The saved solutions of a problem, the reference solution first, then oldest first.",
+		object(props{"itemId": str("Problem id")}, "itemId"), readOnly,
+		func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				ItemID string `json:"itemId"`
+			}
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			return a.ListSolutions(ctx, in.ItemID)
 		})
 
 	t.add(s, "get_submission", "Get submission", "A submission with its per-case results.",
@@ -395,19 +415,66 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "verify_test_cases", "Verify test cases",
-		"Run the problem's reference solution on every test case and report mismatches. Matching cases are marked verified; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Needs a judge engine.",
+		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and changes nothing. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
-			"updateExpected": boolean("Replace expected outputs with the actual output"),
+			"solutionId":     str("Solution to run; omit for the reference solution"),
+			"updateExpected": boolean("Replace expected outputs with the actual output (reference solution only)"),
 		}, "itemId"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID         string `json:"itemId"`
 				UpdateExpected bool   `json:"updateExpected"`
+				SolutionID     string `json:"solutionId"`
 			}
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.VerifyTestCases(ctx, in.ItemID, in.UpdateExpected)
+			return a.VerifyTestCases(ctx, in.ItemID, in.UpdateExpected, in.SolutionID)
+		})
+
+	t.add(s, "save_solution", "Save solution",
+		"Create a saved solution on a problem (give itemId), or change one (give its id; omitted fields are kept). isReference: true makes it the reference solution used to compute and verify expected outputs, clearing the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then.",
+		object(props{
+			"itemId":           str("Problem id, to create a solution"),
+			"id":               str("Solution id, to change an existing solution"),
+			"name":             str("Short single-line name, e.g. the approach"),
+			"language":         languageEnum("Language id"),
+			"source":           str("Complete program reading stdin and writing stdout"),
+			"notes":            str("Markdown notes, e.g. complexity"),
+			"isReference":      boolean("Make this the reference solution"),
+			"expectedRevision": expectedRevision,
+		}), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				ItemID string `json:"itemId"`
+				ID     string `json:"id"`
+				domain.ItemSolutionInput
+			}
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			switch {
+			case in.ID != "" && in.ItemID != "":
+				return nil, &app.Error{Code: app.CodeValidation, Message: "give either id (to change a solution) or itemId (to create one), not both"}
+			case in.ID != "":
+				return a.UpdateSolution(ctx, in.ID, in.ItemSolutionInput)
+			case in.ItemID != "":
+				return a.CreateSolution(ctx, in.ItemID, in.ItemSolutionInput)
+			}
+			return nil, &app.Error{Code: app.CodeValidation, Message: "give id to change a solution or itemId to create one"}
+		})
+
+	t.add(s, "delete_solution", "Delete solution",
+		"Delete one saved solution. Deleting the reference solution leaves the problem without one.",
+		object(props{"id": str("Solution id")}, "id"), destructive,
+		func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in idArg
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			if err := a.DeleteSolution(ctx, in.ID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"deleted": in.ID}, nil
 		})
 
 	t.add(s, "run_code", "Run code",

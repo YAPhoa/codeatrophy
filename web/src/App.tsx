@@ -13,6 +13,7 @@ const ItemPage = lazy(() => import('./features/item/ItemPage'));
 const EditItemPage = lazy(() => import('./features/item/EditItemPage'));
 const TestsPage = lazy(() => import('./features/tests/TestsPage'));
 const GenerateTestsPage = lazy(() => import('./features/tests/GenerateTestsPage'));
+const SolutionsPage = lazy(() => import('./features/solutions/SolutionsPage'));
 const TagsPage = lazy(() => import('./features/tags/TagsPage'));
 const ExportPage = lazy(() => import('./features/share/ExportPage'));
 const ImportPage = lazy(() => import('./features/share/ImportPage'));
@@ -28,6 +29,7 @@ export const routes = createRoutesFromElements(
     <Route path="items/:id/saved" element={<SavedPage />} />
     <Route path="items/:id/tests" element={<TestsPage />} />
     <Route path="items/:id/tests/generate" element={<GenerateTestsPage />} />
+    <Route path="items/:id/solutions" element={<SolutionsPage />} />
     <Route path="items/:id/variant" element={<VariantPage />} />
     <Route path="tags" element={<TagsPage />} />
     <Route path="export" element={<ExportPage />} />

@@ -195,3 +195,38 @@ func TestNormalizeItemText(t *testing.T) {
 		t.Errorf("test case stdin/stdout must stay byte-exact: %+v", tc)
 	}
 }
+
+// Single-line fields reject the Unicode line and paragraph separators and
+// NEL as well as newline and tab.
+func TestSingleLineFieldsRejectUnicodeSeparators(t *testing.T) {
+	lim := Limits{MaxSourceBytes: 1 << 20}
+	checks := map[string]func(string) bool{
+		"title": func(s string) bool {
+			it := Item{Type: TypeReading, Title: s}
+			return ValidateItem(&it, lim)["title"] == ""
+		},
+		"collection name": func(s string) bool {
+			c := Collection{Name: s}
+			return ValidateCollection(&c)["name"] == ""
+		},
+		"tag": func(s string) bool { return ValidateTag(s) == "" },
+		"preset name": func(s string) bool {
+			p := StylePreset{Name: s, Instructions: "x"}
+			return ValidateStylePreset(&p)["name"] == ""
+		},
+		"solution name": func(s string) bool {
+			sol := ItemSolution{Name: s, Language: "python", Source: "print(1)"}
+			return ValidateItemSolution(&sol, lim)["name"] == ""
+		},
+	}
+	for field, valid := range checks {
+		if !valid("plain name") {
+			t.Errorf("%s: a plain value is rejected", field)
+		}
+		for _, sep := range []string{" ", " ", "\u0085", "\n", "\t"} {
+			if valid("a" + sep + "b") {
+				t.Errorf("%s: %q is accepted", field, sep)
+			}
+		}
+	}
+}

@@ -2,6 +2,7 @@ import { useParams } from 'react-router';
 import { FileQuestion } from 'lucide-react';
 import { isApiError } from '../../api/client';
 import { useItem } from '../../api/queries';
+import { useDeclareWorkspace } from '../../app/shellLayout';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { LinkButton } from '../../ui/Button';
 import { EmptyState, ErrorState, PageLoading } from '../../ui/misc';
@@ -24,6 +25,8 @@ export default function ItemPage() {
   const { id = '' } = useParams();
   const item = useItem(id);
   useDocumentTitle(item.data?.title);
+  // A problem opens in the coding workspace, where the navigation steps aside; a reading does not.
+  useDeclareWorkspace(item.data ? item.data.type === 'problem' : null);
 
   if (item.isPending) return <PageLoading />;
   if (item.isError) {

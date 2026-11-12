@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"codeathropy/internal/app"
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/domain"
 )
 
 // library builds: collection "DP" > child "Easy"; problem P (in DP, Easy)
@@ -59,7 +59,7 @@ func TestExportScopesAndContentOnly(t *testing.T) {
 	e.submit(t, p.ID, `{"language":"python","source":"SUBMITTED-SOURCE","mode":"run"}`)
 
 	res := must(e.app.Export(e.ctx, decodeInto[app.ExportInput](t, `{"scope":"all"}`)))
-	if res.Filename != "codeathropy-library.codeathropy.zip" || res.Items != 3 {
+	if res.Filename != "codeatrophy-library.codeatrophy.zip" || res.Items != 3 {
 		t.Errorf("all: %s, %d items", res.Filename, res.Items)
 	}
 	text := zipText(t, res.Data)
@@ -70,7 +70,7 @@ func TestExportScopesAndContentOnly(t *testing.T) {
 		}
 	}
 	coll := must(e.app.Export(e.ctx, decodeInto[app.ExportInput](t, `{"scope":"collection","collectionId":"`+easy.ID+`"}`)))
-	if coll.Filename != "easy.codeathropy.zip" || coll.Items != 2 {
+	if coll.Filename != "easy.codeatrophy.zip" || coll.Items != 2 {
 		t.Errorf("collection: %s, %d items", coll.Filename, coll.Items)
 	}
 	if strings.Contains(zipText(t, coll.Data), dp.ID) {
@@ -220,7 +220,7 @@ func TestPartialExportsCompareAndPreserve(t *testing.T) {
 	}
 	full := src.export(t, `{"scope":"all"}`)
 	for _, it := range must(dst.app.PreviewImport(dst.ctx, full)).Items {
-		if it.ID == p.ID && fmt.Sprint(it.Changes) != "[referenceSolution]" {
+		if it.ID == p.ID && fmt.Sprint(it.Changes) != "[solutions]" {
 			t.Errorf("full bundle compares the solution too: %v", it.Changes)
 		}
 	}
@@ -258,7 +258,7 @@ func TestImportRejectsBadArchives(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, _ := zw.Create("bundle.json")
-	w.Write([]byte(`{"format":"codeathropy.bundle","formatVersion":1}`))
+	w.Write([]byte(`{"format":"codeatrophy.bundle","formatVersion":1}`))
 	w, _ = zw.Create("../escape")
 	w.Write([]byte("x"))
 	zw.Close()

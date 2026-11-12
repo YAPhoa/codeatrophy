@@ -59,7 +59,7 @@ export default function ExportPage() {
   const selectedItems = useItemQuery({ id: shownIds, sort: 'title', limit: SHOWN_TITLES }, scope === 'items' && shownIds.length > 0);
   const selectedTitles = selectedItems.data?.items ?? [];
 
-  const defaultName = scope === 'collection' ? (chosen?.name ?? '') : 'Codeathropy library';
+  const defaultName = scope === 'collection' ? (chosen?.name ?? '') : 'Codeatrophy library';
   const valid = scope === 'all' || (scope === 'collection' && !!effectiveCollection) || (scope === 'items' && passedIds.length > 0);
 
   const run = async () => {
@@ -77,7 +77,7 @@ export default function ExportPage() {
         includeSolutions,
         includeHiddenTests,
       });
-      const filename = res.filename ?? 'library.codeathropy.zip';
+      const filename = res.filename ?? 'library.codeatrophy.zip';
       saveBlob(res.blob, filename);
       setDone({ filename, size: res.blob.size });
     } catch (e) {
@@ -92,7 +92,7 @@ export default function ExportPage() {
       <ShareTabs active="export" />
       <h1 className="page-title">Export a bundle</h1>
       <p className="page-sub">
-        A bundle is a zip of plain Markdown, JSON and source files — readable, diffable, and importable into any Codeathropy instance. It carries content only:{' '}
+        A bundle is a zip of plain Markdown, JSON and source files — readable, diffable, and importable into any Codeatrophy instance. It carries content only:{' '}
         <strong>your status, favorites, notes and submissions are never included</strong>.
       </p>
 
@@ -165,8 +165,8 @@ export default function ExportPage() {
           <Checkbox
             checked={includeSolutions}
             onChange={setIncludeSolutions}
-            label="Reference solutions"
-            hint="Turn off to share problems without giving the answers away."
+            label="Saved solutions"
+            hint="Every solution saved with a problem, the reference solution included. Turn off to share problems without giving the answers away."
           />
           <Checkbox
             checked={includeHiddenTests}

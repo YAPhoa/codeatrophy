@@ -2,8 +2,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 // Where `npm run dev` forwards API and MCP requests. Override with
-// CODEATHROPY_BACKEND_URL when the server listens somewhere else.
-const backend = process.env.CODEATHROPY_BACKEND_URL ?? 'http://localhost:8080';
+// CODEATROPHY_BACKEND_URL when the server listens somewhere else.
+const backend = process.env.CODEATROPHY_BACKEND_URL ?? 'http://localhost:8080';
 
 export default defineConfig(({ mode }) => ({
   plugins: [react()],

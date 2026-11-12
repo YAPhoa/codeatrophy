@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/judge"
 )
 
 // Engine is a scriptable in-memory judge.Engine.

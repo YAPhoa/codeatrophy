@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"codeathropy/internal/domain"
-	"codeathropy/internal/store"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 // Test cases.

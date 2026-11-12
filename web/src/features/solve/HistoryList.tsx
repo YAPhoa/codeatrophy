@@ -1,18 +1,23 @@
-import { History } from 'lucide-react';
+import { BookmarkPlus, History } from 'lucide-react';
 import { useSubmissionList } from '../../api/queries';
-import { VERDICT_BRIEF, VERDICT_LABEL, absoluteTime, formatMs, relativeTime, verdictTone } from '../../lib/format';
+import type { SubmissionSummary } from '../../api/types';
+import { VERDICT_BRIEF, VERDICT_LABEL, absoluteTime, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
-import { cx } from '../../ui/Button';
+import { IconButton, cx } from '../../ui/Button';
 import { EmptyState, ErrorState, PageLoading } from '../../ui/misc';
 
 interface HistoryListProps {
   itemId: string;
   activeId: string | null;
+  /** The problem's time limit, to present time-limit verdicts as exceeding it. */
+  timeLimitMs: number;
   onOpen: (submissionId: string) => void;
+  /** Keep the code of a past submission as a saved solution. */
+  onSaveSolution: (submission: SubmissionSummary) => void;
 }
 
 /** Past runs and submissions of a problem, newest first. Opening one shows its results and code. */
-export function HistoryList({ itemId, activeId, onOpen }: HistoryListProps) {
+export function HistoryList({ itemId, activeId, timeLimitMs, onOpen, onSaveSolution }: HistoryListProps) {
   const list = useSubmissionList(itemId);
   if (list.isPending) return <PageLoading />;
   if (list.isError) return <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />;
@@ -27,7 +32,7 @@ export function HistoryList({ itemId, activeId, onOpen }: HistoryListProps) {
     <>
       <ul className="history">
         {list.data.items.map((s) => (
-          <li key={s.id}>
+          <li key={s.id} className="history-entry">
             <button type="button" className={cx('history-row', activeId === s.id && 'is-active')} onClick={() => onOpen(s.id)} aria-current={activeId === s.id || undefined}>
               <span className={cx('history-verdict', s.verdict ? `tone-${verdictTone(s.verdict)}` : 'tone-neutral')} title={s.verdict ? VERDICT_LABEL[s.verdict] : undefined}>
                 {s.verdict ? VERDICT_BRIEF[s.verdict] : s.status === 'queued' ? 'Queued' : 'Running'}
@@ -36,11 +41,18 @@ export function HistoryList({ itemId, activeId, onOpen }: HistoryListProps) {
               <span className="history-mode">{s.mode === 'submit' ? 'Submit' : 'Run'}</span>
               <span>{languageName(s.language)}</span>
               <span className="muted history-count">{s.verdict && !['executed', 'compile_error', 'internal_error'].includes(s.verdict) && s.totalCount > 0 ? `${s.passedCount}/${s.totalCount}` : ''}</span>
-              <span className="muted history-time">{s.timeMs != null && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' ? formatMs(s.timeMs) : ''}</span>
+              <span className="muted history-time">{s.timeMs != null && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' ? formatRunTime(s.timeMs, s.verdict, timeLimitMs) : ''}</span>
               <time className="muted history-when" dateTime={s.createdAt} title={absoluteTime(s.createdAt)}>
                 {relativeTime(s.createdAt)}
               </time>
             </button>
+            <IconButton
+              size="sm"
+              className={cx('history-save', s.mode === 'submit' && s.verdict === 'accepted' && 'is-suggested')}
+              label={`Save the code of this ${s.mode === 'submit' ? 'submission' : 'run'} as a solution`}
+              icon={<BookmarkPlus size={14} />}
+              onClick={() => onSaveSolution(s)}
+            />
           </li>
         ))}
       </ul>

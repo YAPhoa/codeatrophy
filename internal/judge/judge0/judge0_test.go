@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/judge"
 )
 
 // fakeJudge0 emulates the parts of the Judge0 REST API the adapter uses.
@@ -62,6 +62,10 @@ func (f *fakeJudge0) serve(w http.ResponseWriter, r *http.Request) {
 		})
 	case r.URL.Path == "/languages/62":
 		writeJSON(map[string]any{"compile_cmd": "/usr/local/openjdk13/bin/javac %s Main.java", "run_cmd": "/usr/local/openjdk13/bin/java Main"})
+	case r.URL.Path == "/languages/54":
+		writeJSON(map[string]any{"compile_cmd": "/usr/local/gcc-9.2.0/bin/g++ %s main.cpp", "run_cmd": "LD_LIBRARY_PATH=/usr/local/gcc-9.2.0/lib64 ./a.out"})
+	case r.URL.Path == "/languages/71":
+		writeJSON(map[string]any{"run_cmd": "/usr/local/python-3.8.1/bin/python3 script.py"})
 	case r.URL.Path == "/languages/78":
 		writeJSON(map[string]any{"compile_cmd": "/usr/local/kotlin-1.3.70/bin/kotlinc %s Main.kt", "run_cmd": "/usr/local/kotlin-1.3.70/bin/kotlin MainKt"})
 	case r.URL.Path == "/config_info":
@@ -289,7 +293,7 @@ func TestStatusMapping(t *testing.T) {
 		return map[string]any{"status": map[string]any{"id": 13}, "message": b64s("No such file or directory @ rb_sysopen - /box/script.py")}
 	}
 	res, _ := e2.Execute(context.Background(), judge.ExecRequest{Language: "python", Source: "x", TimeLimitMs: 1000, MemoryLimitKb: 65536})
-	if res.Status != judge.StatusInternalError || !strings.Contains(res.Message, "CODEATHROPY_JUDGE0_CGROUPS") {
+	if res.Status != judge.StatusInternalError || !strings.Contains(res.Message, "CODEATROPHY_JUDGE0_CGROUPS") {
 		t.Errorf("cgroup hint: %+v", res)
 	}
 }
@@ -305,7 +309,13 @@ func TestBatchExecution(t *testing.T) {
 	for _, in := range []string{"a", "b", "c", "d", "e"} {
 		reqs = append(reqs, judge.ExecRequest{Language: "python", Source: "x", Stdin: in, TimeLimitMs: 1000, MemoryLimitKb: 65536})
 	}
-	res, err := e.ExecuteBatch(context.Background(), reqs)
+	res := make([]judge.ExecResult, len(reqs))
+	err := e.ExecuteBatch(context.Background(), reqs, nil, func(i int, r judge.ExecResult, err error) {
+		if err != nil {
+			t.Errorf("case %d: %v", i, err)
+		}
+		res[i] = r
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,5 +344,62 @@ func TestAuthTokenAndHTTPErrors(t *testing.T) {
 	}
 	if _, err := New(Config{}); err == nil {
 		t.Error("URL is required")
+	}
+}
+
+func TestOutputFileLimitFitsLargestExpectedOutput(t *testing.T) {
+	f, srv := newFake(t)
+	e := newEngine(t, srv.URL, Config{})
+	if _, err := e.Execute(context.Background(), judge.ExecRequest{Language: "python", Source: "x", TimeLimitMs: 1000, MemoryLimitKb: 65536}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last()["max_file_size"]; got != float64(8192+1024) {
+		t.Errorf("max_file_size = %v", got)
+	}
+}
+
+func TestShellCrashReportIsStrippedOnlyWhenUnambiguous(t *testing.T) {
+	f, srv := newFake(t)
+	e := newEngine(t, srv.URL, Config{})
+	report := "run: line 1:     3 Aborted                 (core dumped) LD_LIBRARY_PATH=/usr/local/gcc-9.2.0/lib64 ./a.out\n"
+	run := func(lang, stderr string, exit int) judge.ExecResult {
+		f.result = func(map[string]any) map[string]any {
+			return map[string]any{"status": map[string]any{"id": 11}, "stderr": b64s(stderr), "exit_code": exit,
+				"message": b64s("Exited with error status " + fmt.Sprint(exit))}
+		}
+		res, err := e.Execute(context.Background(), judge.ExecRequest{Language: lang, Source: "x", TimeLimitMs: 1000, MemoryLimitKb: 65536})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := run("cpp", "assertion failed: x > 0\n"+report, 134)
+	if res.Stderr != "assertion failed: x > 0\n" || res.Message != "Aborted (core dumped)" {
+		t.Errorf("stripped: stderr %q message %q", res.Stderr, res.Message)
+	}
+	res = run("cpp", "run: line 1:     3 Segmentation fault      (core dumped) LD_LIBRARY_PATH=/usr/local/gcc-9.2.0/lib64 ./a.out", 139)
+	if res.Stderr != "" || res.Message != "Segmentation fault (core dumped)" {
+		t.Errorf("segfault without trailing newline: %q %q", res.Stderr, res.Message)
+	}
+	keep := map[string]struct {
+		lang, stderr string
+		exit         int
+	}{
+		"exit code does not match the signal": {"cpp", report, 1},
+		"not the last line":                   {"cpp", report + "more output\n", 134},
+		"different command":                   {"cpp", strings.Replace(report, "./a.out", "./other", 1), 134},
+		"other language's command":            {"python", report, 134},
+		"unknown signal text":                 {"cpp", strings.Replace(report, "Aborted", "Exploded", 1), 134},
+		"program printed something similar":   {"cpp", "run: line 1: oops\n", 134},
+	}
+	for name, c := range keep {
+		if res := run(c.lang, c.stderr, c.exit); res.Stderr != c.stderr {
+			t.Errorf("%s: stderr changed to %q", name, res.Stderr)
+		}
+	}
+	// A Python crash with its own command is recognised too.
+	res = run("python", "Fatal Python error: Segmentation fault\nrun: line 1:     3 Segmentation fault      (core dumped) /usr/local/python-3.8.1/bin/python3 script.py\n", 139)
+	if res.Stderr != "Fatal Python error: Segmentation fault\n" {
+		t.Errorf("python: %q", res.Stderr)
 	}
 }

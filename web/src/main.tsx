@@ -14,6 +14,9 @@ import './styles/ui.css';
 import './styles/markdown.css';
 import './styles/layout.css';
 import './styles/features.css';
+import './styles/solve.css';
+import './styles/solutions.css';
+import './styles/preferences.css';
 
 async function start() {
   // `npm run dev:mock` serves the UI against an in-memory implementation of

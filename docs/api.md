@@ -28,8 +28,14 @@ under `/api/v1`.
 Any non-2xx response has this body:
 
 ```json
-{ "error": { "code": "validation_failed", "message": "title is required", "fields": { "title": "is required" } } }
+{ "error": { "code": "validation_failed", "message": "title: is required", "fields": { "title": "is required" } } }
 ```
+
+`message` is a human-readable sentence for display. For `validation_failed`
+it names the first offending field (in sorted order) and its problem, as
+`<field>: <problem>`, followed by "(and N more problems)" when there are
+several; `fields` maps every offending field to its problem and is the part
+to use programmatically.
 
 `fields` is present only for `validation_failed`, and for a `conflict` that
 reports the current state (the item revision conflict described under
@@ -38,7 +44,7 @@ reports the current state (the item revision conflict described under
 | HTTP | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `bad_request` | Malformed JSON, bad query parameter, unreadable upload |
-| 403 | `forbidden` | A state-changing request sent from a web page on another origin (see below) |
+| 403 | `forbidden` | The `Host` header is not an accepted name for this server, or a state-changing request was sent from a web page on another origin (see [Host and origin checks](#host-and-origin-checks)) |
 | 404 | `not_found` | Resource does not exist |
 | 405 | `bad_request` | The path exists but does not support this method; the `Allow` header lists the ones it does |
 | 409 | `conflict` | Request conflicts with current state (e.g. a collection cycle) |
@@ -49,11 +55,38 @@ reports the current state (the item revision conflict described under
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
 | 500 | `internal` | Unexpected server error |
 
-Requests other than `GET`, `HEAD` and `OPTIONS` that carry an `Origin` header
-are accepted only from the server's own origin, a loopback origin (such as the
-UI dev server on `http://localhost:5173`), or an origin listed in
-`CODEATHROPY_ALLOWED_ORIGINS`. This blocks cross-site request forgery against
-an instance that has no authentication.
+### Host and origin checks
+
+Two checks protect an instance that has no authentication. Both apply to
+every request under `/api/` and to the MCP endpoint; the UI's static files
+are served for any host.
+
+1. **Host allow-list** (against DNS rebinding, applied first). The `Host`
+   header must name the server: a loopback name or address (`localhost`,
+   `*.localhost`, `127.0.0.0/8`, `::1`) with any port, the host of
+   `CODEATROPHY_PUBLIC_URL`, the host of any origin in
+   `CODEATROPHY_ALLOWED_ORIGINS` or `CODEATROPHY_MCP_ALLOWED_ORIGINS`, or a
+   host listed in `CODEATROPHY_ALLOWED_HOSTS` (comma-separated host names or
+   addresses; ports are ignored; `*` accepts any host and turns the check
+   off). Anything else — including a LAN address such as `192.168.1.20` that
+   is not listed — is `403 forbidden`, whatever the method, with a message
+   naming `CODEATROPHY_PUBLIC_URL` and `CODEATROPHY_ALLOWED_HOSTS`.
+2. **Origin check** (against cross-site request forgery). Requests other
+   than `GET`, `HEAD` and `OPTIONS` that carry an `Origin` header are
+   accepted only from a loopback origin (such as the UI dev server on
+   `http://localhost:5173`), an origin listed in
+   `CODEATROPHY_ALLOWED_ORIGINS` (which includes `CODEATROPHY_PUBLIC_URL`),
+   or an origin whose host is listed in `CODEATROPHY_ALLOWED_HOSTS`. The
+   origin is compared with this configured set, never with the request's
+   own `Host` header. `Origin: null` is rejected.
+
+### Single-line fields
+
+Item `title`, tags, collection `name`, style preset `name` and solution
+`name` are single-line fields: besides their length limits they reject every
+control character (newline, tab and U+0085 included) and the Unicode line
+and paragraph separators U+2028 and U+2029 (`422 validation_failed`). `\r\n`
+and `\r` count as newlines.
 
 ## Enumerations
 
@@ -96,7 +129,8 @@ to show.
   "limits": {
     "maxImportBytes": 52428800,
     "maxImportUncompressedBytes": 209715200,
-    "maxImportEntries": 20000,
+    "maxImportEntries": 1000000,
+    "maxImportCollections": 10000,
     "maxRequestBytes": 33554432,
     "maxPageSize": 200,
     "maxSourceBytes": 65536,
@@ -124,7 +158,10 @@ to show.
     "maxModelIdChars": 200,
     "maxApiKeyChars": 1000,
     "maxBundleNameChars": 200,
-    "maxBundleDescriptionChars": 5000
+    "maxBundleDescriptionChars": 5000,
+    "maxSolutionsPerItem": 50,
+    "maxSolutionNameChars": 100,
+    "maxSolutionNotesChars": 5000
   }
 }
 ```
@@ -143,9 +180,16 @@ to show.
   `maxBundleNameChars` applies to an export's `name` and `author`,
   `maxBundleDescriptionChars` to its `description`. `maxImportUncompressedBytes`
   and `maxImportEntries` bound the contents of an uploaded bundle
-  (`413` beyond them).
+  (`413` beyond them); `maxImportCollections` bounds the number of
+  collections in one bundle (`422` beyond it). The import limits are set so
+  that an export of any library this instance holds can be read back, but
+  restoring a large export may need a higher `CODEATROPHY_MAX_IMPORT_BYTES`
+  (which sets `maxImportBytes` and, at four times that,
+  `maxImportUncompressedBytes`).
+  `maxSolutionsPerItem`, `maxSolutionNameChars` and `maxSolutionNotesChars`
+  bound [solutions](#solutions).
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
-  set `CODEATHROPY_PUBLIC_URL`, otherwise `null`; a client then derives it
+  set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`.
 - `ai.enabled` is `true` when an active provider is fully configured (see
   [AI settings](#ai-settings)). When `false`, `provider` and `model` are `null`.
@@ -169,6 +213,9 @@ to show.
 ```
 
 All enum keys are always present, with `0` when empty.
+`submissions.total` counts every submission; `submissions.accepted` counts
+only `submit`-mode submissions whose verdict is `accepted` — a `run` whose
+sample cases all pass is not counted.
 
 ## Items
 
@@ -199,13 +246,14 @@ All enum keys are always present, with `0` when empty.
 
 - `revision` starts at 1 and increases by one each time a request actually
   changes one of the item's own content fields: `title`, `summary`, `body`,
-  `difficulty`, `tags`, `source`, `variantOf` or anything under `problem`
-  (including a reference solution stored through `testcases/bulk`). It does
+  `difficulty`, `tags`, `source`, `variantOf` or anything under `problem`.
+  That includes the reference solution: whenever the language or source that
+  `problem.referenceSolution` reports changes, by whatever endpoint. It does
   not change for personal state (`status`, `favorite`, `notes`), collection
-  membership, test-case changes, or a request that leaves every field as it
-  was.
+  membership, test-case changes, changes to other saved solutions, or a
+  request that leaves every field as it was.
 - `updatedAt` is the time of the last content change: whenever `revision`
-  increases, and whenever the item's test cases change. Personal state and
+  increases, and whenever the item's test cases or solutions change. Personal state and
   collection membership do not move it, so sorting by `updated` is stable
   under starring and status changes.
 - `variantOf` is the id of the item this one was derived from, or `null`.
@@ -213,11 +261,13 @@ All enum keys are always present, with `0` when empty.
   Deleting an item clears `variantOf` on its variants.
 - `difficulty` is nullable for both types.
 - `testCaseCount` is `0` and `lastVerdict` is `null` for readings.
+- `solutionCount` (a number, next to `testCaseCount`) is how many
+  [solutions](#solutions) are saved for the item; `0` for readings.
 - `lastVerdict` is the verdict of the most recent *completed* `submit`-mode
   submission, or `null` if there is none. A submission still being judged
   does not affect it.
 - `tags` are lower-cased, trimmed, de-duplicated and sorted by the server. A
-  tag may not contain `/` or control characters (`422`).
+  tag is a [single line](#single-line-fields) and may not contain `/` (`422`).
 
 `Item` — everything in `ItemSummary` plus:
 
@@ -232,11 +282,18 @@ All enum keys are always present, with `0` when empty.
     "memoryLimitKb": 262144,
     "compare": "tokens",
     "starterCode": { "python": "import sys\n..." },
-    "referenceSolution": { "language": "python", "source": "..." }
+    "referenceSolution": { "id": "...", "language": "python", "source": "..." }
   }
 }
 ```
 
+- `problem.referenceSolution` is a view of the item's saved
+  [solution](#solutions) that is marked as the reference, or `null` when none
+  is. Writing `{ "language", "source" }` to it (through `PATCH /items/{id}` or
+  `testcases/bulk`) updates that solution in place, or creates one named
+  "Reference solution" if there is none; an `id` in the written value is
+  ignored. Writing `null` only removes the reference mark — the solution
+  itself stays saved.
 - `body` is Markdown (GitHub-flavoured, with `$...$` / `$$...$$` math).
 - `notes` is the user's private Markdown notes. `rawInput` is the original
   text an AI draft was generated from, or `null`. Neither is ever exported.
@@ -268,8 +325,8 @@ All enum keys are always present, with `0` when empty.
 Only `type` and `title` are required on create; everything else defaults as
 shown. `type` cannot be changed after creation. `testCases` (an array of
 `TestCaseInput`) is accepted on create only, so a reviewed AI draft is saved
-atomically with its sample cases. Validation: `title` 1–200 chars;
-`timeLimitMs` 100–30000; `memoryLimitKb` 16384–2097152; at most 30 tags of 1–40
+atomically with its sample cases. Validation: `title` 1–200 chars, a
+[single line](#single-line-fields); `timeLimitMs` 100–30000; `memoryLimitKb` 16384–2097152; at most 30 tags of 1–40
 chars each.
 
 ### `GET /items`
@@ -335,7 +392,9 @@ written and the response is `422` naming the failing edit index in
 
 ### `DELETE /items/{id}`
 
-Deletes the item, its test cases and its submissions.
+Deletes the item, its test cases, its solutions and its submissions. Items
+that were variants of it lose their `variantOf` link; for each of them that
+is a content change, so its `revision` increases and its `updatedAt` moves.
 
 ### `POST /items/bulk`
 
@@ -400,10 +459,13 @@ content.
 
 ### `POST /items/{id}/testcases/verify`
 
-Executes the item's reference solution against every test case. Requires a
-judge engine and a reference solution (`422` if the item has none).
+Executes a saved solution against every test case. Requires a judge engine.
 
-Body: `{ "updateExpected": false }`
+Body: `{ "updateExpected": false, "solutionId": null }`
+
+`solutionId` selects which of the item's [solutions](#solutions) to run; when
+`null` or omitted, the reference solution is used (`422` if the item has
+none, or if `solutionId` is not one of this item's solutions).
 
 ```json
 {
@@ -425,13 +487,80 @@ Body: `{ "updateExpected": false }`
   says why (`runtime_error`, `time_limit_exceeded`, `compile_error`, …).
 - `matches` — `actualStdout` equals the stored expected output under the item's
   compare mode.
-- Cases that are `ok && matches` are marked `verified`. With
-  `updateExpected: true`, cases that are `ok && !matches` have their expected
-  output replaced by `actualStdout` and are marked `verified` too.
+- With the reference solution (`solutionId` omitted, `null`, or the
+  reference solution's id), every case's `verified` is set from the result:
+  `true` when `ok && matches`, `false` otherwise. With
+  `updateExpected: true`, cases that are `ok && !matches` instead have their
+  expected output replaced by `actualStdout` and are marked `verified`
+  (unless `actualStdout` is not valid UTF-8 or exceeds
+  `limits.maxTestDataBytes`, in which case they are left unverified). A case
+  whose run failed in the engine itself (`internal_error` because the engine
+  failed, not because of the program) keeps its flag. A change to that item's
+  test cases moves `updatedAt`, never `revision`.
+- With any other solution, the run is a check only: results are returned and
+  nothing is changed. `updateExpected: true` with a non-reference solution is
+  `422`.
 
 Synchronous; may take as long as the cases take to run. `503
 judge_unavailable` if no engine is configured or the engine cannot be reached;
-nothing is changed in that case.
+nothing is changed in that case. If the engine fails part-way through, the
+results that finished are kept, no further cases are started, and the rest
+are reported with verdict `internal_error`. If the reference solution or a
+case is changed while the run is in progress, the changed cases (or, for a
+changed reference, all cases) are left as they are.
+
+## Solutions
+
+A problem can keep any number of saved solutions: different approaches, the
+same approach in several languages, a brute force next to the intended one.
+They are part of the item's content — exported in bundles unless solutions
+are left out — and are separate from submissions, which are the history of
+what was run.
+
+At most one solution per item is the **reference solution**: the one used to
+compute and verify expected outputs. It is also what
+`problem.referenceSolution` on the item reports.
+
+`Solution`:
+
+```json
+{
+  "id": "...",
+  "itemId": "...",
+  "name": "Hash map, one pass",
+  "language": "python",
+  "source": "...",
+  "notes": "O(n) time, O(n) space.",
+  "isReference": true,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+`SolutionInput`: `name` (required, single line, 1–`limits.maxSolutionNameChars`),
+`language` (required; any canonical language id, whether or not the judge
+currently offers it), `source` (required, non-empty, at most
+`limits.maxSourceBytes`), `notes` (Markdown, default `""`, at most
+`limits.maxSolutionNotesChars`), `isReference` (default `false`).
+
+Setting `isReference: true` on one solution clears it on the item's others in
+the same transaction. An item holds at most `limits.maxSolutionsPerItem`
+solutions (`409 conflict` beyond that).
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /items/{id}/solutions` | `{ "items": [Solution] }`, the reference solution first, then oldest first. Not paginated |
+| `POST /items/{id}/solutions` | Body `SolutionInput`. `201` `Solution` |
+| `PATCH /solutions/{id}` | Partial `SolutionInput`. Returns `Solution` |
+| `DELETE /solutions/{id}` | `204`. Deleting the reference solution leaves the item without one |
+
+All of these return `422` for a reading. Changing the reference solution's
+language or source, or which solution is the reference, changes
+`problem.referenceSolution` and therefore the item's `revision`; `POST` and
+`PATCH` accept an optional `expectedRevision` for that case, checked as for
+`PATCH /items/{id}`. Other solution changes leave `revision` alone. Changing a
+reference solution does not reset `verified` on test cases; run
+`testcases/verify` again to re-check them.
 
 ## Collections
 
@@ -526,7 +655,10 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   a single overall `compile_error` with `compileOutput` set and `results`
   empty.
 - `results` fills in as cases finish; while `running`, cases not yet finished
-  are absent. `stdin`, `expectedStdout`, `stdout` and `stderr` are each
+  are absent. Results may arrive in groups rather than one at a time (an
+  engine that runs cases in batches reports a batch when it finishes), and
+  not necessarily in case order; each result's position in `results` is its
+  case order regardless. `stdin`, `expectedStdout`, `stdout` and `stderr` are each
   truncated to 64 KiB.
 - `testCaseId` and `expectedStdout` are `null` for a custom-stdin run.
 - `totalCount` is fixed when the submission is created — the number of cases
@@ -537,6 +669,12 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   `timeMs` / `memoryKb` are `null`.
 - `error` is a human-readable message when `verdict` is `internal_error`
   (engine unreachable, etc.), otherwise `null`.
+- If the engine fails part-way through, the results that finished are kept,
+  no further cases are started, and the remaining cases are reported as
+  `internal_error`.
+- Submissions still `queued` or `running` when the server stops are not
+  resumed: at the next start they are completed with verdict `internal_error`
+  and an `error` saying judging was interrupted.
 
 `SubmissionSummary` is `Submission` without `source`, `results`,
 `compileOutput`.
@@ -788,10 +926,21 @@ Providers:
   `environment`, or `null` when the default applies.
 - `apiKeyHint` is `…` plus the last four characters. `apiKeySource` is
   `settings`, `environment` or `null`.
+- A key is only ever sent to the origin (scheme, host and port) it was stored
+  for. A saved key is stored together with the origin of the effective base
+  URL at the time it was saved. The environment key belongs to the
+  environment's base URL, or the default when none is set. `apiKeySet`,
+  `apiKeyHint` and `apiKeySource` describe the key that would actually be
+  used with the current effective base URL: a key bound to another origin
+  does not count.
 - `ready` — the provider has everything it needs, counting defaults: a model,
   plus an API key for `anthropic`. A key is optional for `openai_compatible`
-  (local servers), which requires a model and a base URL.
+  (local servers), which requires a model and a base URL — except that on
+  the default OpenAI base URL (`https://api.openai.com`) a key is required too.
 - `activeProvider` is `null` when none is selected; AI features are then off.
+  `CODEATROPHY_AI_PROVIDER` gives its initial value only: once
+  `activeProvider` has been saved through `PUT` — including as `null` — the
+  saved value applies and the environment default no longer does.
 
 ### `PUT /settings/ai`
 
@@ -808,7 +957,11 @@ Merge update. Every field is optional.
 
 - `apiKey` omitted → the stored key is unchanged. `apiKey: null` → the stored
   key is deleted (an environment key, if any, applies again). A string
-  replaces it; an empty string is treated like an omitted key.
+  replaces it; an empty string is treated like an omitted key. A key given
+  here is bound to the origin of the effective base URL after the update.
+- An update that changes the origin of the effective base URL without giving
+  a new `apiKey` deletes the stored key, so it is never sent to the new
+  origin. Changing only the path on the same origin keeps it.
 - `model: null` / `baseUrl: null` clear the saved value.
 - `activeProvider: null` turns AI features off. Selecting a provider that is
   not `ready` after the update is `422`.
@@ -826,7 +979,9 @@ works. Nothing is saved.
 
 Only `provider` is required. Any of `model`, `baseUrl`, `apiKey` given here
 override the saved values for this test, so the UI can test a key before
-saving it.
+saving it. When `baseUrl` points at a different origin from the one a saved
+or environment key belongs to, that key is not used: only an `apiKey` given
+in the same request is sent, and with none the test is made without a key.
 
 ```json
 { "ok": true, "model": "claude-opus-5-5", "latencyMs": 640, "error": null }
@@ -864,8 +1019,7 @@ Hard limits, enforced by the server for every caller and not configurable:
 
 Lengths are counted in Unicode code points after trimming surrounding
 whitespace. Control characters other than newline and tab are rejected; a
-`name` must also be a single line, so newline and tab are rejected there too
-(`\r\n` and `\r` count as newlines).
+`name` must also be a [single line](#single-line-fields).
 Violations are `422 validation_failed`; a 21st preset is `409 conflict`.
 `instructions` is never truncated silently.
 
@@ -905,6 +1059,47 @@ Both responses carry, next to `draft`, the preset that was actually applied:
 `"style": { "id": "...", "name": "LeetCode style" }`, or `"style": null`.
 Presets do not apply to `POST /items/{id}/ai/testcases`.
 
+## Preferences
+
+How the user likes the app to behave. Preferences are stored on the server so
+they follow the user across browsers; they are personal, never exported, and
+not available over MCP. The server stores and validates them but does not act
+on them — they are for clients to honour.
+
+### `GET /settings/preferences`
+
+```json
+{
+  "hideTestCases": true,
+  "editor": {
+    "autocomplete": true,
+    "closeBrackets": true,
+    "matchBrackets": true,
+    "lineWrapping": false,
+    "tabSize": 4,
+    "fontSize": 14
+  }
+}
+```
+
+Every key is always present; the values above are the defaults.
+
+| Key | Values | Meaning for a client |
+| --- | --- | --- |
+| `hideTestCases` | boolean | When `true`, show how many test cases a problem has and how many a run used, but keep the content of non-sample cases (in the test list and in submission results) out of sight until the user asks to reveal it. Sample cases are part of the statement and stay visible |
+| `editor.autocomplete` | boolean | Offer code completion while typing |
+| `editor.closeBrackets` | boolean | Insert the closing bracket or quote automatically |
+| `editor.matchBrackets` | boolean | Highlight the bracket matching the one at the cursor |
+| `editor.lineWrapping` | boolean | Wrap long lines instead of scrolling horizontally |
+| `editor.tabSize` | `2`, `4` or `8` | Indentation width |
+| `editor.fontSize` | integer 10–24 | Editor font size in pixels |
+
+### `PUT /settings/preferences`
+
+Merge update: send any subset, at any depth; omitted keys keep their value.
+An unknown key or an out-of-range value is `422` and nothing is saved.
+Returns the same body as `GET /settings/preferences`.
+
 ## Import and export
 
 Bundle layout and semantics are specified in `bundle-format.md`.
@@ -927,12 +1122,15 @@ Bundle layout and semantics are specified in `bundle-format.md`.
 - `scope` — `all`, `collection` (that collection and its descendants, with
   their items) or `items` (exactly `itemIds`; no collections are exported).
   A `collectionId` or an entry of `itemIds` that does not exist is `422`.
-- `includeSolutions: false` omits reference solutions.
-  `includeHiddenTests: false` exports sample test cases only.
-- `name` defaults to the collection name or `"Codeathropy library"`.
+- `includeSolutions: false` omits saved solutions (the reference solution
+  included). `includeHiddenTests: false` exports sample test cases only. The
+  bundle records both choices in `bundle.json` (`includes`), so an importer
+  knows that missing solutions or hidden cases were left out rather than
+  absent.
+- `name` defaults to the collection name or `"Codeatrophy library"`.
 
 Returns `200` `application/zip` with
-`Content-Disposition: attachment; filename="<slug>.codeathropy.zip"`.
+`Content-Disposition: attachment; filename="<slug>.codeatrophy.zip"`.
 
 ### `POST /import/preview`
 
@@ -960,7 +1158,7 @@ or `existing`.
 For a `changed` item, `changes` names what differs from the local item, so
 the user can choose a strategy knowingly. Values are content field names —
 `type`, `title`, `summary`, `body`, `difficulty`, `tags`, `source`, `variantOf`,
-`limits`, `compare`, `starterCode`, `referenceSolution`, `testCases` — in
+`limits`, `compare`, `starterCode`, `solutions`, `testCases` — in
 that order. It is `[]` for `new` and `unchanged` items.
 
 `422 validation_failed` if the archive is not a valid bundle or its
@@ -973,10 +1171,17 @@ that order. It is `[]` for `new` and `unchanged` items.
 | `strategy` | Effect on `changed` items |
 | --- | --- |
 | `skip` (default) | Keep the local item untouched |
-| `overwrite` | Replace content and test cases with the bundle's; personal state and submissions are kept |
+| `overwrite` | Replace content, test cases and solutions with the bundle's; personal state and submissions are kept. Local solutions and hidden cases survive when the bundle was exported without them |
 | `duplicate` | Import as a separate new item with a fresh id |
 
-`new` items are always created; `unchanged` items are always left alone.
+`new` items are always created; `unchanged` items are always left alone. An
+overwrite increases an item's `revision` only when its content (as for
+`PATCH /items/{id}`) changes; one that changes only test cases moves
+`updatedAt` and leaves `revision` alone. A `variantOf` that names an item in
+neither the bundle nor the library is dropped (set to `null`) before the
+comparison, so re-importing the same bundle stays `unchanged`. Under
+`duplicate`, a bundle item whose `variantOf` names another item duplicated in
+the same import points at the new copy.
 Collections are created if missing; bundle membership is merged into existing
 collections (items not already members are appended in bundle order). The
 whole import is one transaction.

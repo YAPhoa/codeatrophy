@@ -175,6 +175,9 @@ interface Limits {
 }
 
 /** The failure a behaviour causes on case `index` of `total`, if any. */
+/** How long past the time limit the pretend engine lets a program run before stopping it. */
+export const TLE_GRACE_MS = 1100;
+
 export function failureFor(
   behaviour: Behaviour,
   index: number,
@@ -184,7 +187,9 @@ export function failureFor(
 ): { verdict: Verdict; stderr: string; timeMs?: number; memoryKb?: number } | null {
   if (behaviour === 're') return { verdict: 'runtime_error', stderr: stackTraceFor(language) };
   if (index !== total - 1) return null;
-  if (behaviour === 'tle') return { verdict: 'time_limit_exceeded', stderr: '', timeMs: limits.timeLimitMs };
+  // What an engine reports for a run it had to stop is when it stopped it:
+  // the limit plus its grace period, not a measurement of the program.
+  if (behaviour === 'tle') return { verdict: 'time_limit_exceeded', stderr: '', timeMs: limits.timeLimitMs + TLE_GRACE_MS };
   if (behaviour === 'mle') return { verdict: 'memory_limit_exceeded', stderr: '', memoryKb: limits.memoryLimitKb };
   return null;
 }

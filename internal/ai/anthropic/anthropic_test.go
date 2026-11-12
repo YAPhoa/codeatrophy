@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
-	"codeathropy/internal/ai"
+	"codeatrophy/internal/ai"
 )
 
 const testKey = "sk-ant-test-0000-secret"
@@ -38,6 +40,11 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 	var body map[string]any
 	var headers http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"id":"claude-opus-5-5","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z","max_tokens":128000,"max_input_tokens":1000000}`)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/v1/messages") {
 			http.NotFound(w, r)
 			return
@@ -92,7 +99,7 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 
 func TestParamsForFirstPartyAPI(t *testing.T) {
 	p, _ := New(ai.Config{APIKey: testKey})
-	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true})
+	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true}, 0)
 	b, _ := json.Marshal(params)
 	var m map[string]any
 	json.Unmarshal(b, &m)
@@ -107,7 +114,7 @@ func TestParamsForFirstPartyAPI(t *testing.T) {
 	}
 	// Models without effort or fallback support get neither.
 	old, _ := New(ai.Config{APIKey: testKey, Model: "claude-haiku-4-5"})
-	b, _ = json.Marshal(old.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema()}))
+	b, _ = json.Marshal(old.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema()}, 0))
 	if strings.Contains(string(b), "effort") || strings.Contains(string(b), "fallbacks") {
 		t.Errorf("older model params: %s", b)
 	}
@@ -164,4 +171,77 @@ func asError(err error, target **ai.Error) bool {
 		*target = pe
 	}
 	return ok
+}
+
+// max_tokens never exceeds the configured model's own output cap, looked up
+// once through the Models API; without the lookup a value every current
+// model accepts is used.
+func TestMaxTokensFitsTheModel(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		models func(w http.ResponseWriter)
+		want   float64
+	}{
+		{"small cap", func(w http.ResponseWriter) {
+			fmt.Fprint(w, `{"id":"old","type":"model","display_name":"x","created_at":"2024-01-01T00:00:00Z","max_tokens":8192,"max_input_tokens":200000}`)
+		}, 8192},
+		{"no models API", func(w http.ResponseWriter) { w.WriteHeader(404) }, fallbackOutputTokens},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lookups atomic.Int32
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+					lookups.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					tc.models(w)
+					return
+				}
+				b, _ := io.ReadAll(r.Body)
+				json.Unmarshal(b, &body)
+				sse(w, `{"ok": true}`, "end_turn")
+			}))
+			defer srv.Close()
+			p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "old"})
+			for range 2 {
+				if _, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()}); err != nil {
+					t.Fatal(err)
+				}
+				if body["max_tokens"] != tc.want {
+					t.Errorf("max_tokens %v, want %v", body["max_tokens"], tc.want)
+				}
+			}
+			if tc.want == 8192 && lookups.Load() != 1 {
+				t.Errorf("the cap was looked up %d times", lookups.Load())
+			}
+		})
+	}
+}
+
+// One timeout bounds the whole call, retries included.
+func TestTimeoutBoundsRetries(t *testing.T) {
+	var attempts atomic.Int32
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.WriteHeader(404)
+			return
+		}
+		attempts.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
+	}))
+	defer srv.Close()
+	defer close(done)
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Timeout: 400 * time.Millisecond})
+	start := time.Now()
+	_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+	if err == nil {
+		t.Fatal("expected a timeout")
+	}
+	if d := time.Since(start); d > 1200*time.Millisecond {
+		t.Errorf("Generate took %s with a 400ms timeout (%d attempts)", d.Round(time.Millisecond), attempts.Load())
+	}
 }

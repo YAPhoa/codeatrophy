@@ -1,11 +1,37 @@
-import { useEffect, useRef } from 'react';
-import { basicSetup, minimalSetup } from 'codemirror';
-import { Annotation, Compartment, EditorState, type Extension } from '@codemirror/state';
-import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view';
-import { indentWithTab } from '@codemirror/commands';
-import { HighlightStyle, indentUnit, StreamLanguage, syntaxHighlighting } from '@codemirror/language';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { minimalSetup } from 'codemirror';
+import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  HighlightStyle,
+  indentOnInput,
+  indentUnit,
+  syntaxHighlighting,
+} from '@codemirror/language';
+import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
+import {
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+  placeholder as placeholderExt,
+  rectangularSelection,
+} from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
+import { usePreferences } from '../api/queries';
 import { cx } from './Button';
+import { documentWords, loadLanguage } from './editorLanguages';
+import { FONT_SIZE_DEFAULT, lineHeightFor, resolveEditorOptions, type EditorOptions } from './editorOptions';
 
 export interface EditorShortcut {
   /** CodeMirror key name, e.g. `Mod-Enter`. */
@@ -21,7 +47,10 @@ export interface CodeEditorProps {
   readOnly?: boolean;
   ariaLabel: string;
   className?: string;
-  /** Prose mode: soft-wrapped lines and no gutters. */
+  /**
+   * Prose mode, for Markdown bodies and notes: soft-wrapped lines, no
+   * gutters, and none of the user's code-editor preferences.
+   */
   prose?: boolean;
   placeholder?: string;
   shortcuts?: readonly EditorShortcut[];
@@ -31,11 +60,17 @@ export interface CodeEditorProps {
 /** Marks a transaction that mirrors a new `value` prop, so it is not echoed back through `onChange`. */
 const externalChange = Annotation.define<boolean>();
 
-// Colours come from CSS custom properties, so one theme serves light and dark.
+// Colours come from CSS custom properties, so one theme serves light and
+// dark. The type size comes from two more, set on each editor from the user's
+// preferences (see `metrics` below).
 const theme = EditorView.theme({
-  '&': { color: 'var(--text)', backgroundColor: 'transparent', height: '100%', fontSize: '13px' },
+  '&': { color: 'var(--text)', backgroundColor: 'transparent', height: '100%', fontSize: `var(--editor-font-size, ${FONT_SIZE_DEFAULT}px)` },
   '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.55', overflow: 'auto' },
+  '.cm-scroller': {
+    fontFamily: 'var(--font-mono)',
+    lineHeight: `var(--editor-line-height, ${lineHeightFor(FONT_SIZE_DEFAULT)}px)`,
+    overflow: 'auto',
+  },
   '.cm-content': { caretColor: 'var(--text)', padding: '8px 0' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
@@ -58,6 +93,7 @@ const theme = EditorView.theme({
     borderRadius: 'var(--radius)',
     boxShadow: 'var(--shadow-pop)',
   },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-mono)' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--accent-soft)', color: 'var(--text)' },
   '.cm-panels': { backgroundColor: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' },
   '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--border)' },
@@ -93,51 +129,83 @@ const highlight = HighlightStyle.define([
   { tag: [t.invalid], color: 'var(--danger)' },
 ]);
 
-/** Load the CodeMirror language support for a language id on demand. */
-async function loadLanguage(id: string | null | undefined): Promise<Extension> {
-  switch (id) {
-    case 'python':
-      return (await import('@codemirror/lang-python')).python();
-    case 'c':
-    case 'cpp':
-      return (await import('@codemirror/lang-cpp')).cpp();
-    case 'java':
-      return (await import('@codemirror/lang-java')).java();
-    case 'javascript':
-      return (await import('@codemirror/lang-javascript')).javascript();
-    case 'typescript':
-      return (await import('@codemirror/lang-javascript')).javascript({ typescript: true });
-    case 'go':
-      return (await import('@codemirror/lang-go')).go();
-    case 'rust':
-      return (await import('@codemirror/lang-rust')).rust();
-    case 'csharp':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).csharp);
-    case 'kotlin':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).kotlin);
-    case 'ruby':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/ruby')).ruby);
-    case 'markdown':
-      return (await import('@codemirror/lang-markdown')).markdown();
-    default:
-      return [];
-  }
+/**
+ * The fixed part of a code editor: the `basicSetup` of the `codemirror`
+ * package without bracket matching, bracket closing and completion, which
+ * follow the user's preferences and are configured separately.
+ */
+const codeSetup: Extension = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  rectangularSelection(),
+  crosshairCursor(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
+];
+
+/**
+ * The parts of an editor that change during its life, each in a compartment
+ * of its own so that it can be replaced without rebuilding the editor.
+ */
+function createCompartments() {
+  return {
+    language: new Compartment(),
+    readOnly: new Compartment(),
+    autocomplete: new Compartment(),
+    closeBrackets: new Compartment(),
+    matchBrackets: new Compartment(),
+    lineWrapping: new Compartment(),
+    indent: new Compartment(),
+    metrics: new Compartment(),
+  };
 }
+
+/** The extension for each compartment that follows the user's preferences. */
+const optionExtensions = {
+  autocomplete: (o: EditorOptions): Extension => (o.autocomplete ? [autocompletion(), documentWords] : []),
+  closeBrackets: (o: EditorOptions): Extension => (o.closeBrackets ? [closeBrackets(), keymap.of(closeBracketsKeymap)] : []),
+  matchBrackets: (o: EditorOptions): Extension => (o.matchBrackets ? bracketMatching() : []),
+  lineWrapping: (o: EditorOptions): Extension => (o.lineWrapping ? EditorView.lineWrapping : []),
+  indent: (o: EditorOptions): Extension => [EditorState.tabSize.of(o.tabSize), indentUnit.of(o.indentUnit)],
+  metrics: (o: EditorOptions): Extension =>
+    EditorView.editorAttributes.of({ style: `--editor-font-size: ${o.fontSize}px; --editor-line-height: ${o.lineHeight}px` }),
+};
+
+const OPTION_KEYS = Object.keys(optionExtensions) as (keyof typeof optionExtensions)[];
 
 /**
  * CodeMirror 6 wrapped as a controlled component. Tab indents; press Escape
  * and then Tab to move focus out of the editor with the keyboard.
+ *
+ * Every editor reads the user's editor preferences itself and applies a
+ * change at once, in place: the text, selection and undo history are kept.
  */
 export default function CodeEditorImpl({ value, onChange, language, readOnly = false, ariaLabel, className, prose = false, placeholder, shortcuts, autoFocus }: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const shortcutsRef = useRef(shortcuts);
-  const compartments = useRef({ language: new Compartment(), readOnly: new Compartment() });
+  const [compartments] = useState(createCompartments);
+
+  const preferences = usePreferences().editor;
+  const options = useMemo(() => resolveEditorOptions(preferences, { prose }), [preferences, prose]);
+  const optionsRef = useRef(options);
+  /** The options the live editor is configured with. */
+  const appliedRef = useRef(options);
 
   useEffect(() => {
     onChangeRef.current = onChange;
     shortcutsRef.current = shortcuts;
+    optionsRef.current = options;
   });
 
   // The set of shortcut keys is fixed for the lifetime of an editor; their
@@ -147,26 +215,34 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const { language: langC, readOnly: roC } = compartments.current;
+    const { language: langC, readOnly: roC } = compartments;
+    const initial = optionsRef.current;
+    appliedRef.current = initial;
     const keys = shortcutKeys ? shortcutKeys.split(' ') : [];
     const view = new EditorView({
       parent: host,
       state: EditorState.create({
         doc: value,
         extensions: [
-          keymap.of(
-            keys.map((key) => ({
-              key,
-              run: () => {
-                shortcutsRef.current?.find((s) => s.key === key)?.run();
-                return true;
-              },
-            })),
+          // The caller's shortcuts win over every other binding for the same
+          // key, including the ones completion and bracket closing register
+          // at the highest precedence: of two extensions with equal
+          // precedence the earlier one is asked first.
+          Prec.highest(
+            keymap.of(
+              keys.map((key) => ({
+                key,
+                run: () => {
+                  shortcutsRef.current?.find((s) => s.key === key)?.run();
+                  return true;
+                },
+              })),
+            ),
           ),
-          prose ? minimalSetup : basicSetup,
+          // Ahead of the default keymap, so that Backspace can remove a bracket pair.
+          OPTION_KEYS.map((key) => compartments[key].of(optionExtensions[key](initial))),
+          prose ? minimalSetup : codeSetup,
           keymap.of([indentWithTab]),
-          indentUnit.of('    '),
-          prose ? EditorView.lineWrapping : [],
           theme,
           syntaxHighlighting(highlight),
           langC.of([]),
@@ -189,7 +265,17 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
     };
     // The editor is created once; later prop changes are applied by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prose, shortcutKeys]);
+  }, [compartments, prose, shortcutKeys]);
+
+  // A changed preference reconfigures the live editor.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || appliedRef.current === options) return;
+    appliedRef.current = options;
+    view.dispatch({ effects: OPTION_KEYS.map((key) => compartments[key].reconfigure(optionExtensions[key](options))) });
+    // A new type size or wrapping mode changes every line's height.
+    view.requestMeasure();
+  }, [compartments, options]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -203,18 +289,18 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
   useEffect(() => {
     let cancelled = false;
     void loadLanguage(language).then((ext) => {
-      if (!cancelled) viewRef.current?.dispatch({ effects: compartments.current.language.reconfigure(ext) });
+      if (!cancelled) viewRef.current?.dispatch({ effects: compartments.language.reconfigure(ext) });
     });
     return () => {
       cancelled = true;
     };
-  }, [language, prose, shortcutKeys]);
+  }, [compartments, language, prose, shortcutKeys]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: compartments.current.readOnly.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+      effects: compartments.readOnly.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
     });
-  }, [readOnly]);
+  }, [compartments, readOnly]);
 
   return <div ref={hostRef} className={cx('code-editor', prose && 'code-editor-prose', className)} />;
 }

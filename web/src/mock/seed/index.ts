@@ -11,6 +11,7 @@ import { starterCode } from '../starter';
 import type { SeedProblem } from './problems';
 import { SEED_PROBLEMS } from './problems';
 import { SEED_READINGS } from './readings';
+import { SEED_SOLUTIONS } from './solutions';
 
 const pad = (n: number) => String(n).padStart(12, '0');
 const itemId = (n: number) => `11111111-1111-4111-8111-${pad(n)}`;
@@ -18,6 +19,7 @@ const collectionId = (n: number) => `22222222-2222-4222-8222-${pad(n)}`;
 const testCaseId = (item: number, index: number) => `33333333-3333-4333-8333-${pad(item * 100 + index)}`;
 const submissionId = (n: number) => `44444444-4444-4444-8444-${pad(n)}`;
 const styleId = (n: number) => `55555555-5555-4555-8555-${pad(n)}`;
+const solutionId = (item: number, index: number) => `66666666-6666-4666-8666-${pad(item * 100 + index)}`;
 
 /** Fixed ids of seed records, for tests and scripts. */
 export const seedIds = {
@@ -71,6 +73,15 @@ export const seedIds = {
   styles: {
     leetcode: styleId(1),
     terse: styleId(2),
+  },
+  solutions: {
+    /** The reference solution of Two Sum, in Python. */
+    twoSumHashMap: solutionId(1, 1),
+    twoSumBruteForce: solutionId(1, 2),
+    twoSumCpp: solutionId(1, 3),
+    coinChangeTable: solutionId(8, 1),
+    coinChangeMemoised: solutionId(8, 2),
+    coinChangeBfs: solutionId(8, 3),
   },
 } as const;
 
@@ -545,7 +556,6 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
     problem: {
       ...structuredClone(DEFAULT_PROBLEM),
       starterCode: starterCode(p.languages),
-      referenceSolution: p.reference ? { language: 'python', source: p.reference } : null,
     },
     variantOf: variantOf ? itemId(variantOf.n) : null,
     revision: p.revision ?? 1,
@@ -570,6 +580,18 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
       updatedAt: at(p.updated),
     });
     if (c.truth !== undefined) db.truth.set(caseId, c.truth);
+  });
+  // The reference solution was written with the problem; the other approaches were saved later.
+  const set = SEED_SOLUTIONS[p.key];
+  const solutions = [
+    ...(p.reference
+      ? [{ name: 'Reference solution', notes: '', ...set?.reference, language: 'python', source: p.reference, isReference: true }]
+      : []),
+    ...(set?.others ?? []).map((s) => ({ ...s, isReference: false })),
+  ];
+  solutions.forEach((s, i) => {
+    const createdAt = at(s.isReference ? p.created : p.updated);
+    db.solutions.push({ id: solutionId(p.n, i + 1), itemId: id, ...s, createdAt, updatedAt: createdAt, seq: db.nextSeq() });
   });
   for (const key of p.collections) collections.get(key)?.push(id);
 }

@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"codeathropy/internal/domain"
+	"codeatrophy/internal/domain"
 )
 
 // ErrNotFound is returned when a requested record does not exist.
@@ -103,6 +103,18 @@ type Tx interface {
 	UnfinishedSubmissionIDs() ([]string, error)
 
 	Stats() (domain.Stats, error)
+
+	// Solutions of a problem: the reference first, then oldest first.
+	// Item reads fill problem.referenceSolution from them; item writes
+	// ignore it.
+	ListSolutions(itemID string) ([]domain.ItemSolution, error)
+	GetSolution(id string) (domain.ItemSolution, error)
+	InsertSolution(s *domain.ItemSolution) error
+	UpdateSolution(s *domain.ItemSolution) error
+	DeleteSolution(id string) error
+	DeleteSolutions(itemID string) error
+	// ClearReference unsets isReference on every solution of the item.
+	ClearReference(itemID string) error
 
 	// Style presets, default first, then by name.
 	ListStylePresets() ([]domain.StylePreset, error)

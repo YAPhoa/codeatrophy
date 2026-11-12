@@ -18,6 +18,9 @@ const (
 	MaxBundleDescriptionChars = 5000
 	// Bundle archives: entry count and expanded size relative to the
 	// configured upload limit.
-	MaxBundleEntries      = 20000
+	// MaxBundleEntries is high enough that any library this instance can
+	// hold fits; the compressed and expanded size limits bound the work.
+	MaxBundleEntries      = 1000000
+	MaxBundleCollections  = 10000
 	BundleExpansionFactor = 4
 )

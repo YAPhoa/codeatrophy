@@ -1707,7 +1707,7 @@ fieldset.stack legend {
 
 .history-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) 58px minmax(70px, 1fr) 44px 60px 84px;
+  grid-template-columns: minmax(96px, 1.4fr) 48px minmax(52px, 1fr) 34px 52px 70px;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -1755,10 +1755,6 @@ fieldset.stack legend {
 
 @media (max-width: 1100px) {
   .itembar-wide {
-    display: none;
-  }
-
-  .editor-saved {
     display: none;
   }
 }

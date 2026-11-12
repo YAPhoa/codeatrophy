@@ -14,13 +14,17 @@ import type {
   JudgeLanguage,
   Limits,
   Meta,
+  Preferences,
   ProblemSpec,
+  Solution,
+  SourceCode,
   StylePreset,
   Submission,
   TestCase,
   Verdict,
 } from '../api/types';
-import { notFound } from './http';
+import { conflict, notFound } from './http';
+import { uuid } from './util';
 
 export interface MockOptions {
   /** Whether an AI provider is configured at start. Default `true`. */
@@ -42,9 +46,22 @@ export interface MockOptions {
    * start: saved through the API, or supplied by the server's environment.
    */
   aiSource?: 'settings' | 'environment';
-  /** Answer every state-changing request with `403 forbidden`, as for a foreign origin. */
-  forbidden?: boolean;
+  /**
+   * Refuse requests with `403 forbidden`. `host`: every request, as when the
+   * server is reached under a host name it does not accept; `origin`: only
+   * state-changing requests, as for a web page on another origin.
+   */
+  forbidden?: false | 'host' | 'origin';
+  /** The `hideTestCases` preference at start. Default `true`, as on a new instance. */
+  hideTestCases?: boolean;
 }
+
+/**
+ * A problem's settings as stored. The reference solution is not among them:
+ * it is one of the item's saved solutions, and `problem.referenceSolution`
+ * in a response is a view of it.
+ */
+export type StoredProblem = Omit<ProblemSpec, 'referenceSolution'>;
 
 export interface StoredItem {
   id: string;
@@ -59,7 +76,7 @@ export interface StoredItem {
   notes: string;
   rawInput: string | null;
   source: ItemSource;
-  problem: ProblemSpec | null;
+  problem: StoredProblem | null;
   variantOf: string | null;
   revision: number;
   createdAt: string;
@@ -67,6 +84,23 @@ export interface StoredItem {
   /** Monotonic counter that breaks ties between equal timestamps. */
   seq: number;
 }
+
+export interface StoredSolution extends Solution {
+  /** Monotonic counter that breaks ties between equal creation times. */
+  seq: number;
+}
+
+/** The fields of a solution a client can set. */
+export interface SolutionFields {
+  name: string;
+  language: string;
+  source: string;
+  notes: string;
+  isReference: boolean;
+}
+
+/** The name given to a solution created by writing `problem.referenceSolution`. */
+export const REFERENCE_SOLUTION_NAME = 'Reference solution';
 
 export interface StoredCollection {
   id: string;
@@ -117,7 +151,8 @@ export const JUDGE_LANGUAGES: readonly JudgeLanguage[] = [
 export const LIMITS: Limits = {
   maxImportBytes: 52428800,
   maxImportUncompressedBytes: 209715200,
-  maxImportEntries: 20000,
+  maxImportEntries: 1000000,
+  maxImportCollections: 10000,
   maxRequestBytes: 33554432,
   maxPageSize: 200,
   maxSourceBytes: 65536,
@@ -135,6 +170,9 @@ export const LIMITS: Limits = {
   maxTestCasesPerItem: 1000,
   maxTestDataBytes: 8388608,
   maxTestCaseNameChars: 200,
+  maxSolutionsPerItem: 50,
+  maxSolutionNameChars: 100,
+  maxSolutionNotesChars: 5000,
   maxDraftTextChars: 50000,
   maxInstructionChars: 2000,
   maxPreviousDraftBytes: 2097152,
@@ -154,12 +192,24 @@ export const atMostChars = (max: number): string => `must be at most ${max} char
 /** The address reported as `mcp.url` when the operator has set a public URL. */
 export const PUBLIC_MCP_URL = 'https://library.example.org/mcp';
 
-export const DEFAULT_PROBLEM: ProblemSpec = {
+export const DEFAULT_PROBLEM: StoredProblem = {
   timeLimitMs: 2000,
   memoryLimitKb: 262144,
   compare: 'tokens',
   starterCode: {},
-  referenceSolution: null,
+};
+
+/** What `GET /settings/preferences` returns on a new instance. */
+export const DEFAULT_PREFERENCES: Preferences = {
+  hideTestCases: true,
+  editor: {
+    autocomplete: true,
+    closeBrackets: true,
+    matchBrackets: true,
+    lineWrapping: false,
+    tabSize: 4,
+    fontSize: 14,
+  },
 };
 
 type DelayKind = 'default' | 'aiDraft' | 'aiTests' | 'aiTest' | 'bundle' | 'verifyCase' | 'judgeQueue' | 'judgeCase';
@@ -192,16 +242,18 @@ export class MockDb {
   readonly items = new Map<string, StoredItem>();
   collections: StoredCollection[] = [];
   testCases: TestCase[] = [];
+  solutions: StoredSolution[] = [];
   /** Oldest first. */
   submissions: Submission[] = [];
   /**
-   * What the reference solution "really" prints for a test case, when that
+   * What a correct solution "really" prints for a test case, when that
    * differs from the stored expected output. Code is never executed here, so
    * this is how verification can report a mismatch.
    */
   readonly truth = new Map<string, string>();
   ai: { activeProvider: AiProviderId | null; providers: Record<AiProviderId, ProviderConfig> };
   styles: StylePreset[] = [];
+  preferences: Preferences;
 
   private seq = 0;
 
@@ -216,7 +268,9 @@ export class MockDb {
       publicUrl: options.publicUrl ?? false,
       aiSource: options.aiSource ?? 'settings',
       forbidden: options.forbidden ?? false,
+      hideTestCases: options.hideTestCases ?? true,
     };
+    this.preferences = { ...structuredClone(DEFAULT_PREFERENCES), hideTestCases: this.options.hideTestCases };
     const blank = (): ProviderConfig => ({
       savedModel: null,
       savedBaseUrl: null,
@@ -280,12 +334,119 @@ export class MockDb {
   }
 
   /**
-   * Record a change to the item's test cases. They are content for the
-   * purpose of `updatedAt`, but they are outside the revision.
+   * Record a change to the item's test cases, or to its saved solutions
+   * other than the reference. They are content for the purpose of
+   * `updatedAt`, but they are outside the revision.
    */
   touchCases(item: StoredItem): void {
     item.updatedAt = this.now();
     item.seq = this.nextSeq();
+  }
+
+  // ---- Solutions ----------------------------------------------------------
+
+  /** An item's solutions in listing order: the reference first, then oldest first. */
+  solutionsOf(itemId: string): StoredSolution[] {
+    return this.solutions
+      .filter((s) => s.itemId === itemId)
+      .sort((a, b) => {
+        if (a.isReference !== b.isReference) return a.isReference ? -1 : 1;
+        return a.createdAt === b.createdAt ? a.seq - b.seq : a.createdAt < b.createdAt ? -1 : 1;
+      });
+  }
+
+  getSolution(id: string): StoredSolution {
+    const solution = this.solutions.find((s) => s.id === id);
+    if (!solution) throw notFound('solution');
+    return solution;
+  }
+
+  referenceOf(itemId: string): StoredSolution | undefined {
+    return this.solutions.find((s) => s.itemId === itemId && s.isReference);
+  }
+
+  /** What `problem.referenceSolution` reports for an item. */
+  referenceView(itemId: string): (SourceCode & { id: string }) | null {
+    const reference = this.referenceOf(itemId);
+    return reference ? { id: reference.id, language: reference.language, source: reference.source } : null;
+  }
+
+  solutionView(solution: StoredSolution): Solution {
+    const view: Solution & { seq?: number } = { ...solution };
+    delete view.seq;
+    return view;
+  }
+
+  /** Remove the reference mark from an item's solutions; the solutions stay. */
+  clearReference(itemId: string): void {
+    const now = this.now();
+    for (const s of this.solutions) {
+      if (s.itemId === itemId && s.isReference) {
+        s.isReference = false;
+        s.updatedAt = now;
+      }
+    }
+  }
+
+  /** Fail with `409 conflict` when the item already holds as many solutions as it may. */
+  requireSolutionRoom(itemId: string): void {
+    if (this.solutions.filter((s) => s.itemId === itemId).length >= LIMITS.maxSolutionsPerItem) {
+      throw conflict(`a problem can keep at most ${LIMITS.maxSolutionsPerItem} solutions`);
+    }
+  }
+
+  /**
+   * Save a new solution. Marking it as the reference clears the mark on the
+   * item's others. Does not touch the item; see `recordSolutionChange`.
+   */
+  insertSolution(itemId: string, fields: SolutionFields, createdAt = this.now()): StoredSolution {
+    if (fields.isReference) this.clearReference(itemId);
+    const solution: StoredSolution = {
+      id: uuid(),
+      itemId,
+      ...fields,
+      createdAt,
+      updatedAt: createdAt,
+      seq: this.nextSeq(),
+    };
+    this.solutions.push(solution);
+    return solution;
+  }
+
+  /**
+   * Apply a write to `problem.referenceSolution`: a value updates the
+   * reference solution in place, or creates one named "Reference solution"
+   * when the item has none (`409` if it cannot hold another); `null` only
+   * removes the reference mark. Does not touch the item. Returns whether
+   * anything was stored.
+   */
+  writeReference(itemId: string, value: SourceCode | null): boolean {
+    const current = this.referenceOf(itemId);
+    if (value === null) {
+      if (current) this.clearReference(itemId);
+      return current !== undefined;
+    }
+    if (!current) {
+      this.requireSolutionRoom(itemId);
+      this.insertSolution(itemId, { name: REFERENCE_SOLUTION_NAME, ...value, notes: '', isReference: true });
+      return true;
+    }
+    if (current.language === value.language && current.source === value.source) return false;
+    current.language = value.language;
+    current.source = value.source;
+    current.updatedAt = this.now();
+    return true;
+  }
+
+  /**
+   * Record a change to an item's solutions, given what
+   * `problem.referenceSolution` reported before it. The modification time
+   * always moves; the revision goes up only when that view changed — its
+   * language or source, or which solution it is.
+   */
+  recordSolutionChange(item: StoredItem, before: (SourceCode & { id: string }) | null): void {
+    if (JSON.stringify(before) !== JSON.stringify(this.referenceView(item.id))) this.touch(item);
+    else this.touchCases(item);
   }
 
   casesOf(itemId: string): TestCase[] {
@@ -332,6 +493,7 @@ export class MockDb {
       variantOf: item.variantOf,
       variantCount,
       testCaseCount: item.type === 'problem' ? this.testCases.filter((c) => c.itemId === item.id).length : 0,
+      solutionCount: item.type === 'problem' ? this.solutions.filter((s) => s.itemId === item.id).length : 0,
       lastVerdict: item.type === 'problem' ? this.lastVerdict(item.id) : null,
       revision: item.revision,
       createdAt: item.createdAt,
@@ -346,7 +508,9 @@ export class MockDb {
       notes: item.notes,
       rawInput: item.rawInput,
       source: { ...item.source },
-      problem: item.problem ? structuredClone(item.problem) : null,
+      problem: item.problem
+        ? { ...structuredClone(item.problem), referenceSolution: this.referenceView(item.id) }
+        : null,
     };
   }
 
@@ -354,6 +518,7 @@ export class MockDb {
     if (!this.items.delete(id)) return;
     for (const c of this.testCases) if (c.itemId === id) this.truth.delete(c.id);
     this.testCases = this.testCases.filter((c) => c.itemId !== id);
+    this.solutions = this.solutions.filter((s) => s.itemId !== id);
     this.submissions = this.submissions.filter((s) => s.itemId !== id);
     for (const c of this.collections) c.itemIds = c.itemIds.filter((x) => x !== id);
     for (const other of this.items.values()) {
@@ -450,7 +615,12 @@ export class MockDb {
       apiKeySet: key !== null,
       apiKeyHint: key !== null ? `…${key.slice(-4)}` : null,
       apiKeySource: p.savedKey !== null ? 'settings' : p.envKey !== null ? 'environment' : null,
-      ready: id === 'anthropic' ? model !== null && key !== null : model !== null && baseUrl !== null,
+      // A key is optional for an OpenAI-compatible endpoint (local servers),
+      // but not for the default one, which is OpenAI itself.
+      ready:
+        id === 'anthropic'
+          ? model !== null && key !== null
+          : model !== null && baseUrl !== null && (key !== null || !sameOrigin(baseUrl, AI_DEFAULTS[id].baseUrl)),
     };
   }
 
@@ -501,6 +671,18 @@ export class MockDb {
     };
   }
 }
+
+/** The origin (scheme, host and port) of a URL, or `null` when it is not one. */
+export function originOf(url: string | null): string | null {
+  if (url === null) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+export const sameOrigin = (a: string | null, b: string | null): boolean => originOf(a) === originOf(b);
 
 /** Line endings as the server stores them in every text field: `\r\n` and lone `\r` become `\n`. */
 export function normaliseText(text: string): string {

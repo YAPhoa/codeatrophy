@@ -15,10 +15,17 @@ interface SplitPaneProps {
   storageKey?: string;
   label: string;
   className?: string;
+  /**
+   * Minimise one of the panes: `bar` is shown in its place and the other pane
+   * takes the space. The pane stays mounted and the divider keeps its
+   * position, so restoring brings everything back as it was.
+   */
+  collapsed?: 'first' | 'second' | null;
+  bar?: ReactNode;
 }
 
 /** Two panes with a draggable, keyboard-adjustable divider. */
-export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, max = 0.8, storageKey, label, className }: SplitPaneProps) {
+export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, max = 0.8, storageKey, label, className, collapsed = null, bar }: SplitPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ratio, setRatio] = useState(() => {
     const stored = storageKey ? readJson<number | null>(`split:${storageKey}`, null) : null;
@@ -57,11 +64,13 @@ export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, 
   const basis = `${(ratio * 100).toFixed(2)}%`;
   return (
     <div ref={containerRef} className={cx('split', `split-${direction}`, className)}>
-      <div className="split-pane" style={{ flexBasis: basis }}>
+      {collapsed === 'first' && bar}
+      <div className={cx('split-pane', collapsed === 'second' && 'split-pane-rest')} style={collapsed ? undefined : { flexBasis: basis }} hidden={collapsed === 'first'}>
         {first}
       </div>
       <div
         role="separator"
+        hidden={collapsed !== null}
         tabIndex={0}
         aria-label={label}
         aria-orientation={direction === 'horizontal' ? 'vertical' : 'horizontal'}
@@ -82,7 +91,10 @@ export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, 
         onDoubleClick={() => setRatio(initial)}
         onKeyDown={onKeyDown}
       />
-      <div className="split-pane split-pane-rest">{second}</div>
+      <div className="split-pane split-pane-rest" hidden={collapsed === 'second'}>
+        {second}
+      </div>
+      {collapsed === 'second' && bar}
     </div>
   );
 }

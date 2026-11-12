@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
-	"codeathropy/internal/ai"
-	"codeathropy/internal/domain"
-	"codeathropy/internal/grader"
-	"codeathropy/internal/judge"
+	"codeatrophy/internal/ai"
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/grader"
+	"codeatrophy/internal/judge"
 )
 
 // Input bounds for AI requests.
@@ -87,9 +88,11 @@ func checkInstruction(o domain.Opt[string]) (string, error) {
 // Draft turns rough input into a complete item draft. Nothing is saved.
 func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	fe := domain.FieldErrors{}
-	if n := utf8.RuneCountInString(strings.TrimSpace(in.Text)); n < 1 {
+	// Line endings are normalized before counting, like every stored text.
+	text := domain.NormalizeText(in.Text)
+	if n := utf8.RuneCountInString(strings.TrimSpace(text)); n < 1 {
 		fe.Add("text", "is required")
-	} else if utf8.RuneCountInString(in.Text) > MaxDraftTextChars {
+	} else if utf8.RuneCountInString(text) > MaxDraftTextChars {
 		fe.Add("text", fmt.Sprintf("must be at most %d characters", MaxDraftTextChars))
 	}
 	hint := in.TypeHint
@@ -110,7 +113,6 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err := errValidation(fe); err != nil {
 		return DraftResponse{}, err
 	}
-	text := domain.NormalizeText(in.Text)
 	preset, err := a.resolveStyle(ctx, in.StyleID)
 	if err != nil {
 		return DraftResponse{}, err
@@ -178,7 +180,7 @@ func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
 			return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a valid type"}
 		}
 	}
-	d.Title = truncateRunes(strings.TrimSpace(m.Title), domain.MaxTitleChars)
+	d.Title = truncateRunes(oneLine(m.Title), domain.MaxTitleChars)
 	if d.Title == "" {
 		return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a title"}
 	}
@@ -233,6 +235,13 @@ func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
 		}
 	}
 	return d, nil
+}
+
+// oneLine joins a model-written single-line value onto one line.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || !domain.IsSingleLine(string(r))
+	}), " ")
 }
 
 func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
@@ -413,7 +422,7 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	resp, err := provider.Generate(ctx, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.TestCasesSchema(),
+		Schema:     ai.TestCasesSchema(lang),
 		SchemaName: "test_cases",
 	})
 	if err != nil {
@@ -422,6 +431,10 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	var m ai.ModelTestCases
 	if err := json.Unmarshal(resp.JSON, &m); err != nil {
 		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
+	}
+	if m.ReferenceSolution.Language != lang {
+		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: fmt.Sprintf(
+			"the AI provider wrote the reference solution in %q instead of the requested %q", m.ReferenceSolution.Language, lang)}
 	}
 	out := GenerateTestCasesResponse{
 		ReferenceSolution: domain.Solution{Language: lang, Source: m.ReferenceSolution.Source},

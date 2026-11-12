@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Check, Clock, Cpu, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
+import { BookmarkCheck, BookmarkPlus, Check, Clock, Cpu, Eye, EyeOff, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
-import { VERDICT_LABEL, absoluteTime, formatMemoryKb, formatMs, relativeTime, verdictTone } from '../../lib/format';
+import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
 import { Button, cx } from '../../ui/Button';
 import { DiffView } from '../../ui/DiffView';
 import { Callout } from '../../ui/misc';
+import type { Reveal } from './useReveal';
 
 function CaseIcon({ verdict }: { verdict: Verdict }) {
   if (verdict === 'accepted') return <Check size={12} aria-hidden="true" />;
@@ -13,7 +14,7 @@ function CaseIcon({ verdict }: { verdict: Verdict }) {
   return <X size={12} aria-hidden="true" />;
 }
 
-function Output({ label, text, tone, wrap }: { label: string; text: string; tone?: 'danger'; wrap?: boolean }) {
+export function Output({ label, text, tone, wrap }: { label: string; text: string; tone?: 'danger'; wrap?: boolean }) {
   return (
     <div className="io-block">
       <div className="io-label">{label}</div>
@@ -33,7 +34,17 @@ const VERDICT_HELP: Partial<Record<Verdict, string>> = {
   internal_error: 'The judge could not run this case.',
 };
 
-function CaseDetail({ result, compare }: { result: SubmissionResult; compare: CompareMode }) {
+interface CaseDetailProps {
+  result: SubmissionResult;
+  /** Position among the results, from 1. */
+  number: number;
+  compare: CompareMode;
+  timeLimitMs: number;
+  reveal: Reveal;
+}
+
+function CaseDetail({ result, number, compare, timeLimitMs, reveal }: CaseDetailProps) {
+  const concealed = reveal.conceals({ id: result.testCaseId, isSample: result.isSample });
   const failedCompare = result.verdict === 'wrong_answer' && result.expectedStdout !== null;
   // After a crash the error output is the first thing to read; otherwise it is a footnote.
   const crashed = result.verdict === 'runtime_error';
@@ -42,15 +53,38 @@ function CaseDetail({ result, compare }: { result: SubmissionResult; compare: Co
   return (
     <div className="case-detail">
       <div className="row-wrap case-detail-head">
-        <strong>{result.name || 'Test case'}</strong>
+        <strong>{concealed ? `Case ${number}` : result.name || 'Test case'}</strong>
         <span className={`verdict-text tone-${verdictTone(result.verdict)}`}>{VERDICT_LABEL[result.verdict]}</span>
         {result.isSample ? <span className="chip">sample</span> : result.testCaseId ? <span className="chip">hidden</span> : null}
         <span className="muted">
-          {formatMs(result.timeMs)} · {formatMemoryKb(result.memoryKb)}
+          {formatRunTime(result.timeMs, result.verdict, timeLimitMs)} · {formatMemoryKb(result.memoryKb)}
         </span>
       </div>
       {VERDICT_HELP[result.verdict] && <p className="case-help">{VERDICT_HELP[result.verdict]}</p>}
       {crashed && stderr}
+      {concealed ? (
+        <div className="concealed">
+          <EyeOff size={15} aria-hidden="true" />
+          <span className="grow">The input and output of this hidden test case are kept out of sight.</span>
+          <Button size="sm" icon={<Eye size={13} />} onClick={() => result.testCaseId && reveal.reveal(result.testCaseId)}>
+            Reveal this case
+          </Button>
+          <Button size="sm" variant="ghost" onClick={reveal.revealAll}>
+            Reveal all
+          </Button>
+        </div>
+      ) : (
+        <CaseIo result={result} compare={compare} failedCompare={failedCompare} />
+      )}
+      {!crashed && stderr}
+      {!concealed && cut && <p className="case-help">Long input and output are cut off at 64 KiB here; the judge compared the complete output.</p>}
+    </div>
+  );
+}
+
+function CaseIo({ result, compare, failedCompare }: { result: SubmissionResult; compare: CompareMode; failedCompare: boolean }) {
+  return (
+    <>
       <Output label="Input" text={result.stdin} />
       {failedCompare ? (
         <div className="io-block">
@@ -63,9 +97,7 @@ function CaseDetail({ result, compare }: { result: SubmissionResult; compare: Co
           <Output label={result.expectedStdout === null ? 'Output' : 'Your output'} text={result.stdout} />
         </div>
       )}
-      {!crashed && stderr}
-      {cut && <p className="case-help">Long input and output are cut off at 64 KiB here; the judge compared the complete output.</p>}
-    </div>
+    </>
   );
 }
 
@@ -74,12 +106,19 @@ interface ResultPanelProps {
   compare: CompareMode;
   /** Set when the panel shows a past submission rather than one just started. */
   historic: boolean;
+  /** The problem's time limit, to present time-limit verdicts as exceeding it. */
+  timeLimitMs: number;
+  reveal: Reveal;
   onLoadCode?: () => void;
   onClose?: () => void;
+  /** Keep this submission's code as one of the problem's saved solutions. */
+  onSaveSolution?: () => void;
+  /** The code of this submission has been saved as a solution during this visit. */
+  savedAsSolution?: boolean;
 }
 
 /** Live progress and the final outcome of one submission, case by case. */
-export function ResultPanel({ submission: s, compare, historic, onLoadCode, onClose }: ResultPanelProps) {
+export function ResultPanel({ submission: s, compare, historic, timeLimitMs, reveal, onLoadCode, onClose, onSaveSolution, savedAsSolution }: ResultPanelProps) {
   const done = s.status === 'completed';
   const firstFailed = s.results.findIndex((r) => r.verdict !== 'accepted' && r.verdict !== 'executed');
   const [picked, setPicked] = useState<number | null>(null);
@@ -90,6 +129,16 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
   const custom = s.mode === 'run' && s.results.length > 0 && s.results.every((r) => r.testCaseId === null);
   const finished = s.results.length;
   const tone = s.verdict ? verdictTone(s.verdict) : 'neutral';
+  const saveSolution = savedAsSolution ? (
+    <span className="result-saved">
+      <BookmarkCheck size={14} aria-hidden="true" />
+      Saved as a solution
+    </span>
+  ) : onSaveSolution ? (
+    <Button size="sm" icon={<BookmarkPlus size={13} />} onClick={onSaveSolution}>
+      Save as solution
+    </Button>
+  ) : null;
 
   return (
     <div className="result">
@@ -104,6 +153,7 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
               Load this code
             </Button>
           )}
+          {saveSolution}
           {onClose && (
             <Button size="sm" variant="ghost" onClick={onClose}>
               Close
@@ -134,15 +184,13 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
           <>
             <div className="result-verdict">{s.verdict ? VERDICT_LABEL[s.verdict] : 'Finished'}</div>
             {!custom && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' && (
-              <span className="result-count">
-                {s.passedCount}/{s.totalCount} passed
-              </span>
+              <span className="result-count">{describeRun(s.mode, s.totalCount, s.passedCount)}</span>
             )}
             <span className="spacer" />
             <span className="result-stats">
               {s.timeMs != null && s.results.length > 0 && (
                 <span title="Slowest case">
-                  <Clock size={12} aria-hidden="true" /> {formatMs(s.timeMs)}
+                  <Clock size={12} aria-hidden="true" /> {formatRunTime(s.timeMs, s.verdict, timeLimitMs)}
                 </span>
               )}
               {s.memoryKb != null && s.results.length > 0 && (
@@ -150,8 +198,10 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
                   <Cpu size={12} aria-hidden="true" /> {formatMemoryKb(s.memoryKb)}
                 </span>
               )}
-              <span className="muted">{s.mode === 'submit' ? 'all tests' : custom ? 'custom input' : 'samples'}</span>
+              {custom && <span className="muted">custom input</span>}
             </span>
+            {/* An accepted submission is the natural moment to keep the code; offered once, in place, never as a prompt. */}
+            {!historic && s.mode === 'submit' && s.verdict === 'accepted' && saveSolution}
           </>
         )}
       </div>
@@ -189,14 +239,16 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
                 </li>
               );
             }
+            // The name of a concealed case can give its content away, so it goes by its number.
+            const name = reveal.conceals({ id: r.testCaseId, isSample: r.isSample }) ? '' : r.name;
             return (
               <li key={i}>
                 <button
                   type="button"
                   className={cx('case-chip', `tone-${verdictTone(r.verdict)}`, selected === i && 'is-selected')}
                   aria-pressed={selected === i}
-                  aria-label={`Case ${i + 1}, ${r.name || 'unnamed'}: ${VERDICT_LABEL[r.verdict]}`}
-                  title={`${r.name || `Case ${i + 1}`} — ${VERDICT_LABEL[r.verdict]}`}
+                  aria-label={`Case ${i + 1}${name ? `, ${name}` : ''}: ${VERDICT_LABEL[r.verdict]}`}
+                  title={`${name || `Case ${i + 1}`} — ${VERDICT_LABEL[r.verdict]}`}
                   onClick={() => setPicked(i)}
                 >
                   <CaseIcon verdict={r.verdict} />
@@ -208,7 +260,7 @@ export function ResultPanel({ submission: s, compare, historic, onLoadCode, onCl
         </ol>
       )}
 
-      {current && <CaseDetail result={current} compare={compare} />}
+      {current && selected != null && <CaseDetail result={current} number={selected + 1} compare={compare} timeLimitMs={timeLimitMs} reveal={reveal} />}
     </div>
   );
 }

@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	"github.com/anthropics/anthropic-sdk-go/v2/shared/constant"
 
-	"codeathropy/internal/ai"
+	"codeatrophy/internal/ai"
 )
 
 // DefaultModel is used when no model is configured.
@@ -25,12 +26,22 @@ const DefaultModel = "claude-opus-5-5"
 const DefaultBaseURL = "https://api.anthropic.com"
 
 const (
+	// maxOutputTokens is the budget for a generation, lowered to the model's
+	// own output cap when the Models API reports a smaller one.
 	maxOutputTokens      = 64000
 	maxLightOutputTokens = 4096
+	// fallbackOutputTokens is used when the cap cannot be looked up (for
+	// example through a proxy without the Models API); every model the API
+	// currently serves accepts it.
+	fallbackOutputTokens = 32000
 )
+
+// modelCaps caches output caps per base URL and model id.
+var modelCaps sync.Map // key "baseURL\x00model" -> int
 
 // Provider calls the Anthropic Messages API.
 type Provider struct {
+	timeout time.Duration
 	client  sdk.Client
 	model   string
 	baseURL string
@@ -55,7 +66,6 @@ func New(cfg ai.Config) (ai.Provider, error) {
 	opts := []option.RequestOption{
 		option.WithAPIKey(cfg.APIKey),
 		option.WithMaxRetries(2),
-		option.WithRequestTimeout(timeout),
 	}
 	if cfg.BaseURL != "" {
 		u, err := url.Parse(cfg.BaseURL)
@@ -69,7 +79,8 @@ func New(cfg ai.Config) (ai.Provider, error) {
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	return &Provider{client: sdk.NewClient(opts...), model: model, baseURL: cfg.BaseURL, apiKey: cfg.APIKey}, nil
+	return &Provider{client: sdk.NewClient(opts...), model: model, baseURL: cfg.BaseURL, apiKey: cfg.APIKey,
+		timeout: timeout}, nil
 }
 
 // Name implements ai.Provider.
@@ -100,13 +111,16 @@ func hasPrefix(s string, prefixes []string) bool {
 }
 
 // params builds the Messages API request.
-func (p *Provider) params(req ai.GenerateRequest) sdk.BetaMessageNewParams {
+func (p *Provider) params(req ai.GenerateRequest, modelCap int) sdk.BetaMessageNewParams {
 	maxTokens := maxOutputTokens
 	if req.Light {
 		maxTokens = maxLightOutputTokens
 	}
 	if req.MaxOutputTokens > 0 {
 		maxTokens = req.MaxOutputTokens
+	}
+	if modelCap > 0 && maxTokens > modelCap {
+		maxTokens = modelCap
 	}
 	params := sdk.BetaMessageNewParams{
 		Model:     sdk.Model(p.model),
@@ -139,7 +153,11 @@ func (p *Provider) params(req ai.GenerateRequest) sdk.BetaMessageNewParams {
 // Generate implements ai.Provider. The request is streamed so that long
 // outputs do not run into HTTP timeouts.
 func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.GenerateResponse, error) {
-	params := p.params(req)
+	// One deadline bounds the whole call: the SDK's request timeout applies
+	// per attempt and retries would otherwise multiply it.
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+	params := p.params(req, p.outputCap(ctx))
 	stream := p.client.Beta.Messages.NewStreaming(ctx, params)
 	msg := sdk.BetaMessage{}
 	for stream.Next() {
@@ -222,4 +240,23 @@ func rootCause(err error) string {
 		return ue.Err.Error()
 	}
 	return err.Error()
+}
+
+// outputCap returns the configured model's maximum output tokens from the
+// Models API, cached; on failure it returns a value every current model
+// accepts.
+func (p *Provider) outputCap(ctx context.Context) int {
+	key := p.baseURL + "\x00" + p.model
+	if v, ok := modelCaps.Load(key); ok {
+		return v.(int)
+	}
+	lookup, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	info, err := p.client.Models.Get(lookup, p.model, sdk.ModelGetParams{}, option.WithMaxRetries(0))
+	if err != nil || info.MaxTokens <= 0 {
+		return fallbackOutputTokens
+	}
+	cap := int(info.MaxTokens)
+	modelCaps.Store(key, cap)
+	return cap
 }

@@ -1,4 +1,4 @@
-module codeathropy
+module codeatrophy
 
 go 1.27.4
 

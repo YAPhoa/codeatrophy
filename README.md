@@ -1,6 +1,6 @@
-# Codeathropy
+# Codeatrophy
 
-Codeathropy is a self-hosted library for coding challenges and technical
+Codeatrophy is a self-hosted library for coding challenges and technical
 readings. Keep the problems you want to practise and the notes you want to
 keep in one place, organise them with collections and tags, and solve problems
 in the browser against your own test cases.
@@ -30,8 +30,8 @@ Requirements: Docker with Compose v2.20 or later. The judge needs a
 privileged container (see [Security](#security)).
 
 ```sh
-git clone <repository-url> codeathropy
-cd codeathropy
+git clone <repository-url> codeatrophy
+cd codeatrophy
 cp .env.example .env      # adjust if you like; the defaults work
 docker compose up -d --build
 ```
@@ -39,12 +39,12 @@ docker compose up -d --build
 Open <http://localhost:8080>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
-To stop: `docker compose down` (your data stays in the `codeathropy-data`
+To stop: `docker compose down` (your data stays in the `codeatrophy-data`
 volume).
 
 ### Without the judge
 
-Set `CODEATHROPY_JUDGE_ENGINE=none` and remove `judge0` from
+Set `CODEATROPHY_JUDGE_ENGINE=none` and remove `judge0` from
 `COMPOSE_PROFILES` in `.env`. The Judge0 containers are then not started and
 the UI hides run and submit; the library, AI drafting, bundles and MCP keep
 working.
@@ -56,13 +56,15 @@ Everything is configured with environment variables, all documented in
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODEATHROPY_HOST_PORT` | `8080` | Port on the host |
-| `CODEATHROPY_BIND_ADDRESS` | `127.0.0.1` | Host address to publish on |
-| `CODEATHROPY_JUDGE_ENGINE` | `judge0` in `.env.example` | `judge0` or `none` |
-| `CODEATHROPY_SECRET_KEY` | generated | Key that encrypts stored API keys |
-| `CODEATHROPY_AI_PROVIDER` | unset | Default AI provider: `anthropic` or `openai_compatible` |
+| `CODEATROPHY_HOST_PORT` | `8080` | Port on the host |
+| `CODEATROPHY_BIND_ADDRESS` | `127.0.0.1` | Host address to publish on |
+| `CODEATROPHY_PUBLIC_URL` | unset | URL the instance is reached at, when not `localhost` |
+| `CODEATROPHY_ALLOWED_HOSTS` | unset | Extra host names or addresses the server answers to (see [Security](#security)) |
+| `CODEATROPHY_JUDGE_ENGINE` | `judge0` in `.env.example` | `judge0` or `none` |
+| `CODEATROPHY_SECRET_KEY` | generated | Key that encrypts stored API keys |
+| `CODEATROPHY_AI_PROVIDER` | unset | Default AI provider: `anthropic` or `openai_compatible` |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | unset | Provider keys for unattended setups |
-| `CODEATHROPY_MCP_TOKEN` | unset | Require a bearer token on `/mcp` |
+| `CODEATROPHY_MCP_TOKEN` | unset | Require a bearer token on `/mcp` |
 
 AI providers are normally set up in the UI under Settings: choose a provider,
 enter the model and key, and test the connection. Keys entered there are
@@ -84,11 +86,11 @@ languages. One preset can be the default.
 The MCP endpoint is `http://localhost:8080/mcp` (Streamable HTTP).
 
 ```sh
-claude mcp add --transport http codeathropy http://localhost:8080/mcp
+claude mcp add --transport http codeatrophy http://localhost:8080/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8080/mcp`. If you set `CODEATHROPY_MCP_TOKEN`,
+`npx mcp-remote http://localhost:8080/mcp`. If you set `CODEATROPHY_MCP_TOKEN`,
 configure the client to send `Authorization: Bearer <token>`.
 
 Over MCP the connected assistant does the writing; the server stores items,
@@ -98,25 +100,25 @@ prompts.
 
 ## Backup and restore
 
-All state lives in the `codeathropy-data` volume: the SQLite database
-(`codeathropy.db` with its `-wal`/`-shm` files) and, unless you set
-`CODEATHROPY_SECRET_KEY`, the generated `secret.key`.
+All state lives in the `codeatrophy-data` volume: the SQLite database
+(`codeatrophy.db` with its `-wal`/`-shm` files) and, unless you set
+`CODEATROPHY_SECRET_KEY`, the generated `secret.key`.
 
 ```sh
 # Back up (stop the app so the database files are consistent)
 docker compose stop app
-docker run --rm -v codeathropy_codeathropy-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/codeathropy-backup.tgz -C /data .
+docker run --rm -v codeatrophy_codeatrophy-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/codeatrophy-backup.tgz -C /data .
 docker compose start app
 
 # Restore
 docker compose stop app
-docker run --rm -v codeathropy_codeathropy-data:/data -v "$PWD":/backup alpine \
-  sh -c 'rm -rf /data/* && tar xzf /backup/codeathropy-backup.tgz -C /data'
+docker run --rm -v codeatrophy_codeatrophy-data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/codeatrophy-backup.tgz -C /data'
 docker compose start app
 ```
 
-Keep `secret.key` (or your `CODEATHROPY_SECRET_KEY`) with the backup: without
+Keep `secret.key` (or your `CODEATROPHY_SECRET_KEY`) with the backup: without
 it, stored API keys cannot be decrypted and must be entered again. Everything
 else is readable without it.
 
@@ -125,28 +127,43 @@ instead; they carry content only, not your progress, notes or settings.
 
 ## Security
 
-- **No authentication.** Codeathropy is a single-user app without login. The
+- **No authentication.** Codeatrophy is a single-user app without login. The
   Compose file publishes it on `127.0.0.1` only. Anyone who can reach the port
   can read and change the library and run code on the judge. To expose it
   beyond the local machine, put it behind a reverse proxy that authenticates,
-  and set `CODEATHROPY_PUBLIC_URL` to the public URL (its origin is then
+  and set `CODEATROPHY_PUBLIC_URL` to the public URL (its origin is then
   allowed to make changes, and MCP clients are told the endpoint's URL).
   AI requests and verification runs can take minutes: raise the proxy's read
   timeout to at least five minutes for `/api/v1/ai/` and `/api/v1/items/*/ai/`,
   and leave `/mcp` unbuffered with a long timeout, since it streams.
-- **Cross-site requests.** State-changing API requests from other web origins
-  are rejected, and the MCP endpoint accepts only same-origin or loopback
-  `Origin` headers, to block cross-site request forgery and DNS rebinding.
-  Set `CODEATHROPY_MCP_TOKEN` before making `/mcp` reachable from other
-  machines.
+- **Host names it answers to (DNS rebinding).** The API and `/mcp` answer
+  only to requests whose `Host` is `localhost` or a loopback address, the host
+  of `CODEATROPHY_PUBLIC_URL`, the host of an allowed origin, or a host listed
+  in `CODEATROPHY_ALLOWED_HOSTS`; anything else gets `403`. This stops a web
+  page whose DNS name has been re-pointed at your machine from using the app.
+  To reach the app from other machines on your network (after setting
+  `CODEATROPHY_BIND_ADDRESS`), set `CODEATROPHY_PUBLIC_URL` to the URL you
+  use, or list the name or address in `CODEATROPHY_ALLOWED_HOSTS`, for
+  example `CODEATROPHY_ALLOWED_HOSTS=192.168.1.20,nas.local`. The port does
+  not matter, so remapping `CODEATROPHY_HOST_PORT` needs no change.
+- **Cross-site requests.** State-changing requests from web pages on other
+  origins are rejected, on the API and on `/mcp`: only loopback origins and
+  the configured ones (`CODEATROPHY_PUBLIC_URL`, `CODEATROPHY_ALLOWED_ORIGINS`,
+  `CODEATROPHY_MCP_ALLOWED_ORIGINS`, and origins on an allowed host) may make
+  changes. Set `CODEATROPHY_MCP_TOKEN` before making `/mcp` reachable from
+  other machines.
+- **API keys stay with their provider.** A stored key is bound to the origin
+  of the base URL it was saved for. Pointing a provider at another base URL
+  without entering a new key deletes the stored key, and a connection test
+  against another URL never sends a stored key.
 - **The judge runs untrusted code.** Judge0's sandbox (isolate) requires its
   worker container to run `privileged`. The Judge0 containers sit on an
   internal network without internet access, and submissions run without
   network. Treat the host accordingly.
 - **cgroup v2 hosts.** Judge0 1.13's sandbox can only use control groups on
-  cgroup v1, which most current distributions no longer provide. Codeathropy
+  cgroup v1, which most current distributions no longer provide. Codeatrophy
   therefore asks Judge0 for per-process limits by default
-  (`CODEATHROPY_JUDGE0_CGROUPS=false`). In this mode:
+  (`CODEATROPHY_JUDGE0_CGROUPS=false`). In this mode:
   - the memory limit is an address-space limit. Runtimes that reserve large
     virtual ranges get an extra allowance (64 MB for C, C++, Rust and Python;
     128 MB for Go, Ruby and C#; 768 MB for JavaScript and TypeScript; 512 MB
@@ -159,7 +176,7 @@ instead; they carry content only, not your progress, notes or settings.
   - memory-limit verdicts are recognised from the runtime's allocation error
     (`MemoryError`, `std::bad_alloc`, `OutOfMemoryError`, ...) or from the
     peak memory, since Judge0 reports no memory-limit status.
-  On a cgroup v1 host you can set `CODEATHROPY_JUDGE0_CGROUPS=true` for
+  On a cgroup v1 host you can set `CODEATROPHY_JUDGE0_CGROUPS=true` for
   Judge0's cgroup accounting instead.
 - **AI input.** Generated drafts are never saved without your review, model
   output is schema-checked, and text you paste is passed to the model as data,
@@ -178,7 +195,7 @@ make test          # Go tests
 make lint          # go vet, gofmt check, UI lint and type check
 make web-dev-mock  # UI dev server with an in-memory API mock
 make run           # server on :8080 with data in ./data
-make build         # UI + server binary with the UI embedded (bin/codeathropy)
+make build         # UI + server binary with the UI embedded (bin/codeatrophy)
 make up            # the whole Compose stack
 ```
 
@@ -192,11 +209,11 @@ contains the UI.
 
 Copyright (C) 2026 Yohanes Alfredo Phoa
 
-Codeathropy is licensed under the GNU Affero General Public License v3.0 only
+Codeatrophy is licensed under the GNU Affero General Public License v3.0 only
 (SPDX: `AGPL-3.0-only`); see [`LICENSE`](LICENSE). In plain terms: if you run a
 modified version as a network service, you must offer its source code to that
 service's users.
 
-Judge0 is separate software under its own license (GPL-3.0). Codeathropy runs
+Judge0 is separate software under its own license (GPL-3.0). Codeatrophy runs
 it as an independent service, reached over HTTP; none of its code is included
 in this project.

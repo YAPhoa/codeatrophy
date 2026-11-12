@@ -24,7 +24,7 @@ const STRATEGIES: { value: ImportStrategy; title: string; text: string }[] = [
   {
     value: 'overwrite',
     title: 'Take the bundle’s version',
-    text: 'Replace the content and test cases of changed items with the bundle’s. Your status, notes, favorites and submissions are kept.',
+    text: 'Replace the content, solutions and test cases of changed items with the bundle’s. Your status, notes, favorites and submissions are kept, and so are your solutions and hidden test cases where the bundle was exported without them.',
   },
   {
     value: 'duplicate',
@@ -111,7 +111,7 @@ export default function ImportPage() {
       <ShareTabs active="import" />
       <h1 className="page-title">Import a bundle</h1>
       <p className="page-sub">
-        Bring in a <code>.codeathropy.zip</code> exported from this or another instance. You see exactly what would change before anything is written, and an import is applied completely or not at
+        Bring in a <code>.codeatrophy.zip</code> exported from this or another instance. You see exactly what would change before anything is written, and an import is applied completely or not at
         all.
       </p>
 
@@ -121,7 +121,7 @@ export default function ImportPage() {
             <ul className="import-result">
               <li>{plural(result.created, 'item')} added</li>
               {result.updated > 0 && <li>{plural(result.updated, 'item')} updated to the bundle’s version</li>}
-              {result.duplicated > 0 && <li>{plural(result.duplicated, 'item')} added as separate copies</li>}
+              {result.duplicated > 0 && <li>{result.duplicated === 1 ? '1 item added as a separate copy' : `${result.duplicated} items added as separate copies`}</li>}
               {result.skipped > 0 && <li>{plural(result.skipped, 'changed item')} left as they were</li>}
               {result.unchanged > 0 && <li>{plural(result.unchanged, 'item')} already up to date</li>}
               {result.collectionsCreated > 0 && <li>{plural(result.collectionsCreated, 'collection')} created</li>}
@@ -176,7 +176,7 @@ export default function ImportPage() {
                   </label>{' '}
                   or drop it here
                   <div className="muted">
-                    A <code>.codeathropy.zip</code>
+                    A <code>.codeatrophy.zip</code>
                     {Number.isFinite(maxBytes) ? `, up to ${formatBytes(maxBytes)}` : ''}
                   </div>
                 </div>

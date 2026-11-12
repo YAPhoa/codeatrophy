@@ -1,0 +1,261 @@
+/* The coding workspace: minimised panes, the tests and results drawer, and
+   what is shown (or kept out of sight) about test cases. */
+
+/* ---- A pane minimised to a bar ---- */
+
+.pane-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 34px;
+  padding: 11px 0;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.pane-rail:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.pane-rail-label {
+  writing-mode: vertical-rl;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Tests and results drawer ---- */
+
+.drawer-bar {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  height: 32px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.drawer-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 11px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.drawer-bar-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.drawer-bar-btn:focus-visible {
+  outline-offset: -2px;
+}
+
+.drawer-bar-open {
+  padding: 0 9px 0 11px;
+  color: var(--text-3);
+}
+
+/* The status takes the rest of the bar, so the whole bar restores the drawer. */
+.drawer-bar-status {
+  flex: 1;
+  justify-content: flex-end;
+  font-weight: 600;
+}
+
+.drawer-bar-status.tone-neutral {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.drawer > .pane-body {
+  padding: 12px 16px 20px;
+}
+
+.editor-save {
+  flex: none;
+}
+
+/* ---- Test cases as the solver sees them ---- */
+
+.tcases {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 980px;
+}
+
+.tcases-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tcases-summary {
+  font-weight: 600;
+}
+
+.tcases-note {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.tcase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tcase {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tcase.is-concealed {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 10px;
+  border-style: dashed;
+  color: var(--text-2);
+}
+
+.tcase-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -3px -6px -3px 0;
+}
+
+.tcase-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tcase .code-block {
+  max-height: 168px;
+}
+
+/* ---- A hidden case in a result ---- */
+
+.concealed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.concealed > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.concealed > .grow {
+  min-width: 200px;
+}
+
+.result-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+/* ---- History: keep the code of an entry ---- */
+
+.history-entry {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.history-entry > .history-row {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.history-save {
+  flex: none;
+  color: var(--text-3);
+}
+
+.history-save.is-suggested {
+  color: var(--accent-text);
+}
+
+/* The history sits in the statement pane, whose width the user chooses. */
+.pane-body:has(> .history) {
+  container-type: inline-size;
+}
+
+@container (max-width: 420px) {
+  .history-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 34px 52px 70px;
+  }
+
+  .history-mode {
+    display: none;
+  }
+}
+
+@container (max-width: 340px) {
+  .history-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 70px;
+  }
+
+  .history-count,
+  .history-time {
+    display: none;
+  }
+}
+
+/* The toolbar adapts to the editor column, which the panes make wider or narrower. */
+.editor-toolbar {
+  container-type: inline-size;
+}
+
+@container (max-width: 700px) {
+  .editor-save .btn-label,
+  .editor-toolbar .editor-saved {
+    display: none;
+  }
+}
+
+.tcases-note a {
+  text-decoration: underline;
+}

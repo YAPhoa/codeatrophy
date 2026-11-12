@@ -142,10 +142,16 @@ function judge(db: MockDb, s: Submission, cases: CaseSpec[], behaviour: Behaviou
       finish(db, s, db.now());
       return;
     }
-    const result = judgeCase(cases[index]!, index, cases.length, behaviour, s.language, limits, seed);
-    s.results.push(result);
-    if (passed(result)) s.passedCount++;
-    setTimeout(() => step(index + 1), index + 1 >= cases.length ? 0 : db.delay('judgeCase'));
+    // An engine reports cases as they finish, which is not always one at a
+    // time: now and then two results land between a client's polls.
+    const take = Math.min((seed + index) % 3 === 0 ? 2 : 1, cases.length - index);
+    for (let i = index; i < index + take; i++) {
+      const result = judgeCase(cases[i]!, i, cases.length, behaviour, s.language, limits, seed);
+      s.results.push(result);
+      if (passed(result)) s.passedCount++;
+    }
+    const next = index + take;
+    setTimeout(() => step(next), next >= cases.length ? 0 : db.delay('judgeCase'));
   };
 
   setTimeout(() => {
