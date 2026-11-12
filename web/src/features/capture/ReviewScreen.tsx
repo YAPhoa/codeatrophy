@@ -1,0 +1,148 @@
+import { useState, type ReactNode } from 'react';
+import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
+import type { AppliedStyle, Collection, StylePreset } from '../../api/types';
+import { useLimits } from '../../api/queries';
+import { MOD } from '../../lib/hotkeys';
+import type { FormErrors, ItemFormState } from '../../lib/itemForm';
+import { Button } from '../../ui/Button';
+import { ErrorCallout, Kbd } from '../../ui/misc';
+import { ItemEditor } from '../item/ItemEditor';
+import { AssumptionsPanel, GeneratingPanel } from './parts';
+import { StylePicker, type StyleChoice } from './StylePicker';
+
+interface ReviewScreenProps {
+  form: ItemFormState;
+  onFormChange: (form: ItemFormState) => void;
+  errors: FormErrors;
+  collections: readonly Collection[];
+  tagSuggestions: readonly string[];
+  judgeLanguages: readonly string[];
+  onCreateCollection: () => void;
+
+  /** The draft came from the AI (shows assumptions and the revise bar). */
+  aiDrafted: boolean;
+  kind: 'draft' | 'variant';
+  assumptions: readonly string[];
+  appliedStyle: AppliedStyle | null;
+  /** The user's original text, shown for comparison. */
+  originalText?: string;
+  originalLabel?: string;
+
+  aiEnabled: boolean;
+  styles: readonly StylePreset[];
+  styleChoice: StyleChoice;
+  onStyleChange: (choice: StyleChoice) => void;
+  onRevise: (instruction: string) => void;
+  revising: boolean;
+  reviseStartedAt: number | null;
+  reviseError: unknown;
+  onCancelRevise: () => void;
+
+  onSave: () => void;
+  saving: boolean;
+  saveError: unknown;
+  saveLabel: string;
+  onBack: () => void;
+  backLabel: string;
+  onDiscard: () => void;
+  header: ReactNode;
+}
+
+/** Review of a draft before anything is saved: assumptions, revision, every field editable. */
+export function ReviewScreen(props: ReviewScreenProps) {
+  const [instruction, setInstruction] = useState('');
+  const busy = props.revising || props.saving;
+  const limits = useLimits();
+
+  return (
+    <div className="review">
+      <div className="review-bar">
+        {props.header}
+        <span className="spacer" />
+        <Button variant="ghost" icon={<ArrowLeft size={14} />} onClick={props.onBack} disabled={busy}>
+          {props.backLabel}
+        </Button>
+        <Button variant="ghost" icon={<Trash2 size={14} />} onClick={props.onDiscard} disabled={busy}>
+          Discard
+        </Button>
+        <Button variant="primary" icon={<Save size={14} />} onClick={props.onSave} busy={props.saving} disabled={props.revising} title={`${MOD}+S`}>
+          {props.saveLabel}
+        </Button>
+      </div>
+
+      {props.saveError != null && <ErrorCallout error={props.saveError} title="Could not save" onRetry={props.onSave} />}
+
+      {props.aiDrafted && (
+        <AssumptionsPanel assumptions={props.assumptions} kind={props.kind} style={props.appliedStyle} showStyle={props.styles.length > 0 || props.appliedStyle !== null} />
+      )}
+
+      {props.aiDrafted && props.aiEnabled && (
+        <form
+          className="revise"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const text = instruction.trim();
+            if (!text || busy) return;
+            props.onRevise(text);
+          }}
+        >
+          <label htmlFor="revise-instruction" className="revise-label">
+            <RefreshCw size={14} aria-hidden="true" />
+            Ask for a revision
+          </label>
+          <input
+            id="revise-instruction"
+            className="input"
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            placeholder="e.g. use 1-based indices · make it harder · shorten the statement"
+            maxLength={limits?.maxInstructionChars}
+            disabled={busy}
+            autoComplete="off"
+          />
+          <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
+          <Button type="submit" disabled={busy || instruction.trim() === ''}>
+            Revise draft
+          </Button>
+          <p className="revise-hint">The AI reworks the draft as it stands now, including your edits, and returns a new version to review.</p>
+        </form>
+      )}
+
+      {props.revising && (
+        <GeneratingPanel title="Revising the draft…" startedAt={props.reviseStartedAt} onCancel={props.onCancelRevise}>
+          The current draft stays as it is until the new version arrives.
+        </GeneratingPanel>
+      )}
+      {props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed — your draft is unchanged" />}
+
+      {props.originalText && (
+        <details className="original">
+          <summary>{props.originalLabel ?? 'Your original input'}</summary>
+          <pre>{props.originalText}</pre>
+        </details>
+      )}
+
+      <ItemEditor
+        form={props.form}
+        onChange={props.onFormChange}
+        mode="create"
+        errors={props.errors}
+        collections={props.collections}
+        tagSuggestions={props.tagSuggestions}
+        judgeLanguages={props.judgeLanguages}
+        onCreateCollection={props.onCreateCollection}
+        disabled={busy}
+      />
+
+      <div className="review-foot">
+        <span className="muted">
+          Nothing is in your library until you save. <Kbd>{MOD}</Kbd> <Kbd>S</Kbd>
+        </span>
+        <span className="spacer" />
+        <Button variant="primary" icon={<Save size={14} />} onClick={props.onSave} busy={props.saving} disabled={props.revising}>
+          {props.saveLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}

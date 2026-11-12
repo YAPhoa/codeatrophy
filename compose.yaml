@@ -1,0 +1,131 @@
+# Codeathropy: the app plus the Judge0 judge engine.
+#
+# Configuration lives in .env (start from .env.example). The Judge0 services
+# belong to the "judge0" profile, which .env.example enables through
+# COMPOSE_PROFILES. To run without a judge engine, set
+# CODEATHROPY_JUDGE_ENGINE=none and remove judge0 from COMPOSE_PROFILES.
+
+name: codeathropy
+
+x-judge0-env: &judge0-env
+  REDIS_HOST: judge0-redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:-codeathropy-judge0-redis}
+  POSTGRES_HOST: judge0-db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: judge0
+  POSTGRES_USER: judge0
+  POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:-codeathropy-judge0-postgres}
+  AUTHN_TOKEN: ${CODEATHROPY_JUDGE0_AUTH_TOKEN:-}
+  # Number of Judge0 worker processes.
+  COUNT: ${JUDGE0_WORKER_COUNT:-4}
+  # Upper bounds the adapter may request. The address-space allowance for
+  # JVM, Node and similar runtimes needs a high memory ceiling.
+  MAX_CPU_TIME_LIMIT: "30"
+  MAX_WALL_TIME_LIMIT: "60"
+  MAX_MEMORY_LIMIT: "8388608"
+  MAX_PROCESSES_AND_OR_THREADS: "128"
+  MAX_MAX_PROCESSES_AND_OR_THREADS: "256"
+  ENABLE_WAIT_RESULT: "false"
+  ENABLE_CALLBACKS: "false"
+  ENABLE_SUBMISSION_DELETE: "false"
+  ALLOW_ENABLE_NETWORK: "false"
+  ENABLE_NETWORK: "false"
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        VERSION: ${CODEATHROPY_VERSION:-0.1.0}
+    image: codeathropy:${CODEATHROPY_VERSION:-0.1.0}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CODEATHROPY_ADDR: ":8080"
+      CODEATHROPY_DATA_DIR: /data
+      CODEATHROPY_JUDGE_ENGINE: ${CODEATHROPY_JUDGE_ENGINE:-none}
+      CODEATHROPY_JUDGE0_URL: ${CODEATHROPY_JUDGE0_URL:-http://judge0-server:2358}
+    ports:
+      # Loopback only by default: the app has no authentication and can
+      # execute code.
+      - "${CODEATHROPY_BIND_ADDRESS:-127.0.0.1}:${CODEATHROPY_HOST_PORT:-8080}:8080"
+    volumes:
+      - codeathropy-data:/data
+    networks:
+      - default
+      - judge0
+    depends_on:
+      judge0-server:
+        condition: service_started
+        required: false
+
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    profiles: [judge0]
+    restart: unless-stopped
+    environment: *judge0-env
+    networks: [judge0]
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-workers:
+    image: judge0/judge0:1.13.1
+    profiles: [judge0]
+    command: ["./scripts/workers"]
+    restart: unless-stopped
+    # The isolate sandbox needs a privileged container.
+    privileged: true
+    environment: *judge0-env
+    networks: [judge0]
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-db:
+    image: postgres:17.6
+    profiles: [judge0]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:-codeathropy-judge0-postgres}
+    volumes:
+      - judge0-db:/var/lib/postgresql/data
+    networks: [judge0]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judge0 -d judge0"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  judge0-redis:
+    image: redis:7.4
+    profiles: [judge0]
+    restart: unless-stopped
+    command: ["sh", "-c", 'exec redis-server --appendonly no --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:-codeathropy-judge0-redis}
+    networks: [judge0]
+    healthcheck:
+      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+networks:
+  default: {}
+  # Judge0 has no route to the outside world.
+  judge0:
+    internal: true
+
+volumes:
+  codeathropy-data: {}
+  judge0-db: {}

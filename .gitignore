@@ -1,0 +1,28 @@
+# Local tooling
+.claude/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Build output
+/bin/
+/dist/
+web/dist/
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+*.test
+*.out
+coverage/
+
+# Runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal

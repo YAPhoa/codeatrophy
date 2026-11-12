@@ -1,0 +1,174 @@
+# Codeathropy web UI
+
+The single-page app served by the Codeathropy server. It talks to the server
+only through the HTTP API described in [`docs/api.md`](../docs/api.md), which
+is the contract between the two: change a request or response shape there,
+in the server handlers, and in `src/api/types.ts` together.
+
+Stack: Vite, React, TypeScript (strict), React Router, TanStack Query,
+CodeMirror 6, `react-markdown` with KaTeX and highlight.js. Styling is plain
+CSS driven by custom properties (`src/styles/tokens.css`). Everything is
+bundled; the app makes no request to any third-party origin at runtime, so it
+works offline on a LAN.
+
+## Scripts
+
+Requires Node 22 and npm 10.
+
+| Command | What it does |
+| --- | --- |
+| `npm install` | Install dependencies |
+| `npm run dev` | Dev server on <http://localhost:5173>, proxying `/api` and `/mcp` to a running backend |
+| `npm run dev:mock` | Dev server against an in-memory mock of the whole API — no backend needed |
+| `npm run build` | Type-check, then build for production into `dist/` |
+| `npm run typecheck` | TypeScript only |
+| `npm run lint` | ESLint |
+| `npm test` | Unit tests (Vitest); `npm run test:watch` to keep them running |
+| `npm run test:e2e` | Browser smoke tests (Playwright) against the mock — see below |
+
+`npm run dev` expects the backend at `http://localhost:8080`. Point it
+elsewhere with an environment variable:
+
+```sh
+CODEATHROPY_BACKEND_URL=http://localhost:9090 npm run dev
+```
+
+In production the Go server serves `dist/` from `/`, the API from `/api/v1`
+on the same origin, and falls back to `index.html` for client-side routes.
+
+## Working without a backend: the mock
+
+`npm run dev:mock` replaces the network layer with `src/mock`, an in-memory
+implementation of every endpoint in `docs/api.md` — shapes, status codes,
+validation, the asynchronous submission lifecycle, AI endpoints with realistic
+delays — seeded with a believable library. Keep it faithful to the contract
+when the contract changes; its own tests are in `src/mock/mock.test.ts`.
+
+State lives in memory only: **reloading the page resets it** to the seed.
+
+### Scenarios
+
+Add `?mock=` with comma-separated flags to any URL. The flags stick for the
+browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
+
+| Flag | Effect |
+| --- | --- |
+| `no-ai` | No AI provider configured: AI endpoints answer `503 ai_unavailable` |
+| `no-judge` | No judge engine: no languages, execution endpoints answer `503 judge_unavailable` |
+| `judge-down` | Judge configured but unreachable: runs end in `internal_error`, verification answers `503`, generated test cases come back unverified |
+| `mcp-token` / `mcp-off` | MCP endpoint requires a token / is disabled |
+| `mcp-url` | The server reports a public MCP URL (`meta.mcp.url`) instead of leaving it to the page origin |
+| `ai-env` | The Anthropic model, base URL and key come from the server's environment rather than saved settings |
+| `forbidden` | Every state-changing request answers `403 forbidden`, as when a reverse proxy hides the server's own address |
+| `empty` | Start with an empty library and no style presets |
+| `no-styles` | Seed library, but no style presets |
+| `fast` / `instant` | Short / no artificial delays |
+
+Example: <http://localhost:5173/?mock=no-ai,fast>
+
+### Steering outcomes
+
+Code cannot really be executed in the browser, so the mock judge decides
+verdicts from markers anywhere in the submitted source:
+
+| Marker | Verdict |
+| --- | --- |
+| `MOCK:WA` | Wrong answer on some cases |
+| `MOCK:TLE`, `MOCK:MLE` | Time / memory limit exceeded on the last case |
+| `MOCK:RE` | Runtime error with a stack trace |
+| `MOCK:CE` | Compile error with compiler output |
+| `MOCK:IE` | Internal (judge) error |
+| *unchanged starter code* | Wrong answer with empty output |
+| *anything else* | Accepted |
+
+For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
+`502 upstream_error`. In Settings, an API key containing `bad` or a base URL
+containing `unreachable` makes the connection test fail.
+
+The running mock is exposed as `window.__codeathropyMock`. To exercise the
+"changed elsewhere" flow, open an item's edit page, run
+
+```js
+__codeathropyMock.externalEdit('<item id>')
+```
+
+in the console (it edits the item and bumps its revision, as an assistant
+connected over MCP would), then save.
+
+## Browser smoke tests
+
+`npm run test:e2e` runs a short Playwright suite (`e2e/smoke.spec.ts`) over
+the flows the product stands on: capture → draft → revise → save, a judged
+submission with a failing case, and filing selected items into a collection.
+It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
+backend, AI provider or judge, and it fails on any page error or request to a
+third-party origin. It is separate from `npm test`.
+
+The first time, download the browser Playwright drives:
+
+```sh
+npx playwright install chromium
+```
+
+Keep the suite small and deterministic. It checks that the flows hold
+together; logic belongs in unit tests. Because the mock's state lives in the
+page, every test starts from the seed library, and navigation inside a test
+has to stay client-side (a reload resets the mock).
+
+## Structure
+
+```
+src/
+  api/        types.ts (the contract), client.ts (fetch wrapper, ApiError),
+              queries.ts (TanStack Query keys, hooks, cache updates)
+  app/        application frame: shell, sidebar, command palette, shortcuts
+  features/   one folder per area of the product
+    library/      browse, search, filter, sort, select, bulk actions, reorder
+    collections/  create / rename / move / delete dialogs
+    capture/      paste → AI draft → review → save; variants; "what next"
+    item/         item page dispatch, shared header and controls, editor form,
+                  edit page with revision-conflict handling, notes, variants
+    solve/        problem workspace: editor, run / submit, results, history
+    tests/        test-case management, reference solution, AI generation
+    reader/       long-form reading view
+    tags/ share/ settings/
+  lib/        framework-free logic: filters ⇄ URL, form ⇄ API mapping and
+              three-way merge, output diff, collection tree, code storage, …
+  ui/         small shared components (buttons, menus, dialogs, toasts,
+              CodeMirror and Markdown wrappers, diff view, split pane)
+  styles/     design tokens and stylesheets
+  mock/       the in-memory API
+e2e/          Playwright smoke tests (run against the mock)
+```
+
+A few conventions worth knowing:
+
+- **Capabilities come from `GET /meta`.** Features that need an AI provider or
+  a judge engine check it and degrade to an explanation, never to an error.
+- **So do limits.** Every bound on user input (title length, tag count, time
+  and memory ranges, upload size, style preset sizes, …) is read from
+  `meta.limits`; forms validate against those values and the client keeps no
+  copies. Add a bound to the server and to `Limits` in `src/api/types.ts`,
+  then use it from `useLimits()`.
+- **The judge's toolchains are old** (for example Python 3.8, GCC 9, Go 1.13,
+  Java 13, Node 12). The language picker shows the version the judge reports;
+  starter code and reference solutions — including the mock's — must not rely
+  on newer language features.
+- **Edits carry `expectedRevision`.** A `409` opens a dialog that shows what
+  changed elsewhere and merges field by field; nothing is overwritten
+  silently. Only content changes move an item's revision: personal state
+  (status, favorite, notes), collection membership and test-case edits do
+  not, and are saved without it. Saving test cases together with a reference
+  solution does carry it, because the solution is content.
+- **Item bodies are untrusted.** They can come from imported bundles. The
+  Markdown renderer never turns raw HTML into elements, drops unsafe URLs,
+  and does not load remote images until asked. `src/ui/Markdown.test.tsx`
+  guards this; do not add `rehype-raw`.
+- **Work in progress is kept locally.** Solution code is stored per item and
+  language in `localStorage`; capture input and drafts under review survive a
+  reload the same way.
+- **Colours are tokens.** Use the custom properties in
+  `src/styles/tokens.css` so both themes stay correct, and check contrast in
+  light and dark when adding one.
+- **Unit tests cover logic, not layout**: the API client, the mock, and the
+  modules in `src/lib`. The Playwright suite covers the main flows end to end.

@@ -1,0 +1,642 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+
+	"codeathropy/internal/domain"
+	"codeathropy/internal/store"
+)
+
+// ItemQuery is the set of filters for listing items, as accepted by both
+// transports.
+type ItemQuery struct {
+	Q            string   `json:"q"`
+	ID           []string `json:"id"`
+	Type         string   `json:"type"`
+	Status       []string `json:"status"`
+	Difficulty   []string `json:"difficulty"`
+	Tag          []string `json:"tag"`
+	CollectionID string   `json:"collectionId"`
+	Recursive    bool     `json:"recursive"`
+	Uncollected  bool     `json:"uncollected"`
+	VariantOf    string   `json:"variantOf"`
+	Favorite     *bool    `json:"favorite"`
+	Sort         string   `json:"sort"`
+	Order        string   `json:"order"`
+	Limit        *int     `json:"limit"`
+	Offset       int      `json:"offset"`
+}
+
+// Page is a paginated list.
+type Page[T any] struct {
+	Items []T `json:"items"`
+	Total int `json:"total"`
+}
+
+// List is a non-paginated list.
+type List[T any] struct {
+	Items []T `json:"items"`
+}
+
+// Pagination bounds.
+const (
+	DefaultLimit = 50
+	MaxLimit     = domain.MaxPageSize
+)
+
+func pageBounds(limit *int, offset int) (int, int, error) {
+	l := DefaultLimit
+	if limit != nil {
+		l = *limit
+	}
+	if l < 1 || l > MaxLimit {
+		return 0, 0, errBadRequest("limit must be between 1 and %d", MaxLimit)
+	}
+	if offset < 0 {
+		return 0, 0, errBadRequest("offset must not be negative")
+	}
+	return l, offset, nil
+}
+
+// ListItems lists items matching the query.
+func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSummary], error) {
+	f := store.ItemFilter{
+		Query:        strings.TrimSpace(q.Q),
+		CollectionID: q.CollectionID,
+		Recursive:    q.Recursive,
+		Uncollected:  q.Uncollected,
+		VariantOf:    q.VariantOf,
+		Favorite:     q.Favorite,
+		IDs:          dedupe(q.ID),
+	}
+	if q.Type != "" {
+		t := domain.ItemType(q.Type)
+		if !t.Valid() {
+			return Page[domain.ItemSummary]{}, errBadRequest("type must be problem or reading")
+		}
+		f.Type = t
+	}
+	for _, s := range q.Status {
+		st := domain.ItemStatus(s)
+		if !st.Valid() {
+			return Page[domain.ItemSummary]{}, errBadRequest("unknown status %q", s)
+		}
+		f.Statuses = append(f.Statuses, st)
+	}
+	for _, d := range q.Difficulty {
+		if d != "none" && !domain.Difficulty(d).Valid() {
+			return Page[domain.ItemSummary]{}, errBadRequest("unknown difficulty %q", d)
+		}
+		f.Difficulties = append(f.Difficulties, d)
+	}
+	for _, t := range q.Tag {
+		if t = domain.NormalizeTag(t); t != "" {
+			f.Tags = append(f.Tags, t)
+		}
+	}
+	f.Sort = q.Sort
+	if f.Sort == "" {
+		f.Sort = store.SortUpdated
+	}
+	switch f.Sort {
+	case store.SortUpdated, store.SortCreated, store.SortTitle, store.SortDifficulty:
+	case store.SortPosition:
+		if f.CollectionID == "" || f.Recursive {
+			return Page[domain.ItemSummary]{}, errBadRequest("sort=position requires a non-recursive collectionId")
+		}
+	case store.SortRelevance:
+		if f.Query == "" {
+			return Page[domain.ItemSummary]{}, errBadRequest("sort=relevance requires q")
+		}
+	default:
+		return Page[domain.ItemSummary]{}, errBadRequest("unknown sort %q", q.Sort)
+	}
+	switch q.Order {
+	case "":
+		f.Desc = f.Sort == store.SortUpdated || f.Sort == store.SortCreated || f.Sort == store.SortRelevance
+	case "asc":
+	case "desc":
+		f.Desc = true
+	default:
+		return Page[domain.ItemSummary]{}, errBadRequest("order must be asc or desc")
+	}
+	limit, offset, err := pageBounds(q.Limit, q.Offset)
+	if err != nil {
+		return Page[domain.ItemSummary]{}, err
+	}
+	f.Limit, f.Offset = limit, offset
+	var out Page[domain.ItemSummary]
+	err = a.store.Read(ctx, func(tx store.Tx) error {
+		items, total, err := tx.ListItems(f)
+		out = Page[domain.ItemSummary]{Items: items, Total: total}
+		return err
+	})
+	return out, err
+}
+
+// GetItem returns one item.
+func (a *App) GetItem(ctx context.Context, id string) (domain.Item, error) {
+	var it domain.Item
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		var err error
+		it, err = tx.GetItem(id)
+		return notFoundAs(err, "item")
+	})
+	return it, err
+}
+
+// CreateItem creates an item, optionally with test cases and collection
+// memberships, in one transaction.
+func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item, error) {
+	fe := domain.FieldErrors{}
+	if !in.Type.HasValue() {
+		fe.Add("type", "is required")
+	} else if !in.Type.Val.Valid() {
+		fe.Add("type", "must be problem or reading")
+	}
+	if !in.Title.HasValue() {
+		fe.Add("title", "is required")
+	}
+	if in.ExpectedRevision.Set {
+		fe.Add("expectedRevision", "is not accepted on create")
+	}
+	if len(fe) > 0 {
+		return domain.Item{}, errValidation(fe)
+	}
+	now := a.clock()
+	it := domain.Item{ItemSummary: domain.ItemSummary{
+		ID: newID(), Type: in.Type.Val, Status: domain.StatusTodo, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}}
+	if it.Type == domain.TypeProblem {
+		it.Problem = domain.DefaultProblemSpec()
+	}
+	fe.Merge("", domain.ApplyItemInput(&it, in))
+	domain.NormalizeItem(&it)
+	fe.Merge("", domain.ValidateItem(&it, a.limits))
+
+	var cases []domain.TestCase
+	if in.TestCases.HasValue() && len(in.TestCases.Val) > 0 {
+		if it.Type != domain.TypeProblem {
+			fe.Add("testCases", "readings have no test cases")
+		} else if len(in.TestCases.Val) > domain.MaxTestCasesPerItem {
+			fe.Add("testCases", fmt.Sprintf("at most %d test cases", domain.MaxTestCasesPerItem))
+		} else {
+			for i, tci := range in.TestCases.Val {
+				tc, tfe := domain.NewTestCaseFromInput(tci)
+				tfe.Merge("", domain.ValidateTestCase(&tc))
+				fe.Merge(fmt.Sprintf("testCases.%d.", i), tfe)
+				tc.ID, tc.ItemID, tc.Position, tc.CreatedAt, tc.UpdatedAt = newID(), it.ID, i, now, now
+				cases = append(cases, tc)
+			}
+		}
+	}
+	var collIDs []string
+	if in.CollectionIDs.Set {
+		if in.CollectionIDs.Null {
+			fe.Add("collectionIds", "cannot be null")
+		}
+		collIDs = dedupe(in.CollectionIDs.Val)
+	}
+	if err := errValidation(fe); err != nil {
+		return domain.Item{}, err
+	}
+	var out domain.Item
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		if err := checkVariantOf(tx, it.ID, it.VariantOf); err != nil {
+			return err
+		}
+		if err := checkCollections(tx, collIDs); err != nil {
+			return err
+		}
+		if err := tx.InsertItem(&it); err != nil {
+			return err
+		}
+		for i := range cases {
+			if err := tx.InsertTestCase(&cases[i]); err != nil {
+				return err
+			}
+		}
+		if len(collIDs) > 0 {
+			if err := tx.SetItemCollections(it.ID, collIDs); err != nil {
+				return err
+			}
+		}
+		var err error
+		out, err = tx.GetItem(it.ID)
+		return err
+	})
+	return out, err
+}
+
+func dedupe(ids []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func checkVariantOf(tx store.Tx, itemID string, variantOf *string) error {
+	if variantOf == nil {
+		return nil
+	}
+	if *variantOf == itemID {
+		return errField("variantOf", "an item cannot be a variant of itself")
+	}
+	ok, err := tx.ExistingItemIDs([]string{*variantOf})
+	if err != nil {
+		return err
+	}
+	if !ok[*variantOf] {
+		return errField("variantOf", "item does not exist")
+	}
+	return nil
+}
+
+func checkCollections(tx store.Tx, ids []string) error {
+	for _, id := range ids {
+		if _, err := tx.GetCollection(id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return errField("collectionIds", fmt.Sprintf("collection %s does not exist", id))
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// checkRevision enforces an expectedRevision precondition.
+func checkRevision(expected domain.Opt[int], it *domain.Item) error {
+	if !expected.HasValue() || expected.Val == it.Revision {
+		return nil
+	}
+	return errConflict(
+		fmt.Sprintf("the item has changed since revision %d (current revision is %d)", expected.Val, it.Revision),
+		map[string]any{"revision": it.Revision})
+}
+
+// saveItem writes an updated item. A content change increases the revision
+// and moves updatedAt; a change to personal state only (status, favorite,
+// notes, raw input) changes neither; an unchanged item is not written.
+func (a *App) saveItem(tx store.Tx, before, after *domain.Item) error {
+	contentChanged := !domain.ContentEqual(before, after)
+	if !contentChanged && domain.PersonalEqual(before, after) {
+		return nil
+	}
+	after.Revision, after.UpdatedAt = before.Revision, before.UpdatedAt
+	if contentChanged {
+		after.Revision = before.Revision + 1
+		after.UpdatedAt = a.clock()
+	}
+	return tx.UpdateItem(after)
+}
+
+// testCasesChanged records a change to the item's test cases: updatedAt
+// moves, the revision does not.
+func (a *App) testCasesChanged(tx store.Tx, it *domain.Item) error {
+	it.UpdatedAt = a.clock()
+	return tx.UpdateItem(it)
+}
+
+// UpdateItem applies a partial update with merge semantics.
+func (a *App) UpdateItem(ctx context.Context, id string, in domain.ItemInput) (domain.Item, error) {
+	if in.TestCases.Set {
+		return domain.Item{}, errField("testCases", "cannot be changed here; use the test case endpoints")
+	}
+	var out domain.Item
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		cur, err := tx.GetItem(id)
+		if err != nil {
+			return notFoundAs(err, "item")
+		}
+		if err := checkRevision(in.ExpectedRevision, &cur); err != nil {
+			return err
+		}
+		if in.Type.Set && (in.Type.Null || in.Type.Val != cur.Type) {
+			return errField("type", "cannot be changed after creation")
+		}
+		next := cur.Clone()
+		fe := domain.ApplyItemInput(&next, in)
+		domain.NormalizeItem(&next)
+		fe.Merge("", domain.ValidateItem(&next, a.limits))
+		var collIDs []string
+		if in.CollectionIDs.Set {
+			if in.CollectionIDs.Null {
+				fe.Add("collectionIds", "cannot be null")
+			}
+			collIDs = dedupe(in.CollectionIDs.Val)
+		}
+		if err := errValidation(fe); err != nil {
+			return err
+		}
+		if in.VariantOf.HasValue() {
+			if err := checkVariantOf(tx, id, next.VariantOf); err != nil {
+				return err
+			}
+		}
+		if in.CollectionIDs.Set {
+			if err := checkCollections(tx, collIDs); err != nil {
+				return err
+			}
+			if err := tx.SetItemCollections(id, collIDs); err != nil {
+				return err
+			}
+		}
+		if err := a.saveItem(tx, &cur, &next); err != nil {
+			return err
+		}
+		out, err = tx.GetItem(id)
+		return err
+	})
+	return out, err
+}
+
+// TextEdit is one exact-match replacement.
+type TextEdit struct {
+	OldText string `json:"oldText"`
+	NewText string `json:"newText"`
+}
+
+// EditTextInput is the body of a targeted text edit.
+type EditTextInput struct {
+	Field            string          `json:"field"`
+	ExpectedRevision domain.Opt[int] `json:"expectedRevision"`
+	Edits            []TextEdit      `json:"edits"`
+}
+
+// EditItemText applies exact-match replacements to body or notes.
+func (a *App) EditItemText(ctx context.Context, id string, in EditTextInput) (domain.Item, error) {
+	if in.Field != "body" && in.Field != "notes" {
+		return domain.Item{}, errField("field", "must be body or notes")
+	}
+	if len(in.Edits) == 0 {
+		return domain.Item{}, errField("edits", "at least one edit is required")
+	}
+	var out domain.Item
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		cur, err := tx.GetItem(id)
+		if err != nil {
+			return notFoundAs(err, "item")
+		}
+		if err := checkRevision(in.ExpectedRevision, &cur); err != nil {
+			return err
+		}
+		text := cur.Body
+		if in.Field == "notes" {
+			text = cur.Notes
+		}
+		for i, e := range in.Edits {
+			key := "edits." + strconv.Itoa(i)
+			e.OldText, e.NewText = domain.NormalizeText(e.OldText), domain.NormalizeText(e.NewText)
+			if e.OldText == "" {
+				return errField(key, "oldText must not be empty")
+			}
+			switch n := strings.Count(text, e.OldText); n {
+			case 1:
+				text = strings.Replace(text, e.OldText, e.NewText, 1)
+			case 0:
+				return errField(key, "oldText was not found")
+			default:
+				return errField(key, fmt.Sprintf("oldText occurs %d times; it must occur exactly once", n))
+			}
+		}
+		if len(text) > domain.MaxTextBytes {
+			return errField(in.Field, "is too long")
+		}
+		next := cur.Clone()
+		if in.Field == "body" {
+			next.Body = text
+		} else {
+			next.Notes = text
+		}
+		if err := a.saveItem(tx, &cur, &next); err != nil {
+			return err
+		}
+		out, err = tx.GetItem(id)
+		return err
+	})
+	return out, err
+}
+
+// DeleteItem deletes an item with its test cases and submissions.
+func (a *App) DeleteItem(ctx context.Context, id string) error {
+	return a.store.Write(ctx, func(tx store.Tx) error {
+		ok, err := tx.DeleteItem(id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errNotFound("item")
+		}
+		return nil
+	})
+}
+
+// BulkInput is one action applied to many items.
+type BulkInput struct {
+	IDs          []string `json:"ids"`
+	Action       string   `json:"action"`
+	Tags         []string `json:"tags"`
+	Status       string   `json:"status"`
+	Favorite     *bool    `json:"favorite"`
+	CollectionID string   `json:"collectionId"`
+}
+
+// BulkResult reports how many items an action affected.
+type BulkResult struct {
+	Affected int `json:"affected"`
+}
+
+// BulkItems applies one action to many items in one transaction. Unknown
+// ids are ignored.
+func (a *App) BulkItems(ctx context.Context, in BulkInput) (BulkResult, error) {
+	tags := domain.NormalizeTags(in.Tags)
+	switch in.Action {
+	case "delete":
+	case "addTags", "removeTags":
+		if len(tags) == 0 {
+			return BulkResult{}, errField("tags", "at least one tag is required")
+		}
+		for _, t := range tags {
+			if msg := domain.ValidateTag(t); msg != "" {
+				return BulkResult{}, errField("tags", fmt.Sprintf("tag %q %s", t, msg))
+			}
+		}
+	case "setStatus":
+		if !domain.ItemStatus(in.Status).Valid() {
+			return BulkResult{}, errField("status", "must be todo, in_progress or done")
+		}
+	case "setFavorite":
+		if in.Favorite == nil {
+			return BulkResult{}, errField("favorite", "is required")
+		}
+	case "addToCollection", "removeFromCollection":
+		if in.CollectionID == "" {
+			return BulkResult{}, errField("collectionId", "is required")
+		}
+	default:
+		return BulkResult{}, errField("action", "unknown action")
+	}
+	ids := dedupe(in.IDs)
+	var res BulkResult
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		if in.Action == "addToCollection" || in.Action == "removeFromCollection" {
+			if _, err := tx.GetCollection(in.CollectionID); err != nil {
+				return notFoundAs(err, "collection")
+			}
+		}
+		existing, err := tx.ExistingItemIDs(ids)
+		if err != nil {
+			return err
+		}
+		var targets []string
+		for _, id := range ids {
+			if existing[id] {
+				targets = append(targets, id)
+			}
+		}
+		res.Affected = len(targets)
+		switch in.Action {
+		case "delete":
+			for _, id := range targets {
+				if _, err := tx.DeleteItem(id); err != nil {
+					return err
+				}
+			}
+			return nil
+		case "addToCollection":
+			return tx.AddCollectionItems(in.CollectionID, targets)
+		case "removeFromCollection":
+			for _, id := range targets {
+				if _, err := tx.RemoveCollectionItem(in.CollectionID, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		for _, id := range targets {
+			cur, err := tx.GetItem(id)
+			if err != nil {
+				return err
+			}
+			next := cur.Clone()
+			switch in.Action {
+			case "addTags":
+				next.Tags = domain.NormalizeTags(append(next.Tags, tags...))
+				if len(next.Tags) > domain.MaxTags {
+					return errField("tags", fmt.Sprintf("item %s would have more than %d tags", id, domain.MaxTags))
+				}
+			case "removeTags":
+				next.Tags = slices.DeleteFunc(next.Tags, func(t string) bool { return slices.Contains(tags, t) })
+			case "setStatus":
+				next.Status = domain.ItemStatus(in.Status)
+			case "setFavorite":
+				next.Favorite = *in.Favorite
+			}
+			if err := a.saveItem(tx, &cur, &next); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return res, err
+}
+
+// ListTags lists every tag with its item count.
+func (a *App) ListTags(ctx context.Context) (List[domain.Tag], error) {
+	var out List[domain.Tag]
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		tags, err := tx.ListTags()
+		out.Items = tags
+		return err
+	})
+	return out, err
+}
+
+// RenameTag renames a tag on every item, merging with an existing tag of the
+// new name.
+func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Tag, error) {
+	oldName = domain.NormalizeTag(oldName)
+	newName = domain.NormalizeTag(newName)
+	if msg := domain.ValidateTag(newName); msg != "" {
+		return domain.Tag{}, errField("name", msg)
+	}
+	var out domain.Tag
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		ids, err := tx.ItemIDsWithTag(oldName)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return errNotFound("tag")
+		}
+		if oldName != newName {
+			for _, id := range ids {
+				cur, err := tx.GetItem(id)
+				if err != nil {
+					return err
+				}
+				next := cur.Clone()
+				for i, t := range next.Tags {
+					if t == oldName {
+						next.Tags[i] = newName
+					}
+				}
+				next.Tags = domain.NormalizeTags(next.Tags)
+				if err := a.saveItem(tx, &cur, &next); err != nil {
+					return err
+				}
+			}
+		}
+		withNew, err := tx.ItemIDsWithTag(newName)
+		out = domain.Tag{Name: newName, Count: len(withNew)}
+		return err
+	})
+	return out, err
+}
+
+// DeleteTag removes a tag from every item.
+func (a *App) DeleteTag(ctx context.Context, name string) error {
+	name = domain.NormalizeTag(name)
+	return a.store.Write(ctx, func(tx store.Tx) error {
+		ids, err := tx.ItemIDsWithTag(name)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return errNotFound("tag")
+		}
+		for _, id := range ids {
+			cur, err := tx.GetItem(id)
+			if err != nil {
+				return err
+			}
+			next := cur.Clone()
+			next.Tags = slices.DeleteFunc(next.Tags, func(t string) bool { return t == name })
+			if err := a.saveItem(tx, &cur, &next); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Stats returns library statistics.
+func (a *App) Stats(ctx context.Context) (domain.Stats, error) {
+	var s domain.Stats
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		var err error
+		s, err = tx.Stats()
+		return err
+	})
+	return s, err
+}

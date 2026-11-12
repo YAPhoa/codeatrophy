@@ -1,0 +1,326 @@
+/* Rendered Markdown. `.md` is the compact variant used for problem statements
+   and previews; `.md-longform` is tuned for reading articles. */
+
+.md {
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--text);
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md pre,
+.md blockquote,
+.md .md-table-wrap,
+.md .katex-display {
+  margin: 0 0 0.9em;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 1.5em 0 0.5em;
+  font-weight: 650;
+  line-height: 1.3;
+  scroll-margin-top: 16px;
+}
+
+.md h1 {
+  font-size: 1.45em;
+}
+
+.md h2 {
+  font-size: 1.2em;
+}
+
+.md h3 {
+  font-size: 1.05em;
+}
+
+.md h4 {
+  font-size: 1em;
+  color: var(--text-2);
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.5em;
+}
+
+.md ul {
+  list-style: disc;
+}
+
+.md ol {
+  list-style: decimal;
+}
+
+.md li {
+  margin: 0.2em 0;
+}
+
+.md li > ul,
+.md li > ol {
+  margin: 0.2em 0;
+}
+
+.md ul.contains-task-list {
+  list-style: none;
+  padding-left: 0.3em;
+}
+
+.md .task-list-item input {
+  margin: 0 0.5em 0 0;
+  vertical-align: -1px;
+}
+
+.md a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent-text) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+.md a:hover {
+  text-decoration-color: currentColor;
+}
+
+.md code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--surface-3);
+  font-size: 0.88em;
+}
+
+.md pre {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: auto;
+  line-height: 1.5;
+  tab-size: 4;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+}
+
+.md blockquote {
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.md blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.md hr {
+  height: 1px;
+  margin: 1.6em 0;
+  border: none;
+  background: var(--border);
+}
+
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+
+.md th,
+.md td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.md .katex {
+  font-size: 1.05em;
+}
+
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.md .katex-error {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.md sup a {
+  text-decoration: none;
+}
+
+.md-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+  color: var(--text-2);
+}
+
+.md-empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.md-image-blocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.md-image-blocked:hover {
+  color: var(--text);
+  border-style: solid;
+}
+
+/* Long-form reading */
+
+.md-longform {
+  font-size: 16.5px;
+  line-height: 1.72;
+}
+
+.md-longform p,
+.md-longform ul,
+.md-longform ol,
+.md-longform pre,
+.md-longform blockquote,
+.md-longform .md-table-wrap {
+  margin-bottom: 1.15em;
+}
+
+.md-longform h1,
+.md-longform h2,
+.md-longform h3 {
+  margin-top: 1.9em;
+  letter-spacing: -0.01em;
+}
+
+.md-longform h2 {
+  font-size: 1.32em;
+}
+
+.md-longform h3 {
+  font-size: 1.12em;
+}
+
+.md-longform pre code {
+  font-size: 13px;
+}
+
+.md-longform blockquote {
+  font-size: 1.02em;
+}
+
+/* Syntax colours for highlighted code blocks (highlight.js class names). */
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-built_in {
+  color: var(--syn-keyword);
+}
+
+.hljs-built_in {
+  color: var(--syn-type);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-template-variable,
+.hljs-addition {
+  color: var(--syn-string);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable.constant_ {
+  color: var(--syn-number);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--syn-fn);
+}
+
+.hljs-type,
+.hljs-title.class_,
+.hljs-class .hljs-title {
+  color: var(--syn-type);
+}
+
+.hljs-meta,
+.hljs-attr,
+.hljs-attribute,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--syn-meta);
+}
+
+.hljs-deletion {
+  color: var(--danger);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 650;
+}
+
+.md-dead-link {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+  color: var(--text-2);
+}
