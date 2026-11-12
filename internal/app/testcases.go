@@ -1,0 +1,279 @@
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"codeathropy/internal/domain"
+	"codeathropy/internal/store"
+)
+
+// problemItem loads an item and checks that it is a problem.
+func problemItem(tx store.Tx, id string) (domain.Item, error) {
+	it, err := tx.GetItem(id)
+	if err != nil {
+		return it, notFoundAs(err, "item")
+	}
+	if it.Type != domain.TypeProblem {
+		return it, errField("type", "readings have no test cases")
+	}
+	return it, nil
+}
+
+// ListTestCases lists a problem's test cases in order.
+func (a *App) ListTestCases(ctx context.Context, itemID string) (List[domain.TestCase], error) {
+	var out List[domain.TestCase]
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		if _, err := problemItem(tx, itemID); err != nil {
+			return err
+		}
+		cases, err := tx.ListTestCases(itemID)
+		out.Items = cases
+		return err
+	})
+	return out, err
+}
+
+func (a *App) buildCases(itemID string, inputs []domain.TestCaseInput, start int) ([]domain.TestCase, error) {
+	now := a.clock()
+	fe := domain.FieldErrors{}
+	cases := make([]domain.TestCase, 0, len(inputs))
+	for i, in := range inputs {
+		tc, tfe := domain.NewTestCaseFromInput(in)
+		tfe.Merge("", domain.ValidateTestCase(&tc))
+		fe.Merge(fmt.Sprintf("cases.%d.", i), tfe)
+		tc.ID, tc.ItemID, tc.Position, tc.CreatedAt, tc.UpdatedAt = newID(), itemID, start+i, now, now
+		cases = append(cases, tc)
+	}
+	return cases, errValidation(fe)
+}
+
+// AddTestCase appends a test case to a problem.
+func (a *App) AddTestCase(ctx context.Context, itemID string, in domain.TestCaseInput) (domain.TestCase, error) {
+	var out domain.TestCase
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		it, err := problemItem(tx, itemID)
+		if err != nil {
+			return err
+		}
+		existing, err := tx.ListTestCases(itemID)
+		if err != nil {
+			return err
+		}
+		if len(existing) >= domain.MaxTestCasesPerItem {
+			return errField("testCases", fmt.Sprintf("a problem can have at most %d test cases", domain.MaxTestCasesPerItem))
+		}
+		cases, err := a.buildCases(itemID, []domain.TestCaseInput{in}, len(existing))
+		if err != nil {
+			if ae, ok := err.(*Error); ok {
+				// Report single-case field names without the list prefix.
+				fields := map[string]any{}
+				for k, v := range ae.Fields {
+					fields[trimPrefix(k, "cases.0.")] = v
+				}
+				ae.Fields = fields
+			}
+			return err
+		}
+		out = cases[0]
+		if err := tx.InsertTestCase(&out); err != nil {
+			return err
+		}
+		return a.testCasesChanged(tx, &it)
+	})
+	return out, err
+}
+
+func trimPrefix(s, p string) string {
+	if len(s) >= len(p) && s[:len(p)] == p {
+		return s[len(p):]
+	}
+	return s
+}
+
+// BulkTestCasesInput appends or replaces test cases, optionally setting the
+// reference solution in the same transaction.
+type BulkTestCasesInput struct {
+	Cases             []domain.TestCaseInput      `json:"cases"`
+	Replace           bool                        `json:"replace"`
+	ReferenceSolution domain.Opt[domain.Solution] `json:"referenceSolution"`
+	ExpectedRevision  domain.Opt[int]             `json:"expectedRevision"`
+}
+
+// BulkTestCases appends (or replaces) test cases.
+func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCasesInput) (List[domain.TestCase], error) {
+	if in.ReferenceSolution.HasValue() {
+		if err := errValidation(prefixed("referenceSolution.", domain.ValidateSolution(in.ReferenceSolution.Val, a.limits))); err != nil {
+			return List[domain.TestCase]{}, err
+		}
+	}
+	var out List[domain.TestCase]
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		it, err := problemItem(tx, itemID)
+		if err != nil {
+			return err
+		}
+		if err := checkRevision(in.ExpectedRevision, &it); err != nil {
+			return err
+		}
+		existing, err := tx.ListTestCases(itemID)
+		if err != nil {
+			return err
+		}
+		start := len(existing)
+		if in.Replace {
+			start = 0
+		}
+		if start+len(in.Cases) > domain.MaxTestCasesPerItem {
+			return errField("cases", fmt.Sprintf("a problem can have at most %d test cases", domain.MaxTestCasesPerItem))
+		}
+		cases, err := a.buildCases(itemID, in.Cases, start)
+		if err != nil {
+			return err
+		}
+		if in.Replace {
+			if err := tx.DeleteTestCases(itemID); err != nil {
+				return err
+			}
+		}
+		for i := range cases {
+			if err := tx.InsertTestCase(&cases[i]); err != nil {
+				return err
+			}
+		}
+		if in.ReferenceSolution.HasValue() {
+			// The reference solution is item content: storing a different
+			// one increases the revision.
+			next := it.Clone()
+			s := in.ReferenceSolution.Val
+			s.Source = domain.NormalizeText(s.Source)
+			next.Problem.ReferenceSolution = &s
+			if err := a.saveItem(tx, &it, &next); err != nil {
+				return err
+			}
+			it = next
+		}
+		if len(cases) > 0 || (in.Replace && len(existing) > 0) {
+			if err := a.testCasesChanged(tx, &it); err != nil {
+				return err
+			}
+		}
+		out.Items, err = tx.ListTestCases(itemID)
+		return err
+	})
+	return out, err
+}
+
+func prefixed(p string, fe domain.FieldErrors) domain.FieldErrors {
+	out := domain.FieldErrors{}
+	out.Merge(p, fe)
+	return out
+}
+
+// UpdateTestCase applies a partial update to one test case.
+func (a *App) UpdateTestCase(ctx context.Context, id string, in domain.TestCaseInput) (domain.TestCase, error) {
+	var out domain.TestCase
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		tc, err := tx.GetTestCase(id)
+		if err != nil {
+			return notFoundAs(err, "test case")
+		}
+		it, err := problemItem(tx, tc.ItemID)
+		if err != nil {
+			return err
+		}
+		before := tc
+		fe := domain.ApplyTestCaseInput(&tc, in)
+		fe.Merge("", domain.ValidateTestCase(&tc))
+		if err := errValidation(fe); err != nil {
+			return err
+		}
+		if tc == before {
+			out = tc
+			return nil
+		}
+		tc.UpdatedAt = a.clock()
+		if err := tx.UpdateTestCase(&tc); err != nil {
+			return err
+		}
+		out = tc
+		return a.testCasesChanged(tx, &it)
+	})
+	return out, err
+}
+
+// DeleteTestCase deletes one test case and renumbers the rest.
+func (a *App) DeleteTestCase(ctx context.Context, id string) error {
+	return a.store.Write(ctx, func(tx store.Tx) error {
+		tc, err := tx.GetTestCase(id)
+		if err != nil {
+			return notFoundAs(err, "test case")
+		}
+		it, err := tx.GetItem(tc.ItemID)
+		if err != nil {
+			return err
+		}
+		if err := tx.DeleteTestCase(id); err != nil {
+			return err
+		}
+		rest, err := tx.ListTestCases(tc.ItemID)
+		if err != nil {
+			return err
+		}
+		ids := make([]string, len(rest))
+		for i, c := range rest {
+			ids[i] = c.ID
+		}
+		if err := tx.SetTestCasePositions(tc.ItemID, ids); err != nil {
+			return err
+		}
+		return a.testCasesChanged(tx, &it)
+	})
+}
+
+// ReorderTestCases sets the order of a problem's test cases. ids must be
+// exactly the item's case ids.
+func (a *App) ReorderTestCases(ctx context.Context, itemID string, ids []string) (List[domain.TestCase], error) {
+	var out List[domain.TestCase]
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		it, err := problemItem(tx, itemID)
+		if err != nil {
+			return err
+		}
+		cur, err := tx.ListTestCases(itemID)
+		if err != nil {
+			return err
+		}
+		want := map[string]bool{}
+		for _, c := range cur {
+			want[c.ID] = true
+		}
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if !want[id] || seen[id] {
+				return errField("ids", "must list each of the item's test case ids exactly once")
+			}
+			seen[id] = true
+		}
+		if len(seen) != len(want) {
+			return errField("ids", "must list each of the item's test case ids exactly once")
+		}
+		changed := false
+		for i, c := range cur {
+			if c.ID != ids[i] {
+				changed = true
+			}
+		}
+		if changed {
+			if err := tx.SetTestCasePositions(itemID, ids); err != nil {
+				return err
+			}
+			if err := a.testCasesChanged(tx, &it); err != nil {
+				return err
+			}
+		}
+		out.Items, err = tx.ListTestCases(itemID)
+		return err
+	})
+	return out, err
+}

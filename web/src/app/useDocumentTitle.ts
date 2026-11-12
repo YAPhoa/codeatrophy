@@ -1,0 +1,10 @@
+import { useEffect } from 'react';
+
+export function useDocumentTitle(title: string | null | undefined): void {
+  useEffect(() => {
+    document.title = title ? `${title} · Codeathropy` : 'Codeathropy';
+    return () => {
+      document.title = 'Codeathropy';
+    };
+  }, [title]);
+}
