@@ -327,8 +327,13 @@ export function LibraryPage() {
           )}
           <h1 className="page-title">
             {title}
-            <span className="page-count" aria-label={`${total} items`}>
-              {query.isSuccess ? total : ''}
+            <span className="page-count">
+              {query.isSuccess && (
+                <>
+                  <span aria-hidden="true">{total}</span>
+                  <span className="sr-only">, {plural(total, 'item')}</span>
+                </>
+              )}
             </span>
           </h1>
           {collection?.description && <p className="page-sub">{collection.description}</p>}

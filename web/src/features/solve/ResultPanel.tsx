@@ -275,8 +275,10 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
             if (!r) {
               return (
                 <li key={i}>
-                  <span className="case-chip is-pending" aria-label={`Case ${i + 1}: waiting`}>
+                  <span className="case-chip is-pending">
+                    <span className="sr-only">Case </span>
                     {i + 1}
+                    <span className="sr-only">: waiting</span>
                   </span>
                 </li>
               );

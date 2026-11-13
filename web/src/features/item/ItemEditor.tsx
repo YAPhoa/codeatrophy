@@ -231,9 +231,9 @@ export function ItemEditor({
         {isProblem && (
           <section className="editor-section" aria-labelledby="starter-heading">
             <div className="row">
-              <h3 id="starter-heading" className="editor-section-title">
+              <h2 id="starter-heading" className="editor-section-title">
                 What you write
-              </h3>
+              </h2>
               <Segmented size="sm" label="What you write" value={form.interface} onChange={(v) => set('interface', v)} options={INTERFACE_OPTIONS} />
               <span className="spacer" />
               <MenuButton
@@ -356,9 +356,9 @@ export function ItemEditor({
         {isProblem && mode === 'create' && (
           <section className="editor-section" aria-labelledby="cases-heading">
             <div className="row">
-              <h3 id="cases-heading" className="editor-section-title">
+              <h2 id="cases-heading" className="editor-section-title">
                 Test cases
-              </h3>
+              </h2>
               <span className="muted">Saved with the problem. You can generate a fuller set afterwards.</span>
               <span className="spacer" />
               {caseTools}
@@ -423,9 +423,9 @@ export function ItemEditor({
         {isProblem && mode === 'create' && form.referenceSolution && (
           <section className="editor-section" aria-labelledby="reference-heading">
             <div className="row">
-              <h3 id="reference-heading" className="editor-section-title">
+              <h2 id="reference-heading" className="editor-section-title">
                 Reference solution
-              </h3>
+              </h2>
               <span className="muted">
                 {languageName(form.referenceSolution.language)}, written by the AI
               </span>
@@ -480,7 +480,16 @@ export function ItemEditor({
             value={form.difficulty ?? 'none'}
             onChange={(v) => set('difficulty', v === 'none' ? null : v)}
             options={[
-              { value: 'none', label: '—', title: 'Not set' },
+              {
+                value: 'none',
+                label: (
+                  <>
+                    <span aria-hidden="true">—</span>
+                    <span className="sr-only">Not set</span>
+                  </>
+                ),
+                title: 'Not set',
+              },
               { value: 'easy', label: 'Easy' },
               { value: 'medium', label: 'Medium' },
               { value: 'hard', label: 'Hard' },
@@ -512,6 +521,7 @@ export function ItemEditor({
                     {...a}
                     className="input"
                     type="number"
+                    inputMode="numeric"
                     min={limits?.timeLimitMs.min}
                     max={limits?.timeLimitMs.max}
                     step={100}
@@ -526,6 +536,7 @@ export function ItemEditor({
                     {...a}
                     className="input"
                     type="number"
+                    inputMode="numeric"
                     min={limits ? limits.memoryLimitKb.min / 1024 : undefined}
                     max={limits ? limits.memoryLimitKb.max / 1024 : undefined}
                     step={16}
