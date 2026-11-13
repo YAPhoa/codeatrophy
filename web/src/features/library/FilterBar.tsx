@@ -97,6 +97,8 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
       <div className="filter-search">
         <Search size={14} aria-hidden="true" />
         <input
+          name="q"
+          autoComplete="off"
           ref={searchRef}
           type="search"
           value={text}
@@ -161,6 +163,8 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           <>
             {tags.length > 8 && (
               <input
+                name="tag-filter"
+                autoComplete="off"
                 className="input input-sm"
                 placeholder="Filter tags…"
                 aria-label="Filter tags"

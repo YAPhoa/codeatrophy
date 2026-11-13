@@ -35,6 +35,7 @@ export function StylePicker({ styles, value, onChange, disabled, id = 'style-pic
         Style
       </label>
       <select
+        name="style"
         id={id}
         className="input input-sm select"
         value={value ?? NONE}

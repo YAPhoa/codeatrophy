@@ -9,11 +9,23 @@ interface FieldProps {
   /** Hide the label visually (it stays available to assistive technology). */
   hideLabel?: boolean;
   className?: string;
-  children: (props: { id: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean }) => ReactNode;
+  /** The control's `name`. Defaults to one made from the label: "Time limit (ms)" is `time-limit-ms`. */
+  name?: string;
+  children: (props: { id: string; name: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean }) => ReactNode;
+}
+
+/** A form control's `name` from its label: lower case, words joined by hyphens. */
+export function fieldName(label: string): string {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'field'
+  );
 }
 
 /** Label, control, hint and error message wired together for accessibility. */
-export function Field({ label, hint, error, hideLabel, className, children }: FieldProps) {
+export function Field({ label, hint, error, hideLabel, className, name, children }: FieldProps) {
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
@@ -23,7 +35,7 @@ export function Field({ label, hint, error, hideLabel, className, children }: Fi
       <label htmlFor={id} className={cx('field-label', hideLabel && 'sr-only')}>
         {label}
       </label>
-      {children({ id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
+      {children({ id, name: name ?? fieldName(label), 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
       {hint && (
         <div id={hintId} className="field-hint">
           {hint}
@@ -51,7 +63,8 @@ type TextFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | '
 export function TextField({ label, value, onChange, hint, error, hideLabel, fieldClassName, className, ...rest }: TextFieldProps) {
   return (
     <Field label={label} hint={hint} error={error} hideLabel={hideLabel} className={fieldClassName}>
-      {(a) => <input {...rest} {...a} className={cx('input', className)} value={value} onChange={(e) => onChange(e.target.value)} />}
+      {/* These fields hold titles, names and settings, never personal details: no autofill unless a caller asks for it. */}
+      {(a) => <input autoComplete="off" {...rest} {...a} name={rest.name ?? a.name} className={cx('input', className)} value={value} onChange={(e) => onChange(e.target.value)} />}
     </Field>
   );
 }
@@ -73,8 +86,10 @@ export function TextAreaField({ label, value, onChange, hint, error, hideLabel, 
       {(a) => (
         <textarea
           spellCheck={mono ? false : undefined}
+          autoComplete="off"
           {...rest}
           {...a}
+          name={rest.name ?? a.name}
           className={cx('input textarea', mono && 'mono', className)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -99,7 +114,7 @@ export function SelectField<T extends string>({ label, value, onChange, options,
   return (
     <Field label={label} hint={hint} error={error} hideLabel={hideLabel} className={fieldClassName}>
       {(a) => (
-        <select {...rest} {...a} className={cx('input select', className)} value={value} onChange={(e) => onChange(e.target.value as T)}>
+        <select {...rest} {...a} name={rest.name ?? a.name} className={cx('input select', className)} value={value} onChange={(e) => onChange(e.target.value as T)}>
           {options.map((o) => (
             <option key={o.value} value={o.value} disabled={o.disabled}>
               {o.label}
@@ -127,13 +142,16 @@ export function Checkbox({ checked, onChange, label, hint, disabled, className }
       <input
         id={id}
         type="checkbox"
+        name={typeof label === 'string' ? fieldName(label) : undefined}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         aria-describedby={hint ? `${id}-hint` : undefined}
       />
       <div>
-        <label htmlFor={id}>{label}</label>
+        <label htmlFor={id} className="check-label">
+          {label}
+        </label>
         {hint && (
           <div id={`${id}-hint`} className="field-hint">
             {hint}

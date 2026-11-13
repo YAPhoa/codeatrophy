@@ -156,6 +156,8 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
       <Popover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} role="dialog" label="Collections" className="popover-panel">
         {nodes.length > 6 && (
           <input
+            name="collection-filter"
+            autoComplete="off"
             className="input input-sm"
             placeholder="Filter collections…"
             aria-label="Filter collections"

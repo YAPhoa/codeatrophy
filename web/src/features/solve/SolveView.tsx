@@ -449,7 +449,7 @@ export function SolveView({ item }: { item: Item }) {
         <label htmlFor="solve-language" className="sr-only">
           Language
         </label>
-        <select id="solve-language" className="input input-sm select solve-language" value={language ?? ''} onChange={(e) => setLanguage(e.target.value)} disabled={languages.length === 0}>
+        <select id="solve-language" name="language" className="input input-sm select solve-language" value={language ?? ''} onChange={(e) => setLanguage(e.target.value)} disabled={languages.length === 0}>
           {languages.map((l) => (
             <option key={l} value={l}>
               {languageName(l)}
@@ -692,6 +692,7 @@ export function SolveView({ item }: { item: Item }) {
                   Standard input for one run
                 </label>
                 <textarea
+                  name="stdin"
                   id="custom-stdin"
                   className="input textarea mono"
                   rows={5}

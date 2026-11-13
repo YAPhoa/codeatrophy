@@ -259,6 +259,13 @@
   flex: none;
 }
 
+/* The label reaches back over the gap to its box, so there is no dead strip between the two. */
+.check-label {
+  display: block;
+  margin-left: -8px;
+  padding-left: 8px;
+}
+
 input[type='checkbox'],
 input[type='radio'] {
   accent-color: var(--accent);

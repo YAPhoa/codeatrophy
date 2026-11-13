@@ -275,6 +275,7 @@ export default function CapturePage() {
           What you have
         </label>
         <textarea
+          name="text"
           id="capture-text"
           ref={textRef}
           className="capture-text"

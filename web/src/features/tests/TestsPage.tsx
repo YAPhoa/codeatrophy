@@ -698,6 +698,7 @@ function TestsManager({ item }: { item: Item }) {
                       Check another
                     </label>
                     <select
+                      name="solution"
                       id="verify-solution"
                       className="input select verify-select"
                       value={other.id}

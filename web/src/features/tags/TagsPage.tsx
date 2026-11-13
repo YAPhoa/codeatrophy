@@ -102,7 +102,7 @@ export default function TagsPage() {
       ) : (
         <>
           {list.length > 10 && (
-            <input className="input tags-filter" type="search" placeholder="Filter tags…" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <input className="input tags-filter" type="search" name="q" autoComplete="off" placeholder="Filter tags…" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
           )}
           <div className="card">
             <table className="table">

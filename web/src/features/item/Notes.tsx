@@ -107,6 +107,7 @@ export function Notes({ item }: { item: Item }) {
       </div>
       {view === 'write' ? (
         <textarea
+          name="notes"
           className="input textarea notes-text"
           aria-label="Private notes (Markdown)"
           placeholder="Approach, gotchas, or things to revisit... (Markdown supported)"

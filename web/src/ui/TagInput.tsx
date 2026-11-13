@@ -96,6 +96,7 @@ export function TagInput({ value, onChange, suggestions = [], placeholder = 'Add
         </span>
       ))}
       <input
+        name="tag"
         {...aria}
         ref={inputRef}
         className="taginput-input"

@@ -166,6 +166,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
             Ask for a revision
           </label>
           <input
+            name="instruction"
             id="revise-instruction"
             className="input"
             value={instruction}

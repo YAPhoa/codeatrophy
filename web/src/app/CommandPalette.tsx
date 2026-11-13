@@ -111,6 +111,9 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         <div className="palette-input">
           <Search size={16} aria-hidden="true" />
           <input
+            name="palette-search"
+            autoComplete="off"
+            spellCheck={false}
             autoFocus
             role="combobox"
             aria-expanded="true"

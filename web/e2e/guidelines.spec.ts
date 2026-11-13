@@ -164,3 +164,22 @@ test('deep links: the selected test case is in the address', async ({ page }) =>
   }, link.pathname + link.search);
   await expect(name).toHaveValue(selectedName);
 });
+
+test('forms: every text input, text area and select has a name', async ({ page }) => {
+  const unnamed = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLInputElement>('input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea, select')]
+        .filter((el) => !el.name)
+        .map((el) => el.outerHTML.slice(0, 120)),
+    );
+  await open(page, '/');
+  await expect(page.getByRole('link', { name: 'Two Sum', exact: true })).toBeVisible();
+  expect(await unnamed()).toEqual([]);
+
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await expect(page.getByLabel('Title')).toBeVisible();
+  expect(await unnamed()).toEqual([]);
+  await expect(page.getByLabel('Title')).toHaveAttribute('name', 'title');
+  await expect(page.getByLabel('Title')).toHaveAttribute('autocomplete', 'off');
+});

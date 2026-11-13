@@ -312,7 +312,13 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
             onChange={(v) => reconnect({ apiKey: v, removeKey: false })}
             onKeyDown={testOnEnter}
             placeholder={outlook.savedKeyDropped ? 'Paste the key for this server' : provider?.apiKeySet ? 'Enter a new key to replace the current one' : 'Paste the key'}
-            autoComplete="off"
+            name="api-key"
+            // Not a login: browsers ignore "off" on a password field and would offer the site's saved
+            // password, so the field is declared a new secret and password managers are told to pass over it.
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore
             spellCheck={false}
             maxLength={limits?.maxApiKeyChars}
             error={serverError('apiKey')}
