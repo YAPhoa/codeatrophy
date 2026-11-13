@@ -68,6 +68,7 @@ export default function ExportPage() {
   const valid = scope === 'all' || (scope === 'collection' && !!effectiveCollection) || (scope === 'items' && passedIds.length > 0);
 
   const run = async () => {
+    if (!valid) return;
     setBusy(true);
     setError(null);
     setDone(null);
@@ -203,7 +204,7 @@ export default function ExportPage() {
         )}
 
         <div className="form-actions">
-          <Button type="submit" variant="primary" icon={<Download size={15} />} busy={busy} disabled={!valid}>
+          <Button type="submit" variant="primary" icon={<Download size={15} />} busy={busy}>
             Download bundle
           </Button>
         </div>

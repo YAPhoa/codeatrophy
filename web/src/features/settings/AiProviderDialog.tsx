@@ -5,6 +5,7 @@ import { api, isAbort, isApiError } from '../../api/client';
 import { invalidateAi, useLimits } from '../../api/queries';
 import type { AiProvider, AiProviderKind, AiSettings, AiTestResponse } from '../../api/types';
 import { errorLine, sentence } from '../../lib/errors';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatMs, plural } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
@@ -119,7 +120,9 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     modelMax: limits?.maxModelIdChars ?? Infinity,
   };
   const nameLen = charLength(form.name);
-  const nameError = nameProblem(form.name, settings.providers, provider, bounds.nameMax);
+  // A missing name is pointed out once the user has tried to save.
+  const [attempted, setAttempted] = useState(false);
+  const nameError = nameProblem(form.name, settings.providers, provider, bounds.nameMax) ?? (attempted && nameLen === 0 ? 'Give the provider a name.' : null);
   const modelError = modelProblem(form.model, bounds.modelMax);
   const urlError = baseUrlProblem(form.baseUrl);
   const patch = provider ? patchBody(form, provider) : null;
@@ -165,9 +168,20 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   };
 
   const save = async () => {
-    if (!canSave || saving) return;
+    if (saving) return;
+    setAttempted(true);
+    if (nameLen === 0 || nameError || modelError) {
+      focusFirstInvalid();
+      return;
+    }
     if (urlError) {
       setUrlChecked(true);
+      focusFirstInvalid();
+      return;
+    }
+    // Nothing was changed: there is nothing to send.
+    if (!dirty) {
+      onClose();
       return;
     }
     setSaving(true);
@@ -243,7 +257,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           <Button onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button ref={saveRef} variant="primary" type="submit" form="provider-form" busy={saving} disabled={!canSave}>
+          <Button ref={saveRef} variant="primary" type="submit" form="provider-form" busy={saving}>
             {adding ? 'Add provider' : 'Save provider'}
           </Button>
         </>

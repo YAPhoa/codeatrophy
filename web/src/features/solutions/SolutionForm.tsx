@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { useLimits, useMeta } from '../../api/queries';
 import type { Item, Solution, SolutionPatch } from '../../api/types';
 import { pickLanguage } from '../../lib/codeStore';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatBytes, plural } from '../../lib/format';
 import { byteLength, charCount, fieldMessage } from '../../lib/itemForm';
 import { Button } from '../../ui/Button';
@@ -74,7 +75,10 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
 
   const submit = async () => {
     setAttempted(true);
-    if (local.name || local.source || local.notes) return;
+    if (local.name || local.source || local.notes) {
+      focusFirstInvalid();
+      return;
+    }
     const values = { name: name.trim(), language, source, notes, isReference };
     const done = (saved: Solution) => {
       toast.success(solution ? 'Solution saved' : 'Solution added');
@@ -200,7 +204,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
       <WriteProblems write={write} limits={limits} hideError={!server.rest && write.error != null} />
 
       <div className="form-actions">
-        <Button type="submit" variant="primary" icon={<Save size={14} />} busy={write.busy} disabled={solution !== undefined && !dirty}>
+        <Button type="submit" variant="primary" icon={<Save size={14} />} busy={write.busy}>
           {solution ? 'Save solution' : 'Add solution'}
         </Button>
         <Button variant="ghost" onClick={() => void cancel()} disabled={write.busy}>

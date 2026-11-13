@@ -157,7 +157,12 @@ export function ReviewScreen(props: ReviewScreenProps) {
           onSubmit={(e) => {
             e.preventDefault();
             const text = instruction.trim();
-            if (!text || busy) return;
+            if (busy) return;
+            if (!text) {
+              // Nothing to ask for yet: put the cursor where it is typed.
+              e.currentTarget.querySelector<HTMLInputElement>('#revise-instruction')?.focus();
+              return;
+            }
             props.onRevise(text);
           }}
         >
@@ -177,7 +182,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
             autoComplete="off"
           />
           <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
-          <Button type="submit" disabled={busy || instruction.trim() === ''}>
+          <Button type="submit" disabled={busy}>
             Revise draft
           </Button>
           <p className="revise-hint">The AI reworks the draft as it stands now, including your edits, and returns a new version to review.</p>

@@ -6,6 +6,7 @@ import { api, isApiError } from '../../api/client';
 import { qk, useItem, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
 import type { Item, Solution, TestCase, VerifyResult } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { ORIGIN_LABEL, VERDICT_LABEL, formatBytes, plural } from '../../lib/format';
 import { byteLength } from '../../lib/itemForm';
 import { languageLabel } from '../../lib/languages';
@@ -192,7 +193,15 @@ function TestsManager({ item }: { item: Item }) {
   const atCaseLimit = maxCases !== undefined && cases.length >= maxCases;
 
   const saveCase = async () => {
-    if (!draft || stdinError || expectedError) return;
+    if (!draft) return;
+    if (stdinError || expectedError) {
+      focusFirstInvalid();
+      return;
+    }
+    if (!dirty) {
+      toast.info('This case has no changes to save.');
+      return;
+    }
     setBusy(true);
     setCaseError(null);
     try {
@@ -631,7 +640,7 @@ function TestsManager({ item }: { item: Item }) {
                     )}
                     {caseError != null && <ErrorCallout error={caseError} title="Could not save the case" />}
                     <div className="form-actions">
-                      <Button type="submit" variant="primary" icon={<Save size={14} />} busy={busy} disabled={!dirty || !!stdinError || !!expectedError}>
+                      <Button type="submit" variant="primary" icon={<Save size={14} />} busy={busy}>
                         {selectedId === NEW ? 'Add case' : 'Save case'}
                       </Button>
                       {dirty && selected && (

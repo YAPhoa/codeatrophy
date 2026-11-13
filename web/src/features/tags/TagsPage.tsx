@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { invalidateLibrary, useLimits, useTags } from '../../api/queries';
 import type { Tag } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { tagProblem } from '../../lib/itemForm';
 import { plural } from '../../lib/format';
 import { useUrlText } from '../../lib/urlState';
@@ -32,6 +33,8 @@ export default function TagsPage() {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // What is wrong with an empty or unchanged name is said once the user has tried to save it.
+  const [attempted, setAttempted] = useState(false);
 
   const list = useMemo(() => tags.data ?? [], [tags.data]);
   const shown = useMemo(() => {
@@ -42,15 +45,23 @@ export default function TagsPage() {
   const open = (next: NonNullable<Editing>) => {
     setEditing(next);
     setError(null);
+    setAttempted(false);
     setValue(next.kind === 'rename' ? next.tag.name : (list.find((t) => t.name !== next.tag.name)?.name ?? ''));
   };
 
   const target = normalize(value);
   const existing = editing ? list.find((t) => t.name === target && t.name !== editing.tag.name) : undefined;
+  const unchanged = editing !== null && target === editing.tag.name;
   const problem = target ? tagProblem(target, limits) : null;
+  const shownProblem = problem ?? (attempted ? (!target ? 'Enter a name for the tag.' : unchanged ? 'That is the name it has now.' : null) : null);
 
   const apply = async () => {
-    if (!editing || !target || target === editing.tag.name || problem) return;
+    if (!editing) return;
+    setAttempted(true);
+    if (!target || unchanged || problem) {
+      focusFirstInvalid();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -157,7 +168,7 @@ export default function TagsPage() {
             <Button onClick={() => setEditing(null)} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" form="tag-form" busy={busy} disabled={!target || target === editing?.tag.name || !!problem}>
+            <Button variant="primary" type="submit" form="tag-form" busy={busy}>
               {existing || editing?.kind === 'merge' ? 'Merge' : 'Rename'}
             </Button>
           </>
@@ -188,7 +199,7 @@ export default function TagsPage() {
               autoComplete="off"
               autoCapitalize="none"
               spellCheck={false}
-              error={problem}
+              error={shownProblem}
               hint={target && target !== value ? `Will be saved as “${target}”.` : 'Applies to every item that has this tag.'}
             />
           )}

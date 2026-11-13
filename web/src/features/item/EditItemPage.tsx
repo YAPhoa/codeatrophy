@@ -6,6 +6,7 @@ import { api, isApiError } from '../../api/client';
 import { qk, storeItem, useCollections, useItem, useMeta, useTags } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import {
   FIELD_LABEL,
@@ -119,6 +120,7 @@ function EditForm({ initial }: { initial: Item }) {
     setErrors(local);
     if (Object.keys(local).length > 0) {
       toast.error('Some fields need attention before saving.');
+      focusFirstInvalid();
       return;
     }
     const patch = patchFromForm(against, current);
@@ -181,7 +183,7 @@ function EditForm({ initial }: { initial: Item }) {
         <Button variant="ghost" onClick={() => navigate(`/items/${base.id}`)} disabled={saving}>
           Cancel
         </Button>
-        <Button variant="primary" icon={<Save size={14} />} onClick={() => void save()} busy={saving} disabled={!dirty} title={`${MOD}+S`}>
+        <Button variant="primary" icon={<Save size={14} />} onClick={() => void save()} busy={saving} title={`${MOD}+S`}>
           Save changes
         </Button>
       </div>

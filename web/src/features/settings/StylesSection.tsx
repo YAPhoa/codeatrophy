@@ -4,6 +4,7 @@ import { PenLine, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { qk, useLimits, useStyles } from '../../api/queries';
 import type { StylePreset } from '../../api/types';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Checkbox, Field } from '../../ui/Field';
@@ -36,6 +37,8 @@ export function StylesSection() {
   const [editing, setEditing] = useState<Editing>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // An empty name or text is pointed out once the user has tried to save.
+  const [attempted, setAttempted] = useState(false);
 
   const limits = useLimits();
   // Until the limits are known nothing is checked here; the server still enforces them.
@@ -51,6 +54,7 @@ export function StylesSection() {
 
   const open = (preset: StylePreset | null, seed?: { name: string; instructions: string }) => {
     setError(null);
+    setAttempted(false);
     setEditing({
       preset,
       name: preset?.name ?? seed?.name ?? '',
@@ -71,18 +75,27 @@ export function StylesSection() {
           ? 'A name is a single line, without tabs.'
           : editing && CONTROL.test(editing.name)
             ? 'Contains a control character that cannot be saved.'
-          : null;
+            : attempted && nameLen === 0
+              ? 'Give the style a name.'
+              : null;
   const textError =
     textLen > bounds.instructionsMax
       ? `${(textLen - bounds.instructionsMax).toLocaleString()} over the limit. Shorten it — nothing is cut off automatically.`
       : editing && CONTROL.test(editing.instructions.replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
         ? 'Contains a control character that cannot be saved (often pasted from a terminal or PDF).'
-        : null;
+        : attempted && textLen === 0
+          ? 'Write the instructions the AI should follow.'
+          : null;
   const serverFields = isApiError(error) && error.code === 'validation_failed' ? error.fields : {};
   const canSave = editing !== null && nameLen > 0 && textLen > 0 && !nameError && !textError;
 
   const save = async () => {
-    if (!editing || !canSave) return;
+    if (!editing) return;
+    setAttempted(true);
+    if (!canSave) {
+      focusFirstInvalid();
+      return;
+    }
     setBusy(true);
     setError(null);
     const body = { name: editing.name.trim(), instructions: editing.instructions.replace(/\r\n?/g, '\n').trim(), isDefault: editing.isDefault };
@@ -211,7 +224,7 @@ export function StylesSection() {
             <Button onClick={() => setEditing(null)} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" form="style-form" busy={busy} disabled={!canSave}>
+            <Button variant="primary" type="submit" form="style-form" busy={busy}>
               {editing?.preset ? 'Save style' : 'Create style'}
             </Button>
           </>

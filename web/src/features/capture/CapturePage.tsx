@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
@@ -109,9 +109,18 @@ export default function CapturePage() {
   const textLength = charCount(text);
   const tooLong = textLength > maxText;
   const canDraft = aiEnabled && text.trim().length > 0 && !tooLong && !generation.running && !stylesQuery.isPending;
+  // Asked to draft from nothing: say so by the text, until something is typed.
+  const [askedEmpty, setAskedEmpty] = useState(false);
+  const needsText = askedEmpty && text.trim() === '';
 
   const draft = async () => {
-    if (!canDraft) return;
+    if (!canDraft) {
+      if (aiEnabled && !generation.running && !stylesQuery.isPending) {
+        setAskedEmpty(true);
+        textRef.current?.focus();
+      }
+      return;
+    }
     verify.cancel();
     const res = await generation.run((signal) =>
       api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCase }, signal),
@@ -320,10 +329,13 @@ export default function CapturePage() {
           )}
           {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={(c) => patch({ styleChoice: c })} disabled={generation.running} />}
           <span className="spacer" />
-          <span id="capture-count" className={tooLong ? 'field-error' : 'muted capture-count'}>
+          {/* An alert only while something is wrong, so the running count is not read out on every keystroke. */}
+          <span id="capture-count" className={tooLong || needsText ? 'field-error' : 'muted capture-count'} role={tooLong || needsText ? 'alert' : undefined}>
             {tooLong
               ? `${textLength.toLocaleString()} / ${maxText.toLocaleString()} characters — too long to draft from`
-              : textLength > 0
+              : needsText
+                ? 'Type or paste something to draft from.'
+                : textLength > 0
                 ? `${textLength.toLocaleString()} characters`
                 : ''}
           </span>
@@ -338,7 +350,7 @@ export default function CapturePage() {
           <div className="capture-actions">
             {aiEnabled ? (
               <>
-                <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => void draft()} disabled={!canDraft}>
+                <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
                   Draft with AI
                 </Button>
                 <span className="muted capture-kbd">

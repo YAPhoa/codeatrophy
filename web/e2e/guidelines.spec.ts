@@ -183,3 +183,35 @@ test('forms: every text input, text area and select has a name', async ({ page }
   await expect(page.getByLabel('Title')).toHaveAttribute('name', 'title');
   await expect(page.getByLabel('Title')).toHaveAttribute('autocomplete', 'off');
 });
+
+test('forms: a save that cannot go through says why and moves to the field', async ({ page }) => {
+  // A new collection without a name.
+  await open(page, '/');
+  await page.getByRole('button', { name: 'New collection' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New collection' });
+  const create = dialog.getByRole('button', { name: 'Create collection' });
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(dialog.getByRole('alert')).toHaveText('Give the collection a name.');
+  await expect(dialog.getByLabel('Name')).toBeFocused();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  // An item whose title was emptied.
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Title').fill('');
+  await page.getByLabel('Source note').focus();
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByLabel('Title')).toBeFocused();
+  await expect(page.getByLabel('Title')).toHaveAttribute('aria-invalid', 'true');
+});
+
+test('forms: drafting from nothing asks for some text', async ({ page }) => {
+  await open(page, '/new');
+  const draft = page.getByRole('button', { name: 'Draft with AI' });
+  await expect(draft).toBeEnabled();
+  await page.getByRole('button', { name: 'Write it by hand' }).focus();
+  await draft.click();
+  await expect(page.getByRole('alert')).toHaveText('Type or paste something to draft from.');
+  await expect(page.getByLabel('What you have')).toBeFocused();
+});

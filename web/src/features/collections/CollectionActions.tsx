@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { invalidateLibrary, useCollections, useLimits } from '../../api/queries';
 import type { Collection } from '../../api/types';
+import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { buildTree, descendantIds, flattenTree, siblingsOf } from '../../lib/tree';
 import { Button } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
@@ -37,6 +38,8 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
   const [parentId, setParentId] = useState<string>((editing ? editing.parentId : state.mode === 'create' ? state.parentId : null) ?? ROOT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // A missing name is pointed out once the user has tried to save.
+  const [attempted, setAttempted] = useState(false);
 
   const parentOptions = useMemo(() => {
     const tree = buildTree(collections);
@@ -52,7 +55,11 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    setAttempted(true);
+    if (!trimmed) {
+      focusFirstInvalid();
+      return;
+    }
     setBusy(true);
     setError(null);
     const parent = parentId === ROOT ? null : parentId;
@@ -90,7 +97,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
           <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" form="collection-form" busy={busy} disabled={!name.trim()}>
+          <Button variant="primary" type="submit" form="collection-form" busy={busy}>
             {editing ? 'Save collection' : 'Create collection'}
           </Button>
         </>
@@ -104,7 +111,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
           void submit();
         }}
       >
-        <TextField label="Name" value={name} onChange={setName} placeholder="e.g. Dynamic programming…" data-autofocus autoComplete="off" maxLength={limits?.maxCollectionNameChars} />
+        <TextField label="Name" value={name} onChange={setName} error={attempted && !name.trim() ? 'Give the collection a name.' : null} placeholder="e.g. Dynamic programming…" data-autofocus autoComplete="off" maxLength={limits?.maxCollectionNameChars} />
         <TextAreaField
           label="Description (optional)"
           value={description}
