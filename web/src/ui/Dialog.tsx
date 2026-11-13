@@ -134,8 +134,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         size="sm"
         footer={
           <>
-            <Button onClick={() => settle(false)}>{state?.cancelLabel ?? 'Cancel'}</Button>
-            <Button variant={state?.danger ? 'danger' : 'primary'} onClick={() => settle(true)} data-autofocus>
+            {/* A destructive confirm opens on Cancel, so a stray Enter does not delete anything. */}
+            <Button onClick={() => settle(false)} data-autofocus={state?.danger ? true : undefined}>
+              {state?.cancelLabel ?? 'Cancel'}
+            </Button>
+            <Button variant={state?.danger ? 'danger' : 'primary'} onClick={() => settle(true)} data-autofocus={state?.danger ? undefined : true}>
               {state?.confirmLabel ?? 'Confirm'}
             </Button>
           </>

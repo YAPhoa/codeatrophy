@@ -275,10 +275,10 @@ function ClearDialog({ open, onClose, onCleared }: { open: boolean; onClose: () 
       locked={busy}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={onClose} disabled={busy} data-autofocus>
             Cancel
           </Button>
-          <Button variant="danger" onClick={() => void clear()} busy={busy} data-autofocus>
+          <Button variant="danger" onClick={() => void clear()} busy={busy}>
             Clear
           </Button>
         </>
