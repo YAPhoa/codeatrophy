@@ -110,11 +110,14 @@ export function AssumptionsPanel({ assumptions, kind, style, showStyle, usage }:
         <ul className="assumptions-list">
           {assumptions.map((a, i) => (
             <li key={i} className={cx(checked.has(i) && 'is-checked')}>
-              <button type="button" className="assumption-check" aria-pressed={checked.has(i)} onClick={() => toggle(i)} title={checked.has(i) ? 'Mark as not checked' : 'Mark as checked'}>
-                {checked.has(i) && <Check size={12} />}
-                <span className="sr-only">{checked.has(i) ? 'Checked' : 'Not checked'}</span>
-              </button>
-              <span>{a}</span>
+              {/* A checkbox named by the assumption itself, so the whole line is the target and the name never changes. */}
+              <label className="assumption">
+                <input type="checkbox" className="sr-only" name={`assumption-${i + 1}`} checked={checked.has(i)} onChange={() => toggle(i)} />
+                <span className="assumption-check" aria-hidden="true">
+                  {checked.has(i) && <Check size={12} />}
+                </span>
+                <span>{a}</span>
+              </label>
             </li>
           ))}
         </ul>
