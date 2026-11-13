@@ -229,7 +229,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
           <span>{kindName(p.kind)}</span>
           {model ? (
             <span>
-              <code>{model}</code>
+              <code translate="no">{model}</code>
               {p.model === null && ' (the default)'}
             </span>
           ) : (
@@ -237,12 +237,12 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
           )}
           {host && (
             <span>
-              at <code>{host}</code>
+              at <code translate="no">{host}</code>
             </span>
           )}
           {p.apiKeySet ? (
             <span className="provider-key">
-              <KeyRound size={12} aria-hidden="true" /> key ending in <code>{(p.apiKeyHint ?? '').replace(/^…/, '')}</code>
+              <KeyRound size={12} aria-hidden="true" /> key ending in <code translate="no">{(p.apiKeyHint ?? '').replace(/^…/, '')}</code>
             </span>
           ) : (
             <span>no key</span>
@@ -251,7 +251,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
         <ProviderUsage provider={p} />
         {fromEnvironment && (
           <p className="provider-note">
-            Set by the server’s environment variables (see <code>.env.example</code>). It can be tested and used as the default; to change or remove it, edit those variables and restart the
+            Set by the server’s environment variables (see <code translate="no">.env.example</code>). It can be tested and used as the default; to change or remove it, edit those variables and restart the
             server.
           </p>
         )}
@@ -263,7 +263,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
                 errorLine(test.error)
               ) : test.result?.ok && test.result.model !== null ? (
                 <>
-                  The connection works: <code>{test.result.model}</code> answered{test.result.latencyMs != null ? ` in ${formatMs(test.result.latencyMs)}` : ''}.
+                  The connection works: <code translate="no">{test.result.model}</code> answered{test.result.latencyMs != null ? ` in ${formatMs(test.result.latencyMs)}` : ''}.
                 </>
               ) : test.result?.ok ? (
                 <>The connection works{test.result.models ? `, and the server offers ${plural(test.result.models.length, 'model')}` : ''}. No model is set to try.</>

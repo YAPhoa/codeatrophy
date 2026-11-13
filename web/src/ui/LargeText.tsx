@@ -65,7 +65,7 @@ export function TestDataField({ label, value, onChange, rows, filename, error }:
   if (!isLargeText(value)) {
     return (
       <Field label={label} error={error}>
-        {(a) => <textarea {...a} className="input textarea mono" rows={rows} spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} />}
+        {(a) => <textarea {...a} className="input textarea mono" rows={rows} spellCheck={false} translate="no" value={value} onChange={(e) => onChange(e.target.value)} />}
       </Field>
     );
   }

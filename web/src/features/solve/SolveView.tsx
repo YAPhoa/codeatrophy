@@ -694,6 +694,7 @@ export function SolveView({ item }: { item: Item }) {
                 <textarea
                   name="stdin"
                   id="custom-stdin"
+                  translate="no"
                   className="input textarea mono"
                   rows={5}
                   spellCheck={false}

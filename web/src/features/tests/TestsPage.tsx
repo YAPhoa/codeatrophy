@@ -624,7 +624,7 @@ function TestsManager({ item }: { item: Item }) {
                         )}
                         {!selectedVerify.ok && (
                           <Callout tone="warn" title={`${capitalize(who)} did not finish on this input: ${VERDICT_LABEL[selectedVerify.verdict]}`}>
-                            {selectedVerify.stderr ? <pre className="code-block code-block-wrap">{selectedVerify.stderr}</pre> : 'No error output was captured.'}
+                            {selectedVerify.stderr ? <pre translate="no" className="code-block code-block-wrap">{selectedVerify.stderr}</pre> : 'No error output was captured.'}
                           </Callout>
                         )}
                       </div>

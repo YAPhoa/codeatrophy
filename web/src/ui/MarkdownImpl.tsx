@@ -83,6 +83,9 @@ const components: Options['components'] = {
   img: ({ node: _node, ...props }) => <SafeImage {...props} />,
   a: ({ node: _node, ...props }) => <ExternalLink {...props} />,
   table: ({ node: _node, ...props }) => <Table {...props} />,
+  // Code is not prose: a page translator must leave it as written.
+  code: ({ node: _node, ...props }) => <code translate="no" {...props} />,
+  pre: ({ node: _node, ...props }) => <pre translate="no" {...props} />,
 };
 
 export default function MarkdownImpl({ source }: { source: string }) {

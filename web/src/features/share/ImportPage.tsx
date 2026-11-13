@@ -111,7 +111,7 @@ export default function ImportPage() {
       <ShareTabs active="import" />
       <h1 className="page-title">Import a bundle</h1>
       <p className="page-sub">
-        Bring in a <code>.codeatrophy.zip</code> exported from this or another instance. You see exactly what would change before anything is written, and an import is applied completely or not at
+        Bring in a <code translate="no">.codeatrophy.zip</code> exported from this or another instance. You see exactly what would change before anything is written, and an import is applied completely or not at
         all.
       </p>
 
@@ -176,7 +176,7 @@ export default function ImportPage() {
                   </label>{' '}
                   or drop it here
                   <div className="muted">
-                    A <code>.codeatrophy.zip</code>
+                    A <code translate="no">.codeatrophy.zip</code>
                     {Number.isFinite(maxBytes) ? `, up to ${formatBytes(maxBytes)}` : ''}
                   </div>
                 </div>

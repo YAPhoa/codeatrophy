@@ -157,7 +157,7 @@ export function ErrorCallout({ error, onRetry, title }: { error: unknown; onRetr
         <ul className="callout-fields">
           {fields.map(([k, v]) => (
             <li key={k}>
-              <code>{k}</code> {v}
+              <code translate="no">{k}</code> {v}
             </li>
           ))}
         </ul>

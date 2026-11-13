@@ -100,6 +100,7 @@ function EditorPreview({ editor }: { editor: EditorPreferences }) {
     <figure className="prefs-preview">
       <figcaption className="field-hint">Preview</figcaption>
       <pre
+        translate="no"
         className={editor.lineWrapping ? 'prefs-preview-code is-wrapped' : 'prefs-preview-code'}
         style={{ fontSize: editor.fontSize, lineHeight: `${lineHeightFor(editor.fontSize)}px` }}
         // Scrolls sideways when lines are not wrapped, so it has to be reachable by keyboard.

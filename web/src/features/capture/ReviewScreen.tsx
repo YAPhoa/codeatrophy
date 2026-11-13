@@ -194,7 +194,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
       {props.originalText && (
         <details className="original">
           <summary>{props.originalLabel ?? 'Your original input'}</summary>
-          <pre>{props.originalText}</pre>
+          <pre translate="no">{props.originalText}</pre>
         </details>
       )}
 

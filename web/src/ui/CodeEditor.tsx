@@ -40,6 +40,7 @@ function Fallback({ value, className, prose, wrap }: CodeEditorProps) {
   const options = resolveEditorOptions(usePreferences().editor, { prose, wrap });
   return (
     <pre
+      translate="no"
       className={cx('code-editor code-editor-fallback', className)}
       style={{
         fontFamily: 'var(--font-mono)',

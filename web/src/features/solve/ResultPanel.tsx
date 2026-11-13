@@ -38,7 +38,7 @@ export function Output({ label, note, text, tone, wrap, filename }: OutputProps)
       {isLargeText(text) ? (
         <LargeText text={text} filename={filename ?? textFilename(label)} label={label} />
       ) : (
-        <pre className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
+        <pre translate="no" className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
       )}
     </div>
   );
@@ -257,14 +257,14 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
             Compiler output
             {lineOffsetNote(s.lineOffset) && <span className="io-note"> · {lineOffsetNote(s.lineOffset)}</span>}
           </div>
-          <pre className="code-block code-block-danger compile-output">{s.compileOutput || 'The compiler reported an error but produced no output.'}</pre>
+          <pre translate="no" className="code-block code-block-danger compile-output">{s.compileOutput || 'The compiler reported an error but produced no output.'}</pre>
         </div>
       )}
 
       {s.compileOutput !== '' && s.verdict !== 'compile_error' && done && (
         <details className="compile-warnings">
           <summary>Compiler output (warnings)</summary>
-          <pre className="code-block">{s.compileOutput}</pre>
+          <pre translate="no" className="code-block">{s.compileOutput}</pre>
         </details>
       )}
 

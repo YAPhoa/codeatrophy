@@ -326,15 +326,15 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           />
           {outlook.savedKeyDropped && (
             <Callout tone="warn" role="status" title="The saved key will not carry over to this server">
-              The saved key belongs to <code>{hostOf(outlook.currentBaseUrl)}</code>. A key is never sent to a different server than the one it was saved for, so saving this base URL deletes it, and
+              The saved key belongs to <code translate="no">{hostOf(outlook.currentBaseUrl)}</code>. A key is never sent to a different server than the one it was saved for, so saving this base URL deletes it, and
               Test connection runs without it.{' '}
               {outlook.keyRequired ? (
                 <>
-                  Enter the key for <code>{host}</code> to continue.
+                  Enter the key for <code translate="no">{host}</code> to continue.
                 </>
               ) : (
                 <>
-                  Enter the key for <code>{host}</code>, or leave the field empty if that server needs none.
+                  Enter the key for <code translate="no">{host}</code>, or leave the field empty if that server needs none.
                 </>
               )}
             </Callout>
@@ -344,7 +344,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
               <KeyRound size={13} aria-hidden="true" />
               {outlook.savedKeyDropped ? (
                 <span>
-                  The saved key ending in <code>{keyHint}</code> will be deleted when you save.
+                  The saved key ending in <code translate="no">{keyHint}</code> will be deleted when you save.
                 </span>
               ) : form.removeKey && provider.apiKeySet ? (
                 <>
@@ -356,7 +356,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
               ) : provider.apiKeySet ? (
                 <>
                   <span>
-                    A key ending in <code>{keyHint}</code> is saved.
+                    A key ending in <code translate="no">{keyHint}</code> is saved.
                   </span>
                   <button type="button" className="link-btn" onClick={() => reconnect({ removeKey: true, apiKey: '' })}>
                     Delete saved key
@@ -388,7 +388,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           <div className="server-line">
             <Server size={13} aria-hidden="true" />
             <span>
-              Connects to <code>{host}</code>.
+              Connects to <code translate="no">{host}</code>.
             </span>
             <button type="button" className="link-btn" onClick={() => setUrlOpen(true)}>
               {form.kind === 'openai_compatible' ? 'Use another server' : 'Use a proxy or gateway'}
@@ -405,23 +405,23 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           <Callout tone="ok" role="status" title="The connection works">
             {test.model !== null && test.model === modelInUse ? (
               <>
-                <code>{test.model}</code> answered{test.latencyMs != null ? ` in ${formatMs(test.latencyMs)}` : ''}.
+                <code translate="no">{test.model}</code> answered{test.latencyMs != null ? ` in ${formatMs(test.latencyMs)}` : ''}.
               </>
             ) : modelInUse === null ? (
               listing?.models && listing.models.length > 0 ? (
                 <>
-                  <code>{listing.host}</code> offers {plural(listing.models.length, 'model')}. Pick one below.
+                  <code translate="no">{listing.host}</code> offers {plural(listing.models.length, 'model')}. Pick one below.
                 </>
               ) : (
                 <>Enter the model to use below.</>
               )
             ) : listing?.models?.includes(modelInUse) ? (
               <>
-                <code>{modelInUse}</code> is one of the models <code>{listing.host}</code> offers.
+                <code translate="no">{modelInUse}</code> is one of the models <code translate="no">{listing.host}</code> offers.
               </>
             ) : (
               <>
-                <code>{modelInUse}</code> has not been tried yet. Test again to check it, or save it as it is.
+                <code translate="no">{modelInUse}</code> has not been tried yet. Test again to check it, or save it as it is.
               </>
             )}
           </Callout>

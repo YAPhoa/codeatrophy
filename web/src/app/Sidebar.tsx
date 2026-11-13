@@ -292,7 +292,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   return (
     <aside className={cx('sidebar', open && 'is-open')} aria-label="Navigation">
       <div className="sidebar-head">
-        <Link to="/" className="brand">
+        <Link to="/" className="brand" translate="no">
           <span className="brand-mark" aria-hidden="true">
             <Code2 size={15} strokeWidth={2.6} />
           </span>

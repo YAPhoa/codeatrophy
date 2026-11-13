@@ -9,7 +9,7 @@ const Impl = lazyPart(
   ({ source }: { source: string }) => (
     <>
       <ReloadNotice />
-      <pre className="md-fallback">{source}</pre>
+      <pre translate="no" className="md-fallback">{source}</pre>
     </>
   ),
 );
@@ -31,7 +31,7 @@ export function Markdown({ source, className, longform, emptyText }: MarkdownPro
   if (source.trim() === '' && emptyText) return <p className="md-empty">{emptyText}</p>;
   return (
     <div className={cx('md', longform && 'md-longform', className)}>
-      <Suspense fallback={<pre className="md-fallback">{source}</pre>}>
+      <Suspense fallback={<pre translate="no" className="md-fallback">{source}</pre>}>
         <Impl source={source} />
       </Suspense>
     </div>

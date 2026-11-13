@@ -44,7 +44,7 @@ function SettingsCategory({ slug, label }: { slug: SettingsSlug; label: string }
             </NavLink>
           ))}
           <p className="about">
-            Codeatrophy {meta.version}
+            <span translate="no">Codeatrophy</span> {meta.version}
             <br />
             AGPL-3.0-only
           </p>

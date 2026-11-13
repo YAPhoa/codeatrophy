@@ -109,7 +109,7 @@ export function Shell() {
         </a>
         <header className="topbar">
           <IconButton label="Open navigation" icon={<MenuIcon size={18} />} onClick={() => setDrawerOpen(true)} />
-          <Link to="/" className="topbar-brand">
+          <Link to="/" className="topbar-brand" translate="no">
             Codeatrophy
           </Link>
           <span className="spacer" />

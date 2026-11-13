@@ -86,6 +86,7 @@ export function TextAreaField({ label, value, onChange, hint, error, hideLabel, 
       {(a) => (
         <textarea
           spellCheck={mono ? false : undefined}
+          translate={mono ? 'no' : undefined}
           autoComplete="off"
           {...rest}
           {...a}

@@ -29,7 +29,7 @@ export function JudgeSection({ meta }: { meta: Meta }) {
           <div className="card">
             <table className="table">
               <caption className="table-caption">
-                Engine <code>{judge.engine}</code> · {judge.languages.length} languages available
+                Engine <code translate="no">{judge.engine}</code> · {judge.languages.length} languages available
               </caption>
               <thead>
                 <tr>
@@ -59,7 +59,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="copy-row">
       <div className="copy-label">{label}</div>
-      <code className="copy-value">{value}</code>
+      <code translate="no" className="copy-value">{value}</code>
       <CopyButton text={value} />
     </div>
   );
@@ -83,7 +83,7 @@ export function McpSection({ meta }: { meta: Meta }) {
       </p>
       {!mcp.enabled ? (
         <Callout tone="info" title="The MCP endpoint is turned off">
-          It is disabled in the server’s configuration (<code>CODEATROPHY_MCP_ENABLED=false</code>). Remove that setting and restart the server to enable it.
+          It is disabled in the server’s configuration (<code translate="no">CODEATROPHY_MCP_ENABLED=false</code>). Remove that setting and restart the server to enable it.
         </Callout>
       ) : (
         <div className="card card-pad stack">
@@ -92,18 +92,18 @@ export function McpSection({ meta }: { meta: Meta }) {
           <CopyRow label="Clients that only speak stdio" value={conn.stdioCommand} />
           {!mcp.url && (
             <p className="field-hint">
-              The address above is taken from this page. If assistants reach the server under a different address — through a reverse proxy, say — set <code>CODEATROPHY_PUBLIC_URL</code> on the
+              The address above is taken from this page. If assistants reach the server under a different address — through a reverse proxy, say — set <code translate="no">CODEATROPHY_PUBLIC_URL</code> on the
               server and it will be shown here instead.
             </p>
           )}
           {mcp.authRequired ? (
             <p className="field-hint">
-              This server requires a bearer token. Replace <code>&lt;your-token&gt;</code> with the value of <code>CODEATROPHY_MCP_TOKEN</code> from the server’s configuration; the token is not shown
+              This server requires a bearer token. Replace <code translate="no">&lt;your-token&gt;</code> with the value of <code translate="no">CODEATROPHY_MCP_TOKEN</code> from the server’s configuration; the token is not shown
               here.
             </p>
           ) : (
             <p className="field-hint">
-              No token is required, which is fine while the server is only reachable from this machine. Set <code>CODEATROPHY_MCP_TOKEN</code> before exposing it on a network.
+              No token is required, which is fine while the server is only reachable from this machine. Set <code translate="no">CODEATROPHY_MCP_TOKEN</code> before exposing it on a network.
             </p>
           )}
         </div>
