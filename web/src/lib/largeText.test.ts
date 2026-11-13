@@ -22,8 +22,8 @@ describe('textStats and describeTextSize', () => {
   });
 
   it('says how big it is', () => {
-    expect(describeTextSize({ bytes: 183412, lines: 30001 })).toBe('179 KB · 30,001 lines');
-    expect(describeTextSize({ bytes: 40, lines: 1 })).toBe('40 B · 1 line');
+    expect(describeTextSize({ bytes: 183412, lines: 30001 })).toBe('179\u00a0KB · 30,001 lines');
+    expect(describeTextSize({ bytes: 40, lines: 1 })).toBe('40\u00a0B · 1 line');
   });
 });
 

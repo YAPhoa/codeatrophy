@@ -64,7 +64,7 @@ describe('summariseVerify', () => {
 
   it('counts the cases that passed and finds the slowest', () => {
     const summary = summariseVerify([result('a'), result('b', { timeMs: 41 }), result('c')], cases, true);
-    expect(summary).toEqual({ passed: 3, total: 3, slowest: '41 ms', failure: null });
+    expect(summary).toEqual({ passed: 3, total: 3, slowest: '41\u00a0ms', failure: null });
   });
 
   it('names the first case that did not pass', () => {
@@ -86,7 +86,7 @@ describe('summariseVerify', () => {
 
   it('shows a run stopped at the time limit as exceeding it', () => {
     const results = [result('a'), result('b', { ok: false, matches: false, verdict: 'time_limit_exceeded', timeMs: 3100 })];
-    expect(summariseVerify(results, cases, true, 2000)).toMatchObject({ slowest: '> 2 s', failure: 'Case 2 (Example 2) ran out of time.' });
+    expect(summariseVerify(results, cases, true, 2000)).toMatchObject({ slowest: '> 2\u00a0s', failure: 'Case 2 (Example 2) ran out of time.' });
   });
 
   it('has nothing to say about a problem without test cases', () => {
@@ -98,13 +98,13 @@ describe('describeLargeCase', () => {
   const added: LargeCaseReport = { status: 'added', error: null, index: 8, name: '30,000 values in runs of three', inputBytes: 183412, timeMs: 141, generator: null };
 
   it('names an added case, its size, and the reference solution against the time limit', () => {
-    expect(describeLargeCase(added, 2000)).toEqual({ tone: 'ok', text: 'Large case “30,000 values in runs of three” added · 179 KB · reference solution 141 ms of 2 s' });
-    expect(describeLargeCase(added).text).toBe('Large case “30,000 values in runs of three” added · 179 KB · reference solution 141 ms');
+    expect(describeLargeCase(added, 2000)).toEqual({ tone: 'ok', text: 'Large case “30,000 values in runs of three” added · 179\u00a0KB · reference solution 141\u00a0ms of 2\u00a0s' });
+    expect(describeLargeCase(added).text).toBe('Large case “30,000 values in runs of three” added · 179\u00a0KB · reference solution 141\u00a0ms');
     expect(describeLargeCase({ ...added, name: null, inputBytes: null, timeMs: null }, 2000).text).toBe('Large case added');
   });
 
   it('warns when the reference solution needs more than half the time limit', () => {
-    expect(describeLargeCase({ ...added, timeMs: 1200 }, 2000)).toMatchObject({ tone: 'warn', text: expect.stringContaining('1.2 s of 2 s') });
+    expect(describeLargeCase({ ...added, timeMs: 1200 }, 2000)).toMatchObject({ tone: 'warn', text: expect.stringContaining('1.2\u00a0s of 2\u00a0s') });
     expect(describeLargeCase({ ...added, timeMs: 1000 }, 2000).tone).toBe('ok');
   });
 

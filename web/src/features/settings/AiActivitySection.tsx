@@ -165,10 +165,10 @@ function LogRow({ entry, open, onToggle }: { entry: AiLogEntry; open: boolean; o
         <span className="truncate" title={entry.model}>
           {entry.model}
         </span>
-        <span className="log-num" title={entry.usage.inputTokens == null ? undefined : `${entry.usage.inputTokens.toLocaleString('en-US')} tokens in`}>
+        <span className="log-num" title={entry.usage.inputTokens == null ? undefined : `${entry.usage.inputTokens.toLocaleString()} tokens in`}>
           {tokens(entry.usage.inputTokens)}
         </span>
-        <span className="log-num" title={entry.usage.outputTokens == null ? undefined : `${entry.usage.outputTokens.toLocaleString('en-US')} tokens out`}>
+        <span className="log-num" title={entry.usage.outputTokens == null ? undefined : `${entry.usage.outputTokens.toLocaleString()} tokens out`}>
           {tokens(entry.usage.outputTokens)}
         </span>
         <span className="log-num">{formatDuration(entry.durationMs)}</span>

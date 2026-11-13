@@ -41,7 +41,7 @@ export function textStats(text: string): TextStats {
 
 /** "179 KB · 30,001 lines". */
 export function describeTextSize(stats: TextStats): string {
-  return `${formatBytes(stats.bytes)} · ${stats.lines.toLocaleString('en')} ${stats.lines === 1 ? 'line' : 'lines'}`;
+  return `${formatBytes(stats.bytes)} · ${stats.lines.toLocaleString()} ${stats.lines === 1 ? 'line' : 'lines'}`;
 }
 
 /** A file name for downloaded test data: "two-sum-large-case-input.txt". */

@@ -3,24 +3,24 @@ import { describeCases, describeChanges, describeRun, describeUsage, formatDurat
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
-    expect(formatRunTime(48, 'accepted', 2000)).toBe('48 ms');
-    expect(formatRunTime(1500, 'wrong_answer', 2000)).toBe('1.5 s');
-    expect(formatRunTime(2000, 'accepted', 2000)).toBe('2 s');
+    expect(formatRunTime(48, 'accepted', 2000)).toBe('48\u00a0ms');
+    expect(formatRunTime(1500, 'wrong_answer', 2000)).toBe('1.5\u00a0s');
+    expect(formatRunTime(2000, 'accepted', 2000)).toBe('2\u00a0s');
   });
 
   it('shows a time-limit verdict as exceeding the limit, not the time the program was stopped at', () => {
-    expect(formatRunTime(3100, 'time_limit_exceeded', 2000)).toBe('> 2 s');
-    expect(formatRunTime(600, 'time_limit_exceeded', 500)).toBe('> 500 ms');
+    expect(formatRunTime(3100, 'time_limit_exceeded', 2000)).toBe('> 2\u00a0s');
+    expect(formatRunTime(600, 'time_limit_exceeded', 500)).toBe('> 500\u00a0ms');
   });
 
   it('treats any time over the limit the same way, whatever the overall verdict', () => {
     // The slowest case of a submission can be a time-limit case even when an earlier case decided the verdict.
-    expect(formatRunTime(3100, 'wrong_answer', 2000)).toBe('> 2 s');
-    expect(formatRunTime(3100, null, 2000)).toBe('> 2 s');
+    expect(formatRunTime(3100, 'wrong_answer', 2000)).toBe('> 2\u00a0s');
+    expect(formatRunTime(3100, null, 2000)).toBe('> 2\u00a0s');
   });
 
   it('falls back to the measured time when the limit is not known', () => {
-    expect(formatRunTime(3100, 'time_limit_exceeded', undefined)).toBe('3.1 s');
+    expect(formatRunTime(3100, 'time_limit_exceeded', undefined)).toBe('3.1\u00a0s');
   });
 });
 
@@ -75,11 +75,11 @@ describe('formatTokens', () => {
 
 describe('formatDuration', () => {
   it('rounds to whole seconds from ten up, and counts minutes from sixty', () => {
-    expect(formatDuration(380)).toBe('380 ms');
-    expect(formatDuration(5200)).toBe('5.2 s');
-    expect(formatDuration(48200)).toBe('48 s');
-    expect(formatDuration(59600)).toBe('1 min');
-    expect(formatDuration(72400)).toBe('1 min 12 s');
+    expect(formatDuration(380)).toBe('380\u00a0ms');
+    expect(formatDuration(5200)).toBe('5.2\u00a0s');
+    expect(formatDuration(48200)).toBe('48\u00a0s');
+    expect(formatDuration(59600)).toBe('1\u00a0min');
+    expect(formatDuration(72400)).toBe('1\u00a0min 12\u00a0s');
   });
 });
 
@@ -87,18 +87,18 @@ describe('describeUsage', () => {
   const usage = { logId: null, model: 'claude-haiku-5-5', inputTokens: 5210, outputTokens: 4380, reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0, durationMs: 48200 };
 
   it('gives the model, the tokens each way and the time', () => {
-    expect(describeUsage(usage)).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 48 s');
+    expect(describeUsage(usage)).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 48\u00a0s');
   });
 
   it('leaves out what the provider did not report', () => {
-    expect(describeUsage({ ...usage, inputTokens: null, outputTokens: null })).toBe('claude-haiku-5-5 · 48 s');
-    expect(describeUsage({ ...usage, outputTokens: null })).toBe('claude-haiku-5-5 · 5.2k in · 48 s');
+    expect(describeUsage({ ...usage, inputTokens: null, outputTokens: null })).toBe('claude-haiku-5-5 · 48\u00a0s');
+    expect(describeUsage({ ...usage, outputTokens: null })).toBe('claude-haiku-5-5 · 5.2k in · 48\u00a0s');
     expect(describeUsage({ ...usage, model: '', inputTokens: null, outputTokens: null, durationMs: 0 })).toBe('');
   });
 
   it('adds reasoning and cache figures only when there were any', () => {
-    expect(describeUsage({ ...usage, reasoningTokens: 1100, cacheReadTokens: 3100 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 1.1k reasoning · 3.1k cache read · 48 s');
-    expect(describeUsage({ ...usage, reasoningTokens: 0, cacheWriteTokens: 5210 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 5.2k cache write · 48 s');
+    expect(describeUsage({ ...usage, reasoningTokens: 1100, cacheReadTokens: 3100 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 1.1k reasoning · 3.1k cache read · 48\u00a0s');
+    expect(describeUsage({ ...usage, reasoningTokens: 0, cacheWriteTokens: 5210 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 5.2k cache write · 48\u00a0s');
   });
 });
 

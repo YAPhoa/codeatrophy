@@ -54,7 +54,7 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
   // Each language's runner was proven, and the generation says what it cost.
   await expect(page.getByRole('tab', { name: /Python\s*runner ran/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /Go\s*runner ran/ })).toBeVisible();
-  await expect(page.locator('.usage-line')).toHaveText(/^claude-opus-5-5 · [\d.]+k in · \d+ out · \d+ s$/);
+  await expect(page.locator('.usage-line')).toHaveText(/^claude-opus-5-5 · [\d.]+k in · \d+ out · \d+\u00a0s$/);
 
   await page.getByLabel('Title').fill('Two Sum (solution only)');
   await page.getByRole('button', { name: 'Save to library' }).first().click();
@@ -338,11 +338,11 @@ test('large test case: the preference asks for one with every draft, kept out of
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
   // One line says what was added; the input itself is not shown, but can be downloaded.
-  await expect(page.getByText(/^Large case “.+” added · \d+ KB · reference solution \d+ ms of \d+ s$/)).toBeVisible();
+  await expect(page.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of \d+\u00a0s$/)).toBeVisible();
   const card = page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' });
   await expect(card).toHaveCount(1);
   await expect(card.getByText('large', { exact: true })).toBeVisible();
-  await expect(card.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+ KB · \d+ lines?/);
+  await expect(card.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
   await expect(card.getByText('30000')).toHaveCount(0);
   // Still renamed and marked like any case: the name and the expected output are the only fields.
   await expect(card.getByRole('textbox')).toHaveCount(2);
@@ -386,7 +386,7 @@ test('large test case: asked for on the generate form, then kept and managed on 
   await page.getByLabel('How many').fill('3');
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
   await expect(page.getByText('4 of 4 selected')).toBeVisible();
-  await expect(page.getByText(/^Large case “.+” added · \d+ KB · reference solution \d+ ms of 2 s$/)).toBeVisible();
+  await expect(page.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of 2\u00a0s$/)).toBeVisible();
 
   const proposed = page.locator('.proposal-case').last();
   await expect(proposed.getByText('large', { exact: true })).toBeVisible();
@@ -400,7 +400,7 @@ test('large test case: asked for on the generate form, then kept and managed on 
   await page.getByRole('button', { name: 'Show test cases' }).first().click();
   await page.locator('.case-row').last().locator('.case-row-main').click();
   const editor = page.getByRole('group', { name: 'Selected test case' });
-  await expect(editor.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+ KB · \d+ lines?/);
+  await expect(editor.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
   await expect(editor.getByRole('button', { name: 'Download' })).toBeVisible();
   await expectNoLargeText(page);
   await editor.getByLabel('Name').fill('Big input');
@@ -564,7 +564,7 @@ test('AI activity: a generation is logged with its raw request, and the list loa
   const newest = rows.first();
   await expect(newest.locator('.log-row')).toHaveAttribute('aria-expanded', 'true');
   // The key figures are on the row itself.
-  await expect(newest.locator('.log-row')).toContainText(/Draft · Two Sum.*Personal key.*claude-opus-5-5.*[\d.]+k.*\d+.*\d+ s.*just now/);
+  await expect(newest.locator('.log-row')).toContainText(/Draft · Two Sum.*Personal key.*claude-opus-5-5.*[\d.]+k.*\d+.*\d+\u00a0s.*just now/);
   await expect(newest.getByRole('textbox', { name: 'Request' })).toContainText('two sum — array of ints and a target');
   await expect(newest.getByRole('textbox', { name: 'Response' })).toContainText('"title": "Two Sum"');
   await newest.locator('.log-row').click();

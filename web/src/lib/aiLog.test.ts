@@ -31,7 +31,7 @@ describe('usageBreakdown', () => {
 
   it('sits between the provider and the time among the facts of an entry', () => {
     expect(entryFacts(entry, '13 Nov, 09:30').map(([label]) => label)).toEqual(['Provider', 'Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Duration', 'Time']);
-    expect(entryFacts(entry, '13 Nov, 09:30')).toContainEqual(['Duration', '22 s']);
+    expect(entryFacts(entry, '13 Nov, 09:30')).toContainEqual(['Duration', '22\u00a0s']);
   });
 });
 

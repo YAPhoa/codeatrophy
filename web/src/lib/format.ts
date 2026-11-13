@@ -51,9 +51,12 @@ export function difficultyTone(d: Difficulty): Tone {
 
 export const ORIGIN_LABEL: Record<TestOrigin, string> = { manual: 'Manual', ai: 'AI', import: 'Imported' };
 
+// Dates and numbers follow the browser's locale. Relative times are words
+// ("3 hr. ago", "yesterday"), so they stay in English like the rest of the UI
+// rather than drop another language into an English sentence.
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });
-const dateFmt = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric' });
-const dateTimeFmt = new Intl.DateTimeFormat('en', {
+const dateFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
   month: 'short',
   day: 'numeric',
@@ -83,18 +86,31 @@ export function absoluteTime(iso: string): string {
   return Number.isNaN(t) ? '' : dateTimeFmt.format(t);
 }
 
+const wholeFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+const tenthsFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
+/** A count in the browser's locale: 12,480. */
+export function formatNumber(n: number): string {
+  return wholeFmt.format(n);
+}
+
+/** A number and its unit, kept on one line by a non-breaking space: "10 MB". */
+function withUnit(n: string | number, unit: string): string {
+  return `${typeof n === 'number' ? wholeFmt.format(n) : n}\u00a0${unit}`;
+}
+
 export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${trim(n / 1024)} KB`;
-  return `${trim(n / (1024 * 1024))} MB`;
+  if (n < 1024) return withUnit(n, 'B');
+  if (n < 1024 * 1024) return withUnit(trim(n / 1024), 'KB');
+  return withUnit(trim(n / (1024 * 1024)), 'MB');
 }
 
 export function formatMemoryKb(kb: number): string {
-  return kb < 1024 ? `${kb} KB` : `${trim(kb / 1024)} MB`;
+  return kb < 1024 ? withUnit(kb, 'KB') : withUnit(trim(kb / 1024), 'MB');
 }
 
 export function formatMs(ms: number): string {
-  return ms < 1000 ? `${ms} ms` : `${trim(ms / 1000)} s`;
+  return ms < 1000 ? withUnit(ms, 'ms') : withUnit(trim(ms / 1000), 's');
 }
 
 /**
@@ -108,8 +124,9 @@ export function formatRunTime(timeMs: number, verdict: Verdict | null, timeLimit
   return formatMs(timeMs);
 }
 
+/** Three significant digits at most: one decimal below 100, none from there. */
 function trim(n: number): string {
-  return n >= 100 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, '');
+  return n >= 100 ? wholeFmt.format(n) : tenthsFmt.format(n);
 }
 
 export function plural(n: number, one: string, many: string = `${one}s`): string {
@@ -118,18 +135,19 @@ export function plural(n: number, one: string, many: string = `${one}s`): string
 
 /** A token count, short: 850, 5.2k, 61k, 1.2M. */
 export function formatTokens(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 9950) return `${Math.round(n / 100) / 10}k`;
-  if (n < 999_500) return `${Math.round(n / 1000)}k`;
-  return `${Math.round(n / 100_000) / 10}M`;
+  if (n < 1000) return wholeFmt.format(n);
+  if (n < 9950) return `${tenthsFmt.format(n / 1000)}k`;
+  if (n < 999_500) return `${wholeFmt.format(n / 1000)}k`;
+  return `${tenthsFmt.format(n / 1_000_000)}M`;
 }
 
 /** How long a generation took: whole seconds from ten up, minutes from sixty. */
 export function formatDuration(ms: number): string {
   if (ms < 10_000) return formatMs(ms);
   const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds} s`;
-  return seconds % 60 === 0 ? `${seconds / 60} min` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  if (seconds < 60) return withUnit(seconds, 's');
+  const minutes = withUnit(Math.floor(seconds / 60), 'min');
+  return seconds % 60 === 0 ? minutes : `${minutes} ${withUnit(seconds % 60, 's')}`;
 }
 
 /**

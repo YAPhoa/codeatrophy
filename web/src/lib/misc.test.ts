@@ -163,12 +163,12 @@ describe('format', () => {
   });
 
   it('formats sizes and durations', () => {
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(52428800)).toBe('50 MB');
-    expect(formatMemoryKb(262144)).toBe('256 MB');
-    expect(formatMemoryKb(9120)).toBe('8.9 MB');
-    expect(formatMs(48)).toBe('48 ms');
-    expect(formatMs(2000)).toBe('2 s');
+    expect(formatBytes(512)).toBe('512\u00a0B');
+    expect(formatBytes(52428800)).toBe('50\u00a0MB');
+    expect(formatMemoryKb(262144)).toBe('256\u00a0MB');
+    expect(formatMemoryKb(9120)).toBe('8.9\u00a0MB');
+    expect(formatMs(48)).toBe('48\u00a0ms');
+    expect(formatMs(2000)).toBe('2\u00a0s');
   });
 
   it('pluralises', () => {

@@ -60,7 +60,7 @@ export function usageBreakdown(usage: TokenUsage): [label: string, value: string
     ['Cache read', usage.cacheReadTokens],
     ['Cache write', usage.cacheWriteTokens],
   ];
-  return rows.flatMap(([label, n]) => (n == null ? [] : [[label, n.toLocaleString('en-US')] as [string, string]]));
+  return rows.flatMap(([label, n]) => (n == null ? [] : [[label, n.toLocaleString()] as [string, string]]));
 }
 
 /** Everything about an entry that fits a label and a value. */
