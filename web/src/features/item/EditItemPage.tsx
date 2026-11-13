@@ -220,7 +220,7 @@ function EditForm({ initial }: { initial: Item }) {
                   toast.info('Loaded the current version. Your edits were discarded.');
                 }}
               >
-                Discard my edits, load theirs
+                Discard your edits, load theirs
               </Button>
               <Button
                 onClick={() => {
@@ -245,7 +245,7 @@ function EditForm({ initial }: { initial: Item }) {
                   void save(latest, merge.merged);
                 }}
               >
-                {merge.overlapping.length > 0 ? 'Merge, keeping my version where both changed' : 'Merge and save'}
+                {merge.overlapping.length > 0 ? 'Merge, keeping your version where both changed' : 'Merge and save'}
               </Button>
             </>
           }

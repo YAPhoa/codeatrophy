@@ -174,7 +174,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
                 )
               }
             >
-              {dialog?.kind === 'removeTags' ? 'Remove' : 'Add'}
+              {dialog?.kind === 'removeTags' ? 'Remove tags' : 'Add tags'}
             </Button>
           </>
         }
@@ -234,7 +234,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
                 void run({ action: 'addToCollection', collectionId: targetCollection }, `Added {n} to “${name}”`);
               }}
             >
-              Add
+              Add to collection
             </Button>
           </>
         }

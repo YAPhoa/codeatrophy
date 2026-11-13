@@ -168,7 +168,7 @@ export function StylesSection() {
             <div className="form-actions">
               <Button onClick={() => open(null, { name: EXAMPLE_NAME, instructions: EXAMPLE_INSTRUCTIONS })}>Start from this example</Button>
               <Button variant="ghost" onClick={() => open(null)}>
-                Write my own
+                Write your own
               </Button>
             </div>
           </div>
@@ -212,7 +212,7 @@ export function StylesSection() {
               Cancel
             </Button>
             <Button variant="primary" type="submit" form="style-form" busy={busy} disabled={!canSave}>
-              {editing?.preset ? 'Save' : 'Create style'}
+              {editing?.preset ? 'Save style' : 'Create style'}
             </Button>
           </>
         }

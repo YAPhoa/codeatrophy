@@ -244,7 +244,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
             Cancel
           </Button>
           <Button ref={saveRef} variant="primary" type="submit" form="provider-form" busy={saving} disabled={!canSave}>
-            {adding ? 'Add provider' : 'Save'}
+            {adding ? 'Add provider' : 'Save provider'}
           </Button>
         </>
       }

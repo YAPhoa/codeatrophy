@@ -59,7 +59,7 @@ test('unsaved work: leaving an edited test case or an unsaved proposal asks firs
   // A proposal: "Discard" and every other way out go through the same question.
   await page.getByRole('link', { name: /Generate/ }).first().click();
   await page.getByLabel('How many').fill('2');
-  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
   await expect(page.getByText('2 of 2 selected')).toBeVisible();
   await page.getByRole('link', { name: 'Discard' }).click();
   const discard = page.getByRole('dialog', { name: 'Discard the proposed test cases?' });

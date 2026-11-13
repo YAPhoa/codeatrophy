@@ -319,7 +319,7 @@ function Generator({ item }: { item: Item }) {
               {!generation.running && (
                 <div className="form-actions">
                   <Button type="submit" variant={proposal ? 'default' : 'primary'} icon={proposal ? <RefreshCw size={14} /> : <FlaskConical size={14} />} disabled={noRunner}>
-                    {proposal ? 'Generate again' : 'Generate'}
+                    {proposal ? 'Generate again' : 'Generate test cases'}
                   </Button>
                   {proposal && <span className="muted">Generating again replaces the proposal below.</span>}
                 </div>
@@ -427,7 +427,7 @@ function Generator({ item }: { item: Item }) {
                   Select all
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setKeep(proposal.cases.map(() => false))}>
-                  None
+                  Select none
                 </Button>
               </div>
 

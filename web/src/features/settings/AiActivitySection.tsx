@@ -279,7 +279,7 @@ function ClearDialog({ open, onClose, onCleared }: { open: boolean; onClose: () 
             Cancel
           </Button>
           <Button variant="danger" onClick={() => void clear()} busy={busy}>
-            Clear
+            Clear log
           </Button>
         </>
       }

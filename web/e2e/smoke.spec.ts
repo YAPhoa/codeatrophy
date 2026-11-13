@@ -146,7 +146,7 @@ test('test cases to generate: the preference is where the generate page starts',
 
   // It can still be changed for one run.
   await page.getByRole('button', { name: 'Fewer test cases' }).click();
-  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
   await expect(page.getByText(/\d+ of 11 selected/)).toBeVisible();
   await expect(page.locator('.proposal-head .usage-line')).toContainText('claude-opus-5-5');
   // The proposed solution is hidden as well, with what running it found.
@@ -384,7 +384,7 @@ test('large test case: asked for on the generate form, then kept and managed on 
   await expect(large).not.toBeChecked();
   await large.check();
   await page.getByLabel('How many').fill('3');
-  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
   await expect(page.getByText('4 of 4 selected')).toBeVisible();
   await expect(page.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of 2\u00a0s$/)).toBeVisible();
 
@@ -449,7 +449,7 @@ test('verify all: a draft is checked again as edited, and a saved problem from t
   await page.getByRole('button', { name: 'Verify all' }).click();
   await expect(page.getByText(/^All \d+ cases match the reference solution and are marked verified$/)).toBeVisible();
   // Another saved solution is a check, from the Verification card.
-  await page.getByRole('button', { name: 'Check', exact: true }).click();
+  await page.getByRole('button', { name: 'Check solution', exact: true }).click();
   await expect(page.getByText(/A check only: marks and expected outputs are unchanged\./)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Discard/ })).toHaveCount(0);
 
@@ -597,7 +597,7 @@ test('organise: selected items are filed into a new collection', async ({ page }
   await dialog.getByRole('button', { name: /New collection/ }).click();
   const create = page.getByRole('dialog', { name: /collection/i }).last();
   await create.getByLabel('Name').fill('Smoke test picks');
-  await create.getByRole('button', { name: 'Create' }).click();
+  await create.getByRole('button', { name: 'Create collection' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /^Add/ }).click();
 
   // The collection appears in the sidebar and holds exactly those two items.

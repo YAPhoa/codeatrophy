@@ -720,7 +720,7 @@ function TestsManager({ item }: { item: Item }) {
                       ))}
                     </select>
                     <Button onClick={() => void runVerify(other)} busy={verifying?.id === other.id} disabled={!canCheck || verifying !== null} title={!judgeOn ? 'Needs a judge engine' : undefined}>
-                      Check
+                      Check solution
                     </Button>
                     <Button onClick={() => void makeReference(other)} busy={referenceWrite.busy} disabled={verifying !== null}>
                       Use as reference

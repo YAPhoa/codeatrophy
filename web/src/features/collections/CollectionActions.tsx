@@ -91,7 +91,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
             Cancel
           </Button>
           <Button variant="primary" type="submit" form="collection-form" busy={busy} disabled={!name.trim()}>
-            {editing ? 'Save' : 'Create'}
+            {editing ? 'Save collection' : 'Create collection'}
           </Button>
         </>
       }
