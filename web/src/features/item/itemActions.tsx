@@ -5,6 +5,7 @@ import { Download, FlaskConical, GitBranch, Pencil, Trash2 } from 'lucide-react'
 import { api } from '../../api/client';
 import { invalidateLibrary, qk } from '../../api/queries';
 import type { Item } from '../../api/types';
+import { exportItemsPath } from '../../lib/exportLink';
 import { readString } from '../../lib/storage';
 import { useConfirm } from '../../ui/Dialog';
 import type { MenuEntry } from '../../ui/Popover';
@@ -71,7 +72,7 @@ export function useItemActions(item: Item) {
           { label: 'Practise a variant…', icon: <GitBranch size={14} />, onSelect: () => navigate(`/items/${item.id}/variant`) },
         ] satisfies MenuEntry[])
       : ([{ label: 'Rework as a new reading…', icon: <GitBranch size={14} />, onSelect: () => navigate(`/items/${item.id}/variant`) }] satisfies MenuEntry[])),
-    { label: 'Export this item…', icon: <Download size={14} />, onSelect: () => navigate('/export', { state: { itemIds: [item.id] } }) },
+    { label: 'Export this item…', icon: <Download size={14} />, onSelect: () => navigate(exportItemsPath([item.id])) },
     'separator',
     { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove() },
   ];

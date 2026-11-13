@@ -125,3 +125,18 @@ test('deep links: the review step of a capture is in the history, so Back return
   await page.goForward();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 });
+
+test('deep links: an export of selected items survives in the address', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Export this item…' }).click();
+  await expect(page).toHaveURL(/\/export\?.*item=/);
+  await expect(page.getByRole('radio', { name: /Selected items/ })).toBeChecked();
+  await expect(page.locator('.export-items')).toContainText('Two Sum');
+
+  await page.getByRole('checkbox', { name: 'Saved solutions' }).uncheck();
+  await expect(page).toHaveURL(/[?&]solutions=0/);
+  await page.getByRole('radio', { name: /The whole library/ }).check();
+  await expect(page).toHaveURL(/[?&]scope=all/);
+});

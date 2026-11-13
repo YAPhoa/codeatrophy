@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { Download, PackageCheck } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCollections, useItemQuery, useLimits, useStats } from '../../api/queries';
@@ -8,6 +8,7 @@ import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { saveBlob } from '../../lib/download';
 import { formatBytes, plural } from '../../lib/format';
 import { buildTree, descendantIds, flattenTree } from '../../lib/tree';
+import { useUrlMirror, useUrlState } from '../../lib/urlState';
 import { Button, cx } from '../../ui/Button';
 import { Checkbox, SelectField, TextAreaField, TextField } from '../../ui/Field';
 import { Callout, ErrorCallout } from '../../ui/misc';
@@ -15,25 +16,39 @@ import { ShareTabs } from './ShareTabs';
 
 const SHOWN_TITLES = 8;
 
+// An option that is on unless the address says `0`.
+const parseOn = (raw: string | null): boolean => raw !== '0';
+const formatOn = (value: boolean): string | null => (value ? null : '0');
+
 /** Export the whole library, one collection subtree, or a selection of items as a bundle. */
 export default function ExportPage() {
   useDocumentTitle('Export');
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { data: collections = [] } = useCollections();
   const stats = useStats();
   const limits = useLimits();
 
-  const passedIds = useMemo(() => ((location.state as { itemIds?: string[] } | null)?.itemIds ?? []).filter((x) => typeof x === 'string'), [location.state]);
+  // What is being exported is in the address, so a reload or a shared link
+  // keeps it: `?item=…` (repeated) for a selection, `?collection=…`, and
+  // `scope`, `solutions` and `hidden` where they differ from the default.
+  const itemParams = searchParams.getAll('item').join('\n');
+  const passedIds = useMemo(() => (itemParams ? itemParams.split('\n') : []), [itemParams]);
   const presetCollection = searchParams.get('collection');
 
-  const [scope, setScope] = useState<ExportScope>(passedIds.length > 0 ? 'items' : presetCollection ? 'collection' : 'all');
+  // Without `scope`, the address says what is meant by what it carries.
+  const [implied] = useState<ExportScope>(() => (passedIds.length > 0 ? 'items' : presetCollection ? 'collection' : 'all'));
+  const [scope, setScope] = useUrlState<ExportScope>(
+    'scope',
+    (raw) => (raw === 'all' || raw === 'collection' || raw === 'items' ? raw : implied),
+    (value) => (value === implied ? null : value),
+  );
   const [collectionId, setCollectionId] = useState(presetCollection ?? '');
+  useUrlMirror('collection', scope === 'collection' && collectionId ? collectionId : null, (raw) => setCollectionId(raw ?? ''));
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [author, setAuthor] = useState('');
-  const [includeSolutions, setIncludeSolutions] = useState(true);
-  const [includeHiddenTests, setIncludeHiddenTests] = useState(true);
+  const [includeSolutions, setIncludeSolutions] = useUrlState('solutions', parseOn, formatOn);
+  const [includeHiddenTests, setIncludeHiddenTests] = useUrlState('hidden', parseOn, formatOn);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState<{ filename: string; size: number } | null>(null);

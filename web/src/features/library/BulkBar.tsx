@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { invalidateLibrary, useCollections, useTags } from '../../api/queries';
 import type { BulkAction, Collection, ItemSummary } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
+import { exportItemsPath } from '../../lib/exportLink';
 import { STATUS_LABEL, plural } from '../../lib/format';
 import { buildTree, flattenTree } from '../../lib/tree';
 import { Button, IconButton } from '../../ui/Button';
@@ -143,7 +144,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
           Remove from this collection
         </Button>
       )}
-      <Button size="sm" disabled={busy} icon={<Download size={13} />} onClick={() => navigate('/export', { state: { itemIds: ids } })}>
+      <Button size="sm" disabled={busy} icon={<Download size={13} />} onClick={() => navigate(exportItemsPath(ids))}>
         Export
       </Button>
       <span className="spacer" />
