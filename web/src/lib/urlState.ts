@@ -1,35 +1,86 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { useSearchParams, type SetURLSearchParams } from 'react-router';
+import { useLocation, useNavigation, useSearchParams, type SetURLSearchParams } from 'react-router';
 
-// View state that a link should be able to carry (the open tab, a filter)
-// lives in the query string. Each value is ordinary component state that is
-// mirrored into the URL, so the page reacts at once and the address catches
-// up; a value at its default is left out of the URL. Changes replace the
-// history entry: Back leaves the page rather than stepping through tabs.
+// View state that a link should be able to carry (the open tab, a filter, the
+// step of a flow) lives in the query string. Each value is ordinary state
+// that is mirrored into the URL, so the page reacts at once and the address
+// catches up; a value at its default is left out of the URL.
 
 /** Writes made in the same tick, applied in one navigation so none overwrites another. */
-let pending: Map<string, string | null> | null = null;
+let pending: { changes: Map<string, string | null>; push: boolean } | null = null;
 
-function write(key: string, value: string | null, setParams: SetURLSearchParams): void {
+function write(key: string, value: string | null, push: boolean, setParams: SetURLSearchParams): void {
   if (!pending) {
-    pending = new Map();
+    const batch = { changes: new Map<string, string | null>(), push: false };
+    const page = window.location.pathname;
+    pending = batch;
     queueMicrotask(() => {
-      const changes = pending!;
       pending = null;
+      // The page was left in the meantime: its parameters mean nothing where the user is now.
+      if (window.location.pathname !== page) return;
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          for (const [k, v] of changes) {
+          for (const [k, v] of batch.changes) {
             if (v === null) next.delete(k);
             else next.set(k, v);
           }
           return next;
         },
-        { replace: true },
+        { replace: !batch.push },
       );
     });
   }
-  pending.set(key, value);
+  pending.changes.set(key, value);
+  pending.push ||= push;
+}
+
+/**
+ * Mirror a value into the query parameter `key`. `current` is the parameter
+ * the value stands for (`null` to leave it out). `onExternal` is called when
+ * the parameter changes from outside: a link to this page, or Back and
+ * Forward.
+ *
+ * By default a change replaces the history entry, so Back leaves the page
+ * rather than stepping through tabs. With `push` each change is an entry of
+ * its own, for a step the user expects Back to undo.
+ */
+export function useUrlMirror(key: string, current: string | null, onExternal: (raw: string | null) => void, push = false): void {
+  const [params, setParams] = useSearchParams();
+  const raw = params.get(key);
+  // On the way to another page (a save that then navigates, say) the address is
+  // left alone: a write would cut that navigation short.
+  const leaving = useNavigation().state !== 'idle';
+  const leavingRef = useRef(leaving);
+  // A new function whenever the query string changes; kept in a ref so that alone does not count as a change of value.
+  const setParamsRef = useRef(setParams);
+  const { pathname } = useLocation();
+  // The parameter as last written or read here, to tell these writes from a change made elsewhere.
+  const known = useRef(raw);
+  const mounted = useRef(false);
+  const onExternalRef = useRef(onExternal);
+  useEffect(() => {
+    onExternalRef.current = onExternal;
+    leavingRef.current = leaving;
+    setParamsRef.current = setParams;
+  });
+
+  useEffect(() => {
+    if (raw === known.current) return;
+    known.current = raw;
+    onExternalRef.current(raw);
+  }, [raw]);
+
+  useEffect(() => {
+    // What the page opens with only corrects the address; it is not a step to go back over.
+    const first = !mounted.current;
+    mounted.current = true;
+    // The browser can already be at the next page while this one is still on screen.
+    if (leavingRef.current || window.location.pathname !== pathname) return;
+    if (current === known.current) return;
+    known.current = current;
+    write(key, current, push && !first, setParamsRef.current);
+  }, [key, current, push, pathname]);
 }
 
 /**
@@ -38,33 +89,9 @@ function write(key: string, value: string | null, setParams: SetURLSearchParams)
  * `format` gives the parameter for a value, or `null` to leave it out.
  */
 export function useUrlState<T>(key: string, parse: (raw: string | null) => T, format: (value: T) => string | null): [T, Dispatch<SetStateAction<T>>] {
-  const [params, setParams] = useSearchParams();
-  const raw = params.get(key);
-  const [value, setValue] = useState<T>(() => parse(raw));
-  // The parameter as this hook last wrote or read it, to tell its own writes from a change made elsewhere.
-  const known = useRef(raw);
-  const parseRef = useRef(parse);
-  const formatRef = useRef(format);
-  useEffect(() => {
-    parseRef.current = parse;
-    formatRef.current = format;
-  });
-
-  // The address changed underneath (a link to this page with another value): follow it.
-  useEffect(() => {
-    if (raw === known.current) return;
-    known.current = raw;
-    setValue(parseRef.current(raw));
-  }, [raw]);
-
-  // The value changed here: put it in the address.
-  useEffect(() => {
-    const next = formatRef.current(value);
-    if (next === known.current) return;
-    known.current = next;
-    write(key, next, setParams);
-  }, [key, value, setParams]);
-
+  const [params] = useSearchParams();
+  const [value, setValue] = useState<T>(() => parse(params.get(key)));
+  useUrlMirror(key, format(value), (raw) => setValue(parse(raw)));
   return [value, setValue];
 }
 

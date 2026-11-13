@@ -7,6 +7,7 @@ import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { charCount, checkedState, draftFromForm, emptyForm, formFromDraft, revisionProblem, upgradeForm, type ItemFormState } from '../../lib/itemForm';
+import { useUrlMirror } from '../../lib/urlState';
 import { useStoredState } from '../../lib/useStoredState';
 import { Button } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
@@ -74,6 +75,8 @@ export default function CapturePage() {
   const defaults = (): Partial<ItemFormState> => ({ collectionIds: presetCollection ? [presetCollection] : [] });
   const styleChoice = resolveStyleChoice(session.styleChoice, styles);
   const patch = (change: Partial<CaptureSession>) => setSession((s) => ({ ...s, ...change }));
+  // The step is part of the address (`?step=review`) and of the history, so Back returns from the review to the input.
+  useUrlMirror('step', session.stage === 'review' && session.form ? 'review' : null, (raw) => setSession((s) => ({ ...s, stage: raw === 'review' ? 'review' : 'input' })), true);
   const form = useMemo(() => (session.form ? upgradeForm(session.form) : null), [session.form]);
   const interfaceHint = session.interfaceHint ?? 'auto';
   // Without AI there is nothing to detect: the choices are the two interfaces.

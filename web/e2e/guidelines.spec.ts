@@ -111,3 +111,17 @@ test('deep links: the open tabs of the solve page are part of the address', asyn
   await expect(page.getByRole('tab', { name: 'Submissions' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Custom input' })).toHaveAttribute('aria-selected', 'true');
 });
+
+test('deep links: the review step of a capture is in the history, so Back returns to the input', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+  await expect(page).toHaveURL(/[?&]step=review/);
+
+  await page.goBack();
+  await expect(page.getByLabel('What you have')).toBeVisible();
+  await expect(page).not.toHaveURL(/step=/);
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+});
