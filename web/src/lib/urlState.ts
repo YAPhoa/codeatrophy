@@ -48,13 +48,13 @@ function write(key: string, value: string | null, push: boolean, setParams: SetU
 export function useUrlMirror(key: string, current: string | null, onExternal: (raw: string | null) => void, push = false): void {
   const [params, setParams] = useSearchParams();
   const raw = params.get(key);
+  const { pathname } = useLocation();
   // On the way to another page (a save that then navigates, say) the address is
   // left alone: a write would cut that navigation short.
   const leaving = useNavigation().state !== 'idle';
   const leavingRef = useRef(leaving);
   // A new function whenever the query string changes; kept in a ref so that alone does not count as a change of value.
   const setParamsRef = useRef(setParams);
-  const { pathname } = useLocation();
   // The parameter as last written or read here, to tell these writes from a change made elsewhere.
   const known = useRef(raw);
   const mounted = useRef(false);
@@ -70,6 +70,22 @@ export function useUrlMirror(key: string, current: string | null, onExternal: (r
     known.current = raw;
     onExternalRef.current(raw);
   }, [raw]);
+
+  // Back and Forward are taken from the browser itself. A step back made
+  // right after a write can return to the address this page last rendered
+  // with, and then nothing above would see a change.
+  useEffect(() => {
+    const onPop = () => {
+      // Gone to another page: this one is about to leave the screen.
+      if (window.location.pathname !== pathname) return;
+      const now = new URLSearchParams(window.location.search).get(key);
+      if (now === known.current) return;
+      known.current = now;
+      onExternalRef.current(now);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [key, pathname]);
 
   useEffect(() => {
     // What the page opens with only corrects the address; it is not a step to go back over.
