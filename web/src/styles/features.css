@@ -291,6 +291,9 @@
   padding: 0 10px 0 4px;
   border-bottom: 1px solid var(--border);
   position: relative;
+  /* Rows off screen are not laid out, so a library loaded far down stays light. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
 }
 
 .item-list.is-reorderable .item-row {
@@ -325,12 +328,13 @@
   z-index: 1;
 }
 
+/* Inside the row: a row clips what it draws outside its own box. */
 .item-row.drop-before::before {
-  top: -1px;
+  top: 0;
 }
 
 .item-row.drop-after::after {
-  bottom: -1px;
+  bottom: 0;
 }
 
 .item-cell {
@@ -1004,8 +1008,16 @@
   flex: none;
 }
 
+.assumption-check:hover {
+  background: var(--warn-soft);
+}
+
 .assumption-check[aria-pressed='true'] {
   background: var(--warn);
+}
+
+.assumption-check[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--warn) 82%, var(--text));
 }
 
 .assumptions-foot {
@@ -1728,10 +1740,12 @@ fieldset.stack legend {
   max-width: 360px;
 }
 
+/* Scaled, not resized: a transform animates without laying the page out again. */
 .progress-fill {
   height: 100%;
   background: var(--accent);
-  transition: width 0.25s ease;
+  transform-origin: left;
+  transition: transform 0.25s ease;
 }
 
 .case-chips {
@@ -1754,6 +1768,10 @@ fieldset.stack legend {
   font-size: var(--text-sm);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+button.case-chip:hover {
+  background: var(--surface-2);
 }
 
 .case-chip.tone-ok {
@@ -2013,7 +2031,9 @@ fieldset.stack legend {
   top: 24px;
   align-self: start;
   max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
   overflow: auto;
+  overscroll-behavior: contain;
   font-size: var(--text-sm);
 }
 
@@ -2399,6 +2419,11 @@ fieldset.stack legend {
   border: none;
   background: none;
   text-align: left;
+}
+
+.proposal-main:hover .proposal-text,
+.proposal-main:hover > svg {
+  color: var(--accent-text);
 }
 
 .proposal-main > svg {

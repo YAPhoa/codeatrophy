@@ -215,7 +215,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
                 aria-valuemax={Math.max(1, s.totalCount)}
                 aria-valuenow={finished}
               >
-                <div className="progress-fill" style={{ width: `${s.totalCount > 0 ? (finished / s.totalCount) * 100 : 0}%` }} />
+                <div className="progress-fill" style={{ transform: `scaleX(${s.totalCount > 0 ? finished / s.totalCount : 0})` }} />
               </div>
             </div>
           </>
