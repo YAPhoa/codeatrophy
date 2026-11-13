@@ -135,7 +135,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
           error={shown.name}
           maxLength={limits?.maxSolutionNameChars}
           autoComplete="off"
-          placeholder="e.g. Hash map, one pass"
+          placeholder="e.g. Hash map, one pass…"
           fieldClassName="grow"
           autoFocus
         />
@@ -159,7 +159,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
             onChange={setSource}
             language={language}
             ariaLabel="Solution code"
-            placeholder="Paste or write a complete program that reads stdin and writes stdout."
+            placeholder="Paste or write a complete program that reads stdin and writes stdout…"
           />
         </div>
         {shown.source && (
@@ -181,7 +181,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
             {notesLimit !== undefined && notesCount > notesLimit * 0.8 && ` ${notesCount.toLocaleString()} of ${notesLimit.toLocaleString()} characters.`}
           </>
         }
-        placeholder="e.g. O(n) time, O(n) space. Store each value’s index and look up the complement."
+        placeholder="e.g. O(n) time, O(n) space. Store each value’s index and look up the complement…"
       />
 
       <Checkbox

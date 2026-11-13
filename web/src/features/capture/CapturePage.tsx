@@ -282,7 +282,7 @@ export default function CapturePage() {
           value={text}
           readOnly={generation.running}
           onChange={(e) => patch({ text: e.target.value })}
-          placeholder={'e.g. “that interview question: array of ints and a target, return the two indices that add up to it, should be O(n)”'}
+          placeholder={'e.g. “that interview question: array of ints and a target, return the two indices that add up to it, should be O(n)”…'}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();

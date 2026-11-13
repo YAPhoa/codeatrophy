@@ -162,7 +162,7 @@ export default function ImportPage() {
                   <strong className="truncate">{file.name}</strong>
                   <div className="muted">{formatBytes(file.size)}</div>
                 </div>
-                {previewing && <Spinner label="Reading the bundle" />}
+                {previewing && <Spinner label="Reading the bundle…" />}
                 <Button size="sm" onClick={reset} disabled={previewing || importing}>
                   Choose another
                 </Button>

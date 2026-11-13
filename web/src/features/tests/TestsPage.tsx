@@ -582,7 +582,7 @@ function TestsManager({ item }: { item: Item }) {
                     }}
                   >
                     <div className="row-wrap">
-                      <TextField label="Name" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} fieldClassName="grow" autoComplete="off" maxLength={meta?.limits.maxTestCaseNameChars} placeholder="e.g. Minimum size" />
+                      <TextField label="Name" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} fieldClassName="grow" autoComplete="off" maxLength={meta?.limits.maxTestCaseNameChars} placeholder="e.g. Minimum size…" />
                       <Checkbox className="case-flag" checked={draft.isSample} onChange={(v) => setDraft({ ...draft, isSample: v })} label="Sample" hint="Shown to “Run”" />
                       <Checkbox className="case-flag" checked={draft.verified} onChange={(v) => setDraft({ ...draft, verified: v })} label="Verified" hint="Output confirmed" />
                     </div>

@@ -146,7 +146,7 @@ export function ItemEditor({
           error={errors.title}
           maxLength={limits?.maxTitleChars}
           className="input-title"
-          placeholder={isProblem ? 'e.g. Two Sum' : 'e.g. Notes on consistent hashing'}
+          placeholder={isProblem ? 'e.g. Two Sum…' : 'e.g. Notes on consistent hashing…'}
           autoComplete="off"
         />
         <TextField
@@ -154,7 +154,7 @@ export function ItemEditor({
           value={form.summary}
           onChange={(v) => set('summary', v)}
           error={errors.summary}
-          placeholder="One line shown in lists"
+          placeholder="One line shown in lists…"
           autoComplete="off"
         />
 
@@ -185,7 +185,7 @@ export function ItemEditor({
                   language="markdown"
                   prose
                   ariaLabel={isProblem ? 'Statement (Markdown)' : 'Text (Markdown)'}
-                  placeholder={isProblem ? 'Describe the task, the input and output format, constraints and examples.' : 'Write or paste the text.'}
+                  placeholder={isProblem ? 'Describe the task, the input and output format, constraints and examples…' : 'Write or paste the text…'}
                   readOnly={disabled}
                 />
               </div>
@@ -365,7 +365,7 @@ export function ItemEditor({
                   <li key={t.key} className="case-card">
                     <div className="row">
                       <span className="case-no">{i + 1}</span>
-                      <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="Name" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
+                      <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
                       {t.large && <Badge title="Not carried over by a revision">large</Badge>}
                       {t.verified && (
                         <Badge tone="ok" title="The reference solution printed this output">
@@ -473,7 +473,7 @@ export function ItemEditor({
           />
         </div>
         <TextField label="Source link" type="url" value={form.sourceUrl} onChange={(v) => set('sourceUrl', v)} placeholder="https://…" error={errors.sourceUrl} maxLength={limits?.maxSourceUrlChars} autoComplete="off" />
-        <TextField label="Source note" value={form.sourceNote} onChange={(v) => set('sourceNote', v)} error={errors.sourceNote} placeholder="e.g. onsite interview, spring" maxLength={limits?.maxSourceNoteChars} autoComplete="off" />
+        <TextField label="Source note" value={form.sourceNote} onChange={(v) => set('sourceNote', v)} error={errors.sourceNote} placeholder="e.g. onsite interview, spring…" maxLength={limits?.maxSourceNoteChars} autoComplete="off" />
 
         {isProblem && (
           <>

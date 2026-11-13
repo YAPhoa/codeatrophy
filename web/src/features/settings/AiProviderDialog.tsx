@@ -298,7 +298,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
                 setForm((f) => ({ ...f, name: e.target.value }));
                 setSaveError(null);
               }}
-              placeholder="e.g. Personal key"
+              placeholder="e.g. Personal key…"
               autoComplete="off"
             />
           )}
@@ -311,7 +311,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
             value={form.apiKey}
             onChange={(v) => reconnect({ apiKey: v, removeKey: false })}
             onKeyDown={testOnEnter}
-            placeholder={outlook.savedKeyDropped ? 'Paste the key for this server' : provider?.apiKeySet ? 'Enter a new key to replace the current one' : 'Paste the key'}
+            placeholder={outlook.savedKeyDropped ? 'Paste the key for this server…' : provider?.apiKeySet ? 'Enter a new key to replace the current one…' : 'Paste the key…'}
             name="api-key"
             // Not a login: browsers ignore "off" on a password field and would offer the site's saved
             // password, so the field is declared a new secret and password managers are told to pass over it.
@@ -439,7 +439,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           onChange={setModel}
           models={listing?.models ?? null}
           inputRef={modelRef}
-          placeholder={kind.defaultModel ?? (listing?.models?.length ? 'Pick a model' : 'e.g. gpt-4.1, llama3.1:70b')}
+          placeholder={kind.defaultModel ?? (listing?.models?.length ? 'Pick a model…' : 'e.g. gpt-4.1, llama3.1:70b…')}
           maxLength={limits?.maxModelIdChars}
           error={modelError ?? serverError('model')}
           hint={

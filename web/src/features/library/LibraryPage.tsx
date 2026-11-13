@@ -459,7 +459,7 @@ export function LibraryPage() {
                 <span className="item-head-label">
                   {reorderable ? 'Manual order — drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
                 </span>
-                {query.isFetching && <Spinner size={13} label="Refreshing" />}
+                {query.isFetching && <Spinner size={13} label="Refreshing…" />}
               </div>
               <ul className={cx('item-list', reorderable && 'is-reorderable')} ref={listRef} onKeyDown={onListKeyDown} aria-label={`${title}: items`}>
                 {items.map((item, i) => (

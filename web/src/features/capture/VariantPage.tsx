@@ -286,7 +286,7 @@ function VariantFlow({ original }: { original: Item }) {
         onChange={(v) => patch({ instruction: v })}
         rows={2}
         maxLength={limits?.maxInstructionChars}
-        placeholder={isProblem ? 'e.g. set it on a grid · require O(1) extra space · use strings instead of numbers' : 'e.g. focus on the failure modes · rewrite as a checklist for an on-call engineer'}
+        placeholder={isProblem ? 'e.g. set it on a grid · require O(1) extra space · use strings instead of numbers…' : 'e.g. focus on the failure modes · rewrite as a checklist for an on-call engineer…'}
         disabled={generation.running || !aiEnabled}
         fieldClassName="capture-instruction"
       />

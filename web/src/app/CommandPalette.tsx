@@ -139,7 +139,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
               }
             }}
           />
-          {items.isFetching && q.length > 0 && <Spinner size={14} label="Searching" />}
+          {items.isFetching && q.length > 0 && <Spinner size={14} label="Searching…" />}
         </div>
         <ul id="palette-list" role="listbox" aria-label="Results" className="palette-list" ref={listRef}>
           {entries.map((entry, i) => (

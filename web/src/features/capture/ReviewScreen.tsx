@@ -171,7 +171,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
             className="input"
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
-            placeholder="e.g. use 1-based indices · make it harder · shorten the statement"
+            placeholder="e.g. use 1-based indices · make it harder · shorten the statement…"
             maxLength={limits?.maxInstructionChars}
             disabled={busy}
             autoComplete="off"

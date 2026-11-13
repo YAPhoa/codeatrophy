@@ -307,7 +307,7 @@ function Generator({ item }: { item: Item }) {
                 onChange={setInstruction}
                 rows={2}
                 maxLength={meta?.limits.maxInstructionChars}
-                placeholder="e.g. include negative numbers and duplicates · stress the upper limit of n"
+                placeholder="e.g. include negative numbers and duplicates · stress the upper limit of n…"
                 disabled={generation.running}
               />
               {storedSolution && <p className="field-hint">The problem’s current reference solution ({languageName(storedSolution.language)}) is given to the model as context.</p>}

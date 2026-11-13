@@ -182,10 +182,18 @@ export default function ExportPage() {
         </fieldset>
 
         <div className="form-grid">
-          <TextField label="Bundle name" value={name} onChange={setName} placeholder={defaultName} hint="Also used for the file name." maxLength={limits?.maxBundleNameChars} autoComplete="off" />
-          <TextField label="Author" value={author} onChange={setAuthor} placeholder="Optional" maxLength={limits?.maxBundleNameChars} autoComplete="off" />
+          <TextField label="Bundle name" value={name} onChange={setName} placeholder={defaultName ? `${defaultName}…` : undefined} hint="Also used for the file name." maxLength={limits?.maxBundleNameChars} autoComplete="off" />
+          <TextField label="Author (optional)" value={author} onChange={setAuthor} placeholder="e.g. Ada Lovelace…" maxLength={limits?.maxBundleNameChars} autoComplete="off" />
         </div>
-        <TextAreaField label="Description" value={description} onChange={setDescription} rows={2} maxLength={limits?.maxBundleDescriptionChars} placeholder="Optional — shown to whoever imports it" />
+        <TextAreaField
+          label="Description (optional)"
+          hint="Shown to whoever imports the bundle."
+          value={description}
+          onChange={setDescription}
+          rows={2}
+          maxLength={limits?.maxBundleDescriptionChars}
+          placeholder="e.g. Graph problems from the spring interview loop…"
+        />
 
         {error != null && <ErrorCallout error={error} title="The export failed" onRetry={() => void run()} />}
         {done && (

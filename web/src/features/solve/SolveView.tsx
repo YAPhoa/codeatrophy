@@ -699,7 +699,7 @@ export function SolveView({ item }: { item: Item }) {
                   spellCheck={false}
                   value={customInput}
                   onChange={(e) => setCustomInput(e.target.value)}
-                  placeholder={solutionOnly ? 'One JSON value per line, one per argument.' : 'Type or paste the input your program should read.'}
+                  placeholder={solutionOnly ? 'One JSON value per line, one per argument…' : 'Type or paste the input your program should read…'}
                 />
               </>
             )}

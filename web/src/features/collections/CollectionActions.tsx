@@ -104,8 +104,15 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
           void submit();
         }}
       >
-        <TextField label="Name" value={name} onChange={setName} placeholder="e.g. Dynamic programming" data-autofocus autoComplete="off" maxLength={limits?.maxCollectionNameChars} />
-        <TextAreaField label="Description" value={description} onChange={setDescription} rows={2} maxLength={limits?.maxCollectionDescriptionChars} placeholder="Optional — what belongs here" />
+        <TextField label="Name" value={name} onChange={setName} placeholder="e.g. Dynamic programming…" data-autofocus autoComplete="off" maxLength={limits?.maxCollectionNameChars} />
+        <TextAreaField
+          label="Description (optional)"
+          value={description}
+          onChange={setDescription}
+          rows={2}
+          maxLength={limits?.maxCollectionDescriptionChars}
+          placeholder="e.g. Problems to redo before the next interview…"
+        />
         <SelectField label="Inside" value={parentId} onChange={setParentId} options={parentOptions} hint="Collections can be nested to any depth." />
         {error != null && <ErrorCallout error={error} />}
       </form>

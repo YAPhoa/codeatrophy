@@ -233,7 +233,7 @@ export function StylesSection() {
                   className="input"
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  placeholder="e.g. LeetCode style"
+                  placeholder="e.g. LeetCode style…"
                   autoComplete="off"
                   data-autofocus
                 />
@@ -258,7 +258,7 @@ export function StylesSection() {
                   rows={8}
                   value={editing.instructions}
                   onChange={(e) => setEditing({ ...editing, instructions: e.target.value })}
-                  placeholder="Describe how you want statements laid out and written."
+                  placeholder="Describe how you want statements laid out and written…"
                 />
               )}
             </Field>
