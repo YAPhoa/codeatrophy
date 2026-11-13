@@ -89,6 +89,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
     <Dialog
       open
       onClose={onClose}
+      guard
       title={editing ? 'Edit collection' : 'New collection'}
       size="sm"
       locked={busy}

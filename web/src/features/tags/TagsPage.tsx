@@ -160,6 +160,7 @@ export default function TagsPage() {
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
+        guard
         title={editing?.kind === 'merge' ? `Merge “${editing.tag.name}” into…` : `Rename “${editing?.tag.name ?? ''}”`}
         size="sm"
         locked={busy}

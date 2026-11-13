@@ -236,6 +236,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     <Dialog
       open
       onClose={onClose}
+      guard
       title={adding ? 'Add provider' : 'Edit provider'}
       size="md"
       locked={saving}

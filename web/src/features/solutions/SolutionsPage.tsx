@@ -376,6 +376,7 @@ function RenameDialog({ item, solution, onClose }: { item: Item; solution: Solut
     <Dialog
       open
       onClose={onClose}
+      guard
       title="Rename solution"
       size="sm"
       locked={busy}

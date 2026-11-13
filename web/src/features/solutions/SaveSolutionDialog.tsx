@@ -85,6 +85,7 @@ function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutio
     <Dialog
       open
       onClose={onClose}
+      guard
       title="Save as a solution"
       locked={write.busy}
       footer={

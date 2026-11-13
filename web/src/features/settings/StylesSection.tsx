@@ -216,6 +216,7 @@ export function StylesSection() {
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
+        guard
         title={editing?.preset ? 'Edit style' : 'New style'}
         size="md"
         locked={busy}

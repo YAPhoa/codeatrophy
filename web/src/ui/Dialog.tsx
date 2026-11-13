@@ -22,6 +22,11 @@ interface DialogProps {
   size?: 'sm' | 'md' | 'lg';
   /** Do not close on Escape or a click on the backdrop (while a request is in flight, say). */
   locked?: boolean;
+  /**
+   * The dialog holds a form: once something was entered, Escape, the close button and a click on
+   * the backdrop ask before throwing it away. The form's own Cancel button closes without asking.
+   */
+  guard?: boolean;
 }
 
 const FOCUSABLE =
@@ -30,15 +35,19 @@ const FOCUSABLE =
 let openDialogs = 0;
 
 /** Modal dialog: traps focus, closes on Escape, restores focus to the opener. */
-export function Dialog({ open, onClose, title, children, footer, size = 'md', locked }: DialogProps) {
+export function Dialog({ open, onClose, title, children, footer, size = 'md', locked, guard }: DialogProps) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const confirm = useContext(ConfirmContext);
+  const touched = useRef(false);
+  const asking = useRef(false);
 
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
     const root = document.getElementById('root');
     openDialogs++;
+    touched.current = false;
     root?.setAttribute('inert', '');
     const el = ref.current;
     const first = el?.querySelector<HTMLElement>('[data-autofocus]') ?? el?.querySelector<HTMLElement>('.dialog-body ' + FOCUSABLE.split(', ').join(', .dialog-body '));
@@ -52,10 +61,29 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
 
   if (!open) return null;
 
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape' && !locked) {
-      e.stopPropagation();
+  const requestClose = () => {
+    if (locked || asking.current) return;
+    if (!guard || !touched.current || !confirm) {
       onClose();
+      return;
+    }
+    asking.current = true;
+    void confirm({
+      title: 'Discard what you entered?',
+      body: 'It has not been saved.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      danger: true,
+    }).then((ok) => {
+      asking.current = false;
+      if (ok) onClose();
+    });
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      requestClose();
       return;
     }
     if (e.key !== 'Tab') return;
@@ -81,14 +109,20 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
     <div
       className="dialog-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !locked) onClose();
+        if (e.target !== e.currentTarget) return;
+        // Focus stays in the dialog, for when the click does not close it.
+        e.preventDefault();
+        requestClose();
       }}
       onKeyDown={onKeyDown}
+      onInput={() => {
+        touched.current = true;
+      }}
     >
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cx('dialog', `dialog-${size}`)}>
         <header className="dialog-header">
           <h2 id={titleId}>{title}</h2>
-          <IconButton label="Close" size="sm" icon={<X size={16} />} onClick={onClose} disabled={locked} />
+          <IconButton label="Close" size="sm" icon={<X size={16} />} onClick={requestClose} disabled={locked} />
         </header>
         <div className="dialog-body">{children}</div>
         {footer && <footer className="dialog-footer">{footer}</footer>}

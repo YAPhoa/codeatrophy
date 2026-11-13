@@ -155,6 +155,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
       <Dialog
         open={dialog?.kind === 'addTags' || dialog?.kind === 'removeTags'}
         onClose={() => setDialog(null)}
+        guard
         title={dialog?.kind === 'removeTags' ? `Remove tags from ${plural(n, 'item')}` : `Add tags to ${plural(n, 'item')}`}
         size="sm"
         locked={busy}
