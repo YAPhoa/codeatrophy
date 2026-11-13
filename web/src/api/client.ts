@@ -133,6 +133,11 @@ interface RequestOptions {
   /** Multipart body; mutually exclusive with `body`. */
   form?: FormData;
   signal?: AbortSignal;
+  /**
+   * Let the request outlive the page, for a last save as the tab closes.
+   * Browsers cap the body of such a request at 64 KiB and drop larger ones.
+   */
+  keepalive?: boolean;
   /** How to read a successful response. Defaults to JSON (or nothing for 204). */
   as?: 'json' | 'blob';
 }
@@ -173,6 +178,7 @@ async function toApiError(res: Response): Promise<ApiError> {
 export async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
   const url = API_BASE + path + buildQuery(opts.query);
   const init: RequestInit = { method, signal: opts.signal, headers: { Accept: 'application/json' } };
+  if (opts.keepalive) init.keepalive = true;
   if (opts.form) {
     init.body = opts.form;
   } else if (opts.body !== undefined) {
@@ -223,7 +229,7 @@ export const api = {
       request<Page<ItemSummary>>('GET', '/items', { query: { ...params }, signal }),
     get: (id: string, signal?: AbortSignal) => request<Item>('GET', `/items/${enc(id)}`, { signal }),
     create: (input: ItemInput) => request<Item>('POST', '/items', { body: input }),
-    update: (id: string, patch: ItemPatch) => request<Item>('PATCH', `/items/${enc(id)}`, { body: patch }),
+    update: (id: string, patch: ItemPatch, opts: { keepalive?: boolean } = {}) => request<Item>('PATCH', `/items/${enc(id)}`, { body: patch, keepalive: opts.keepalive }),
     edits: (id: string, body: TextEditsRequest) => request<Item>('POST', `/items/${enc(id)}/edits`, { body }),
     remove: (id: string) => request<void>('DELETE', `/items/${enc(id)}`),
     bulk: (body: BulkRequest) => request<{ affected: number }>('POST', '/items/bulk', { body }),

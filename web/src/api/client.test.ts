@@ -43,6 +43,14 @@ describe('buildQuery', () => {
 });
 
 describe('request', () => {
+  it('marks a last-chance save as a request that outlives the page', async () => {
+    const calls = stub(() => json({ id: '1' }));
+    await api.items.update('1', { notes: 'n' }, { keepalive: true });
+    await api.items.update('1', { notes: 'n' });
+    expect(calls[0]?.init.keepalive).toBe(true);
+    expect(calls[1]?.init.keepalive).toBeUndefined();
+  });
+
   it('sends JSON under /api/v1 and parses the response', async () => {
     const calls = stub(() => json({ id: '1', title: 'T' }, 201));
     const item = await api.items.create({ type: 'problem', title: 'T' });

@@ -11,6 +11,9 @@ import { Spinner } from '../../ui/misc';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
+/** Browsers refuse a request that outlives the page when its body is over 64 KiB; this leaves room for the JSON around the text. */
+const KEEPALIVE_BYTES = 60_000;
+
 /**
  * Private notes on an item, saved automatically a moment after typing stops.
  * Notes are personal state: they do not change the item's revision and are
@@ -24,11 +27,14 @@ export function Notes({ item }: { item: Item }) {
   const [view, setView] = useState<'write' | 'preview'>('write');
   const latest = useRef({ text: item.notes, saved: item.notes, id: item.id });
 
-  const save = async (value: string) => {
+  // `lastChance` is for a save made as the page goes away: the request is
+  // one that outlives the page. Such a request cannot carry a large body, so
+  // long notes are sent the ordinary way and may not make it.
+  const save = async (value: string, lastChance = false) => {
     if (value === latest.current.saved) return;
     setState('saving');
     try {
-      const updated = await api.items.update(latest.current.id, { notes: value });
+      const updated = await api.items.update(latest.current.id, { notes: value }, { keepalive: lastChance && new Blob([value]).size <= KEEPALIVE_BYTES });
       latest.current.saved = value;
       qc.setQueryData(qk.item(updated.id), updated);
       setState(latest.current.text === value ? 'saved' : 'dirty');
@@ -49,13 +55,22 @@ export function Notes({ item }: { item: Item }) {
     return () => window.clearTimeout(t);
   }, [text, state]);
 
-  // Save pending changes when leaving the item.
-  useEffect(
-    () => () => {
-      if (latest.current.text !== latest.current.saved) void api.items.update(latest.current.id, { notes: latest.current.text }).catch(() => undefined);
-    },
-    [],
-  );
+  // Save pending changes when leaving the item, and when the tab is closed,
+  // reloaded or put in the background before the delay above has passed.
+  useEffect(() => {
+    const saveNow = (lastChance: boolean) => void saveRef.current(latest.current.text, lastChance);
+    const flush = () => saveNow(true);
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+      saveNow(false);
+    };
+  }, []);
 
   return (
     <div className="notes">

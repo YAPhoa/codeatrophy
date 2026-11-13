@@ -69,3 +69,16 @@ test('unsaved work: leaving an edited test case or an unsaved proposal asks firs
   await discard.getByRole('button', { name: 'Discard' }).click();
   await expect(page).toHaveURL(/\/tests$/);
 });
+
+test('notes: text typed just before the tab goes away is still saved', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('tab', { name: /^Notes/ }).click();
+  await page.getByLabel('Private notes (Markdown)').pressSequentially(' x');
+  const state = page.locator('.notes-state');
+  await expect(state).toHaveText('Unsaved');
+  // Well inside the autosave delay, and without leaving the field.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect(state).not.toHaveText('Unsaved', { timeout: 300 });
+  await expect(state).toHaveText('Saved');
+});
