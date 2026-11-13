@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, NavLink, useLocation, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
@@ -102,7 +102,6 @@ function CollectionTreeNode({
   const actions = useCollectionActions();
   const qc = useQueryClient();
   const toast = useToast();
-  const navigate = useNavigate();
   const [dropping, setDropping] = useState(false);
   const c = node.collection;
   const hasChildren = node.children.length > 0;
@@ -176,7 +175,7 @@ function CollectionTreeNode({
               onSelect: () => actions.shift(c, 1),
             },
             'separator',
-            { label: 'Export…', icon: <Download size={14} />, onSelect: () => navigate(`/export?collection=${c.id}`) },
+            { label: 'Export…', icon: <Download size={14} />, to: `/export?collection=${c.id}` },
             { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => actions.remove(c) },
           ]}
         />

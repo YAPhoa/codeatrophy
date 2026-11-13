@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router';
 import { Check } from 'lucide-react';
 import { Button, cx, type ButtonProps } from './Button';
 
@@ -126,16 +127,19 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
 }
 
 export type MenuEntry =
-  | {
+  | ({
       label: string;
       icon?: ReactNode;
-      onSelect: () => void;
       danger?: boolean;
       disabled?: boolean;
       /** Render as a checkable item; the menu stays open when it is toggled. */
       checked?: boolean;
       hint?: string;
-    }
+    } & (
+      | { onSelect: () => void; to?: undefined }
+      /** An item that goes to another page is a link, so it can be opened in a new tab. */
+      | { to: string; onSelect?: undefined }
+    ))
   | 'separator'
   | { heading: string };
 
@@ -216,6 +220,36 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
               );
             }
             const checkable = item.checked !== undefined;
+            const content = (
+              <>
+                <span className="menu-item-icon" aria-hidden="true">
+                  {checkable ? item.checked ? <Check size={14} /> : null : item.icon}
+                </span>
+                <span className="grow">{item.label}</span>
+                {item.hint && <span className="menu-item-hint">{item.hint}</span>}
+              </>
+            );
+            if (item.to !== undefined && !item.disabled) {
+              return (
+                <Link
+                  key={i}
+                  to={item.to}
+                  role="menuitem"
+                  tabIndex={-1}
+                  className={cx('menu-item', item.danger && 'menu-item-danger')}
+                  onClick={() => setOpen(false)}
+                  onKeyDown={(e) => {
+                    // A menu item answers to Space as well as Enter.
+                    if (e.key === ' ') {
+                      e.preventDefault();
+                      e.currentTarget.click();
+                    }
+                  }}
+                >
+                  {content}
+                </Link>
+              );
+            }
             return (
               <button
                 key={i}
@@ -227,18 +261,14 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
                 className={cx('menu-item', item.danger && 'menu-item-danger')}
                 onClick={() => {
                   if (item.disabled) return;
-                  item.onSelect();
+                  item.onSelect?.();
                   if (!checkable) {
                     setOpen(false);
                     anchorRef.current?.focus();
                   }
                 }}
               >
-                <span className="menu-item-icon" aria-hidden="true">
-                  {checkable ? item.checked ? <Check size={14} /> : null : item.icon}
-                </span>
-                <span className="grow">{item.label}</span>
-                {item.hint && <span className="menu-item-hint">{item.hint}</span>}
+                {content}
               </button>
             );
           })}

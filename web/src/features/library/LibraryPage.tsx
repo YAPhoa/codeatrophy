@@ -362,7 +362,7 @@ export function LibraryPage() {
                 onSelect: () => collectionActions.shift(collection, 1),
               },
               'separator',
-              { label: 'Export this collection…', icon: <Download size={14} />, onSelect: () => navigate(`/export?collection=${collection.id}`) },
+              { label: 'Export this collection…', icon: <Download size={14} />, to: `/export?collection=${collection.id}` },
               { label: 'Delete collection', icon: <Trash2 size={14} />, danger: true, onSelect: () => collectionActions.remove(collection) },
             ]}
           />

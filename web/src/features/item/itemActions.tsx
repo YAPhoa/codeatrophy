@@ -65,14 +65,14 @@ export function useItemActions(item: Item) {
   }, [item, confirm, qc, toast, navigate]);
 
   const menu: MenuEntry[] = [
-    { label: 'Edit details…', icon: <Pencil size={14} />, onSelect: () => navigate(`/items/${item.id}/edit`) },
+    { label: 'Edit details…', icon: <Pencil size={14} />, to: `/items/${item.id}/edit` },
     ...(item.type === 'problem'
       ? ([
-          { label: 'Generate test cases…', icon: <FlaskConical size={14} />, onSelect: () => navigate(`/items/${item.id}/tests/generate`) },
-          { label: 'Practise a variant…', icon: <GitBranch size={14} />, onSelect: () => navigate(`/items/${item.id}/variant`) },
+          { label: 'Generate test cases…', icon: <FlaskConical size={14} />, to: `/items/${item.id}/tests/generate` },
+          { label: 'Practise a variant…', icon: <GitBranch size={14} />, to: `/items/${item.id}/variant` },
         ] satisfies MenuEntry[])
-      : ([{ label: 'Rework as a new reading…', icon: <GitBranch size={14} />, onSelect: () => navigate(`/items/${item.id}/variant`) }] satisfies MenuEntry[])),
-    { label: 'Export this item…', icon: <Download size={14} />, onSelect: () => navigate(exportItemsPath([item.id])) },
+      : ([{ label: 'Rework as a new reading…', icon: <GitBranch size={14} />, to: `/items/${item.id}/variant` }] satisfies MenuEntry[])),
+    { label: 'Export this item…', icon: <Download size={14} />, to: exportItemsPath([item.id]) },
     'separator',
     { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove() },
   ];

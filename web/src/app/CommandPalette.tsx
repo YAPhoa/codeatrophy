@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Download, Folder, Library, Moon, Plus, Search, Settings, Sun, Tags, Upload } from 'lucide-react';
 import { useCollections, useItemQuery } from '../api/queries';
 import { TypeIcon } from '../features/item/controls';
@@ -15,6 +15,8 @@ interface Entry {
   label: string;
   hint?: string;
   run: () => void;
+  /** Where the entry goes, when it is a destination: lets it be opened in a new tab. */
+  to?: string;
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -49,15 +51,15 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   }, []);
 
   const entries = useMemo<Entry[]>(() => {
-    const go = (to: string) => () => navigate(to);
+    const go = (to: string) => ({ to, run: () => navigate(to) });
     const needle = text.trim().toLowerCase();
     const commands: Entry[] = [
-      { key: 'new', icon: <Plus size={15} />, label: 'Capture a new item', hint: 'C', run: go(newHref) },
-      { key: 'lib', icon: <Library size={15} />, label: 'Go to library', run: go('/') },
-      { key: 'tags', icon: <Tags size={15} />, label: 'Manage tags', run: go('/tags') },
-      { key: 'import', icon: <Upload size={15} />, label: 'Import a bundle', run: go('/import') },
-      { key: 'export', icon: <Download size={15} />, label: 'Export', run: go('/export') },
-      { key: 'settings', icon: <Settings size={15} />, label: 'Settings', run: go('/settings') },
+      { key: 'new', icon: <Plus size={15} />, label: 'Capture a new item', hint: 'C', ...go(newHref) },
+      { key: 'lib', icon: <Library size={15} />, label: 'Go to library', ...go('/') },
+      { key: 'tags', icon: <Tags size={15} />, label: 'Manage tags', ...go('/tags') },
+      { key: 'import', icon: <Upload size={15} />, label: 'Import a bundle', ...go('/import') },
+      { key: 'export', icon: <Download size={15} />, label: 'Export', ...go('/export') },
+      { key: 'settings', icon: <Settings size={15} />, label: 'Settings', ...go('/settings') },
       {
         key: 'theme',
         icon: resolveTheme(getThemePreference()) === 'dark' ? <Sun size={15} /> : <Moon size={15} />,
@@ -71,18 +73,18 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       icon: <TypeIcon type={it.type} />,
       label: it.title,
       hint: it.tags.slice(0, 2).join(' · ') || undefined,
-      run: go(`/items/${it.id}`),
+      ...go(`/items/${it.id}`),
     }));
 
     const collectionEntries: Entry[] = needle
       ? (collections.data ?? [])
           .filter((c) => c.name.toLowerCase().includes(needle))
           .slice(0, 5)
-          .map((c) => ({ key: `col-${c.id}`, icon: <Folder size={15} />, label: c.name, hint: 'Collection', run: go(`/collections/${c.id}`) }))
+          .map((c) => ({ key: `col-${c.id}`, icon: <Folder size={15} />, label: c.name, hint: 'Collection', ...go(`/collections/${c.id}`) }))
       : [];
 
     const searchAll: Entry[] = needle
-      ? [{ key: 'search-all', icon: <Search size={15} />, label: `Search the library for “${text.trim()}”`, run: go(`/?q=${encodeURIComponent(text.trim())}`) }]
+      ? [{ key: 'search-all', icon: <Search size={15} />, label: `Search the library for “${text.trim()}”`, ...go(`/?q=${encodeURIComponent(text.trim())}`) }]
       : [];
 
     return needle ? [...itemEntries, ...collectionEntries, ...searchAll, ...commands] : [...commands.slice(0, 1), ...itemEntries, ...commands.slice(1)];
@@ -99,6 +101,16 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     onClose();
     entry.run();
   };
+
+  const body = (entry: Entry) => (
+    <>
+      <span className="palette-icon" aria-hidden="true">
+        {entry.icon}
+      </span>
+      <span className="grow truncate">{entry.label}</span>
+      {entry.hint && <span className="palette-hint">{entry.hint}</span>}
+    </>
+  );
 
   return createPortal(
     <div
@@ -152,11 +164,22 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
               onMouseMove={() => setActive(i)}
               onClick={() => run(entry)}
             >
-              <span className="palette-icon" aria-hidden="true">
-                {entry.icon}
-              </span>
-              <span className="grow truncate">{entry.label}</span>
-              {entry.hint && <span className="palette-hint">{entry.hint}</span>}
+              {entry.to !== undefined ? (
+                <Link
+                  to={entry.to}
+                  tabIndex={-1}
+                  className="palette-link"
+                  onClick={(e) => {
+                    // A plain click is the option's own; with a modifier the browser opens the link in a new tab.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) e.stopPropagation();
+                    else e.preventDefault();
+                  }}
+                >
+                  {body(entry)}
+                </Link>
+              ) : (
+                body(entry)
+              )}
             </li>
           ))}
           {entries.length === 0 && <li className="palette-empty">Nothing matches.</li>}

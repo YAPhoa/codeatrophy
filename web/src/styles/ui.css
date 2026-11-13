@@ -524,6 +524,7 @@ button.chip:hover {
   color: var(--text);
   text-align: left;
   font-size: var(--text-md);
+  text-decoration: none;
   cursor: pointer;
 }
 
