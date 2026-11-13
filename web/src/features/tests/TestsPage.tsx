@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowDown, ArrowUp, Check, CircleSlash, Eye, EyeOff, FlaskConical, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
@@ -11,6 +11,7 @@ import { byteLength } from '../../lib/itemForm';
 import { languageLabel } from '../../lib/languages';
 import { textFilename } from '../../lib/largeText';
 import { moveIndex } from '../../lib/tree';
+import { useUrlMirror } from '../../lib/urlState';
 import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { useLeaveGuard } from '../../ui/LeaveGuard';
@@ -80,9 +81,16 @@ function TestsManager({ item }: { item: Item }) {
   const meta = useMeta().data;
   const casesQuery = useTestCases(item.id);
   const cases = useMemo(() => casesQuery.data ?? [], [casesQuery.data]);
+  const casesLoaded = casesQuery.data !== undefined;
   const judgeOn = meta?.judge.enabled ?? false;
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selected case is in the address (`?case=…`, left out for the first
+  // one), so a link can point at a case. The address only follows the
+  // selection: a change to it from outside is not taken up, since the editor
+  // may hold edits to the case that is open.
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('case'));
+  const linked = useRef(selectedId);
   // `draft` is what the editor shows; `base` is the stored state it was loaded
   // from. Comparing the two (not the draft with the live case) tells the
   // user's edits apart from changes made to the case underneath, such as a
@@ -122,12 +130,20 @@ function TestsManager({ item }: { item: Item }) {
 
   // Select the first case once loaded, and follow the selection when the list changes.
   useEffect(() => {
-    if (selectedId === NEW) return;
-    if (selectedId && cases.some((c) => c.id === selectedId)) return;
+    if (selectedId === NEW || !casesLoaded) return;
+    const current = selectedId ? cases.find((c) => c.id === selectedId) : undefined;
+    if (current) {
+      // The case named by the link is selected, but not yet in the editor.
+      if (linked.current === selectedId) load(draftOf(current));
+      linked.current = null;
+      return;
+    }
+    linked.current = null;
     const first = cases[0];
     setSelectedId(first?.id ?? null);
     load(first ? draftOf(first) : null);
-  }, [cases, selectedId]);
+  }, [cases, casesLoaded, selectedId]);
+  useUrlMirror('case', selectedId && selectedId !== NEW && selectedId !== cases[0]?.id ? selectedId : null, () => undefined);
 
   /**
    * Edit the input or expected output. A verified case stops being verified

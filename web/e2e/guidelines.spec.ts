@@ -140,3 +140,27 @@ test('deep links: an export of selected items survives in the address', async ({
   await page.getByRole('radio', { name: /The whole library/ }).check();
   await expect(page).toHaveURL(/[?&]scope=all/);
 });
+
+test('deep links: the selected test case is in the address', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
+  const name = page.getByLabel('Name', { exact: true });
+  await expect(name).not.toHaveValue('');
+  await expect(page).not.toHaveURL(/case=/);
+
+  const second = page.getByRole('list', { name: 'Test cases' }).locator('.case-row-main').nth(1);
+  await second.click();
+  await expect(page).toHaveURL(/[?&]case=/);
+  const selectedName = await name.inputValue();
+
+  // Arriving by the link opens the same case. Another problem first, so the page starts afresh without a reload.
+  const link = new URL(page.url());
+  await page.getByRole('link', { name: 'Back to the library' }).click();
+  await page.getByRole('link', { name: 'Coin Change' }).click();
+  await page.evaluate((to) => {
+    window.history.pushState(null, '', to);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, link.pathname + link.search);
+  await expect(name).toHaveValue(selectedName);
+});
