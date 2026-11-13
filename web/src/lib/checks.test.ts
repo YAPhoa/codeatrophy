@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { DraftCheck, VerifyResult } from '../api/types';
-import { describeDraftCheck, runnerChecks, summariseVerify } from './checks';
+import type { DraftCheck, LargeCaseReport, VerifyResult } from '../api/types';
+import { describeDraftCheck, describeLargeCase, runnerChecks, summariseVerify } from './checks';
 
-const check = (change: Partial<DraftCheck> = {}): DraftCheck => ({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: [], ...change });
+const check = (change: Partial<DraftCheck> = {}): DraftCheck => ({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: [], largeCase: null, ...change });
 
 describe('describeDraftCheck', () => {
   it('says how many test cases the solution passes', () => {
@@ -91,5 +91,27 @@ describe('summariseVerify', () => {
 
   it('has nothing to say about a problem without test cases', () => {
     expect(summariseVerify([], [], true)).toEqual({ passed: 0, total: 0, slowest: null, failure: null });
+  });
+});
+
+describe('describeLargeCase', () => {
+  const added: LargeCaseReport = { status: 'added', error: null, index: 8, name: '30,000 values in runs of three', inputBytes: 183412, timeMs: 141, generator: null };
+
+  it('names an added case, its size, and the reference solution against the time limit', () => {
+    expect(describeLargeCase(added, 2000)).toEqual({ tone: 'ok', text: 'Large case “30,000 values in runs of three” added · 179 KB · reference solution 141 ms of 2 s' });
+    expect(describeLargeCase(added).text).toBe('Large case “30,000 values in runs of three” added · 179 KB · reference solution 141 ms');
+    expect(describeLargeCase({ ...added, name: null, inputBytes: null, timeMs: null }, 2000).text).toBe('Large case added');
+  });
+
+  it('warns when the reference solution needs more than half the time limit', () => {
+    expect(describeLargeCase({ ...added, timeMs: 1200 }, 2000)).toMatchObject({ tone: 'warn', text: expect.stringContaining('1.2 s of 2 s') });
+    expect(describeLargeCase({ ...added, timeMs: 1000 }, 2000).tone).toBe('ok');
+  });
+
+  it('gives the reason when nothing was added', () => {
+    const none = { ...added, index: null, name: null, inputBytes: null, timeMs: null };
+    expect(describeLargeCase({ ...none, status: 'failed', error: 'the generator ran out of time' }, 2000)).toEqual({ tone: 'warn', text: 'Large case not added. The generator ran out of time.' });
+    expect(describeLargeCase({ ...none, status: 'skipped', error: 'there is no judge engine' })).toEqual({ tone: 'neutral', text: 'Large case not added. There is no judge engine.' });
+    expect(describeLargeCase({ ...none, status: 'skipped', error: null }).text).toBe('Large case not added');
   });
 });

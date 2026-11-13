@@ -1,21 +1,24 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Eye, EyeOff, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useLimits, useMeta } from '../../api/queries';
-import type { Collection, CompareMode, Difficulty, DraftCheck, HarnessCode, ItemType, ProblemInterface, RunnerCheck } from '../../api/types';
+import type { CheckOutcome, Collection, CompareMode, Difficulty, DraftCheck, HarnessCode, ItemType, ProblemInterface, RunnerCheck } from '../../api/types';
 import { describeDraftCheck, runnerChecks } from '../../lib/checks';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
 import { addFormLanguage, formLanguages, newKey, removeFormLanguage, type FormErrors, type FormTestCase, type ItemFormState } from '../../lib/itemForm';
+import { textFilename } from '../../lib/largeText';
 import { LANGUAGES, languageLabel, languageName, sortLanguages } from '../../lib/languages';
 import { readString, writeString } from '../../lib/storage';
 import { Button, IconButton } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { Checkbox, Field, Segmented, SelectField, TextField } from '../../ui/Field';
+import { TestDataField } from '../../ui/LargeText';
 import { Markdown } from '../../ui/Markdown';
 import { MenuButton } from '../../ui/Popover';
 import { Badge, Tabs, tabPanelProps } from '../../ui/misc';
 import { TagInput } from '../../ui/TagInput';
 import { lineCount } from '../solutions/solutionWrites';
+import { LargeCaseOutcome } from '../tests/LargeCaseOutcome';
 import { CollectionPicker } from './controls';
 
 type BodyView = 'write' | 'split' | 'preview';
@@ -36,6 +39,9 @@ interface ItemEditorProps {
   check?: DraftCheck | null;
   /** The form was edited since that check. */
   checkStale?: boolean;
+  /** Controls placed by the Test cases heading, and what they have to say below it. */
+  caseTools?: ReactNode;
+  caseNotice?: ReactNode;
 }
 
 const INTERFACE_OPTIONS: { value: ProblemInterface; label: string }[] = [
@@ -44,6 +50,9 @@ const INTERFACE_OPTIONS: { value: ProblemInterface; label: string }[] = [
 ];
 
 const NO_RUNNER: HarnessCode = { prefix: '', suffix: '' };
+
+/** What "Verify all" found for a case that did not pass. */
+const OUTCOME_LABEL: Record<Exclude<CheckOutcome, 'passed'>, string> = { wrong: 'wrong', failed: 'failed', not_run: 'not run' };
 
 const COMPARE_OPTIONS: { value: CompareMode; label: string }[] = [
   { value: 'tokens', label: 'Tokens — ignore whitespace differences' },
@@ -72,7 +81,21 @@ function RunnerTabLabel({ language, check }: { language: string; check: RunnerCh
   );
 }
 
-export function ItemEditor({ form, onChange, mode, errors = {}, collections, tagSuggestions, judgeLanguages, onCreateCollection, disabled, check = null, checkStale = false }: ItemEditorProps) {
+export function ItemEditor({
+  form,
+  onChange,
+  mode,
+  errors = {},
+  collections,
+  tagSuggestions,
+  judgeLanguages,
+  onCreateCollection,
+  disabled,
+  check = null,
+  checkStale = false,
+  caseTools,
+  caseNotice,
+}: ItemEditorProps) {
   const set = <K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => onChange({ ...form, [key]: value });
   const limits = useLimits();
   const judged = useMeta().data?.judge.languages;
@@ -102,12 +125,14 @@ export function ItemEditor({ form, onChange, mode, errors = {}, collections, tag
   const setRunner = (change: Partial<HarnessCode>) => set('harness', { ...form.harness, [activeStarter]: { ...runner, ...change } });
   const [solutionShown, setSolutionShown] = useState(false);
   const checkLine = describeDraftCheck(check, checkStale);
+  // When every case came out the same way (the engine was down, say), the check's own line says it once.
+  const sharedOutcome = form.testCases.length > 1 && form.testCases.every((t) => t.outcome?.error === form.testCases[0]?.outcome?.error);
 
   // Editing what a case feeds in or expects undoes its verification, as on the server.
   const setCase = (key: string, change: Partial<FormTestCase>) =>
     set(
       'testCases',
-      form.testCases.map((t) => (t.key === key ? { ...t, ...change, ...('stdin' in change || 'expectedStdout' in change ? { verified: false } : {}) } : t)),
+      form.testCases.map((t) => (t.key === key ? { ...t, ...change, ...('stdin' in change || 'expectedStdout' in change ? { verified: false, outcome: undefined } : {}) } : t)),
     );
 
   return (
@@ -311,6 +336,7 @@ export function ItemEditor({ form, onChange, mode, errors = {}, collections, tag
               </h3>
               <span className="muted">Saved with the problem. You can generate a fuller set afterwards.</span>
               <span className="spacer" />
+              {caseTools}
               <Button
                 size="sm"
                 icon={<Plus size={13} />}
@@ -324,6 +350,8 @@ export function ItemEditor({ form, onChange, mode, errors = {}, collections, tag
                 Add case
               </Button>
             </div>
+            {caseNotice}
+            {check?.largeCase && <LargeCaseOutcome report={check.largeCase} timeLimitMs={form.timeLimitMs} />}
             {errors.testCases && (
               <div className="field-error" role="alert">
                 {errors.testCases}
@@ -338,23 +366,26 @@ export function ItemEditor({ form, onChange, mode, errors = {}, collections, tag
                     <div className="row">
                       <span className="case-no">{i + 1}</span>
                       <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="Name" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
+                      {t.large && <Badge title="Not carried over by a revision">large</Badge>}
                       {t.verified && (
                         <Badge tone="ok" title="The reference solution printed this output">
                           <ShieldCheck size={11} aria-hidden="true" /> verified
                         </Badge>
                       )}
+                      {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
                       <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
                       <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={13} />} onClick={() => set('testCases', form.testCases.filter((c) => c.key !== t.key))} />
                     </div>
+                    {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
                     <div className="case-io">
-                      <Field label="Input (stdin)">
-                        {(a) => <textarea {...a} className="input textarea mono" rows={3} spellCheck={false} value={t.stdin} onChange={(e) => setCase(t.key, { stdin: e.target.value })} />}
-                      </Field>
-                      <Field label="Expected output">
-                        {(a) => (
-                          <textarea {...a} className="input textarea mono" rows={3} spellCheck={false} value={t.expectedStdout} onChange={(e) => setCase(t.key, { expectedStdout: e.target.value })} />
-                        )}
-                      </Field>
+                      <TestDataField label="Input (stdin)" rows={3} value={t.stdin} onChange={(stdin) => setCase(t.key, { stdin })} filename={textFilename(form.title, t.name || `case ${i + 1}`, 'input')} />
+                      <TestDataField
+                        label="Expected output"
+                        rows={3}
+                        value={t.expectedStdout}
+                        onChange={(expectedStdout) => setCase(t.key, { expectedStdout })}
+                        filename={textFilename(form.title, t.name || `case ${i + 1}`, 'output')}
+                      />
                     </div>
                   </li>
                 ))}

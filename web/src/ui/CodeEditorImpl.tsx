@@ -32,6 +32,8 @@ import { usePreferences } from '../api/queries';
 import { cx } from './Button';
 import { documentWords, loadLanguage } from './editorLanguages';
 import { FONT_SIZE_DEFAULT, lineHeightFor, resolveEditorOptions, type EditorOptions } from './editorOptions';
+import { foldRegionEffects, regionFolding, unfoldAllEffects } from './editorRegions';
+import { runnerExtension, type RunnerCode } from './editorRunner';
 
 export interface EditorShortcut {
   /** CodeMirror key name, e.g. `Mod-Enter`. */
@@ -57,6 +59,18 @@ export interface CodeEditorProps {
   placeholder?: string;
   shortcuts?: readonly EditorShortcut[];
   autoFocus?: boolean;
+  /**
+   * Fold the marked regions (see lib/regions.ts) whenever the text comes
+   * from outside rather than from typing: when the editor opens and when
+   * `value` is replaced. For the solve editor.
+   */
+  foldRegions?: boolean;
+  /**
+   * The runner of a "Solution only" problem, shown above and below the code
+   * as collapsed rows that expand to it, read-only. It is not part of the
+   * text. For the solve editor.
+   */
+  runner?: RunnerCode | null;
 }
 
 /** Marks a transaction that mirrors a new `value` prop, so it is not echoed back through `onChange`. */
@@ -81,7 +95,33 @@ const theme = EditorView.theme({
   '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--text-3)', border: 'none', paddingLeft: '4px' },
   '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--editor-active-line)', color: 'var(--text-2)' },
-  '.cm-foldPlaceholder': { backgroundColor: 'var(--surface-3)', border: 'none', color: 'var(--text-2)' },
+  '.cm-foldPlaceholder': { backgroundColor: 'var(--surface-3)', border: 'none', color: 'var(--text-2)', margin: '0 4px', padding: '0 4px' },
+  // The runner rows of the solve editor (see editorRunner.ts), set like code lines.
+  '.cm-runner-toggle': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    width: '100%',
+    height: `var(--editor-line-height, ${lineHeightFor(FONT_SIZE_DEFAULT)}px)`,
+    padding: '0 2px 0 6px',
+    border: 'none',
+    borderRadius: 0,
+    background: 'none',
+    color: 'var(--text-3)',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
+  '.cm-runner-toggle:hover': { backgroundColor: 'var(--editor-active-line)', color: 'var(--text-2)' },
+  '.cm-runner-toggle:focus-visible': { outline: '2px solid var(--focus)', outlineOffset: '-2px' },
+  '.cm-runner-chevron': { flex: 'none', transition: 'transform 120ms ease' },
+  '.cm-runner-toggle[aria-expanded="true"] .cm-runner-chevron': { transform: 'rotate(90deg)' },
+  '.cm-runner-more': { padding: '0 4px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--surface-3)', color: 'var(--text-2)' },
+  '.cm-runner-code': { opacity: '0.55', cursor: 'default' },
+  '.cm-runner-line': { padding: '0 2px 0 6px' },
+  // Where the runner meets the solver's code, while it is expanded.
+  '.cm-runner-prefix.cm-runner-open': { borderBottom: '1px dashed var(--border-strong)' },
+  '.cm-runner-suffix.cm-runner-open': { borderTop: '1px dashed var(--border-strong)' },
   '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
     backgroundColor: 'var(--surface-3)',
     outline: '1px solid var(--border-strong)',
@@ -151,6 +191,7 @@ const codeSetup: Extension = [
   crosshairCursor(),
   highlightActiveLine(),
   highlightSelectionMatches(),
+  regionFolding,
   keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
 ];
 
@@ -168,6 +209,7 @@ function createCompartments() {
     lineWrapping: new Compartment(),
     indent: new Compartment(),
     metrics: new Compartment(),
+    runner: new Compartment(),
   };
 }
 
@@ -184,6 +226,12 @@ const optionExtensions = {
 
 const OPTION_KEYS = Object.keys(optionExtensions) as (keyof typeof optionExtensions)[];
 
+/** Fold the outermost marked regions of the editor's text. */
+function foldMarkedRegions(view: EditorView): void {
+  const effects = foldRegionEffects(view.state.doc);
+  if (effects.length > 0) view.dispatch({ effects });
+}
+
 /**
  * CodeMirror 6 wrapped as a controlled component. Tab indents; press Escape
  * and then Tab to move focus out of the editor with the keyboard.
@@ -191,11 +239,26 @@ const OPTION_KEYS = Object.keys(optionExtensions) as (keyof typeof optionExtensi
  * Every editor reads the user's editor preferences itself and applies a
  * change at once, in place: the text, selection and undo history are kept.
  */
-export default function CodeEditorImpl({ value, onChange, language, readOnly = false, ariaLabel, className, prose = false, wrap = false, placeholder, shortcuts, autoFocus }: CodeEditorProps) {
+export default function CodeEditorImpl({
+  value,
+  onChange,
+  language,
+  readOnly = false,
+  ariaLabel,
+  className,
+  prose = false,
+  wrap = false,
+  placeholder,
+  shortcuts,
+  autoFocus,
+  foldRegions = false,
+  runner,
+}: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const shortcutsRef = useRef(shortcuts);
+  const foldRegionsRef = useRef(foldRegions);
   const [compartments] = useState(createCompartments);
 
   const preferences = usePreferences().editor;
@@ -208,6 +271,21 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
     onChangeRef.current = onChange;
     shortcutsRef.current = shortcuts;
     optionsRef.current = options;
+    foldRegionsRef.current = foldRegions;
+  });
+
+  // The runner is compared by its text, so that a new object with the same code changes nothing.
+  const runnerPrefix = runner?.prefix ?? null;
+  const runnerSuffix = runner?.suffix ?? null;
+  const runnerExt = useMemo(
+    () => runnerExtension(runnerPrefix === null || runnerSuffix === null ? null : { prefix: runnerPrefix, suffix: runnerSuffix }),
+    [runnerPrefix, runnerSuffix],
+  );
+  const runnerRef = useRef(runnerExt);
+  /** The runner extension the live editor is configured with. */
+  const appliedRunnerRef = useRef(runnerExt);
+  useEffect(() => {
+    runnerRef.current = runnerExt;
   });
 
   // The set of shortcut keys is fixed for the lifetime of an editor; their
@@ -217,9 +295,10 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const { language: langC, readOnly: roC } = compartments;
+    const { language: langC, readOnly: roC, runner: runnerC } = compartments;
     const initial = optionsRef.current;
     appliedRef.current = initial;
+    appliedRunnerRef.current = runnerRef.current;
     const keys = shortcutKeys ? shortcutKeys.split(' ') : [];
     const view = new EditorView({
       parent: host,
@@ -249,6 +328,7 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
           syntaxHighlighting(highlight),
           langC.of([]),
           roC.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+          runnerC.of(runnerRef.current),
           placeholder ? placeholderExt(placeholder) : [],
           EditorView.contentAttributes.of({ 'aria-label': ariaLabel, tabindex: '0' }),
           EditorView.updateListener.of((update) => {
@@ -260,6 +340,7 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
       }),
     });
     viewRef.current = view;
+    if (foldRegionsRef.current) foldMarkedRegions(view);
     if (autoFocus) view.focus();
     return () => {
       view.destroy();
@@ -284,9 +365,21 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
     if (!view) return;
     const current = view.state.doc.toString();
     if (current !== value) {
+      // Code given from outside opens with its regions folded; what was folded before goes first.
+      const fold = foldRegionsRef.current;
+      const unfold = fold ? unfoldAllEffects(view.state) : [];
+      if (unfold.length > 0) view.dispatch({ effects: unfold });
       view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: externalChange.of(true) });
+      if (fold) foldMarkedRegions(view);
     }
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || appliedRunnerRef.current === runnerExt) return;
+    appliedRunnerRef.current = runnerExt;
+    view.dispatch({ effects: compartments.runner.reconfigure(runnerExt) });
+  }, [compartments, runnerExt]);
 
   useEffect(() => {
     let cancelled = false;

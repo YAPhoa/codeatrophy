@@ -1,23 +1,23 @@
-import { lazy } from 'react';
 import { Navigate, Route, createRoutesFromElements } from 'react-router';
 import { Shell } from './app/Shell';
 import { NotFoundPage, RouteError } from './app/NotFoundPage';
 import { LibraryPage } from './features/library/LibraryPage';
+import { lazyScreen } from './lib/newBuild';
 
 // Everything but the library is loaded on demand: the editor and Markdown
 // stacks are large and not needed to show the first screen.
-const CapturePage = lazy(() => import('./features/capture/CapturePage'));
-const VariantPage = lazy(() => import('./features/capture/VariantPage'));
-const SavedPage = lazy(() => import('./features/capture/SavedPage'));
-const ItemPage = lazy(() => import('./features/item/ItemPage'));
-const EditItemPage = lazy(() => import('./features/item/EditItemPage'));
-const TestsPage = lazy(() => import('./features/tests/TestsPage'));
-const GenerateTestsPage = lazy(() => import('./features/tests/GenerateTestsPage'));
-const SolutionsPage = lazy(() => import('./features/solutions/SolutionsPage'));
-const TagsPage = lazy(() => import('./features/tags/TagsPage'));
-const ExportPage = lazy(() => import('./features/share/ExportPage'));
-const ImportPage = lazy(() => import('./features/share/ImportPage'));
-const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
+const CapturePage = lazyScreen(() => import('./features/capture/CapturePage'));
+const VariantPage = lazyScreen(() => import('./features/capture/VariantPage'));
+const SavedPage = lazyScreen(() => import('./features/capture/SavedPage'));
+const ItemPage = lazyScreen(() => import('./features/item/ItemPage'));
+const EditItemPage = lazyScreen(() => import('./features/item/EditItemPage'));
+const TestsPage = lazyScreen(() => import('./features/tests/TestsPage'));
+const GenerateTestsPage = lazyScreen(() => import('./features/tests/GenerateTestsPage'));
+const SolutionsPage = lazyScreen(() => import('./features/solutions/SolutionsPage'));
+const TagsPage = lazyScreen(() => import('./features/tags/TagsPage'));
+const ExportPage = lazyScreen(() => import('./features/share/ExportPage'));
+const ImportPage = lazyScreen(() => import('./features/share/ImportPage'));
+const SettingsPage = lazyScreen(() => import('./features/settings/SettingsPage'));
 
 export const routes = createRoutesFromElements(
   <Route element={<Shell />} errorElement={<RouteError />}>

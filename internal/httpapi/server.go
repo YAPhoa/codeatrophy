@@ -83,6 +83,7 @@ func (s *Server) routes() {
 	s.handle("GET /items", s.listItems)
 	s.handle("POST /items", s.createItem)
 	s.handle("POST /items/bulk", s.bulkItems)
+	s.handle("POST /items/check", s.checkItem)
 	s.handle("GET /items/{id}", s.getItem)
 	s.handle("PATCH /items/{id}", s.updateItem)
 	s.handle("DELETE /items/{id}", s.deleteItem)
@@ -241,7 +242,7 @@ const (
 func longRunning(path string) bool {
 	p := strings.TrimPrefix(path, Prefix)
 	return strings.HasPrefix(p, "/ai/") || strings.Contains(p, "/ai/") ||
-		strings.HasSuffix(p, "/testcases/verify") || p == "/export" || strings.HasPrefix(p, "/import")
+		strings.HasSuffix(p, "/testcases/verify") || p == "/items/check" || p == "/export" || strings.HasPrefix(p, "/import")
 }
 
 func setDeadlines(w http.ResponseWriter, path string) {
@@ -828,6 +829,19 @@ func (s *Server) deleteAIProvider(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) error {
+	var in domain.ItemInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	res, err := s.app.CheckItem(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, res)
 	return nil
 }
 

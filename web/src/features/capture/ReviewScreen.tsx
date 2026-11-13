@@ -1,12 +1,15 @@
-import { useState, type ReactNode } from 'react';
-import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft, RefreshCw, Save, ShieldCheck, Square, Trash2, X } from 'lucide-react';
 import type { AppliedStyle, Collection, DraftCheck, GenerationUsage, StylePreset } from '../../api/types';
-import { useLimits } from '../../api/queries';
+import { useLimits, useMeta } from '../../api/queries';
+import { describeDraftCheck } from '../../lib/checks';
+import { plural } from '../../lib/format';
 import { MOD } from '../../lib/hotkeys';
-import type { FormErrors, ItemFormState } from '../../lib/itemForm';
+import { discardableCases, type FormErrors, type ItemFormState } from '../../lib/itemForm';
 import { Button } from '../../ui/Button';
-import { ErrorCallout, Kbd } from '../../ui/misc';
+import { ErrorCallout, Kbd, Spinner } from '../../ui/misc';
 import { ItemEditor } from '../item/ItemEditor';
+import type { DraftCheckControl } from './draftChecks';
 import { AssumptionsPanel, GeneratingPanel } from './parts';
 import { StylePicker, type StyleChoice } from './StylePicker';
 
@@ -29,6 +32,8 @@ interface ReviewScreenProps {
   checkStale: boolean;
   /** What the last generation of this draft cost. */
   usage: GenerationUsage | null;
+  /** Running the reference solution on the test cases again, as they stand. */
+  verify: DraftCheckControl;
   /** The user's original text, shown for comparison. */
   originalText?: string;
   originalLabel?: string;
@@ -53,11 +58,76 @@ interface ReviewScreenProps {
   header: ReactNode;
 }
 
+/** A check under way: how many cases, for how long, and a way to stop it. */
+function CheckProgress({ total, startedAt, onCancel }: { total: number; startedAt: number | null; onCancel: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+  return (
+    <div className="check-progress" role="status">
+      <Spinner size={13} />
+      <span>
+        Verifying {plural(total, 'test case')}… {seconds} s
+      </span>
+      <span className="muted">You can leave this page.</span>
+      <span className="spacer" />
+      <Button size="sm" variant="ghost" icon={<Square size={12} />} onClick={onCancel}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 /** Review of a draft before anything is saved: assumptions, revision, every field editable. */
 export function ReviewScreen(props: ReviewScreenProps) {
   const [instruction, setInstruction] = useState('');
   const busy = props.revising || props.saving;
   const limits = useLimits();
+  const judgeOn = useMeta().data?.judge.enabled ?? false;
+  const { verify, form } = props;
+  const blocked = !judgeOn
+    ? 'Needs a judge engine'
+    : !form.referenceSolution || form.referenceSolution.source.trim() === ''
+      ? 'Needs a reference solution'
+      : form.testCases.length === 0
+        ? 'No test cases yet'
+        : null;
+  const caseTools = (
+    <>
+      {blocked && <span className="muted verify-reason">{blocked}</span>}
+      <Button size="sm" icon={<ShieldCheck size={13} />} onClick={() => verify.start(form)} busy={verify.running} disabled={blocked !== null}>
+        Verify all
+      </Button>
+    </>
+  );
+  // What the last "Verify all" found, while the form is as it was checked; the cases it found wrong can go in one step.
+  const checkedCases = !props.checkStale && form.testCases.some((t) => t.outcome);
+  const discardable = checkedCases ? discardableCases(form) : [];
+  const result = checkedCases ? describeDraftCheck(props.check, props.checkStale) : null;
+  const caseNotice = verify.running ? (
+    <CheckProgress total={verify.total} startedAt={verify.startedAt} onCancel={verify.cancel} />
+  ) : verify.error != null ? (
+    <ErrorCallout error={verify.error} title="The test cases could not be verified" onRetry={blocked ? undefined : () => verify.start(form)} />
+  ) : verify.outdated ? (
+    <p className="check-line tone-neutral" role="status">
+      The draft changed while it was verified. Verify again.
+    </p>
+  ) : result ? (
+    <div className="large-case-row">
+      <p className={`check-line tone-${result.tone}`} role="status">
+        {result.text}
+      </p>
+      <span className="spacer" />
+      {discardable.length > 0 && (
+        <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => verify.discard(discardable)}>
+          Discard {discardable.length} failed
+        </Button>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div className="review">
@@ -139,6 +209,8 @@ export function ReviewScreen(props: ReviewScreenProps) {
         disabled={busy}
         check={props.check}
         checkStale={props.checkStale}
+        caseTools={caseTools}
+        caseNotice={caseNotice}
       />
 
       <div className="review-foot">

@@ -1,12 +1,23 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { usePreferences } from '../api/queries';
+import { lazyPart } from '../lib/newBuild';
 import type { CodeEditorProps } from './CodeEditorImpl';
 import { cx } from './Button';
 import { resolveEditorOptions } from './editorOptions';
+import { ReloadNotice } from './ReloadNotice';
 
 export type { CodeEditorProps, EditorShortcut } from './CodeEditorImpl';
 
-const Impl = lazy(() => import('./CodeEditorImpl'));
+const Impl = lazyPart(
+  () => import('./CodeEditorImpl'),
+  // The editor of the build this tab runs is gone; the text stays, read-only.
+  (props: CodeEditorProps) => (
+    <>
+      <ReloadNotice />
+      <Fallback {...props} />
+    </>
+  ),
+);
 
 /**
  * Code editor. CodeMirror is loaded on first use; until then the text is

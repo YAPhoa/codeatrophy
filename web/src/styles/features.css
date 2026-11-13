@@ -1613,30 +1613,6 @@ fieldset.stack legend {
   flex: none;
 }
 
-/* ---- The runner of a "solution only" problem, read-only ---- */
-
-.runner-view {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.runner-code .code-editor {
-  /* As tall as the code: the pane around it scrolls. */
-  height: auto;
-}
-
-.runner-marker {
-  padding: 8px 12px;
-  border: 1px dashed var(--accent);
-  border-radius: var(--radius);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  text-align: center;
-}
-
 .no-judge {
   display: flex;
   gap: 12px;
@@ -2164,6 +2140,14 @@ fieldset.stack legend {
 
 /* ---- Test cases ---- */
 
+/* What "Verify all" found, between the page's buttons and the cases. */
+.tests-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
 .tests-grid {
   display: grid;
   grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
@@ -2309,6 +2293,49 @@ fieldset.stack legend {
   padding: 10px 14px;
   border-top: 1px solid var(--border);
   background: var(--surface-2);
+}
+
+/* "Verify all" on a draft: why it cannot run, and how far a running check has got. */
+.verify-reason {
+  font-size: var(--text-sm);
+}
+
+.check-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 32px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.check-progress .muted {
+  font-size: var(--text-sm);
+}
+
+/* The large test case of a generation: what became of it, and its generator on request. */
+.large-case {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.large-case-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.large-case-card {
+  padding: 8px 14px;
+}
+
+.large-case-generator {
+  height: 230px;
 }
 
 .proposal-list {
@@ -2821,28 +2848,8 @@ fieldset.stack legend {
   line-height: 1.5;
 }
 
-.provider-usage > .row {
+.provider-usage.row {
   gap: 12px;
-}
-
-.provider-usage-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-}
-
-.provider-usage-toggle:hover {
-  color: var(--text-2);
-}
-
-.provider-usage > p {
-  padding-left: 15px;
 }
 
 .log-clear-note {

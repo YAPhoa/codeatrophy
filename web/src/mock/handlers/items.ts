@@ -34,7 +34,8 @@ import {
   pagination,
   Validator,
 } from '../http';
-import { isLanguage, uuid } from '../util';
+import { checkProblem } from '../ai';
+import { isLanguage, sleep, uuid } from '../util';
 
 const TYPES: readonly ItemType[] = ['problem', 'reading'];
 const STATUSES: readonly ItemStatus[] = ['todo', 'in_progress', 'done'];
@@ -505,6 +506,32 @@ export function checkRevision(item: StoredItem, raw: Record<string, unknown>): v
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/**
+ * Run the reference solution of a problem that is not saved yet on its test
+ * cases. Validated as `POST /items` validates them; other keys are ignored.
+ */
+async function checkItem(db: MockDb, req: Req) {
+  const raw = objectBody(req);
+  const v = new Validator();
+  let problem: Partial<ProblemSpec> = {};
+  if (raw.type !== undefined && raw.type !== 'problem') v.add('type', 'must be problem');
+  if (!isRecord(raw.problem)) v.add('problem', 'is required');
+  else problem = parseProblem(raw.problem, v);
+  const cases: Partial<TestCaseInput>[] = [];
+  if (raw.testCases !== undefined) {
+    if (!Array.isArray(raw.testCases)) v.add('testCases', 'must be an array');
+    else if (raw.testCases.length > LIMITS.maxTestCasesPerItem) v.add('testCases', tooManyCases);
+    else raw.testCases.forEach((tc, i) => cases.push(parseTestCaseInput(tc, v, `testCases.${i}.`)));
+  }
+  const { referenceSolution = null, ...rest } = problem;
+  const spec = { ...structuredClone(DEFAULT_PROBLEM), ...rest, referenceSolution };
+  checkHarness(spec, v);
+  v.check();
+  // As long as the cases take to run.
+  if (db.options.judge === 'ok' && referenceSolution) await sleep(cases.length * db.delay('verifyCase'));
+  return ok(checkProblem(db, spec, cases.map((c) => ({ name: c.name ?? '', stdin: c.stdin ?? '', expectedStdout: c.expectedStdout ?? '' }))));
+}
+
 function patchItem(db: MockDb, req: Req) {
   const item = db.getItem(req.params.id!);
   const raw = objectBody(req);
@@ -671,6 +698,7 @@ export function itemRoutes(db: MockDb): [string, string, Handler][] {
     ['GET', '/items', (req) => listItems(db, req)],
     ['POST', '/items', (req) => createItem(db, req)],
     ['POST', '/items/bulk', (req) => bulk(db, req)],
+    ['POST', '/items/check', (req) => checkItem(db, req)],
     ['GET', '/items/:id', (req) => ok(db.full(db.getItem(req.params.id!)))],
     ['PATCH', '/items/:id', (req) => patchItem(db, req)],
     ['POST', '/items/:id/edits', (req) => editItemText(db, req)],

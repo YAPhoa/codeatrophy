@@ -18,7 +18,9 @@ in the browser against your own test cases.
   complete, reviewable item with the assumptions listed — solution-only or a
   full program, whichever fits — whose examples have already been checked by
   running the model's own reference solution; generate test cases whose
-  expected outputs come from actually running a reference solution; derive
+  expected outputs come from actually running a reference solution, and
+  optionally one large case built by a generator program, so that a solution
+  of the wrong complexity fails; derive
   easier, harder or twisted variants. Works with Anthropic or any
   OpenAI-compatible endpoint, including local models. Every request's
   tokens are counted per provider, and an activity log keeps what was sent
@@ -286,8 +288,9 @@ which an older Codeatrophy refuses to import; upgrade it first.
   and set `CODEATROPHY_PUBLIC_URL` to the public URL (its origin is then
   allowed to make changes, and MCP clients are told the endpoint's URL).
   AI requests and verification runs can take minutes: raise the proxy's read
-  timeout to at least six minutes for `/api/v1/ai/` and `/api/v1/items/*/ai/`,
-  and leave `/mcp` unbuffered with a long timeout, since it streams.
+  timeout to at least six minutes for `/api/v1/ai/`, `/api/v1/items/*/ai/` and
+  `/api/v1/items/check`, and leave `/mcp` unbuffered with a long timeout,
+  since it streams.
 - **Host names it answers to (DNS rebinding).** The API and `/mcp` answer
   only to requests whose `Host` is `localhost` or a loopback address, the host
   of `CODEATROPHY_PUBLIC_URL`, the host of an allowed origin, or a host listed

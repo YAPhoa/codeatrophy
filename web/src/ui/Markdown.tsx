@@ -1,7 +1,18 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { lazyPart } from '../lib/newBuild';
 import { cx } from './Button';
+import { ReloadNotice } from './ReloadNotice';
 
-const Impl = lazy(() => import('./MarkdownImpl'));
+const Impl = lazyPart(
+  () => import('./MarkdownImpl'),
+  // The renderer of the build this tab runs is gone; the text is shown as it is.
+  ({ source }: { source: string }) => (
+    <>
+      <ReloadNotice />
+      <pre className="md-fallback">{source}</pre>
+    </>
+  ),
+);
 
 interface MarkdownProps {
   source: string;

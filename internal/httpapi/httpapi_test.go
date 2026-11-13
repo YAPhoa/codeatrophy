@@ -256,15 +256,15 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxSourceUrlChars", "maxSourceNoteChars", "maxTags", "maxTagChars", "maxCollectionNameChars",
 		"maxCollectionDescriptionChars", "timeLimitMs", "memoryLimitKb", "maxTestCasesPerItem", "maxTestDataBytes",
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
-		"maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
+		"maxLargeInputBytes", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxAiProviders", "maxAiProviderNameChars", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
 		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 37 {
-		t.Errorf("limits has %d keys, want 37", len(lim))
+	if len(lim) != 38 {
+		t.Errorf("limits has %d keys, want 38", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -366,6 +366,13 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 		t.Error("upstream error code")
 	}
 
+	// A large test case is reported only when asked for (here: a reading,
+	// so there is no check at all).
+	if v, ok := d["check"]; !ok || v != nil {
+		t.Errorf("check of a reading: %v", d["check"])
+	}
+	c.expect("POST", api+"/ai/draft", `{"text":"x","largeTestCase":"yes"}`, 422)
+
 	// The usage of a generation, and the AI log.
 	u := d["usage"].(map[string]any)
 	if u["logId"] == nil || u["model"] != "fake-model" || u["inputTokens"] != nil {
@@ -430,6 +437,16 @@ func TestSubmissionsEndpoints(t *testing.T) {
 	}
 	c.expect("POST", api+"/items/"+id+"/submissions", `{"language":"python","source":"`+strings.Repeat("x", 2000)+`"}`, 422)
 	c.expect("POST", api+"/items/"+id+"/testcases/verify", `{}`, 422) // no reference solution
+	chk := c.expect("POST", api+"/items/check", `{"type":"problem","title":"x","problem":{"referenceSolution":{"language":"python","source":"sum"}},
+		"testCases":[{"stdin":"1 2","expectedStdout":"3"},{"stdin":"2 2","expectedStdout":"5"}]}`, 200).json(t)
+	if ch := chk["check"].(map[string]any); ch["passed"] != float64(1) || ch["total"] != float64(2) || ch["largeCase"] != nil {
+		t.Errorf("item check: %v", chk)
+	}
+	if v := chk["cases"].([]any); len(v) != 2 || v[0].(map[string]any)["outcome"] != "passed" ||
+		v[1].(map[string]any)["outcome"] != "wrong" || v[1].(map[string]any)["error"] != nil {
+		t.Errorf("cases: %v", chk["cases"])
+	}
+	c.expect("POST", api+"/items/check", `{"type":"reading","title":"x"}`, 422)
 	if s0["lineOffset"] != float64(0) || sub["lineOffset"] != float64(0) {
 		t.Errorf("lineOffset: %v %v", s0["lineOffset"], sub["lineOffset"])
 	}

@@ -125,6 +125,7 @@ export function useSolutions(itemId: string, enabled = true) {
 export const DEFAULT_PREFERENCES: Preferences = {
   hideTestCases: true,
   generatedTestCases: 8,
+  largeTestCase: false,
   editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
 };
 

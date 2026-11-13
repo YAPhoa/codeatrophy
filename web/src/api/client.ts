@@ -30,6 +30,8 @@ import type {
   ImportResult,
   ImportStrategy,
   Item,
+  ItemCheckRequest,
+  ItemCheckResponse,
   ItemInput,
   ItemListParams,
   ItemPatch,
@@ -225,6 +227,8 @@ export const api = {
     edits: (id: string, body: TextEditsRequest) => request<Item>('POST', `/items/${enc(id)}/edits`, { body }),
     remove: (id: string) => request<void>('DELETE', `/items/${enc(id)}`),
     bulk: (body: BulkRequest) => request<{ affected: number }>('POST', '/items/bulk', { body }),
+    /** Runs the reference solution of a problem not saved yet on its test cases; nothing is stored. */
+    check: (body: ItemCheckRequest, signal?: AbortSignal) => request<ItemCheckResponse>('POST', '/items/check', { body, signal }),
   },
 
   testCases: {

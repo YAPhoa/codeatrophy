@@ -86,12 +86,60 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
   await expect(languages).toHaveCount(2);
   await expect(languages).toContainText(['Go', 'Python']);
 
-  // The runner is one click away, and the editor keeps its room.
-  const editorWidth = (await page.locator('.editor-host').boundingBox())!.width;
-  await page.getByRole('tab', { name: 'Runner' }).click();
-  await expect(page.getByText('Your solution goes here')).toBeVisible();
-  await expect(page.getByText('sys.stdin')).toBeVisible();
-  expect((await page.locator('.editor-host').boundingBox())!.width).toBe(editorWidth);
+  // The runner is one click away, folded around the solver's code.
+  const editor = page.locator('.editor-host');
+  const after = editor.getByRole('button', { name: /^Runner · \d+ lines?, after your code$/ });
+  await expect(after).toHaveAttribute('aria-expanded', 'false');
+  await after.click();
+  await expect(after).toHaveAttribute('aria-expanded', 'true');
+  await expect(editor.getByText('sys.stdin')).toBeVisible();
+});
+
+test('solve: the runner of a "solution only" problem sits folded around the code, outside it', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Merge k Sorted Lists' }).click();
+
+  // One collapsed row above the code and one below it.
+  const editor = page.locator('.editor-host');
+  const before = editor.getByRole('button', { name: /^Runner · \d+ lines?, before your code$/ });
+  const after = editor.getByRole('button', { name: /^Runner · \d+ lines?, after your code$/ });
+  await expect(before).toHaveAttribute('aria-expanded', 'false');
+  await expect(after).toHaveAttribute('aria-expanded', 'false');
+  await expect(editor.getByText('import json')).toHaveCount(0);
+
+  // Expanded, the runner is shown in place; the code that would be submitted is still only the solver's.
+  await before.click();
+  await expect(before).toHaveAttribute('aria-expanded', 'true');
+  await expect(editor.getByText('import json')).toBeVisible();
+  const lines = editor.locator('.cm-line');
+  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
+  expect((await lines.allTextContents()).join('\n')).not.toContain('import json');
+  await expect(editor.locator('.cm-lineNumbers .cm-gutterElement').filter({ hasText: /^1$/ })).toBeVisible();
+
+  // It folds away again from the keyboard.
+  await before.focus();
+  await page.keyboard.press('Enter');
+  await expect(before).toHaveAttribute('aria-expanded', 'false');
+  await expect(editor.getByText('import json')).toHaveCount(0);
+});
+
+test('solve: the lines that read the input open folded, and unfold in place', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Number of Islands' }).click();
+
+  const editor = page.locator('.editor-host');
+  await expect(editor.locator('.cm-line').filter({ hasText: '# region input' })).toBeVisible();
+  await expect(editor.getByText('sys.stdin')).toHaveCount(0);
+  await expect(editor.getByText('print(count_islands(grid))')).toBeVisible();
+
+  await editor.locator('.cm-foldPlaceholder').click();
+  await expect(editor.getByText('sys.stdin.read()')).toBeVisible();
+  await expect(editor.locator('.cm-foldPlaceholder')).toHaveCount(0);
+
+  // Opened in another language, its region is folded again.
+  await page.getByRole('combobox', { name: 'Language' }).selectOption('cpp');
+  await expect(editor.locator('.cm-line').filter({ hasText: '// region input' })).toBeVisible();
+  await expect(editor.getByText('cin >> rows')).toHaveCount(0);
 });
 
 test('test cases to generate: the preference is where the generate page starts', async ({ page }) => {
@@ -243,7 +291,7 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await saved.getByRole('button', { name: 'Use as reference' }).click();
   await expect(saved.getByText('Reference', { exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
-  await expect(page.getByLabel('Verify against')).toContainText('Smoke test solution');
+  await expect(page.getByRole('region', { name: 'Verification' })).toContainText(/Reference solution\s*Smoke test solution/);
 
   // Submitted again, the same code is not offered for saving: the verdict says where it already is.
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: 'Solve' }).click();
@@ -281,6 +329,155 @@ test('preferences: hidden test cases and editor options follow the settings', as
   await expect(page.getByRole('tab', { name: /^Tests/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(/\d+ test cases · \d+ samples, \d+ hidden/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reveal all' })).toHaveCount(0);
+});
+
+/** Nothing on the page, in a field or as text, holds a large test case in full. */
+async function expectNoLargeText(page: Page): Promise<void> {
+  expect(await page.evaluate(() => document.body.innerText.length)).toBeLessThan(100_000);
+  expect(await page.locator('textarea').evaluateAll((areas) => Math.max(0, ...areas.map((a) => (a as HTMLTextAreaElement).value.length)))).toBeLessThan(10_000);
+}
+
+test('large test case: the preference asks for one with every draft, kept out of sight', async ({ page }) => {
+  await open(page, '/settings/preferences');
+  const preference = page.getByRole('checkbox', { name: 'Generate a large test case by default' });
+  await expect(preference).not.toBeChecked();
+  await preference.check();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+
+  // One line says what was added; the input itself is not shown, but can be downloaded.
+  await expect(page.getByText(/^Large case “.+” added · \d+ KB · reference solution \d+ ms of \d+ s$/)).toBeVisible();
+  const card = page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' });
+  await expect(card).toHaveCount(1);
+  await expect(card.getByText('large', { exact: true })).toBeVisible();
+  await expect(card.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+ KB · \d+ lines?/);
+  await expect(card.getByText('30000')).toHaveCount(0);
+  // Still renamed and marked like any case: the name and the expected output are the only fields.
+  await expect(card.getByRole('textbox')).toHaveCount(2);
+  await expectNoLargeText(page);
+  const download = page.waitForEvent('download');
+  await card.getByRole('button', { name: 'Download' }).click();
+  expect((await download).suggestedFilename()).toMatch(/-input\.txt$/);
+
+  // The generator is there on request, read-only.
+  const toggle = page.getByRole('button', { name: 'Show generator' });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('random.seed')).toHaveCount(0);
+  await toggle.click();
+  await expect(page.getByRole('textbox', { name: /^Generator of the large case/ })).toContainText('random.seed(');
+
+  // A revision asks again, and the case comes back.
+  await page.getByLabel('Ask for a revision').fill('use 1-based indices');
+  await page.getByRole('button', { name: 'Revise draft' }).click();
+  await expect(page.getByText('Revising the draft…')).toBeHidden();
+  await expect(page.getByText(/^Large case “.+” added/)).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' })).toHaveCount(1);
+
+  // A large case that could not be built is reported, and nothing is added.
+  await page.getByRole('button', { name: 'Back to input' }).click();
+  await page.getByLabel('What you have').fill('two sum, array and target MOCK:LARGE-FAIL');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText(/^Large case not added\. The generator crashed/)).toBeVisible();
+  await expect(page.getByText('Too large to show or edit')).toHaveCount(0);
+});
+
+test('large test case: asked for on the generate form, then kept and managed on the Test cases page', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
+  await page.getByRole('link', { name: /Generate/ }).first().click();
+
+  // Off, as the preference is; on for this run.
+  const large = page.getByRole('checkbox', { name: 'Add a large test case' });
+  await expect(large).not.toBeChecked();
+  await large.check();
+  await page.getByLabel('How many').fill('3');
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.getByText('4 of 4 selected')).toBeVisible();
+  await expect(page.getByText(/^Large case “.+” added · \d+ KB · reference solution \d+ ms of 2 s$/)).toBeVisible();
+
+  const proposed = page.locator('.proposal-case').last();
+  await expect(proposed.getByText('large', { exact: true })).toBeVisible();
+  await proposed.locator('.proposal-main').click();
+  await expect(proposed.getByRole('button', { name: 'Download' })).toBeVisible();
+  await expectNoLargeText(page);
+  await page.getByRole('button', { name: 'Save 4 cases' }).click();
+
+  // On the Test cases page it stays out of sight too; renaming, marking and moving still work.
+  await expect(page).toHaveURL(/\/tests$/);
+  await page.getByRole('button', { name: 'Show test cases' }).first().click();
+  await page.locator('.case-row').last().locator('.case-row-main').click();
+  const editor = page.getByRole('group', { name: 'Selected test case' });
+  await expect(editor.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+ KB · \d+ lines?/);
+  await expect(editor.getByRole('button', { name: 'Download' })).toBeVisible();
+  await expectNoLargeText(page);
+  await editor.getByLabel('Name').fill('Big input');
+  await editor.getByRole('checkbox', { name: 'Sample' }).check();
+  await editor.getByRole('button', { name: 'Save case' }).click();
+  await expect(page.getByText('Test case saved')).toBeVisible();
+  const row = page.locator('.case-row').filter({ hasText: 'Big input' });
+  await expect(row.getByText('sample', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Move Big input up' }).click();
+  await expect(page.locator('.case-row').nth(-2)).toContainText('Big input');
+  await expect(editor.getByText(/Too large to show or edit/)).toBeVisible();
+});
+
+test('verify all: a draft is checked again as edited, and a saved problem from the top of its test cases', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByRole('radiogroup', { name: 'What you write' }).getByText('Full program').click();
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Passes 2 of 2 test cases')).toBeVisible();
+
+  // Editing a case takes its mark away; "Verify all" runs the check again on the cases as they stand.
+  const second = page.getByRole('listitem').filter({ has: page.getByRole('textbox', { name: 'Name of case 2' }) });
+  await second.getByLabel('Expected output').fill('1 2 MOCK:WA');
+  await expect(second.getByText('verified')).toHaveCount(0);
+  await expect(page.getByText('Checked before your edits')).toBeVisible();
+  await page.getByRole('button', { name: 'Verify all' }).click();
+  const result = page.locator('section[aria-labelledby="cases-heading"]').getByRole('status').filter({ hasText: /^Passes/ });
+  await expect(result).toHaveText(/^Passes 1 of 2 test cases\. Example 2: expected 1 2 MOCK:WA/);
+  await expect(page.getByRole('listitem').filter({ has: page.getByRole('textbox', { name: 'Name of case 1' }) }).getByText('verified')).toBeVisible();
+  await expect(second.getByText('wrong', { exact: true })).toBeVisible();
+
+  // The case it found wrong goes in one step, and the check follows.
+  await page.getByRole('button', { name: 'Discard 1 failed' }).click();
+  await expect(page.getByRole('textbox', { name: 'Name of case 2' })).toHaveCount(0);
+  await expect(result).toHaveText('Passes 1 of 1 test case');
+
+  // Without a reference solution there is nothing to verify with, and the button says why.
+  await page.getByRole('button', { name: 'Remove the reference solution' }).click();
+  await expect(page.getByRole('button', { name: 'Verify all' })).toBeDisabled();
+  await expect(page.getByText('Needs a reference solution')).toBeVisible();
+
+  // On a saved problem it runs the reference solution, from the top of the Test cases page.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
+  await page.getByRole('button', { name: 'Verify all' }).click();
+  await expect(page.getByText(/^All \d+ cases match the reference solution and are marked verified$/)).toBeVisible();
+  // Another saved solution is a check, from the Verification card.
+  await page.getByRole('button', { name: 'Check', exact: true }).click();
+  await expect(page.getByText(/A check only: marks and expected outputs are unchanged\./)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Discard/ })).toHaveCount(0);
+
+  // A case the reference solution does not reproduce can be deleted from the result.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Merge Intervals', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
+  const rows = page.getByRole('list', { name: 'Test cases' }).getByRole('listitem');
+  await expect(rows.first()).toBeVisible();
+  const before = await rows.count();
+  await page.getByRole('button', { name: 'Verify all' }).click();
+  await expect(page.getByText(/^\d+ of \d+ match · 1 differ · 0 failed to run$/)).toBeVisible();
+  await page.getByRole('button', { name: 'Discard 1 failed' }).click();
+  await page.getByRole('dialog', { name: 'Delete 1 test case?' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Deleted 1 test case')).toBeVisible();
+  await expect(rows).toHaveCount(before - 1);
 });
 
 test('settings: each category is its own page, and a link to an old section still arrives', async ({ page }) => {
@@ -326,10 +523,10 @@ test('AI providers: a new one is tested, gets a model from the loaded list, and 
   const section = page.getByRole('region', { name: 'AI providers' });
   await expect(section.getByText('On · Personal key · claude-opus-5-5')).toBeVisible();
 
-  // Each provider says what it was used for lately, and the rest on request.
+  // Each provider says when it was last used and links to its requests.
   const personal = section.getByRole('listitem').filter({ hasText: 'Personal key' });
-  await personal.getByText('14 requests · 1 failed · 61k in · 48k out · last 30 days').click();
-  await expect(personal.getByText(/^52 requests · 3 failed · 233k in · 172k out · all time · last used /)).toBeVisible();
+  await expect(personal.getByText(/^Last used /)).toBeVisible();
+  await expect(personal).not.toContainText(/\d+ requests/);
   await expect(personal.getByRole('link', { name: 'Requests through Personal key' })).toHaveAttribute('href', /\/settings\/ai-activity\?provider=/);
   await expect(section.getByRole('listitem').filter({ hasText: 'Work gateway' })).toContainText('Not used yet');
 

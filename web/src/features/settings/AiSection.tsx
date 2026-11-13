@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ChevronDown, ChevronRight, KeyRound, Pencil, PlugZap, Plus, Power, Sparkles, Star, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, KeyRound, Pencil, PlugZap, Plus, Power, Sparkles, Star, Trash2, XCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateAi, qk, useAiSettings, useLimits } from '../../api/queries';
-import type { AiProvider, AiProviderKind, AiProviderUsage, AiSettings, AiTestResponse, Meta } from '../../api/types';
+import type { AiProvider, AiProviderKind, AiSettings, AiTestResponse, Meta } from '../../api/types';
 import { aiLogPath } from '../../lib/aiLog';
 import { errorLine, sentence } from '../../lib/errors';
-import { absoluteTime, describeTotals, formatMs, plural, relativeTime } from '../../lib/format';
+import { absoluteTime, formatMs, plural, relativeTime } from '../../lib/format';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Badge, ErrorState, PageLoading } from '../../ui/misc';
@@ -184,38 +184,26 @@ interface ProviderRowProps {
   onDelete: () => void;
 }
 
-/** What the instance has spent through a provider: the last 30 days, the rest on request, and the way to its requests. */
+/** When a provider was last used, and the way to its requests. */
 function ProviderUsage({ provider }: { provider: AiProvider }) {
-  const usage: AiProviderUsage | undefined = provider.usage;
-  const [open, setOpen] = useState(false);
+  const usage = provider.usage;
   // A server from before the counts existed sends none.
   if (!usage) return null;
   if (usage.allTime.requests === 0) return <p className="provider-usage">Not used yet</p>;
   return (
-    <div className="provider-usage">
-      <div className="row">
-        <button type="button" className="provider-usage-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          {open ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
-          {describeTotals(usage.last30Days)} · last 30 days
-        </button>
-        <Link to={aiLogPath({ providerId: provider.id })} aria-label={`Requests through ${provider.name}`}>
-          Requests
-        </Link>
-      </div>
-      {open && (
-        <p>
-          {describeTotals(usage.allTime)} · all time
-          {usage.lastUsedAt && (
-            <>
-              {' · last used '}
-              <time dateTime={usage.lastUsedAt} title={absoluteTime(usage.lastUsedAt)}>
-                {relativeTime(usage.lastUsedAt)}
-              </time>
-            </>
-          )}
-        </p>
+    <p className="provider-usage row">
+      {usage.lastUsedAt && (
+        <span>
+          Last used{' '}
+          <time dateTime={usage.lastUsedAt} title={absoluteTime(usage.lastUsedAt)}>
+            {relativeTime(usage.lastUsedAt)}
+          </time>
+        </span>
       )}
-    </div>
+      <Link to={aiLogPath({ providerId: provider.id })} aria-label={`Requests through ${provider.name}`}>
+        Requests
+      </Link>
+    </p>
   );
 }
 

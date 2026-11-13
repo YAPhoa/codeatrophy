@@ -36,6 +36,12 @@
   border-top: 1px solid var(--border);
 }
 
+/* A checkbox that follows a row is set off from it the same way. */
+.prefs-check-row {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 .prefs-row-text {
   flex: 1 1 240px;
   min-width: 0;

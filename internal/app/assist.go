@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -54,6 +55,31 @@ type DraftTestCase struct {
 	// Verified is true when the draft's reference solution printed the
 	// expected output.
 	Verified bool `json:"verified"`
+	// outcome is what the check found for this case (see CaseOutcome).
+	outcome CaseOutcome
+}
+
+// CaseOutcome is what a check found for one test case: passed, wrong,
+// failed (the reference solution did not compile, crashed or exceeded a
+// limit) or not_run (the check did not get to it), with the reason for the
+// last two.
+type CaseOutcome struct {
+	Outcome string  `json:"outcome"`
+	Error   *string `json:"error"`
+}
+
+func outcome(o, msg string) CaseOutcome {
+	if msg == "" {
+		return CaseOutcome{Outcome: o}
+	}
+	return CaseOutcome{Outcome: o, Error: &msg}
+}
+
+// setOutcomes gives every case of d the same outcome.
+func setOutcomes(d *ItemDraft, o, msg string) {
+	for i := range d.TestCases {
+		d.TestCases[i].outcome = outcome(o, msg)
+	}
 }
 
 // DraftCheck summarises running a draft's reference solution on its test
@@ -65,6 +91,8 @@ type DraftCheck struct {
 	Total     int           `json:"total"`
 	Error     *string       `json:"error"`
 	Runners   []RunnerCheck `json:"runners"`
+	// LargeCase is nil unless the request asked for a large test case.
+	LargeCase *LargeCaseReport `json:"largeCase"`
 }
 
 // ItemDraft is a proposed item, mapping onto ItemInput.
@@ -97,6 +125,8 @@ type DraftInput struct {
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
+	// LargeTestCase asks for a large test case as well.
+	LargeTestCase bool `json:"largeTestCase"`
 }
 
 func styleOf(p *domain.StylePreset) (*ai.Style, *domain.StyleRef) {
@@ -163,17 +193,19 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 		return DraftResponse{}, err
 	}
 	style, ref := styleOf(preset)
+	large := in.LargeTestCase && hint != "reading"
 	system, user := ai.DraftPrompt{Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
-		PreviousDraft: prev, Toolchains: a.toolchains(ctx)}.Build()
+		PreviousDraft: prev, Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(large)}.Build()
 	var draft ItemDraft
+	var gen *ai.ModelLargeCase
 	subject := &logSubject{}
 	usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.DraftSchema(),
+		Schema:     ai.DraftSchema(large),
 		SchemaName: "item_draft",
 	}, func(raw json.RawMessage) (err error) {
-		if draft, err = a.parseDraft(raw, hint, iface); err == nil {
+		if draft, gen, err = a.parseDraft(raw, hint, iface); err == nil {
 			subject.Title = &draft.Title
 		}
 		return err
@@ -181,7 +213,7 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft), Usage: usage}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gen), Usage: usage}, nil
 }
 
 // previousDraft re-encodes an optional previous ItemDraft compactly for the
@@ -195,6 +227,8 @@ func previousDraft(raw json.RawMessage) (string, string) {
 	if json.Unmarshal(p, &obj) != nil {
 		return "", "must be an ItemDraft object"
 	}
+	// Large test data never goes into a prompt.
+	elidePreviousDraft(obj)
 	b, err := json.Marshal(obj)
 	if err != nil {
 		return "", "must be an ItemDraft object"
@@ -209,10 +243,20 @@ func previousDraft(raw json.RawMessage) (string, string) {
 // repaired (the draft is reviewed by the user before saving); structural
 // problems are upstream errors. iface, unless "auto", is the interface a
 // problem gets whatever the model chose.
-func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, error) {
+// The generator of a large test case, if the model wrote one, is returned
+// apart: it is not part of the draft.
+func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, *ai.ModelLargeCase, error) {
+	d, m, err := a.decodeDraft(raw, hint, iface)
+	if err != nil || d.Type != domain.TypeProblem {
+		return d, nil, err
+	}
+	return d, m.LargeCase, nil
+}
+
+func (a *App) decodeDraft(raw json.RawMessage, hint, iface string) (ItemDraft, ai.ModelDraft, error) {
 	var m ai.ModelDraft
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft that does not match the schema"}
+		return ItemDraft{}, m, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft that does not match the schema"}
 	}
 	d := ItemDraft{Type: domain.ItemType(m.Type), Summary: strings.TrimSpace(m.Summary), Body: m.Body,
 		Tags: []string{}, TestCases: []DraftTestCase{}, Assumptions: []string{}}
@@ -223,16 +267,16 @@ func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, er
 		if m.Problem != nil {
 			d.Type = domain.TypeProblem
 		} else {
-			return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a valid type"}
+			return ItemDraft{}, m, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a valid type"}
 		}
 	}
 	d.Title = truncateRunes(oneLine(m.Title), domain.MaxTitleChars)
 	if d.Title == "" {
-		return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a title"}
+		return ItemDraft{}, m, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft without a title"}
 	}
 	d.Summary = truncateRunes(d.Summary, domain.MaxSummaryChars)
 	if len(d.Body) > domain.MaxTextBytes {
-		return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a body that is too long"}
+		return ItemDraft{}, m, &Error{Code: CodeUpstream, Message: "the AI provider returned a body that is too long"}
 	}
 	if m.Difficulty != nil {
 		if diff := domain.Difficulty(*m.Difficulty); diff.Valid() {
@@ -316,7 +360,7 @@ func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, er
 				Stdin: tc.Stdin, ExpectedStdout: tc.ExpectedStdout, IsSample: tc.IsSample})
 		}
 	}
-	return d, nil
+	return d, m, nil
 }
 
 // oneLine joins a model-written single-line value onto one line.
@@ -360,6 +404,7 @@ type VariantInput struct {
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
+	LargeTestCase bool               `json:"largeTestCase"`
 }
 
 // Variant drafts a new item derived from an existing one. Nothing is saved.
@@ -407,10 +452,14 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 			return DraftResponse{}, err
 		}
 		for _, c := range cases.Items {
-			if c.IsSample && len(samples) < 3 {
-				samples = append(samples, map[string]any{
-					"stdin": domain.Truncate(c.Stdin, 4096), "expectedStdout": domain.Truncate(c.ExpectedStdout, 4096)})
+			if !c.IsSample || len(samples) >= 3 {
+				continue
 			}
+			if isLargeData(c.Stdin, c.ExpectedStdout) {
+				samples = append(samples, map[string]any{"name": c.Name, "omitted": largeCaseInfo(c.Stdin, c.ExpectedStdout)})
+				continue
+			}
+			samples = append(samples, map[string]any{"stdin": c.Stdin, "expectedStdout": c.ExpectedStdout})
 		}
 	}
 	preset, err := a.resolveStyle(ctx, in.StyleID)
@@ -444,42 +493,46 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
 	style, ref := styleOf(preset)
+	large := in.LargeTestCase && it.Type == domain.TypeProblem
 	system, user := ai.VariantPrompt{Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
-		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx)}.Build()
+		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(large)}.Build()
 	forced := iface
 	if forced == "" {
 		forced = "auto"
 	}
 	var draft ItemDraft
+	var gen *ai.ModelLargeCase
 	usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.DraftSchema(),
+		Schema:     ai.DraftSchema(large),
 		SchemaName: "item_draft",
 	}, func(raw json.RawMessage) (err error) {
-		draft, err = a.parseDraft(raw, string(it.Type), forced)
+		draft, gen, err = a.parseDraft(raw, string(it.Type), forced)
 		return err
 	})
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft), Usage: usage}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gen), Usage: usage}, nil
 }
 
 // GenerateTestCasesInput is the body of POST /items/{id}/ai/testcases.
 type GenerateTestCasesInput struct {
-	Count       domain.Opt[int]    `json:"count"`
-	Language    string             `json:"language"`
-	Instruction domain.Opt[string] `json:"instruction"`
+	LargeTestCase bool               `json:"largeTestCase"`
+	Count         domain.Opt[int]    `json:"count"`
+	Language      string             `json:"language"`
+	Instruction   domain.Opt[string] `json:"instruction"`
 }
 
 // GeneratedCase is one proposed test case.
 type GeneratedCase struct {
-	Name              string  `json:"name"`
-	Rationale         string  `json:"rationale"`
-	Stdin             string  `json:"stdin"`
-	ExpectedStdout    string  `json:"expectedStdout"`
-	PredictedStdout   string  `json:"predictedStdout"`
+	Name            string  `json:"name"`
+	Rationale       string  `json:"rationale"`
+	Stdin           string  `json:"stdin"`
+	ExpectedStdout  string  `json:"expectedStdout"`
+	PredictedStdout *string `json:"predictedStdout"` // nil for the large case
+
 	IsSample          bool    `json:"isSample"`
 	Verified          bool    `json:"verified"`
 	PredictionMatched *bool   `json:"predictionMatched"`
@@ -499,9 +552,11 @@ type GenerateTestCasesResponse struct {
 	Verification      Verification    `json:"verification"`
 	// DuplicatesDropped counts proposed cases whose stdin the problem, or
 	// an earlier proposal, already had.
-	DuplicatesDropped int             `json:"duplicatesDropped"`
-	Usage             Usage           `json:"usage"`
-	Cases             []GeneratedCase `json:"cases"`
+	DuplicatesDropped int   `json:"duplicatesDropped"`
+	Usage             Usage `json:"usage"`
+	// LargeCase is nil unless the request asked for a large test case.
+	LargeCase *LargeCaseReport `json:"largeCase"`
+	Cases     []GeneratedCase  `json:"cases"`
 }
 
 // GenerateTestCases asks the model for a reference solution and inputs, then
@@ -560,37 +615,70 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	}
 	system, user := ai.TestCasesPrompt{Problem: string(problemJSON), Function: function, Count: count, Language: lang,
 		ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
-		Toolchains: a.toolchains(ctx)}.Build()
+		Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(in.LargeTestCase)}.Build()
 	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}}
+	var gen *ai.ModelLargeCase
 	out.Usage, err = a.generate(ctx, "testcases", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.TestCasesSchema(lang, function),
+		Schema:     ai.TestCasesSchema(lang, function, in.LargeTestCase),
 		SchemaName: "test_cases",
-	}, func(raw json.RawMessage) error { return a.parseTestCases(raw, lang, count, existingCases.Items, &out) })
+	}, func(raw json.RawMessage) error {
+		var err error
+		gen, err = a.parseTestCases(raw, lang, count, existingCases.Items, &out)
+		return err
+	})
 	if err != nil {
 		return GenerateTestCasesResponse{}, err
 	}
 	if len(out.Cases) > 0 {
 		a.verifyGenerated(ctx, it, h, &out)
 	}
+	if in.LargeTestCase {
+		// After the proposed cases, never repeating them or the stored ones.
+		var known []namedInput
+		for _, c := range existingCases.Items {
+			known = append(known, namedInput{c.Name, c.Stdin})
+		}
+		for _, c := range out.Cases {
+			known = append(known, namedInput{c.Name, c.Stdin})
+		}
+		ref := out.ReferenceSolution
+		report, lc := a.buildLargeCase(ctx, it.Problem, gen, &ref, known)
+		if lc != nil {
+			out.Cases = append(out.Cases, GeneratedCase{Name: lc.Name, Rationale: lc.Rationale, Stdin: lc.Stdin,
+				ExpectedStdout: lc.Expected, Verified: true})
+			i := len(out.Cases) - 1
+			report.Index = &i
+		}
+		out.LargeCase = report
+	}
 	return out, nil
+}
+
+// largeBytes is the cap a prompt states for a requested large case, or 0.
+func largeBytes(asked bool) int {
+	if !asked {
+		return 0
+	}
+	return MaxLargeInputBytes
 }
 
 // parseTestCases decodes the model's test cases into out, leaving out those
 // whose stdin repeats an existing case or an earlier proposal.
-func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existing []domain.TestCase, out *GenerateTestCasesResponse) error {
+func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existing []domain.TestCase,
+	out *GenerateTestCasesResponse) (*ai.ModelLargeCase, error) {
 	var m ai.ModelTestCases
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
+		return nil, &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
 	}
 	if m.ReferenceSolution.Language != lang {
-		return &Error{Code: CodeUpstream, Message: fmt.Sprintf(
+		return nil, &Error{Code: CodeUpstream, Message: fmt.Sprintf(
 			"the AI provider wrote the reference solution in %q instead of the requested %q", m.ReferenceSolution.Language, lang)}
 	}
 	out.ReferenceSolution = domain.Solution{Language: lang, Source: m.ReferenceSolution.Source}
 	if fe := domain.ValidateSolution(out.ReferenceSolution, a.limits); len(fe) > 0 {
-		return &Error{Code: CodeUpstream, Message: "the AI provider returned an unusable reference solution: " + fe.First()}
+		return nil, &Error{Code: CodeUpstream, Message: "the AI provider returned an unusable reference solution: " + fe.First()}
 	}
 	seen := map[string]bool{}
 	for _, c := range existing {
@@ -609,15 +697,16 @@ func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existi
 		} else {
 			seen[key] = true
 		}
+		predicted := c.PredictedStdout
 		out.Cases = append(out.Cases, GeneratedCase{
 			Name: truncateRunes(strings.TrimSpace(c.Name), domain.MaxTestCaseNameChars), Rationale: strings.TrimSpace(c.Rationale),
-			Stdin: c.Stdin, PredictedStdout: c.PredictedStdout, ExpectedStdout: c.PredictedStdout, IsSample: c.IsSample,
+			Stdin: c.Stdin, PredictedStdout: &predicted, ExpectedStdout: c.PredictedStdout, IsSample: c.IsSample,
 		})
 	}
-	if len(out.Cases) == 0 && out.DuplicatesDropped == 0 {
-		return &Error{Code: CodeUpstream, Message: "the AI provider proposed no usable test cases"}
+	if len(out.Cases) == 0 && out.DuplicatesDropped == 0 && m.LargeCase == nil {
+		return nil, &Error{Code: CodeUpstream, Message: "the AI provider proposed no usable test cases"}
 	}
-	return nil
+	return m.LargeCase, nil
 }
 
 // sameInput is what two test inputs are compared by: trailing whitespace
@@ -627,13 +716,12 @@ func sameInput(stdin string) string { return strings.TrimRight(stdin, " \t\r\n")
 // Bounds on the existing cases shown to the model when it proposes more.
 const (
 	maxShownCases      = 40
-	maxShownStdinBytes = 1500
 	maxShownCasesBytes = 32 << 10
 )
 
 // existingCasesText lists a problem's test inputs for the model, so that
 // it adds to them rather than repeating them: names and stdin, in order,
-// long inputs cut and the list bounded.
+// a large case by its name and size only, and the list bounded.
 func existingCasesText(cases []domain.TestCase) string {
 	var b strings.Builder
 	for i, c := range cases {
@@ -642,8 +730,8 @@ func existingCasesText(cases []domain.TestCase) string {
 			break
 		}
 		stdin := c.Stdin
-		if len(stdin) > maxShownStdinBytes {
-			stdin = domain.Truncate(stdin, maxShownStdinBytes) + fmt.Sprintf("\n… (cut; %d bytes in all)", len(c.Stdin))
+		if isLargeData(c.Stdin, c.ExpectedStdout) {
+			stdin = largeCaseInfo(c.Stdin, c.ExpectedStdout)
 		}
 		name := oneLine(c.Name)
 		if name == "" {
@@ -697,7 +785,7 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 			allFailed = false
 			c.ExpectedStdout = e.Result.Stdout
 			c.Verified = true
-			matched := grader.Match(it.Problem.Compare, c.PredictedStdout, e.Result.Stdout)
+			matched := grader.Match(it.Problem.Compare, *c.PredictedStdout, e.Result.Stdout)
 			c.PredictionMatched = &matched
 			continue
 		}
@@ -749,10 +837,14 @@ func validationText(err error) string {
 // model can return up to MaxGeneratedCases of them. The time bound keeps a
 // draft that took the provider's whole timeout (5 minutes by default)
 // within the HTTP API's 6-minute deadline for AI requests.
-const (
-	maxDraftCheckCases = 10
-	draftCheckTimeout  = 50 * time.Second
-)
+var draftCheckBounds = checkBounds{maxCases: 10, timeout: 50 * time.Second}
+
+// checkBounds bound a check: how many test cases it runs (0: all) and for
+// how long.
+type checkBounds struct {
+	maxCases int
+	timeout  time.Duration
+}
 
 // checkDraft runs a problem draft's reference solution on its test cases
 // (through the harness for a function problem) and marks each case that
@@ -762,21 +854,58 @@ const (
 // draft: an absent or unreachable engine, a compile error or a timeout are
 // reported in the check. Nothing in the draft other than the flags is
 // changed. Both parts share one time bound, the reference solution first.
-func (a *App) checkDraft(ctx context.Context, d *ItemDraft) *DraftCheck {
+//
+// With large, the large test case is built after the other cases and
+// before the runners, in the same time bound; the 10-case cap does not
+// apply to it. Added, it is the draft's last test case and counts in
+// passed and total.
+func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large bool, gen *ai.ModelLargeCase) *DraftCheck {
 	if d.Type != domain.TypeProblem || d.Problem == nil {
 		return nil
 	}
 	c := &DraftCheck{Total: len(d.TestCases), Runners: []RunnerCheck{}}
 	ref := d.Problem.ReferenceSolution
 	if a.engine == nil || ref == nil || len(d.TestCases) == 0 {
+		if large {
+			// Nothing runs when the check is not attempted.
+			reason := "the draft has no test case to check the reference solution on"
+			switch {
+			case a.engine == nil:
+				reason = "no judge engine is configured"
+			case ref == nil:
+				reason = "there is no reference solution to compute the expected output"
+			}
+			c.LargeCase = newLargeCaseReport(gen).fail("skipped", "%s", reason)
+		}
 		return c
 	}
 	name := a.engine.Name()
 	c.Attempted, c.Engine = true, &name
-	ctx, cancel := context.WithTimeout(ctx, draftCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
-	if msg := a.checkReference(ctx, d, c); msg != "" {
+	msg, refFailed := a.checkReference(ctx, d, c, b.maxCases)
+	if msg != "" {
 		c.Error = &msg
+	}
+	if large && refFailed {
+		// Its expected output would come from a reference solution that
+		// just failed: it would be marked verified and probably be wrong.
+		c.LargeCase = newLargeCaseReport(gen).fail("skipped", "the reference solution did not pass the other test cases")
+	} else if large {
+		known := make([]namedInput, len(d.TestCases))
+		for i, tc := range d.TestCases {
+			known[i] = namedInput{tc.Name, tc.Stdin}
+		}
+		report, lc := a.buildLargeCase(ctx, d.Problem.spec(), gen, ref, known)
+		if lc != nil {
+			d.TestCases = append(d.TestCases, DraftTestCase{Name: lc.Name, Stdin: lc.Stdin, ExpectedStdout: lc.Expected,
+				Verified: true})
+			i := len(d.TestCases) - 1
+			report.Index = &i
+			c.Passed++
+			c.Total++
+		}
+		c.LargeCase = report
 	}
 	if d.Problem.Interface == domain.InterfaceFunction {
 		c.Runners = a.checkRunners(ctx, d)
@@ -785,40 +914,71 @@ func (a *App) checkDraft(ctx context.Context, d *ItemDraft) *DraftCheck {
 }
 
 // checkReference runs the reference solution on the cases and returns the
-// first failure in plain words, or "".
-func (a *App) checkReference(ctx context.Context, d *ItemDraft, c *DraftCheck) string {
+// first problem in plain words, or "", and whether the reference solution
+// failed: did not run or compile, or failed a case it reached. Cases left
+// out by the cap or the time bound are not failures.
+func (a *App) checkReference(ctx context.Context, d *ItemDraft, c *DraftCheck, maxCases int) (msg string, failed bool) {
 	ref := d.Problem.ReferenceSolution
 	spec := d.Problem.spec()
 	h, ok := spec.HarnessFor(ref.Language)
 	if !ok {
-		return "the reference solution cannot run: " + noHarnessMessage(spec, ref.Language)
+		msg := "the reference solution cannot run: " + noHarnessMessage(spec, ref.Language)
+		setOutcomes(d, "failed", msg)
+		return msg, true
 	}
 	if err := a.requireLanguage(ctx, ref.Language); err != nil {
-		return "the reference solution could not be run: " + validationText(err)
+		msg := "the reference solution could not be run: " + validationText(err)
+		if AsError(err).Code == CodeJudgeUnavailable {
+			setOutcomes(d, "not_run", msg)
+		} else {
+			setOutcomes(d, "failed", msg)
+		}
+		return msg, false
 	}
 	prog, _, err := a.runnable(ctx, spec, ref.Language, h, ref.Source, "referenceSolution")
 	if err != nil {
-		return "the reference solution cannot run: " + validationText(err)
+		msg := "the reference solution cannot run: " + validationText(err)
+		setOutcomes(d, "failed", msg)
+		return msg, true
 	}
-	cases := d.TestCases[:min(len(d.TestCases), maxDraftCheckCases)]
+	cases := d.TestCases
+	if maxCases > 0 {
+		cases = cases[:min(len(cases), maxCases)]
+	}
+	setOutcomes(d, "not_run", fmt.Sprintf("only the first %d test cases are checked", len(cases)))
 	stdins := make([]string, len(cases))
 	for i, tc := range cases {
 		stdins[i] = tc.Stdin
 	}
 	execs := a.grader.RunAll(ctx, prog, stdins, nil)
 	if execs[0].CompileFailed() {
-		return "the reference solution does not compile: " +
+		msg := "the reference solution does not compile: " +
 			domain.Truncate(strings.TrimSpace(execs[0].Result.CompileOutput), 2000)
+		setOutcomes(d, "failed", msg)
+		return msg, true
 	}
 	first, reached := "", 0
 	for i, e := range execs {
+		tc := &d.TestCases[i]
 		if e.Err != nil && ctx.Err() != nil {
-			continue // not reached in time
+			tc.outcome = outcome("not_run", "the check's time ran out")
+			continue
 		}
 		reached++
-		tc := &d.TestCases[i]
 		exp := tc.ExpectedStdout
 		v := grader.Verdict(d.Problem.Compare, e, &exp)
+		switch {
+		case v == domain.VerdictAccepted:
+			tc.outcome = outcome("passed", "")
+		case v == domain.VerdictWrongAnswer:
+			tc.outcome = outcome("wrong", "")
+		case errors.Is(e.Err, judge.ErrNotRun):
+			tc.outcome = outcome("not_run", "the judge engine failed on an earlier test case, so this one was not run")
+		case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+			tc.outcome = outcome("not_run", describeFailure(v, e))
+		default:
+			tc.outcome = outcome("failed", describeFailure(v, e))
+		}
 		if v == domain.VerdictAccepted {
 			tc.Verified = true
 			c.Passed++
@@ -830,13 +990,13 @@ func (a *App) checkReference(ctx context.Context, d *ItemDraft, c *DraftCheck) s
 	}
 	switch {
 	case first != "":
-		return first
+		return first, true
 	case reached < len(cases):
-		return fmt.Sprintf("the check ran out of time after %d of %d test cases", reached, len(d.TestCases))
+		return fmt.Sprintf("the check ran out of time after %d of %d test cases", reached, len(d.TestCases)), false
 	case len(cases) < len(d.TestCases):
-		return fmt.Sprintf("only the first %d test cases were checked", len(cases))
+		return fmt.Sprintf("only the first %d test cases were checked", len(cases)), false
 	}
-	return ""
+	return "", false
 }
 
 // RunnerCheck says whether one language's starter code ran in its harness.

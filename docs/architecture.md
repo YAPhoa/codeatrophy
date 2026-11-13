@@ -374,6 +374,9 @@ independent:
   code, which is written to compile and run with a placeholder result, runs
   unchanged on the first example in the time the reference solution left
   (the languages in parallel), and any answer counts as a working runner.
+  The same check runs on demand for a problem that is not saved yet (a
+  draft after editing), on every test case and within five minutes, without
+  an AI provider.
   The prompts tell the model which languages and versions the judge runs
   (Judge0 ships old toolchains: Python 3.8, Java 13, Go 1.13, ...), and the
   conventions require a Python harness prefix to start with
@@ -394,6 +397,19 @@ independent:
   whose input repeats an existing or earlier one (ignoring trailing
   whitespace) is dropped and counted; a draft's own repeated inputs are
   dropped too.
+- **Large test case.** Models write small inputs by hand, so on request a
+  generation also asks for a *generator*: a deterministic program that reads
+  nothing and prints one input near the statement's bounds, in the shape
+  that makes a slow solution run out of time. The server runs it in the
+  judge as a plain program (10 s, 512 MB), refuses an output over 1 MiB,
+  empty, not UTF-8 or repeating an existing input, then runs the reference
+  solution on it under the problem's own limits for the expected output, and
+  appends the result as an ordinary hidden test case. In a draft this runs
+  after the other cases and before the runners, inside the check's time
+  bound and outside its 10-case cap. The generator itself is not stored.
+  Large test data never enters a prompt (and so never the AI log): wherever
+  a prompt lists test cases, one larger than 4 KiB is named with its size
+  instead.
 - **Variants.** From an existing item the model drafts a related new one — the
   same technique in a different setting, an easier or harder version, or a
   twist that breaks the original approach. A saved variant keeps a `variantOf`

@@ -1,4 +1,4 @@
-import type { Difficulty, GenerationUsage, ItemStatus, ItemType, TestOrigin, TokenUsage, UsageTotals, Verdict } from '../api/types';
+import type { Difficulty, GenerationUsage, ItemStatus, ItemType, TestOrigin, TokenUsage, Verdict } from '../api/types';
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
   todo: 'To do',
@@ -153,18 +153,6 @@ export function describeTokens(usage: TokenUsage): string {
 export function describeUsage(usage: GenerationUsage): string {
   return [usage.model, describeTokens(usage), usage.durationMs > 0 ? formatDuration(usage.durationMs) : '']
     .filter((part) => part !== '')
-    .join(' · ');
-}
-
-/** What a provider was used for over a period; failed requests and tokens only when there are any. */
-export function describeTotals(totals: UsageTotals): string {
-  if (totals.requests === 0) return 'No requests';
-  return [
-    plural(totals.requests, 'request'),
-    totals.failed > 0 ? `${totals.failed} failed` : null,
-    ...(totals.inputTokens > 0 || totals.outputTokens > 0 ? [`${formatTokens(totals.inputTokens)} in`, `${formatTokens(totals.outputTokens)} out`] : []),
-  ]
-    .filter((part) => part !== null)
     .join(' · ');
 }
 

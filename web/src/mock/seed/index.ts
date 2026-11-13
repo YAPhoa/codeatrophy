@@ -557,7 +557,7 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
     source: { url: p.sourceUrl ?? null, note: p.sourceNote ?? null },
     problem: p.solutionOnly
       ? { ...structuredClone(DEFAULT_PROBLEM), interface: 'function', ...structuredClone(p.solutionOnly) }
-      : { ...structuredClone(DEFAULT_PROBLEM), starterCode: starterCode(p.languages) },
+      : { ...structuredClone(DEFAULT_PROBLEM), starterCode: { ...starterCode(p.languages), ...p.starter } },
     variantOf: variantOf ? itemId(variantOf.n) : null,
     revision: p.revision ?? 1,
     createdAt: at(p.created),

@@ -94,7 +94,7 @@ export function Notes({ item }: { item: Item }) {
         <textarea
           className="input textarea notes-text"
           aria-label="Private notes (Markdown)"
-          placeholder="Your approach, what tripped you up, things to revisit… Markdown works. Only you see this."
+          placeholder="Approach, gotchas, or things to revisit... (Markdown supported)"
           value={text}
           onChange={(e) => {
             latest.current.text = e.target.value;

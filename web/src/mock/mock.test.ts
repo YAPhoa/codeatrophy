@@ -102,6 +102,7 @@ describe('meta and stats', () => {
       maxInstructionChars: 2000,
       maxPreviousDraftBytes: 2097152,
       maxGeneratedTestCases: 30,
+      maxLargeInputBytes: 1048576,
       maxStylePresets: 20,
       maxStyleNameChars: 60,
       maxStyleInstructionsChars: 2000,
@@ -112,7 +113,7 @@ describe('meta and stats', () => {
       maxBundleNameChars: 200,
       maxBundleDescriptionChars: 5000,
     });
-    expect(Object.keys(meta.limits)).toHaveLength(37);
+    expect(Object.keys(meta.limits)).toHaveLength(38);
     expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
     expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
       'c GCC 9.2.0',
@@ -1439,7 +1440,7 @@ describe('AI drafting', () => {
 
   it('checks the reference solution against the draft\'s test cases', async () => {
     const good = await api.ai.draft({ text: 'two sum', styleId: null });
-    expect(good.check).toEqual({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: KIT_LANGUAGES.map((language) => ({ language, status: 'ok', error: null })).sort((a, b) => a.language.localeCompare(b.language)) });
+    expect(good.check).toEqual({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: KIT_LANGUAGES.map((language) => ({ language, status: 'ok', error: null })).sort((a, b) => a.language.localeCompare(b.language)), largeCase: null });
     expect(good.draft.testCases.every((c) => c.verified)).toBe(true);
 
     // The mock can be asked for an example its own solution disagrees with.
@@ -1452,7 +1453,7 @@ describe('AI drafting', () => {
 
     start({ judge: 'none' });
     const none = await api.ai.draft({ text: 'two sum', styleId: null });
-    expect(none.check).toEqual({ attempted: false, engine: null, passed: 0, total: 2, error: null, runners: [] });
+    expect(none.check).toEqual({ attempted: false, engine: null, passed: 0, total: 2, error: null, runners: [], largeCase: null });
     expect(none.draft.testCases.some((c) => c.verified)).toBe(false);
     expect(none.draft.problem!.referenceSolution).not.toBeNull();
 
@@ -1798,6 +1799,168 @@ describe('AI test cases', () => {
       expect(c).toMatchObject({ verified: false, predictionMatched: null });
       expect(c.expectedStdout).toBe(c.predictedStdout);
     }
+  });
+});
+
+describe('checking a problem that is not saved', () => {
+  const problem = { interface: 'program' as const, compare: 'tokens' as const, timeLimitMs: 2000, referenceSolution: { language: 'python', source: 'print(1)' } };
+  const cases = [
+    { name: 'One', stdin: '1\n', expectedStdout: '1\n' },
+    { name: 'Two', stdin: '2\n', expectedStdout: '2\n' },
+    { name: 'Three', stdin: '3\n', expectedStdout: '3\n' },
+    { name: 'Four', stdin: '4\n', expectedStdout: '4\n' },
+  ];
+  const passed = { outcome: 'passed', error: null };
+
+  it('runs the reference solution on every case and stores nothing', async () => {
+    const before = (await api.items.list()).total;
+    const res = await api.items.check({ problem, testCases: cases });
+    expect(res).toEqual({ check: { attempted: true, engine: 'judge0', passed: 4, total: 4, error: null, runners: [], largeCase: null }, cases: [passed, passed, passed, passed] });
+    expect((await api.items.list()).total).toBe(before);
+  });
+
+  it('tells a wrong case from one the solution failed on, and names the first', async () => {
+    const marked = cases.map((c, i) => (i === 1 ? { ...c, expectedStdout: '2 MOCK:WA\n' } : i === 2 ? { ...c, stdin: '3 MOCK:RE\n' } : c));
+    const res = await api.items.check({ problem, testCases: marked });
+    expect(res.cases.map((c) => c.outcome)).toEqual(['passed', 'wrong', 'failed', 'passed']);
+    expect(res.cases[1]!.error).toBeNull();
+    expect(res.cases[2]!.error).toMatch(/crashed/);
+    expect(res.check).toMatchObject({ attempted: true, passed: 2, total: 4 });
+    expect(res.check.error).toMatch(/^Two: expected 2 MOCK:WA, but the reference solution printed /);
+  });
+
+  it('reports what stopped the check, and the cases it did not get to', async () => {
+    const slow = await api.items.check({ problem: { ...problem, referenceSolution: { language: 'python', source: 'print(1)  # MOCK:TIMEOUT' } }, testCases: cases });
+    expect(slow.cases.map((c) => c.outcome)).toEqual(['passed', 'passed', 'not_run', 'not_run']);
+    expect(slow.check).toMatchObject({ passed: 2, error: 'the check ran out of time after 2 of 4 test cases' });
+    const broken = await api.items.check({ problem: { ...problem, referenceSolution: { language: 'python', source: 'print( # MOCK:CE' } }, testCases: cases });
+    expect(broken.check).toMatchObject({ attempted: true, passed: 0, error: 'the reference solution did not compile' });
+    expect(broken.cases.every((c) => c.outcome === 'failed')).toBe(true);
+    const none = await api.items.check({ problem: { ...problem, referenceSolution: null }, testCases: cases });
+    expect(none.check).toMatchObject({ attempted: false, error: null });
+    expect(none.cases.every((c) => c.outcome === 'not_run')).toBe(true);
+    start({ judge: 'none' });
+    expect((await api.items.check({ problem, testCases: cases })).check).toMatchObject({ attempted: false, engine: null });
+    start({ judge: 'down' });
+    const down = await api.items.check({ problem, testCases: cases });
+    expect(down.check.error).toMatch(/unreachable/);
+    expect(down.cases.every((c) => c.outcome === 'not_run')).toBe(true);
+  });
+
+  it('validates the problem and the test cases as for a new item, and ignores the rest', async () => {
+    expect((await failure(api.items.check({ testCases: cases } as never))).fields).toEqual({ problem: 'is required' });
+    expect((await failure(api.items.check({ type: 'reading', problem, testCases: cases } as never))).fields).toEqual({ type: 'must be problem' });
+    expect((await failure(api.items.check({ problem: { ...problem, timeLimitMs: 5 }, testCases: cases }))).fields).toHaveProperty(['problem.timeLimitMs']);
+    expect((await failure(api.items.check({ problem, testCases: [{ stdin: '1' } as never] }))).fields).toEqual({ 'testCases.0.expectedStdout': 'is required' });
+    expect((await failure(api.items.check({ problem: { ...problem, harness: { python: { prefix: 'a', suffix: 'b' } } }, testCases: cases }))).fields).toHaveProperty(['problem.harness']);
+    const whole = { type: 'problem', title: 'Anything', tags: ['x'], problem, testCases: cases };
+    expect((await api.items.check(whole as never)).check.passed).toBe(4);
+  });
+});
+
+describe('large test case', () => {
+  const large = (text: string) => text.length > 100_000;
+
+  it('is built only when asked for, appended to a draft and counted in its check', async () => {
+    const plain = await api.ai.draft({ text: 'two sum', interfaceHint: 'program' });
+    expect(plain.check!.largeCase).toBeNull();
+    expect(plain.draft.testCases.some((c) => large(c.stdin))).toBe(false);
+
+    const res = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCase: true });
+    const cases = res.draft.testCases;
+    const report = res.check!.largeCase!;
+    expect(report).toMatchObject({ status: 'added', error: null, index: cases.length - 1 });
+    expect(report.generator).toMatchObject({ language: 'python' });
+    expect(report.generator!.source).toContain('random.seed(');
+    const added = cases[cases.length - 1]!;
+    expect(added).toMatchObject({ name: report.name, isSample: false, verified: true });
+    // A few hundred kilobytes, within the bound, as the report says.
+    expect(report.inputBytes).toBe(new TextEncoder().encode(added.stdin).length);
+    expect(report.inputBytes).toBeGreaterThan(200_000);
+    expect(report.inputBytes).toBeLessThanOrEqual(LIMITS.maxLargeInputBytes);
+    expect(report.timeMs).toBeGreaterThan(0);
+    expect(report.timeMs).toBeLessThan(res.draft.problem!.timeLimitMs);
+    expect(res.check).toMatchObject({ passed: cases.length, total: cases.length });
+    // The model did not write it, so it does not count towards the tokens.
+    expect(res.usage.outputTokens).toBeLessThan(plain.usage.outputTokens! * 2);
+    // The same input every time.
+    const again = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCase: true });
+    expect(again.draft.testCases.at(-1)!.stdin).toBe(added.stdin);
+  });
+
+  it('takes the problem\'s input convention, and is ignored for a reading', async () => {
+    const fn = await api.ai.draft({ text: 'two sum', interfaceHint: 'function', largeTestCase: true });
+    expect(fn.draft.testCases.at(-1)!.stdin).toMatch(/^\[-?\d+,/);
+    const reading = await api.ai.draft({ text: 'notes on consistent hashing', typeHint: 'reading', largeTestCase: true });
+    expect(reading.check).toBeNull();
+    expect(reading.draft.testCases).toEqual([]);
+  });
+
+  it('reports a failed or skipped large case, and adds nothing', async () => {
+    const failed = await api.ai.draft({ text: 'two sum MOCK:LARGE-FAIL', interfaceHint: 'program', largeTestCase: true });
+    expect(failed.check!.largeCase).toMatchObject({ status: 'failed', index: null, inputBytes: null, timeMs: null });
+    expect(failed.check!.largeCase!.error).toMatch(/generator crashed/);
+    expect(failed.check!.passed).toBe(failed.check!.total);
+    expect(failed.draft.testCases.some((c) => large(c.stdin))).toBe(false);
+
+    const skipped = await api.ai.draft({ text: 'two sum MOCK:LARGE-SKIP', interfaceHint: 'program', largeTestCase: true });
+    expect(skipped.check!.largeCase).toMatchObject({ status: 'skipped', index: null });
+    expect(skipped.check!.largeCase!.error).toMatch(/ran out of time/);
+
+    start({ judge: 'none' });
+    const noJudge = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCase: true });
+    expect(noJudge.check!.largeCase).toMatchObject({ status: 'skipped', error: 'there is no judge engine' });
+    start({ judge: 'down' });
+    expect((await api.ai.draft({ text: 'two sum', largeTestCase: true })).check!.largeCase).toMatchObject({ status: 'skipped', error: 'the judge engine could not be reached' });
+  });
+
+  it('is asked for on a variant and its revision too', async () => {
+    const res = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', largeTestCase: true });
+    expect(res.check!.largeCase!.status).toBe('added');
+    expect(large(res.draft.testCases.at(-1)!.stdin)).toBe(true);
+    const revised = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', instruction: 'shorter', previousDraft: res.draft, largeTestCase: false });
+    expect(revised.check!.largeCase).toBeNull();
+  });
+
+  it('is proposed after the counted cases, without a prediction', async () => {
+    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 4, largeTestCase: true });
+    expect(res.cases).toHaveLength(5);
+    expect(res.largeCase).toMatchObject({ status: 'added', index: 4 });
+    expect(res.cases[4]).toMatchObject({ name: res.largeCase!.name, isSample: false, verified: true, predictedStdout: null, predictionMatched: null, error: null });
+    expect(large(res.cases[4]!.stdin)).toBe(true);
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 4 })).largeCase).toBeNull();
+
+    const failed = await api.ai.testCases(seedIds.items.twoSum, { count: 2, largeTestCase: true, instruction: 'MOCK:LARGE-FAIL' });
+    expect(failed.largeCase!.status).toBe('failed');
+    expect(failed.cases).toHaveLength(2);
+    start({ judge: 'none' });
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, largeTestCase: true })).largeCase!.status).toBe('skipped');
+  });
+
+  it('is saved like any case, never sent to the model, and cut to 64 KiB in results', async () => {
+    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 1, largeTestCase: true });
+    const big = res.cases[1]!;
+    await api.testCases.bulk(seedIds.items.twoSum, { cases: [{ name: big.name, stdin: big.stdin, expectedStdout: big.expectedStdout, origin: 'ai', verified: true }] });
+    // The next generation lists the stored case by its name and size only.
+    const next = await api.ai.testCases(seedIds.items.twoSum, { count: 1 });
+    const entry = await api.settings.logEntry(next.usage.logId!);
+    const prompt = JSON.stringify(entry.request);
+    expect(prompt).toContain(big.name);
+    expect(prompt).not.toContain(big.stdin.slice(0, 2000));
+    expect(prompt.length).toBeLessThan(50_000);
+
+    const { id } = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source: 'print(1)', mode: 'submit', stdin: null });
+    const { final } = await judged(id);
+    const result = final.results.find((r) => r.name === big.name)!;
+    expect(new TextEncoder().encode(result.stdin).length).toBe(64 * 1024);
+    expect(big.stdin.startsWith(result.stdin)).toBe(true);
+  });
+
+  it('rejects a flag that is not a boolean', async () => {
+    expect((await failure(api.ai.draft({ text: 'two sum', largeTestCase: 'yes' as never }))).fields).toEqual({ largeTestCase: 'must be a boolean' });
+    expect((await failure(api.ai.variant(seedIds.items.twoSum, { largeTestCase: 1 as never }))).fields).toEqual({ largeTestCase: 'must be a boolean' });
+    // Null counts as absent.
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 1, largeTestCase: null as never })).largeCase).toBeNull();
   });
 });
 
@@ -2355,6 +2518,7 @@ describe('preferences', () => {
     expect(prefs).toEqual({
       hideTestCases: true,
       generatedTestCases: 8,
+      largeTestCase: false,
       editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
     });
     expect(prefs).toEqual(DEFAULT_PREFERENCES);
@@ -2367,6 +2531,8 @@ describe('preferences', () => {
     expect(prefs).toEqual({ ...DEFAULT_PREFERENCES, hideTestCases: false, editor: { ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true } });
     prefs = await api.preferences.put({ generatedTestCases: 12 });
     expect(prefs.generatedTestCases).toBe(12);
+    prefs = await api.preferences.put({ largeTestCase: true });
+    expect(prefs.largeTestCase).toBe(true);
     prefs = await api.preferences.put({ editor: { tabSize: 2 }, hideTestCases: true });
     expect(prefs.editor).toEqual({ ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true, tabSize: 2 });
     expect(await api.preferences.put({})).toEqual(prefs);
@@ -2382,6 +2548,7 @@ describe('preferences', () => {
       [{ generatedTestCases: 0 }, 'generatedTestCases'],
       [{ generatedTestCases: LIMITS.maxGeneratedTestCases + 1 }, 'generatedTestCases'],
       [{ generatedTestCases: 2.5 }, 'generatedTestCases'],
+      [{ largeTestCase: 1 }, 'largeTestCase'],
       [{ theme: 'dark' }, 'theme'],
       [{ editor: { minimap: true } }, 'editor.minimap'],
       [{ editor: { tabSize: 3 } }, 'editor.tabSize'],
