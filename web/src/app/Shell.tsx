@@ -67,6 +67,23 @@ export function Shell() {
   // Close the navigation drawer (narrow screens) after navigating.
   useEffect(() => setDrawerOpen(false), [location.pathname, location.search]);
 
+  // An open drawer is modal: focus moves into it, Escape closes it, and focus returns to where it was.
+  const drawer = narrow && drawerOpen;
+  useEffect(() => {
+    if (!drawer) return;
+    const opener = document.activeElement as HTMLElement | null;
+    document.querySelector<HTMLElement>('.sidebar .sidebar-close')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      // A menu or dialog opened from the drawer takes its own Escape first.
+      if (e.key === 'Escape' && !e.defaultPrevented) setDrawerOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      opener?.focus?.();
+    };
+  }, [drawer]);
+
   const openPalette = useCallback(() => setPaletteOpen(true), []);
 
   useHotkeys({
@@ -107,7 +124,8 @@ export function Shell() {
         <a href="#main" className="skip-link">
           Skip to content
         </a>
-        <header className="topbar">
+        {/* While the drawer is open, the page behind it is out of reach of Tab and of assistive technology. */}
+        <header className="topbar" inert={drawer}>
           <IconButton label="Open navigation" icon={<MenuIcon size={18} />} onClick={() => setDrawerOpen(true)} />
           <Link to="/" className="topbar-brand" translate="no">
             Codeatrophy
@@ -128,7 +146,7 @@ export function Shell() {
           onOpenShortcuts={() => setShortcutsOpen(true)}
         />
         {drawerOpen && <div className="drawer-scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
-        <main id="main" className="main" tabIndex={-1}>
+        <main id="main" className="main" tabIndex={-1} inert={drawer}>
           <Suspense fallback={<PageLoading />}>
             <Outlet />
           </Suspense>
