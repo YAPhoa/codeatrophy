@@ -537,6 +537,6 @@ describe('restoreCases', () => {
 
   it('copes with a list that changed since: nothing twice, and a lost position means the end', () => {
     expect(restoreCases({ testCases: [before[1]!] }, before, ['b', 'd']).testCases.map((t) => t.key)).toEqual(['b', 'd']);
-    expect(restoreCases({ testCases: [] }, before, ['c']).testCases.map((t) => t.key)).toEqual(['c']);
+    expect(restoreCases({ testCases: [] as FormTestCase[] }, before, ['c']).testCases.map((t) => t.key)).toEqual(['c']);
   });
 });
