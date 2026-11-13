@@ -19,8 +19,16 @@ export function resolveTheme(pref: ThemePreference): 'light' | 'dark' {
   return pref === 'system' ? (systemDark() ? 'dark' : 'light') : pref;
 }
 
+/** The page background (`--bg`) of each theme, for the browser's own chrome. */
+const THEME_COLOR = { light: '#f5f5f2', dark: '#111214' } as const;
+
 function apply(): void {
-  document.documentElement.dataset.theme = resolveTheme(getThemePreference());
+  const theme = resolveTheme(getThemePreference());
+  document.documentElement.dataset.theme = theme;
+  // The tags in index.html follow the OS setting; a theme chosen in the app overrides it.
+  document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((meta) => {
+    meta.content = THEME_COLOR[theme];
+  });
 }
 
 export function setThemePreference(pref: ThemePreference): void {
