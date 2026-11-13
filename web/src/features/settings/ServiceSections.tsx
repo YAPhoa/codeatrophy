@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import type { Meta } from '../../api/types';
 import { mcpConnection, mcpUrl } from '../../lib/mcp';
 import { Badge, Callout, CopyButton } from '../../ui/misc';
@@ -5,9 +6,11 @@ import { Badge, Callout, CopyButton } from '../../ui/misc';
 export function JudgeSection({ meta }: { meta: Meta }) {
   const { judge } = meta;
   return (
-    <section id="judge" className="settings-section" aria-labelledby="judge-title">
+    <section className="settings-section" aria-labelledby="judge-title">
       <div className="row">
-        <h2 id="judge-title">Judge</h2>
+        <h1 id="judge-title" className="page-title">
+          Judge
+        </h1>
         {!judge.enabled ? <Badge>Not configured</Badge> : judge.healthy ? <Badge tone="ok">Healthy</Badge> : <Badge tone="danger">Not responding</Badge>}
       </div>
       <p className="settings-lead">The judge engine runs code in a sandbox: your solutions when you run or submit, and reference solutions when test cases are verified.</p>
@@ -66,15 +69,17 @@ export function McpSection({ meta }: { meta: Meta }) {
   const { mcp } = meta;
   const conn = mcpConnection(mcpUrl(mcp, window.location.origin), mcp.authRequired);
   return (
-    <section id="mcp" className="settings-section" aria-labelledby="mcp-title">
+    <section className="settings-section" aria-labelledby="mcp-title">
       <div className="row">
-        <h2 id="mcp-title">MCP server</h2>
+        <h1 id="mcp-title" className="page-title">
+          MCP server
+        </h1>
         {mcp.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge>Disabled</Badge>}
         {mcp.enabled && (mcp.authRequired ? <Badge tone="accent">Token required</Badge> : <Badge>No token</Badge>)}
       </div>
       <p className="settings-lead">
         The Model Context Protocol endpoint lets an AI assistant browse, write and edit this library on your behalf — “add this problem to my DP collection and write tests for it”. The assistant you
-        connect is the model; it does not use the AI provider above.
+        connect is the model; it does not use the <Link to="/settings/ai">AI providers</Link> set up here.
       </p>
       {!mcp.enabled ? (
         <Callout tone="info" title="The MCP endpoint is turned off">

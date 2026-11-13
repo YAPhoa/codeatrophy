@@ -19,9 +19,12 @@ import (
 	"codeatrophy/internal/store"
 )
 
-// AIEnv are AI provider values supplied by the environment. Values saved in
-// settings take precedence.
+// AIEnv are AI provider values supplied by the environment. Each kind whose
+// values are set becomes a read-only environment provider; they never fill
+// in fields of saved providers.
 type AIEnv struct {
+	// Provider is the kind whose environment provider is the default until
+	// a default is saved, or "".
 	Provider         string
 	AnthropicAPIKey  string
 	AnthropicModel   string
@@ -151,9 +154,13 @@ func (a *App) Version() string { return a.version }
 // Limits returns the instance limits.
 func (a *App) Limits() domain.Limits { return a.limits }
 
-// Start recovers submissions interrupted by a previous process, starts the
-// judging workers and the engine health probe.
+// Start carries settings of earlier versions over, recovers submissions
+// interrupted by a previous process, starts the judging workers and the
+// engine health probe.
 func (a *App) Start(ctx context.Context) error {
+	if err := a.migrateLegacyAISettings(ctx); err != nil {
+		return err
+	}
 	if err := a.recoverSubmissions(ctx); err != nil {
 		return err
 	}

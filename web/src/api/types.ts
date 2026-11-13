@@ -4,6 +4,13 @@
 export type ItemType = 'problem' | 'reading';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type ItemStatus = 'todo' | 'in_progress' | 'done';
+/**
+ * What the person solving a problem writes. `program`: a complete program
+ * reading stdin and writing stdout. `function`: only the solution — a
+ * function or a class — which a hidden per-language harness turns into such
+ * a program.
+ */
+export type ProblemInterface = 'program' | 'function';
 export type CompareMode = 'tokens' | 'exact';
 export type TestOrigin = 'manual' | 'ai' | 'import';
 export type SubmissionMode = 'run' | 'submit';
@@ -58,11 +65,12 @@ export interface JudgeLanguage {
   version: string;
 }
 
-export type AiProviderId = 'anthropic' | 'openai_compatible';
+export type AiProviderKind = 'anthropic' | 'openai_compatible';
 
 export interface Meta {
   version: string;
-  ai: { enabled: boolean; provider: AiProviderId | null; model: string | null };
+  /** The default AI provider when it is ready; otherwise `enabled` is `false` and the rest is `null`. `model` is the one in effect. */
+  ai: { enabled: boolean; providerId: string | null; providerName: string | null; kind: AiProviderKind | null; model: string | null };
   judge: { enabled: boolean; engine: string; healthy: boolean; languages: JudgeLanguage[] };
   /** `url` is the public MCP URL when the operator configured one; otherwise derive it from the page origin and `path`. */
   mcp: { enabled: boolean; path: string; url: string | null; authRequired: boolean };
@@ -114,6 +122,9 @@ export interface Limits {
   maxStyleInstructionsChars: number;
   maxModelIdChars: number;
   maxApiKeyChars: number;
+  /** Saved AI providers per instance; environment providers do not count. */
+  maxAiProviders: number;
+  maxAiProviderNameChars: number;
   /** Applies to an export's `name` and `author`. */
   maxBundleNameChars: number;
   maxBundleDescriptionChars: number;
@@ -141,11 +152,24 @@ export interface SourceCode {
   source: string;
 }
 
+/** The hidden code around a submitted solution: the program that runs is `prefix`, the source and `suffix`, each starting on a new line. */
+export interface HarnessCode {
+  prefix: string;
+  suffix: string;
+}
+
 export interface ProblemSpec {
+  interface: ProblemInterface;
   timeLimitMs: number;
   memoryLimitKb: number;
   compare: CompareMode;
+  /** Keyed by language id. For a `function` problem, the stub the solver starts from. */
   starterCode: Record<string, string>;
+  /**
+   * Keyed by language id; `{}` for a `program` problem. A `function` problem
+   * can be run in exactly the languages that have an entry.
+   */
+  harness: Record<string, HarnessCode>;
   /**
    * A view of the saved solution marked as the reference, or `null`. When
    * read it carries that solution's `id`; when written only `language` and
@@ -383,6 +407,13 @@ export interface SubmissionSummary {
   timeMs: number | null;
   memoryKb: number | null;
   error: string | null;
+  /**
+   * How many lines the harness placed before the submitted source in the
+   * program that ran; `0` for a `program` problem. The server rewrites line
+   * numbers in compiler and error output to the source's own lines where it
+   * can, and this explains one it could not.
+   */
+  lineOffset: number;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -407,13 +438,19 @@ export interface DraftTestCase {
   stdin: string;
   expectedStdout: string;
   isSample: boolean;
+  /** The draft's reference solution was run on this case and printed the expected output. */
+  verified: boolean;
 }
 
 export interface DraftProblemSpec {
+  interface: ProblemInterface;
   timeLimitMs: number;
   memoryLimitKb: number;
   compare: CompareMode;
   starterCode: Record<string, string>;
+  harness: Record<string, HarnessCode>;
+  /** The model's own solution, or `null` if it gave none. For a `function` problem, the solution part only. */
+  referenceSolution: SourceCode | null;
 }
 
 export interface ItemDraft {
@@ -428,9 +465,13 @@ export interface ItemDraft {
   assumptions: string[];
 }
 
+/** Which interface a drafted problem should have; with `auto` the model chooses. */
+export type InterfaceHint = 'auto' | ProblemInterface;
+
 export interface DraftRequest {
   text: string;
   typeHint?: 'auto' | ItemType;
+  interfaceHint?: InterfaceHint;
   /** At most `limits.maxInstructionChars` characters. */
   instruction?: string | null;
   previousDraft?: ItemDraft | null;
@@ -444,10 +485,55 @@ export interface AppliedStyle {
   name: string;
 }
 
+/** What running a draft's reference solution on its test cases found. */
+export interface DraftCheck {
+  /** `false` when there was no engine, no reference solution or no test case; nothing is verified then. */
+  attempted: boolean;
+  engine: string | null;
+  passed: number;
+  total: number;
+  /** The first failure in plain words, or why the engine could not be used. */
+  error: string | null;
+  /** One entry per harness language of a `function` problem, in language order; `[]` otherwise and when nothing was attempted. */
+  runners: RunnerCheck[];
+}
+
+/**
+ * Whether a language's harness ran its starter code on the first test case:
+ * `failed` when it did not compile or crashed, `skipped` when it was not tried.
+ */
+export interface RunnerCheck {
+  language: string;
+  status: 'ok' | 'failed' | 'skipped';
+  error: string | null;
+}
+
+/** Token counts of one request; each is `null` when the provider does not report it. */
+export interface TokenUsage {
+  inputTokens: number | null;
+  /** Everything generated, reasoning included. */
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  /** Input tokens served from, and written to, the provider's prompt cache, on top of `inputTokens`. */
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+}
+
+/** What one generation cost, as the provider reported it. */
+export interface GenerationUsage extends TokenUsage {
+  /** Its entry in the AI activity log, or `null` if none could be written. */
+  logId: string | null;
+  model: string;
+  durationMs: number;
+}
+
 /** Response of `POST /ai/draft` and `POST /items/{id}/ai/variant`. */
 export interface DraftResponse {
   draft: ItemDraft;
   style: AppliedStyle | null;
+  /** `null` for a reading. */
+  check: DraftCheck | null;
+  usage: GenerationUsage;
 }
 
 export type VariantMode = 'similar' | 'easier' | 'harder' | 'twist';
@@ -458,10 +544,13 @@ export interface VariantRequest {
   /** A draft returned by an earlier variant call; with `instruction` this asks for a revision of it. */
   previousDraft?: ItemDraft | null;
   styleId?: string | null;
+  /** Omitted → the variant keeps the original's interface. */
+  interfaceHint?: ProblemInterface;
 }
 
 export interface AiTestCasesRequest {
   count?: number;
+  /** Language of the reference solution. For a `function` problem it must have a harness. */
   language?: string;
   instruction?: string | null;
 }
@@ -481,6 +570,9 @@ export interface ProposedTestCase {
 export interface AiTestCasesResponse {
   referenceSolution: SourceCode;
   verification: { attempted: boolean; engine: string | null; error: string | null };
+  /** Proposed cases left out because their input repeated an existing or an earlier proposed one. */
+  duplicatesDropped: number;
+  usage: GenerationUsage;
   cases: ProposedTestCase[];
 }
 
@@ -506,41 +598,143 @@ export type StylePresetPatch = Partial<StylePresetInput>;
 
 // ---- AI settings ----------------------------------------------------------
 
-/** Where an effective setting comes from; `null` means the built-in default applies. */
-export type SettingSource = 'settings' | 'environment' | null;
-
-export interface AiProviderState {
-  /** Effective values: saved, else from the environment, else `null` (the default applies). */
+/** A named connection to an AI service. Keys are write-only: only `apiKeySet` and `apiKeyHint` describe one. */
+export interface AiProvider {
+  id: string;
+  name: string;
+  kind: AiProviderKind;
+  /** Saved values; `null` means the kind's default applies. */
   model: string | null;
   baseUrl: string | null;
-  modelSource: SettingSource;
-  baseUrlSource: SettingSource;
   apiKeySet: boolean;
+  /** `…` plus the last four characters, or `null` without a key. */
   apiKeyHint: string | null;
-  apiKeySource: SettingSource;
+  /** `environment`: supplied by the server's environment variables; it cannot be changed or deleted through the API. */
+  source: 'settings' | 'environment';
+  isDefault: boolean;
+  /** Has everything it needs, counting the kind's defaults. Only a ready provider can be the default. */
   ready: boolean;
+  /** What this instance has spent through the provider. */
+  usage: AiProviderUsage;
+  /** `null` for an environment provider. */
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface UsageTotals {
+  requests: number;
+  /** The part of `requests` that returned no usable answer. */
+  failed: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface AiProviderUsage {
+  /** Today and the 29 days before it, in UTC. */
+  last30Days: UsageTotals;
+  allTime: UsageTotals;
+  /** `null` before the first request. */
+  lastUsedAt: string | null;
+}
+
+export type AiOperation = 'draft' | 'variant' | 'testcases' | 'test';
+
+/** One request the server sent to an AI provider. */
+export interface AiLogEntry {
+  id: string;
+  createdAt: string;
+  /** `test` is a connection test. */
+  operation: AiOperation;
+  /** The item the request was about; an entry outlives its item. */
+  itemId: string | null;
+  /** A short label fixed when the entry was written, or `null`. */
+  title: string | null;
+  /** Provider, kind and model as they were at the time. */
+  providerId: string;
+  providerName: string;
+  kind: AiProviderKind;
+  model: string;
+  /** `cancelled`: the client went away. */
+  status: 'ok' | 'failed' | 'cancelled';
+  error: string | null;
+  durationMs: number;
+  usage: TokenUsage;
+}
+
+/** An entry with what was sent and what came back; for reading, not for programs. */
+export interface AiLogDetail extends AiLogEntry {
+  request: unknown;
+  /** `null` if none arrived. */
+  response: string | null;
+  /** Either was cut off at the size the server keeps. */
+  truncated: boolean;
+}
+
+export type AiLogStatus = AiLogEntry['status'];
+
+/** Filters of the log; they are applied by the server. */
+export interface AiLogFilters {
+  providerId?: string;
+  operation?: AiOperation;
+  status?: AiLogStatus;
+}
+
+export interface AiLogParams extends AiLogFilters {
+  limit?: number;
+  /** The `next` of the page before. */
+  before?: string;
+}
+
+/** A batch of the log, newest first. */
+export interface AiLogPage {
+  items: AiLogEntry[];
+  /** The cursor of the following batch, or `null` at the end. */
+  next: string | null;
+  /** The entries matching the filters. */
+  total: number;
+}
+
+export interface AiKindInfo {
+  defaultModel: string | null;
+  defaultBaseUrl: string;
+  /** Whether a key is always required. `openai_compatible` needs one only on the default base URL. */
+  keyRequired: boolean;
 }
 
 export interface AiSettings {
-  activeProvider: AiProviderId | null;
-  providers: Record<AiProviderId, AiProviderState>;
-  defaults: Record<AiProviderId, { model: string | null; baseUrl: string | null }>;
+  /** The provider the AI endpoints use; `null` means AI features are off. */
+  defaultProviderId: string | null;
+  /** The default first, then saved providers by name, then environment providers. */
+  providers: AiProvider[];
+  kinds: Record<AiProviderKind, AiKindInfo>;
 }
 
-export interface AiProviderUpdate {
+export interface AiSettingsUpdate {
+  defaultProviderId: string | null;
+}
+
+export interface AiProviderInput {
+  name: string;
+  kind: AiProviderKind;
+  model?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+}
+
+export interface AiProviderPatch {
+  name?: string;
+  /** `null` clears the saved value, so the kind's default applies. */
   model?: string | null;
   baseUrl?: string | null;
   /** Omit (or send an empty string) to keep the stored key, `null` to delete it, a string to replace it. */
   apiKey?: string | null;
 }
 
-export interface AiSettingsUpdate {
-  activeProvider?: AiProviderId | null;
-  providers?: Partial<Record<AiProviderId, AiProviderUpdate>>;
-}
-
+/** Exactly one of `providerId` (a saved or environment provider) and `kind` (a configuration not saved yet). */
 export interface AiTestRequest {
-  provider: AiProviderId;
+  providerId?: string | null;
+  kind?: AiProviderKind | null;
+  /** With `providerId`, these override the provider's values for this test. */
   model?: string | null;
   baseUrl?: string | null;
   apiKey?: string | null;
@@ -548,9 +742,13 @@ export interface AiTestRequest {
 
 export interface AiTestResponse {
   ok: boolean;
+  /** The model the generation request used, or `null` when there was none to test. */
   model: string | null;
   latencyMs: number | null;
   error: string | null;
+  /** The service's model ids, or `null` when the list could not be fetched; `modelsError` then says why. */
+  models: string[] | null;
+  modelsError: string | null;
 }
 
 // ---- Preferences ------------------------------------------------------------
@@ -569,12 +767,15 @@ export interface EditorPreferences {
 export interface Preferences {
   /** Keep the content of non-sample test cases out of sight until the user asks to see it. */
   hideTestCases: boolean;
+  /** How many test cases to ask for by default when generating them: 1 to `limits.maxGeneratedTestCases`. */
+  generatedTestCases: number;
   editor: EditorPreferences;
 }
 
 /** Body of `PUT /settings/preferences`: any subset, at any depth. */
 export interface PreferencesUpdate {
   hideTestCases?: boolean;
+  generatedTestCases?: number;
   editor?: Partial<EditorPreferences>;
 }
 
@@ -609,6 +810,8 @@ export type ImportChange =
   | 'limits'
   | 'compare'
   | 'starterCode'
+  | 'interface'
+  | 'harness'
   | 'solutions'
   | 'testCases';
 

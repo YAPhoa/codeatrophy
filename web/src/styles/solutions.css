@@ -79,6 +79,11 @@
   overflow-wrap: anywhere;
 }
 
+.solution-outcome {
+  margin-top: 8px;
+  padding: 0 16px;
+}
+
 .solution-actions {
   display: flex;
   align-items: center;
@@ -142,6 +147,12 @@
 }
 
 /* ---- "Save as a solution" dialog ---- */
+
+.save-solution-accepted {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}
 
 .save-solution-code {
   display: flex;

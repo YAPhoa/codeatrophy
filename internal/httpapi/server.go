@@ -126,6 +126,12 @@ func (s *Server) routes() {
 	s.handle("GET /settings/ai", s.getAISettings)
 	s.handle("PUT /settings/ai", s.putAISettings)
 	s.handle("POST /settings/ai/test", s.testAISettings)
+	s.handle("POST /settings/ai/providers", s.createAIProvider)
+	s.handle("PATCH /settings/ai/providers/{id}", s.updateAIProvider)
+	s.handle("DELETE /settings/ai/providers/{id}", s.deleteAIProvider)
+	s.handle("GET /settings/ai/log", s.listAILog)
+	s.handle("GET /settings/ai/log/{id}", s.getAILogEntry)
+	s.handle("DELETE /settings/ai/log", s.deleteAILog)
 	s.handle("GET /settings/preferences", s.getPreferences)
 	s.handle("PUT /settings/preferences", s.putPreferences)
 
@@ -788,6 +794,73 @@ func (s *Server) testAISettings(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) createAIProvider(w http.ResponseWriter, r *http.Request) error {
+	var in app.AIProviderInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	p, err := s.app.CreateAIProvider(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, p)
+	return nil
+}
+
+func (s *Server) updateAIProvider(w http.ResponseWriter, r *http.Request) error {
+	var in app.AIProviderInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	p, err := s.app.UpdateAIProvider(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) deleteAIProvider(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteAIProvider(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listAILog(w http.ResponseWriter, r *http.Request) error {
+	v := r.URL.Query()
+	q := app.AILogQuery{ProviderID: v.Get("providerId"), Operation: v.Get("operation"), Status: v.Get("status"),
+		Before: v.Get("before")}
+	var err error
+	if q.Limit, err = queryInt(r, "limit"); err != nil {
+		return err
+	}
+	page, err := s.app.ListAILog(r.Context(), q)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, page)
+	return nil
+}
+
+func (s *Server) getAILogEntry(w http.ResponseWriter, r *http.Request) error {
+	e, err := s.app.GetAILogEntry(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, e)
+	return nil
+}
+
+func (s *Server) deleteAILog(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteAILog(r.Context(), r.URL.Query().Get("before")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

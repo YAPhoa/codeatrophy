@@ -46,25 +46,6 @@
   font-weight: 500;
 }
 
-.prefs-stepper {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-}
-
-.prefs-number {
-  width: 58px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.prefs-unit {
-  margin-right: 2px;
-  font-size: var(--text-sm);
-  color: var(--text-3);
-}
-
 .prefs-preview {
   display: flex;
   flex-direction: column;

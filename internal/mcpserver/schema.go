@@ -60,8 +60,24 @@ func testCaseSchema() map[string]any {
 func solutionSchema() map[string]any {
 	return object(props{
 		"language": languageEnum("Language id"),
-		"source":   str("Complete program reading stdin and writing stdout"),
+		"source":   str(solutionSource),
 	}, "language", "source")
+}
+
+// solutionSource describes the source of a solution or a run.
+const solutionSource = "For a program problem, a complete program reading stdin and writing stdout; for a function " +
+	"problem, only the solution part (what fills in the stub), which runs inside the language's harness"
+
+func harnessSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"description": "Function problems: runner code keyed by language id; replaces all harness entries. The program " +
+			"that runs is prefix, the solution and suffix, each on a new line. Must be {} for a program problem",
+		"additionalProperties": object(props{
+			"prefix": str("Code before the solution: imports and helper types (Python: start with `from __future__ import annotations`)"),
+			"suffix": str("Code after the solution: reads one JSON value per line per argument, calls the solution, prints one compact JSON value"),
+		}, "prefix", "suffix"),
+	}
 }
 
 // itemFieldProps are the writable item fields shared by create_item and
@@ -81,10 +97,12 @@ func itemFieldProps() props {
 			"note": nullableStr("Free-form attribution"),
 		}),
 		"problem": object(props{
+			"interface":         enumStr("What the solver writes: program (a full program, the default) or function (only a function or class, run inside the harness)", "program", "function"),
+			"harness":           harnessSchema(),
 			"timeLimitMs":       integer("100-30000"),
 			"memoryLimitKb":     integer("16384-2097152"),
 			"compare":           enumStr("Output comparison", "tokens", "exact"),
-			"starterCode":       map[string]any{"type": "object", "description": "Starter code keyed by language id; replaces all starter code", "additionalProperties": map[string]any{"type": "string"}},
+			"starterCode":       map[string]any{"type": "object", "description": "Starter code keyed by language id (for a function problem, the stub); replaces all starter code", "additionalProperties": map[string]any{"type": "string"}},
 			"referenceSolution": map[string]any{"anyOf": []any{solutionSchema(), map[string]any{"type": "null"}}},
 		}),
 		"collectionIds": arrayOf(str("Collection id"), "Replaces the item's collection memberships"),

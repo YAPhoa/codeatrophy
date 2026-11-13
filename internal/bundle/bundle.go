@@ -13,11 +13,34 @@ import (
 	"codeatrophy/internal/domain"
 )
 
-// Format identification.
+// Format identification. FormatVersion is the newest version this package
+// reads and writes. A bundle is written in the oldest version that can
+// carry its content (see RequiredVersion), so that servers which know only
+// version 1 can still import bundles without solution-only problems, and
+// refuse those that have one.
 const (
 	FormatName    = "codeatrophy.bundle"
-	FormatVersion = 1
+	FormatVersion = 2
 )
+
+// Format versions.
+const (
+	// Version1 carries problems that are complete programs.
+	Version1 = 1
+	// Version2 adds solution-only problems: problem.interface and
+	// problem.harness in item.json, and the harness/ directory.
+	Version2 = 2
+)
+
+// RequiredVersion is the oldest format version that can carry items.
+func RequiredVersion(items []Item) int {
+	for i := range items {
+		if p := items[i].Problem; p != nil && p.Interface == domain.InterfaceFunction {
+			return Version2
+		}
+	}
+	return Version1
+}
 
 // Meta describes a bundle as a whole.
 type Meta struct {
@@ -55,6 +78,10 @@ type Problem struct {
 	MemoryLimitKb int
 	Compare       domain.CompareMode
 	StarterCode   map[string]string
+	// Interface is program unless the problem is solution-only; only
+	// function problems have a Harness.
+	Interface domain.ProblemInterface
+	Harness   map[string]domain.HarnessCode
 }
 
 // Solution is a saved solution as carried by a bundle.
@@ -147,9 +174,16 @@ func FromDomain(it domain.Item, cases []domain.TestCase, sols []domain.ItemSolut
 		p := &Problem{
 			TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb,
 			Compare: it.Problem.Compare, StarterCode: map[string]string{},
+			Interface: domain.InterfaceProgram, Harness: map[string]domain.HarnessCode{},
 		}
 		for k, v := range it.Problem.StarterCode {
 			p.StarterCode[k] = v
+		}
+		if it.Problem.Interface == domain.InterfaceFunction {
+			p.Interface = domain.InterfaceFunction
+			for k, v := range it.Problem.Harness {
+				p.Harness[k] = v
+			}
 		}
 		if includeSolutions {
 			out.SolutionsIncluded = true
@@ -206,12 +240,24 @@ func ContentHash(it *Item) string {
 		for k, v := range p.StarterCode {
 			starter[k] = v
 		}
-		doc["problem"] = map[string]any{
+		prob := map[string]any{
 			"timeLimitMs":   int64(p.TimeLimitMs),
 			"memoryLimitKb": int64(p.MemoryLimitKb),
 			"compare":       string(p.Compare),
 			"starterCode":   starter,
 		}
+		// Format version 2: a solution-only problem adds its interface and
+		// harness. A program problem hashes exactly as in version 1, so the
+		// hashes of existing bundles stay valid.
+		if p.Interface == domain.InterfaceFunction {
+			harness := map[string]any{}
+			for k, h := range p.Harness {
+				harness[k] = map[string]any{"prefix": h.Prefix, "suffix": h.Suffix}
+			}
+			prob["interface"] = string(domain.InterfaceFunction)
+			prob["harness"] = harness
+		}
+		doc["problem"] = prob
 		// Solutions left out of the export are left out of the hash; a
 		// problem without solutions hashes an empty list.
 		if it.SolutionsIncluded {
@@ -272,7 +318,7 @@ func Slug(s string) string {
 
 // Changes lists the content fields in which b differs from a, in the order
 // type, title, summary, body, difficulty, tags, source, variantOf, limits, compare,
-// starterCode, solutions, testCases. Both items should cover the
+// starterCode, interface, harness, solutions, testCases. Both items should cover the
 // same scope (see FromDomain), so that only what a bundle carries is
 // compared.
 func Changes(a, b *Item) []string {
@@ -303,11 +349,28 @@ func Changes(a, b *Item) []string {
 	add(pa.TimeLimitMs != pb.TimeLimitMs || pa.MemoryLimitKb != pb.MemoryLimitKb, "limits")
 	add(pa.Compare != pb.Compare, "compare")
 	add(!maps.Equal(nonNil(pa.StarterCode), nonNil(pb.StarterCode)), "starterCode")
+	add(interfaceOf(pa) != interfaceOf(pb), "interface")
+	add(!maps.Equal(harnessOf(pa), harnessOf(pb)), "harness")
 	add(a.SolutionsIncluded != b.SolutionsIncluded || !slices.Equal(a.Solutions, b.Solutions), "solutions")
 	add(!slices.EqualFunc(a.TestCases, b.TestCases, func(x, y TestCase) bool {
 		return x.Name == y.Name && x.Stdin == y.Stdin && x.ExpectedStdout == y.ExpectedStdout && x.IsSample == y.IsSample
 	}), "testCases")
 	return out
+}
+
+func interfaceOf(p *Problem) domain.ProblemInterface {
+	if p.Interface == domain.InterfaceFunction {
+		return p.Interface
+	}
+	return domain.InterfaceProgram
+}
+
+// harnessOf is the harness that counts: none for a program problem.
+func harnessOf(p *Problem) map[string]domain.HarnessCode {
+	if p.Interface != domain.InterfaceFunction || p.Harness == nil {
+		return map[string]domain.HarnessCode{}
+	}
+	return p.Harness
 }
 
 func nonNil(m map[string]string) map[string]string {

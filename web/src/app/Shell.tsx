@@ -4,6 +4,7 @@ import { Menu as MenuIcon, Plus, Search } from 'lucide-react';
 import { useMeta } from '../api/queries';
 import { CollectionActionsProvider } from '../features/collections/CollectionActions';
 import { useHotkeys } from '../lib/hotkeys';
+import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import { cx } from '../ui/Button';
@@ -34,6 +35,7 @@ export function Shell() {
   const meta = useMeta();
   const navigate = useNavigate();
   const location = useLocation();
+  const newHref = useNewItemHref();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -74,7 +76,7 @@ export function Shell() {
     },
     c: (e) => {
       e.preventDefault();
-      navigate('/new');
+      navigate(newHref);
     },
     'mod+b': (e) => {
       e.preventDefault();
@@ -112,7 +114,7 @@ export function Shell() {
           </Link>
           <span className="spacer" />
           <IconButton label="Search and commands" icon={<Search size={17} />} onClick={openPalette} />
-          <LinkButton to="/new" variant="primary" size="sm" icon={<Plus size={14} />}>
+          <LinkButton to={newHref} variant="primary" size="sm" icon={<Plus size={14} />}>
             New
           </LinkButton>
         </header>

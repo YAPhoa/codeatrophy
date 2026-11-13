@@ -448,7 +448,7 @@ function TestsManager({ item }: { item: Item }) {
                       <Button icon={<Eye size={14} />} onClick={reveal}>
                         Show test cases
                       </Button>
-                      <Link to="/settings#preferences">Turn this off in Settings</Link>
+                      <Link to="/settings/preferences">Turn this off in Settings</Link>
                     </div>
                   </div>
                 ) : draft ? (
@@ -587,7 +587,7 @@ function TestsManager({ item }: { item: Item }) {
                 <p className="verify-panel-note muted">
                   {!judgeOn ? (
                     <>
-                      Needs a judge engine to run the solution. <Link to="/settings#judge">Judge status</Link>
+                      Needs a judge engine to run the solution. <Link to="/settings/judge">Judge status</Link>
                     </>
                   ) : cases.length === 0 ? (
                     'Add test cases first.'

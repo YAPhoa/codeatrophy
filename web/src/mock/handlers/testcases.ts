@@ -16,6 +16,7 @@ import {
   ok,
   Validator,
 } from '../http';
+import { assemble } from '../harness';
 import { compileOutputFor, detectBehaviour, failureFor, perturbOutput, resourceUsage, wrongAnswerHits } from '../judge';
 import { hash32, isLanguage, sleep } from '../util';
 import { checkRevision, insertTestCase, parseTestCaseInput, tooManyCases } from './items';
@@ -142,7 +143,9 @@ function reorderCases(db: MockDb, req: Req) {
  * another — on every case. Nothing is executed: the solution is assumed to
  * print the stored expected output, except for cases with an entry in
  * `db.truth`, and except when the solution carries one of the judge's
- * failure markers.
+ * failure markers or is the problem's starter code left as it was. For a
+ * "solution only" problem it runs inside the harness of its language, and
+ * cannot be run without one.
  *
  * Only a run with the reference solution changes anything: it marks the
  * cases it confirms as verified, clears the mark on those it does not, and
@@ -168,6 +171,10 @@ async function verify(db: MockDb, req: Req) {
   if (raw.updateExpected === true && !authoritative) {
     throw invalid('updateExpected', 'only the reference solution can replace expected outputs');
   }
+  const harness = item.problem!.interface === 'function' ? item.problem!.harness[reference.language] : undefined;
+  if (item.problem!.interface === 'function' && !harness) {
+    throw invalid(solutionId === null ? 'referenceSolution' : 'solutionId', `is in ${reference.language}, which has no harness on this problem`);
+  }
   // Nothing is changed when the engine is missing or cannot be reached.
   if (db.options.judge === 'none') throw judgeUnavailable();
   if (db.options.judge === 'down') throw judgeUnavailable('the judge engine is not reachable');
@@ -175,7 +182,7 @@ async function verify(db: MockDb, req: Req) {
   const cases = db.casesOf(item.id);
   for (let i = 0; i < cases.length; i++) await sleep(db.delay('verifyCase'));
 
-  const behaviour = detectBehaviour(reference.source, undefined);
+  const behaviour = detectBehaviour(reference.source, item.problem!.starterCode[reference.language], assemble(harness, reference.source).program);
   const limits = { timeLimitMs: item.problem!.timeLimitMs, memoryLimitKb: item.problem!.memoryLimitKb };
   let casesChanged = false;
   const results: VerifyResult[] = cases.map((tc, i) => {
@@ -203,7 +210,8 @@ async function verify(db: MockDb, req: Req) {
       };
     }
     const right = db.truth.get(tc.id) ?? tc.expectedStdout;
-    const actual = behaviour === 'wrong' && wrongAnswerHits(i, cases.length) ? perturbOutput(right) : right;
+    // Starter code left as it was prints nothing.
+    const actual = behaviour === 'starter' ? '' : behaviour === 'wrong' && wrongAnswerHits(i, cases.length) ? perturbOutput(right) : right;
     const matches = outputsMatch(actual, tc.expectedStdout, item.problem!.compare);
     if (!authoritative) {
       // A check with another solution reports and changes nothing.

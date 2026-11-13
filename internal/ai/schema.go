@@ -65,13 +65,25 @@ func languageIDs() []string {
 func DraftSchema() map[string]any {
 	starter := obj(map[string]any{
 		"language": enum("Language id", languageIDs()...),
-		"source":   str("Starter code that reads the input"),
+		"source":   str("Program problem: starter code that reads the input. Function problem: the stub the solver fills in"),
+	})
+	harness := obj(map[string]any{
+		"language": enum("Language id", languageIDs()...),
+		"prefix":   str("Code before the solver's code: imports, helper type definitions (Python: first line `from __future__ import annotations`)"),
+		"suffix":   str("Code after the solver's code: reads one JSON value per line per argument, calls the solution, prints one compact JSON value"),
+	})
+	reference := obj(map[string]any{
+		"language": enum("Language id; for a function problem one that has a harness", languageIDs()...),
+		"source":   str("Program problem: a complete program. Function problem: only the solution part, as a solver would write it"),
 	})
 	problem := obj(map[string]any{
-		"timeLimitMs":   integer("Time limit in milliseconds, 100-30000"),
-		"memoryLimitKb": integer("Memory limit in KB, 16384-2097152"),
-		"compare":       enum("Output comparison: tokens (whitespace-insensitive) or exact", "tokens", "exact"),
-		"starterCode":   array(starter, "Starter code per language"),
+		"interface":         enum("What the solver writes: program (a full program) or function (only a function or class)", "program", "function"),
+		"timeLimitMs":       integer("Time limit in milliseconds, 100-30000"),
+		"memoryLimitKb":     integer("Memory limit in KB, 16384-2097152"),
+		"compare":           enum("Output comparison: tokens (whitespace-insensitive) or exact", "tokens", "exact"),
+		"starterCode":       array(starter, "Starter code per language"),
+		"harness":           array(harness, "Function problems: runner code per language; empty for a program problem"),
+		"referenceSolution": nullable(reference),
 	})
 	testCase := obj(map[string]any{
 		"name":           str("Short name, e.g. \"Example 1\""),
@@ -101,6 +113,7 @@ type ModelDraft struct {
 	Difficulty *string  `json:"difficulty"`
 	Tags       []string `json:"tags"`
 	Problem    *struct {
+		Interface     string `json:"interface"`
 		TimeLimitMs   int    `json:"timeLimitMs"`
 		MemoryLimitKb int    `json:"memoryLimitKb"`
 		Compare       string `json:"compare"`
@@ -108,6 +121,15 @@ type ModelDraft struct {
 			Language string `json:"language"`
 			Source   string `json:"source"`
 		} `json:"starterCode"`
+		Harness []struct {
+			Language string `json:"language"`
+			Prefix   string `json:"prefix"`
+			Suffix   string `json:"suffix"`
+		} `json:"harness"`
+		ReferenceSolution *struct {
+			Language string `json:"language"`
+			Source   string `json:"source"`
+		} `json:"referenceSolution"`
 	} `json:"problem"`
 	TestCases []struct {
 		Name           string `json:"name"`
@@ -119,12 +141,17 @@ type ModelDraft struct {
 }
 
 // TestCasesSchema is the output schema for test-case generation. The
-// reference solution must be in the requested language.
-func TestCasesSchema(language string) map[string]any {
+// reference solution must be in the requested language; for a function
+// problem it is only the solution part.
+func TestCasesSchema(language string, function bool) map[string]any {
+	source := "Complete program reading stdin and writing stdout"
+	if function {
+		source = "Only the solution part, filling in the stub; the harness turns it into a program"
+	}
 	return obj(map[string]any{
 		"referenceSolution": obj(map[string]any{
 			"language": enum("Language id; must be the requested language", language),
-			"source":   str("Complete program reading stdin and writing stdout"),
+			"source":   str(source),
 		}),
 		"cases": array(obj(map[string]any{
 			"name":            str("Short name"),

@@ -273,7 +273,7 @@ func TestRejectsInvalidBundles(t *testing.T) {
 		"no manifest":   zipOf(t, map[string]string{"readme.md": "x"}),
 		"bad json":      zipOf(t, map[string]string{"bundle.json": "{"}),
 		"wrong format":  zipOf(t, map[string]string{"bundle.json": `{"format":"other","formatVersion":1}`}),
-		"newer version": zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":2}`}),
+		"newer version": zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":3}`}),
 		"no version":    zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle"}`}),
 	}
 	for name, data := range cases {

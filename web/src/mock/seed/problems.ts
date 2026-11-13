@@ -1,7 +1,8 @@
 // The problems of the seed library. Statements live as Markdown files in
 // ./content, keyed by `key`.
 
-import type { Difficulty, ItemStatus, TestOrigin } from '../../api/types';
+import type { Difficulty, HarnessCode, ItemStatus, TestOrigin } from '../../api/types';
+import { MERGE_K_LISTS_HARNESS, MERGE_K_LISTS_REFERENCE, MERGE_K_LISTS_STARTER } from './mergeKLists';
 
 export interface SeedCase {
   name: string;
@@ -40,6 +41,12 @@ export interface SeedProblem {
   variantOf?: string;
   /** Languages that get starter code. */
   languages: string[];
+  /**
+   * Set for a "solution only" problem: the stub and the hidden runner per
+   * language, in place of the stock starter code. Its `reference` and other
+   * solutions are then the solution part only.
+   */
+  solutionOnly?: { starterCode: Record<string, string>; harness: Record<string, HarnessCode> };
   /** Source of the reference solution, in Python. Its name and the other saved solutions are in ./solutions. */
   reference?: string;
   cases: SeedCase[];
@@ -638,6 +645,32 @@ main()
         verified: true,
       },
       { name: 'Miss before any put', stdin: '3 4\nget 7\nput 7 70\nget 7\nget 8\n', out: '-1\n70\n-1\n', origin: 'ai', verified: true },
+    ],
+    collections: ['interview'],
+  },
+  // The one "solution only" problem: the solver writes a method, and a hidden runner does the input and output.
+  {
+    key: 'merge-k-lists',
+    n: 25,
+    title: 'Merge k Sorted Lists',
+    summary: 'Merge k sorted linked lists into one sorted list.',
+    difficulty: 'hard',
+    tags: ['heap', 'linked-list'],
+    status: 'todo',
+    created: 4,
+    updated: 4,
+    sourceNote: 'Onsite, second round',
+    languages: [],
+    solutionOnly: { starterCode: MERGE_K_LISTS_STARTER, harness: MERGE_K_LISTS_HARNESS },
+    reference: MERGE_K_LISTS_REFERENCE,
+    cases: [
+      { name: 'Example 1', stdin: '[[1,4,5],[1,3,4],[2,6]]\n', out: '[1,1,2,3,4,4,5,6]\n', sample: true, verified: true },
+      { name: 'Example 2', stdin: '[]\n', out: '[]\n', sample: true, verified: true },
+      { name: 'Example 3', stdin: '[[]]\n', out: '[]\n', sample: true, verified: true },
+      { name: 'A single list', stdin: '[[1,2,3]]\n', out: '[1,2,3]\n', verified: true },
+      { name: 'Empty lists among the others', stdin: '[[],[2],[],[1,3]]\n', out: '[1,2,3]\n', origin: 'ai', verified: true },
+      { name: 'Negative values', stdin: '[[-5,-1,0],[-3,2],[-4]]\n', out: '[-5,-4,-3,-1,0,2]\n', origin: 'ai', verified: true },
+      { name: 'Equal values across lists', stdin: '[[1,1],[1,1],[1]]\n', out: '[1,1,1,1,1]\n', origin: 'ai', verified: true },
     ],
     collections: ['interview'],
   },

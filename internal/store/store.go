@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"codeatrophy/internal/domain"
 )
@@ -39,6 +40,96 @@ type ItemFilter struct {
 	Desc         bool
 	Limit        int // 0 means no limit
 	Offset       int
+}
+
+// AIProvider is a saved AI provider as stored. Model and BaseURL are ""
+// when the kind's default applies. APIKey is ciphertext ("" when no key is
+// stored), bound to the kind and APIKeyOrigin.
+type AIProvider struct {
+	ID           string
+	Name         string
+	Kind         string
+	Model        string
+	BaseURL      string
+	APIKey       string
+	APIKeyOrigin string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// AIUsageRecord is one finished request to an AI provider.
+type AIUsageRecord struct {
+	ProviderID string
+	At         time.Time
+	Failed     bool
+	// Token counts the service reported; 0 when it reported none.
+	InputTokens, OutputTokens int64
+}
+
+// AIUsageTotals sums the requests of a period.
+type AIUsageTotals struct {
+	Requests, Failed, InputTokens, OutputTokens int64
+}
+
+// AIUsage is one provider's usage: over the recent days asked for, over all
+// time, and when it was last used.
+type AIUsage struct {
+	Recent, AllTime AIUsageTotals
+	LastUsedAt      time.Time
+}
+
+// AILogEntry is the index row of one request in the AI activity log.
+type AILogEntry struct {
+	ID           string
+	CreatedAt    time.Time
+	Operation    string
+	ItemID       *string
+	Title        *string
+	ProviderID   string
+	ProviderName string
+	Kind         string
+	Model        string
+	Status       string
+	Error        *string
+	DurationMs   int
+	// Token counts, nil where the provider reported none.
+	InputTokens, OutputTokens, ReasoningTokens, CacheReadTokens, CacheWriteTokens *int
+}
+
+// AILogBody is what an AI log entry sent and received. Stores keep the
+// system text once per distinct text and compress everything (see
+// CompressText).
+type AILogBody struct {
+	System string
+	// Request is the rest of the request, JSON.
+	Request   string
+	Response  *string
+	Truncated bool
+}
+
+// AILogFilter selects AI log entries; zero values select everything.
+type AILogFilter struct {
+	ProviderID, Operation, Status string
+	// Before starts the page after this entry (keyset paging).
+	Before *AILogCursor
+	Limit  int
+}
+
+// AILogCursor is a position in the AI log, which is ordered newest first
+// by (created time, id).
+type AILogCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// UsageDay is the UTC day of t, in days since 1970-01-01: the unit AI usage
+// is kept in.
+func UsageDay(t time.Time) int64 {
+	sec := t.Unix()
+	if sec < 0 {
+		return (sec - 86399) / 86400
+	}
+	return sec / 86400
 }
 
 // Store gives transactional access to the library.
@@ -124,6 +215,33 @@ type Tx interface {
 	DeleteStylePreset(id string) error
 	// ClearDefaultStylePreset unsets isDefault on every preset.
 	ClearDefaultStylePreset() error
+
+	// Saved AI providers, by name.
+	ListAIProviders() ([]AIProvider, error)
+	GetAIProvider(id string) (AIProvider, error)
+	InsertAIProvider(p *AIProvider) error
+	// UpdateAIProvider changes everything but the id and the kind.
+	UpdateAIProvider(p *AIProvider) error
+	DeleteAIProvider(id string) error
+
+	// AI usage, per provider id (saved or environment provider) and UTC
+	// day. RecordAIUsage adds one request to its day.
+	RecordAIUsage(r AIUsageRecord) error
+	// AIUsage returns the usage of every provider that has any; Recent sums
+	// the days from sinceDay (see UsageDay) on.
+	AIUsage(sinceDay int64) (map[string]AIUsage, error)
+	DeleteAIUsage(providerID string) error
+
+	// The AI activity log, newest first by (created time, id). It is
+	// append-only: entries are inserted once and removed only by
+	// DeleteAILog, which also drops system texts no entry uses any more.
+	InsertAILogEntry(e AILogEntry, body AILogBody) error
+	// ListAILog returns at most f.Limit entries and the number of entries
+	// matching the filters (ignoring Before); it reads no bodies.
+	ListAILog(f AILogFilter) ([]AILogEntry, int, error)
+	GetAILogEntry(id string) (AILogEntry, AILogBody, error)
+	// DeleteAILog removes the entries created before the time, or all.
+	DeleteAILog(before *time.Time) error
 
 	// Settings are opaque key/value pairs.
 	GetSetting(key string) (string, bool, error)

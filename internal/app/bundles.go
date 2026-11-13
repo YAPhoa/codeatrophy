@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -289,11 +290,13 @@ func (a *App) toDomain(it bundle.Item, id string, now time.Time) domain.Item {
 	}, Body: it.Body, Source: it.Source}
 	if it.Type == domain.TypeProblem && it.Problem != nil {
 		d.Problem = &domain.ProblemSpec{
-			TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb, Compare: it.Problem.Compare,
-			StarterCode: map[string]string{},
+			Interface: domain.InterfaceProgram, TimeLimitMs: it.Problem.TimeLimitMs,
+			MemoryLimitKb: it.Problem.MemoryLimitKb, Compare: it.Problem.Compare,
+			StarterCode: maps.Clone(it.Problem.StarterCode), Harness: map[string]domain.HarnessCode{},
 		}
-		for k, v := range it.Problem.StarterCode {
-			d.Problem.StarterCode[k] = v
+		if it.Problem.Interface == domain.InterfaceFunction {
+			d.Problem.Interface = domain.InterfaceFunction
+			maps.Copy(d.Problem.Harness, it.Problem.Harness)
 		}
 	}
 	if d.CreatedAt.IsZero() {

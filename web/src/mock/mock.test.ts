@@ -3,8 +3,10 @@ import { api, ApiError, setTransport } from '../api/client';
 import type { Submission } from '../api/types';
 import type { MockOptions, MockServer } from './index';
 import { DEFAULT_PREFERENCES, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
+import { assemble, functionKit, KIT_LANGUAGES } from './harness';
 import { buildBundleZip, createMockServer, optionsFromFlags, parseBundleZip, seedIds } from './index';
 import { TLE_GRACE_MS } from './judge';
+import { MERGE_K_LISTS_JAVA, MERGE_K_LISTS_REFERENCE } from './seed/mergeKLists';
 import { readZip } from './zip';
 
 let server: MockServer;
@@ -60,7 +62,8 @@ afterEach(() => {
 describe('meta and stats', () => {
   it('reports capabilities for the default scenario', async () => {
     const meta = await api.meta();
-    expect(meta.ai).toEqual({ enabled: true, provider: 'anthropic', model: 'claude-opus-5-5' });
+    expect(meta.ai).toEqual({ enabled: true, providerId: meta.ai.providerId, providerName: 'Personal key', kind: 'anthropic', model: 'claude-opus-5-5' });
+    expect(meta.ai.providerId).toBe((await api.settings.getAi()).defaultProviderId);
     expect(meta.judge.enabled).toBe(true);
     expect(meta.judge.healthy).toBe(true);
     expect(meta.judge.languages.map((l) => l.id)).toContain('python');
@@ -104,10 +107,12 @@ describe('meta and stats', () => {
       maxStyleInstructionsChars: 2000,
       maxModelIdChars: 200,
       maxApiKeyChars: 1000,
+      maxAiProviders: 20,
+      maxAiProviderNameChars: 60,
       maxBundleNameChars: 200,
       maxBundleDescriptionChars: 5000,
     });
-    expect(Object.keys(meta.limits)).toHaveLength(35);
+    expect(Object.keys(meta.limits)).toHaveLength(37);
     expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
     expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
       'c GCC 9.2.0',
@@ -132,7 +137,7 @@ describe('meta and stats', () => {
   it('reflects scenario flags', async () => {
     start(optionsFromFlags(['no-ai', 'no-judge', 'mcp-token', 'empty', 'instant']));
     const meta = await api.meta();
-    expect(meta.ai).toEqual({ enabled: false, provider: null, model: null });
+    expect(meta.ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
     expect(meta.judge).toEqual({ enabled: false, engine: 'none', healthy: false, languages: [] });
     expect(meta.mcp.authRequired).toBe(true);
     expect((await api.items.list()).total).toBe(0);
@@ -147,9 +152,9 @@ describe('meta and stats', () => {
 
   it('counts the seed library with every enum key present', async () => {
     const stats = await api.stats();
-    expect(stats.items.total).toBe(24);
-    expect(stats.items.byType).toEqual({ problem: 16, reading: 8 });
-    expect(stats.items.byStatus.todo + stats.items.byStatus.in_progress + stats.items.byStatus.done).toBe(24);
+    expect(stats.items.total).toBe(25);
+    expect(stats.items.byType).toEqual({ problem: 17, reading: 8 });
+    expect(stats.items.byStatus.todo + stats.items.byStatus.in_progress + stats.items.byStatus.done).toBe(25);
     expect(Object.keys(stats.items.byDifficulty).sort()).toEqual(['easy', 'hard', 'medium', 'none']);
     expect(stats.collections).toBe(8);
     expect(stats.submissions.total).toBeGreaterThan(10);
@@ -171,8 +176,8 @@ describe('meta and stats', () => {
 describe('listing items', () => {
   it('paginates and reports the total before pagination', async () => {
     const page = await api.items.list({ limit: 5, offset: 20 });
-    expect(page.total).toBe(24);
-    expect(page.items).toHaveLength(4);
+    expect(page.total).toBe(25);
+    expect(page.items).toHaveLength(5);
     expect((await failure(api.items.list({ limit: 500 }))).code).toBe('bad_request');
   });
 
@@ -285,10 +290,12 @@ describe('creating and editing items', () => {
     expect(item.rawInput).toBeNull();
     expect(item.source).toEqual({ url: null, note: null });
     expect(item.problem).toEqual({
+      interface: 'program',
       timeLimitMs: 2000,
       memoryLimitKb: 262144,
       compare: 'tokens',
       starterCode: {},
+      harness: {},
       referenceSolution: null,
     });
     expect(item.testCaseCount).toBe(1);
@@ -440,7 +447,108 @@ describe('creating and editing items', () => {
     expect(item.status).toBe('done');
     expect(item.collectionIds).toContain(seedIds.collections.weeklyPractice);
     await api.items.bulk({ ids, action: 'delete' });
-    expect((await api.items.list()).total).toBe(22);
+    expect((await api.items.list()).total).toBe(23);
+  });
+});
+
+describe('problem interface', () => {
+  const lists = seedIds.items.mergeKLists;
+  const runner = { prefix: 'import json\n', suffix: 'print(solve())\n' };
+
+  it('seeds a "solution only" problem with a stub and a harness per language', async () => {
+    const item = await api.items.get(lists);
+    expect(item.problem!.interface).toBe('function');
+    expect(Object.keys(item.problem!.harness).sort()).toEqual(['java', 'python']);
+    expect(Object.keys(item.problem!.starterCode).sort()).toEqual(['java', 'python']);
+    expect(item.problem!.starterCode.python).toContain('def mergeKLists(self, lists: list[ListNode | None]) -> ListNode | None:');
+    // The solver's part defines no ListNode and reads no input: the harness does.
+    expect(item.problem!.harness.python!.prefix).toContain('class ListNode:');
+    expect(item.problem!.harness.python!.suffix).toContain('sys.stdin');
+    // Saved solutions hold the solution part only.
+    expect(item.problem!.referenceSolution).toMatchObject({ language: 'python', source: MERGE_K_LISTS_REFERENCE });
+    expect(MERGE_K_LISTS_REFERENCE).not.toContain('class ListNode:');
+    // Test cases follow the convention: one JSON value per argument, one JSON value out.
+    for (const c of (await api.testCases.list(lists)).items) {
+      expect(() => JSON.parse(c.stdin)).not.toThrow();
+      expect(() => JSON.parse(c.expectedStdout)).not.toThrow();
+    }
+    // Every other seed problem is a full program without a harness.
+    expect((await api.items.get(seedIds.items.twoSum)).problem).toMatchObject({ interface: 'program', harness: {} });
+  });
+
+  it('saves a harness with a function problem, and none with a program', async () => {
+    const made = await api.items.create({ type: 'problem', title: 'F', problem: { interface: 'function', starterCode: { python: 'def solve():\r\n    pass' }, harness: { python: runner } } });
+    expect(made.problem).toMatchObject({ interface: 'function', starterCode: { python: 'def solve():\n    pass' }, harness: { python: runner } });
+    // It may be saved with no entries at all.
+    expect((await api.items.create({ type: 'problem', title: 'G', problem: { interface: 'function' } })).problem).toMatchObject({ interface: 'function', harness: {} });
+
+    const refused = await failure(api.items.create({ type: 'problem', title: 'P', problem: { harness: { python: runner } } }));
+    expect(refused.status).toBe(422);
+    expect(refused.fields).toHaveProperty(['problem.harness']);
+  });
+
+  it('validates the interface and the shape of the harness', async () => {
+    const bad: [Record<string, unknown>, string][] = [
+      [{ interface: 'class' }, 'problem.interface'],
+      [{ interface: 'function', harness: { klingon: runner } }, 'problem.harness'],
+      [{ interface: 'function', harness: { python: { prefix: 'x' } } }, 'problem.harness'],
+      [{ interface: 'function', harness: [] }, 'problem.harness'],
+      [{ interface: 'function', harness: { python: { prefix: 'x'.repeat(LIMITS.maxSourceBytes + 1), suffix: '' } } }, 'problem.harness.python'],
+    ];
+    for (const [problem, field] of bad) {
+      const err = await failure(api.items.create({ type: 'problem', title: 'X', problem: problem as never }));
+      expect(err.status, field).toBe(422);
+      expect(err.fields, field).toHaveProperty([field]);
+    }
+    // Either part may be empty.
+    const item = await api.items.create({ type: 'problem', title: 'X', problem: { interface: 'function', harness: { go: { prefix: '', suffix: 'func main() {}' } } } });
+    expect(item.problem!.harness).toEqual({ go: { prefix: '', suffix: 'func main() {}' } });
+  });
+
+  it('changes the interface later, only together with a harness that fits it', async () => {
+    const before = await api.items.get(lists);
+    // A program keeps no harness: the change is refused while one is stored.
+    const refused = await failure(api.items.update(lists, { problem: { interface: 'program' } }));
+    expect(refused.status).toBe(422);
+    expect(refused.fields).toHaveProperty(['problem.harness']);
+    expect(await api.items.get(lists)).toEqual(before);
+
+    const program = await api.items.update(lists, { problem: { interface: 'program', harness: {} } });
+    expect(program.problem).toMatchObject({ interface: 'program', harness: {} });
+    expect(program.revision).toBe(before.revision + 1);
+    // Starter code and saved solutions are left as they were.
+    expect(program.problem!.starterCode).toEqual(before.problem!.starterCode);
+    expect(program.solutionCount).toBe(before.solutionCount);
+
+    const back = await api.items.update(lists, { problem: { interface: 'function', harness: { python: runner } } });
+    expect(back.problem).toMatchObject({ interface: 'function', harness: { python: runner } });
+    // The harness is replaced as a whole, like starter code.
+    expect((await api.items.update(lists, { problem: { harness: { java: runner } } })).problem!.harness).toEqual({ java: runner });
+    // A harness on a program is refused in a patch too.
+    expect((await failure(api.items.update(seedIds.items.twoSum, { problem: { harness: { python: runner } } }))).status).toBe(422);
+  });
+
+  it('assembles the program from the prefix, the source and the suffix, each on a new line', () => {
+    expect(assemble({ prefix: 'a\nb', suffix: 'z' }, 'x\ny')).toEqual({ program: 'a\nb\nx\ny\nz', lineOffset: 2 });
+    expect(assemble({ prefix: 'a\n', suffix: 'z\n' }, 'x\n')).toEqual({ program: 'a\nx\nz\n', lineOffset: 1 });
+    expect(assemble({ prefix: '', suffix: 'z' }, 'x')).toEqual({ program: 'x\nz', lineOffset: 0 });
+    expect(assemble(undefined, 'x')).toEqual({ program: 'x', lineOffset: 0 });
+  });
+
+  it('writes a stub and a runner for a signature in each language it knows', () => {
+    const kit = functionKit({ name: 'twoSum', params: [{ name: 'nums', type: 'int[]' }, { name: 'target', type: 'int' }], returns: 'int[]' });
+    expect(Object.keys(kit.starterCode)).toEqual([...KIT_LANGUAGES]);
+    expect(Object.keys(kit.harness)).toEqual([...KIT_LANGUAGES]);
+    expect(kit.starterCode.python).toBe('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        ');
+    expect(kit.starterCode.java).toContain('public int[] twoSum(int[] nums, int target) {');
+    expect(kit.starterCode.go).toContain('func twoSum(nums []int, target int) []int {');
+    expect(kit.starterCode.javascript).toContain('function twoSum(nums, target) {');
+    for (const language of KIT_LANGUAGES) {
+      // The runner calls the solution, and nothing in the stub does its work.
+      expect(kit.harness[language]!.suffix, language).toMatch(/twoSum[.(]/);
+      expect(kit.starterCode[language], language).not.toMatch(/stdin|readLine|readFileSync|os\.Stdin/);
+    }
+    expect(Object.keys(functionKit({ name: 'f', params: [], returns: 'bool' }, ['python', 'rust']).harness)).toEqual(['python']);
   });
 });
 
@@ -649,6 +757,74 @@ describe('test cases', () => {
     expect(foreign.status).toBe(422);
     expect(foreign.fields).toHaveProperty('solutionId');
     expect((await failure(api.testCases.verify(itemId, false, 'no-such-solution'))).status).toBe(422);
+  });
+});
+
+describe('running a "solution only" problem', () => {
+  const lists = seedIds.items.mergeKLists;
+
+  it('runs a submission inside the harness and reports where its lines start', async () => {
+    const item = await api.items.get(lists);
+    const queued = await api.submissions.create(lists, { language: 'python', source: MERGE_K_LISTS_REFERENCE, mode: 'submit', stdin: null });
+    // What is stored is what was submitted; the offset is the length of the prefix.
+    expect(queued.source).toBe(MERGE_K_LISTS_REFERENCE);
+    expect(queued.lineOffset).toBe(item.problem!.harness.python!.prefix.split('\n').length - 1);
+    expect(queued.lineOffset).toBeGreaterThan(0);
+    const { final } = await judged(queued.id);
+    expect(final).toMatchObject({ verdict: 'accepted', passedCount: 7, totalCount: 7, lineOffset: queued.lineOffset });
+    expect((await api.submissions.list(lists)).items[0]!.lineOffset).toBe(queued.lineOffset);
+
+    // A program has nothing before the source.
+    const plain = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source: 'print(1)', mode: 'run', stdin: null });
+    expect(plain.lineOffset).toBe(0);
+  });
+
+  it('fails the stub submitted as it is', async () => {
+    const stub = (await api.items.get(lists)).problem!.starterCode.python!;
+    const { final } = await judged((await api.submissions.create(lists, { language: 'python', source: stub, mode: 'run', stdin: null })).id);
+    expect(final.verdict).toBe('wrong_answer');
+    expect(final.passedCount).toBe(0);
+    expect(final.results.every((r) => r.stdout === '')).toBe(true);
+  });
+
+  it('only runs the languages that have a harness', async () => {
+    const java = await api.submissions.create(lists, { language: 'java', source: MERGE_K_LISTS_JAVA, mode: 'run', stdin: null });
+    expect((await judged(java.id)).final.verdict).toBe('accepted');
+    // Offered by the judge, but this problem has no harness for it.
+    const err = await failure(api.submissions.create(lists, { language: 'go', source: 'package main', mode: 'run', stdin: null }));
+    expect(err.status).toBe(422);
+    expect(err.fields).toEqual({ language: 'has no harness on this problem' });
+    // With no entries at all nothing can be run.
+    await api.items.update(lists, { problem: { harness: {} } });
+    expect((await failure(api.submissions.create(lists, { language: 'python', source: 'x', mode: 'run', stdin: null }))).status).toBe(422);
+  });
+
+  it('judges the assembled program: a harness that does not build fails every submission', async () => {
+    const item = await api.items.get(lists);
+    const python = item.problem!.harness.python!;
+    await api.items.update(lists, { problem: { harness: { python: { ...python, suffix: `${python.suffix}\n# MOCK:CE` } } } });
+    const { final } = await judged((await api.submissions.create(lists, { language: 'python', source: MERGE_K_LISTS_REFERENCE, mode: 'submit', stdin: null })).id);
+    expect(final.verdict).toBe('compile_error');
+    expect(final.compileOutput).not.toBe('');
+  });
+
+  it('verifies saved solutions through the harness of their language', async () => {
+    const all = (await api.solutions.list(lists)).items;
+    const reference = await api.testCases.verify(lists, false);
+    expect(reference.results).toHaveLength(7);
+    expect(reference.results.every((r) => r.ok && r.matches)).toBe(true);
+    const java = all.find((s) => s.language === 'java')!;
+    expect((await api.testCases.verify(lists, false, java.id)).results.every((r) => r.ok && r.matches)).toBe(true);
+
+    // The stub saved as a solution prints nothing.
+    const stub = await api.solutions.create(lists, { name: 'Untouched stub', language: 'python', source: (await api.items.get(lists)).problem!.starterCode.python! });
+    expect((await api.testCases.verify(lists, false, stub.id)).results.every((r) => r.ok && !r.matches && r.actualStdout === '')).toBe(true);
+
+    // A solution in a language without a harness cannot be run.
+    const go = await api.solutions.create(lists, { name: 'Go', language: 'go', source: 'func mergeKLists() {}' });
+    const err = await failure(api.testCases.verify(lists, false, go.id));
+    expect(err.status).toBe(422);
+    expect(err.fields).toHaveProperty('solutionId');
   });
 });
 
@@ -933,7 +1109,7 @@ describe('collections and tags', () => {
     const { items } = await api.collections.list();
     const roots = items.filter((c) => c.parentId === null);
     expect(roots.map((c) => c.name)).toEqual(['Interview prep', 'Databases', 'Distributed systems', 'Weekly practice']);
-    expect((await api.items.list()).total).toBe(24);
+    expect((await api.items.list()).total).toBe(25);
   });
 
   it('manages membership', async () => {
@@ -1193,12 +1369,12 @@ describe('AI drafting', () => {
 
   it('resolves styleId: null for none, an id for that preset, 422 for an unknown id', async () => {
     const text = 'valid parentheses';
-    const plain = await api.ai.draft({ text, styleId: null });
+    const plain = await api.ai.draft({ text, styleId: null, interfaceHint: 'program' });
     expect(plain.style).toBeNull();
     expect(Object.keys(plain.draft.problem!.starterCode)).toHaveLength(5);
     expect(plain.draft.body).toContain('## Examples');
 
-    const terse = await api.ai.draft({ text: 'two sum', styleId: seedIds.styles.terse });
+    const terse = await api.ai.draft({ text: 'two sum', styleId: seedIds.styles.terse, interfaceHint: 'program' });
     expect(terse.style?.name).toBe('Terse contest style');
     expect(Object.keys(terse.draft.problem!.starterCode).sort()).toEqual(['cpp', 'python']);
     expect(terse.draft.body).not.toContain('## Follow-up');
@@ -1209,6 +1385,181 @@ describe('AI drafting', () => {
 
     await api.styles.remove(seedIds.styles.leetcode);
     expect((await api.ai.draft({ text })).style).toBeNull();
+  });
+
+  it('chooses the interface itself: a function for one routine, a program when input and output are the task', async () => {
+    const algorithm = await api.ai.draft({ text: 'two sum, array + target, return indices', styleId: null });
+    expect(algorithm.draft.problem!.interface).toBe('function');
+    expect(Object.keys(algorithm.draft.problem!.harness)).toEqual([...KIT_LANGUAGES]);
+    expect(Object.keys(algorithm.draft.problem!.starterCode)).toEqual([...KIT_LANGUAGES]);
+    expect(algorithm.draft.problem!.starterCode.python).toBe('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        ');
+    // One JSON value per argument in, one JSON value out.
+    expect(algorithm.draft.testCases[0]).toMatchObject({ stdin: '[2,7,11,15]\n9\n', expectedStdout: '[0,1]\n' });
+    // The reference solution is the solution part, in a language that has a harness.
+    expect(algorithm.draft.problem!.referenceSolution).toMatchObject({ language: 'python' });
+    expect(algorithm.draft.problem!.referenceSolution!.source).toMatch(/^class Solution:/);
+    expect(algorithm.draft.problem!.referenceSolution!.source).not.toContain('stdin');
+
+    for (const text of ['Design an LRU cache with get and put', 'Parse a log file and print the busiest hour', 'simulate a bank queue; the input format is one event per line']) {
+      const { draft } = await api.ai.draft({ text, styleId: null });
+      expect(draft.problem, text).toMatchObject({ interface: 'program', harness: {} });
+      expect(draft.problem!.referenceSolution!.source, text).toContain('sys.stdin');
+    }
+    const generic = (await api.ai.draft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
+    expect(generic.problem!.interface).toBe('function');
+    expect(generic.problem!.starterCode.python).toContain('def solve(self, nums: list[int]) -> int:');
+  });
+
+  it('follows interfaceHint when it gives one', async () => {
+    const program = (await api.ai.draft({ text: 'two sum', interfaceHint: 'program', styleId: null })).draft;
+    expect(program.problem).toMatchObject({ interface: 'program', harness: {} });
+    expect(program.testCases[0]!.stdin).toBe('4\n2 7 11 15\n9\n');
+    // Written up only as a program in the mock: drafted from the text instead.
+    const fn = (await api.ai.draft({ text: 'Design an LRU cache with get and put', interfaceHint: 'function', styleId: null })).draft;
+    expect(fn.problem!.interface).toBe('function');
+    expect(Object.keys(fn.problem!.harness).length).toBeGreaterThan(0);
+    // It says nothing for a reading.
+    expect((await api.ai.draft({ text: 'two sum', typeHint: 'reading', interfaceHint: 'function' })).draft.problem).toBeNull();
+    const err = await failure(api.ai.draft({ text: 'two sum', interfaceHint: 'class' as never }));
+    expect(err.status).toBe(422);
+    expect(err.fields).toHaveProperty('interfaceHint');
+  });
+
+  it('keeps a stub and its runner together when a style narrows the languages', async () => {
+    // The default preset asks for Python and Go only.
+    const { draft } = await api.ai.draft({ text: 'valid parentheses' });
+    expect(draft.problem!.interface).toBe('function');
+    expect(Object.keys(draft.problem!.starterCode).sort()).toEqual(['go', 'python']);
+    expect(Object.keys(draft.problem!.harness).sort()).toEqual(['go', 'python']);
+    // The terse one asks for C++ and Python; there is no C++ runner, so Python it is.
+    const terse = (await api.ai.draft({ text: 'valid parentheses', styleId: seedIds.styles.terse })).draft;
+    expect(Object.keys(terse.problem!.starterCode)).toEqual(['python']);
+    expect(Object.keys(terse.problem!.harness)).toEqual(['python']);
+  });
+
+  it('checks the reference solution against the draft\'s test cases', async () => {
+    const good = await api.ai.draft({ text: 'two sum', styleId: null });
+    expect(good.check).toEqual({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: KIT_LANGUAGES.map((language) => ({ language, status: 'ok', error: null })).sort((a, b) => a.language.localeCompare(b.language)) });
+    expect(good.draft.testCases.every((c) => c.verified)).toBe(true);
+
+    // The mock can be asked for an example its own solution disagrees with.
+    const bad = await api.ai.draft({ text: 'two sum MOCK:MISMATCH', styleId: null });
+    expect(bad.check).toMatchObject({ attempted: true, passed: 1, total: 2 });
+    expect(bad.check!.error).toMatch(/^Example 2: expected \[1,2\], but the reference solution printed /);
+    expect(bad.draft.testCases.map((c) => c.verified)).toEqual([true, false]);
+
+    expect((await api.ai.draft({ text: 'Notes on how vector clocks work. Each process keeps a counter per process.' })).check).toBeNull();
+
+    start({ judge: 'none' });
+    const none = await api.ai.draft({ text: 'two sum', styleId: null });
+    expect(none.check).toEqual({ attempted: false, engine: null, passed: 0, total: 2, error: null, runners: [] });
+    expect(none.draft.testCases.some((c) => c.verified)).toBe(false);
+    expect(none.draft.problem!.referenceSolution).not.toBeNull();
+
+    // An engine that cannot be reached is reported in the check, not as a failed request.
+    start({ judge: 'down' });
+    const down = await api.ai.draft({ text: 'two sum', styleId: null });
+    expect(down.check).toMatchObject({ passed: 0, total: 2 });
+    expect(down.check!.error).toMatch(/unreachable/);
+    expect(down.draft.testCases.some((c) => c.verified)).toBe(false);
+  });
+
+  it('proves every runner of a "solution only" draft, not only the reference solution\'s', async () => {
+    // The default preset keeps Python and Go; the mock can be asked to leave Go's runner broken.
+    const { draft, check } = await api.ai.draft({ text: 'two sum MOCK:RUNNER' });
+    expect(check).toMatchObject({ attempted: true, passed: 2, total: 2, error: null });
+    expect(check!.runners).toEqual([
+      { language: 'go', status: 'failed', error: expect.stringMatching(/^the go starter code did not compile inside its harness: /) },
+      { language: 'python', status: 'ok', error: null },
+    ]);
+    // Saved as it is, the problem cannot be solved in Go until the runner is fixed.
+    const item = await api.items.create({ type: 'problem', title: draft.title, problem: draft.problem!, testCases: draft.testCases.map((c) => ({ ...c, origin: 'ai' as const })) });
+    const go = await judged((await api.submissions.create(item.id, { language: 'go', source: 'func twoSum() {}', mode: 'run', stdin: null })).id);
+    expect(go.final.verdict).toBe('compile_error');
+    // A revision does not break it twice.
+    const revised = await api.ai.draft({ text: 'two sum MOCK:RUNNER', previousDraft: draft, instruction: 'shorter' });
+    expect(revised.draft.problem!.harness.go).toEqual(draft.problem!.harness.go);
+
+    // A runner without starter code is not tried, and neither is one the engine has no language for.
+    const first = (await api.ai.draft({ text: 'two sum', styleId: null })).draft;
+    const partial = { ...first, problem: { ...first.problem!, starterCode: { ...first.problem!.starterCode, java: '' } } };
+    const skipped = await api.ai.draft({ text: 'two sum', previousDraft: partial, instruction: 'shorter', styleId: null });
+    expect(skipped.check!.runners.find((r) => r.language === 'java')).toEqual({ language: 'java', status: 'skipped', error: null });
+    expect(skipped.check!.runners.filter((r) => r.status === 'ok').map((r) => r.language)).toEqual(['go', 'javascript', 'python']);
+
+    // A program has none, and nothing is tried without an engine or when it cannot be reached.
+    expect((await api.ai.draft({ text: 'two sum', interfaceHint: 'program', styleId: null })).check!.runners).toEqual([]);
+    start({ judge: 'down' });
+    expect((await api.ai.draft({ text: 'two sum', styleId: null })).check!.runners.every((r) => r.status === 'skipped')).toBe(true);
+    start({ judge: 'none' });
+    expect((await api.ai.draft({ text: 'two sum', styleId: null })).check!.runners).toEqual([]);
+  });
+
+  it('reports what each generation cost, and counts it towards the default provider', async () => {
+    const before = (await api.settings.getAi()).providers[0]!;
+    const { usage, draft } = await api.ai.draft({ text: 'two sum', styleId: null });
+    expect(usage.model).toBe('claude-opus-5-5');
+    expect(usage.inputTokens).toBeGreaterThan(1800);
+    expect(usage.outputTokens).toBe(Math.ceil(JSON.stringify(draft).length / 4));
+    expect(usage.durationMs).toBeGreaterThan(0);
+
+    const variant = await api.ai.variant(seedIds.items.coinChange, { styleId: null });
+    const tests = await api.ai.testCases(seedIds.items.twoSum, { count: 3 });
+    expect(variant.usage.model).toBe('claude-opus-5-5');
+    expect(tests.usage.outputTokens).toBeGreaterThan(0);
+    // A failed request is counted too, with no tokens.
+    await failure(api.ai.draft({ text: 'anything MOCK:FAIL' }));
+
+    const [after, ...others] = (await api.settings.getAi()).providers;
+    const spent = [usage, variant.usage, tests.usage];
+    for (const period of ['last30Days', 'allTime'] as const) {
+      expect(after!.usage[period]).toEqual({
+        requests: before.usage[period].requests + 4,
+        failed: before.usage[period].failed + 1,
+        inputTokens: before.usage[period].inputTokens + spent.reduce((sum, u) => sum + u.inputTokens!, 0),
+        outputTokens: before.usage[period].outputTokens + spent.reduce((sum, u) => sum + u.outputTokens!, 0),
+      });
+    }
+    expect(Date.parse(after!.usage.lastUsedAt!)).toBeGreaterThan(Date.parse(before.usage.lastUsedAt!));
+    // The other providers were not involved.
+    expect(others.map((p) => p.usage.allTime.requests)).toEqual([9, 0]);
+  });
+
+  it('keeps the interface, the harness and the reference solution through a revision, and checks again', async () => {
+    const first = (await api.ai.draft({ text: 'two sum', styleId: null })).draft;
+    const edited = { ...first, problem: { ...first.problem!, harness: { python: first.problem!.harness.python! }, starterCode: { python: '# mine' } } };
+    const revised = await api.ai.draft({ text: 'two sum', previousDraft: edited, instruction: 'make it harder', interfaceHint: 'function', styleId: null });
+    expect(revised.draft.problem).toMatchObject({ interface: 'function', harness: edited.problem.harness, starterCode: { python: '# mine' }, referenceSolution: first.problem!.referenceSolution });
+    expect(revised.check).toMatchObject({ attempted: true, passed: 2, total: 2 });
+    expect(revised.draft.testCases.every((c) => c.verified)).toBe(true);
+
+    // Without the runner of the solution's language there is nothing to run it with.
+    const noRunner = { ...first, problem: { ...first.problem!, harness: { go: first.problem!.harness.go! } } };
+    const unrun = await api.ai.draft({ text: 'two sum', previousDraft: noRunner, instruction: 'shorter', styleId: null });
+    expect(unrun.check).toMatchObject({ passed: 0, total: 2 });
+    expect(unrun.check!.error).toMatch(/no harness/);
+    // A draft that went back as a program carries no harness.
+    const asProgram = { ...first, problem: { ...first.problem!, interface: 'program' as const, harness: {} } };
+    expect((await api.ai.draft({ text: 'two sum', previousDraft: asProgram, instruction: 'shorter', styleId: null })).draft.problem).toMatchObject({ interface: 'program', harness: {} });
+  });
+
+  it('saves a reviewed draft with its harness, its reference solution and the verified marks', async () => {
+    const { draft } = await api.ai.draft({ text: 'two sum', styleId: null });
+    const item = await api.items.create({
+      type: 'problem',
+      title: draft.title,
+      body: draft.body,
+      problem: draft.problem!,
+      testCases: draft.testCases.map((c) => ({ ...c, origin: 'ai' as const })),
+    });
+    expect(item.problem).toMatchObject({ interface: 'function', harness: draft.problem!.harness });
+    expect(item.problem!.referenceSolution).toMatchObject(draft.problem!.referenceSolution!);
+    expect(item.solutionCount).toBe(1);
+    expect((await api.testCases.list(item.id)).items.map((c) => c.verified)).toEqual([true, true]);
+    // The saved reference solution passes when it is run, and the stub does not.
+    expect((await api.testCases.verify(item.id, false)).results.every((r) => r.ok && r.matches)).toBe(true);
+    const stub = await judged((await api.submissions.create(item.id, { language: 'python', source: draft.problem!.starterCode.python!, mode: 'submit', stdin: null })).id);
+    expect(stub.final.verdict).toBe('wrong_answer');
   });
 
   it('builds a generic problem or a reading from unrecognised text', async () => {
@@ -1316,6 +1667,41 @@ describe('AI variants', () => {
     expect((await failure(api.ai.variant(id, { instruction: 'x', previousDraft: { nope: true } as never }))).status).toBe(422);
   });
 
+  it('keeps the original\'s interface, with its stubs, runners and a checked reference solution', async () => {
+    const lists = seedIds.items.mergeKLists;
+    const origin = await api.items.get(lists);
+    const { draft, check } = await api.ai.variant(lists, { mode: 'similar', styleId: null });
+    expect(draft.problem).toMatchObject({ interface: 'function', harness: origin.problem!.harness, starterCode: origin.problem!.starterCode });
+    expect(draft.problem!.referenceSolution).toEqual({ language: 'python', source: MERGE_K_LISTS_REFERENCE });
+    expect(check).toMatchObject({ attempted: true, engine: 'judge0', passed: 3, total: 3, error: null });
+    expect(check!.runners).toEqual([
+      { language: 'java', status: 'ok', error: null },
+      { language: 'python', status: 'ok', error: null },
+    ]);
+    expect(draft.testCases.every((c) => c.verified)).toBe(true);
+
+    const program = await api.ai.variant(seedIds.items.coinChange, { mode: 'easier', styleId: null });
+    expect(program.draft.problem).toMatchObject({ interface: 'program', harness: {} });
+    expect(program.check).toMatchObject({ attempted: true, error: null });
+    // A twist has no examples, so there is nothing to check.
+    expect((await api.ai.variant(lists, { mode: 'twist', styleId: null })).check).toMatchObject({ attempted: false, total: 0 });
+    expect((await api.ai.variant(seedIds.items.capTheorem, {})).check).toBeNull();
+  });
+
+  it('takes the other interface when interfaceHint asks for it', async () => {
+    const lists = seedIds.items.mergeKLists;
+    const { draft, check } = await api.ai.variant(lists, { interfaceHint: 'program', styleId: null });
+    expect(draft.problem).toMatchObject({ interface: 'program', harness: {}, referenceSolution: null });
+    expect(check).toMatchObject({ attempted: false });
+    expect((await api.ai.variant(lists, { interfaceHint: 'function', styleId: null })).draft.problem!.interface).toBe('function');
+    expect((await api.ai.variant(seedIds.items.coinChange, { interfaceHint: 'function', styleId: null })).draft.problem).toMatchObject({ interface: 'function', harness: {} });
+
+    const err = await failure(api.ai.variant(lists, { interfaceHint: 'auto' as never }));
+    expect(err.status).toBe(422);
+    expect(err.fields).toHaveProperty('interfaceHint');
+    expect((await failure(api.ai.variant(seedIds.items.capTheorem, { interfaceHint: 'function' }))).status).toBe(422);
+  });
+
   it('only offers "similar" for a reading', async () => {
     const id = seedIds.items.capTheorem;
     const err = await failure(api.ai.variant(id, { mode: 'harder' }));
@@ -1351,6 +1737,36 @@ describe('AI test cases', () => {
     expect(small.cases.filter((c) => c.error !== null)).toHaveLength(0);
   });
 
+  it('writes only the solution part for a "solution only" problem, in a language that has a harness', async () => {
+    const lists = seedIds.items.mergeKLists;
+    const python = await api.ai.testCases(lists, { count: 4 });
+    expect(python.referenceSolution).toEqual({ language: 'python', source: MERGE_K_LISTS_REFERENCE });
+    expect(python.cases.every((c) => c.stdin.startsWith('['))).toBe(true);
+    const java = await api.ai.testCases(lists, { count: 4, language: 'java' });
+    expect(java.referenceSolution).toEqual({ language: 'java', source: MERGE_K_LISTS_JAVA });
+
+    const err = await failure(api.ai.testCases(lists, { language: 'go' }));
+    expect(err.status).toBe(422);
+    expect(err.fields).toEqual({ language: 'has no harness on this problem' });
+    // The same language is fine for a full program.
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, language: 'go' })).referenceSolution.language).toBe('go');
+  });
+
+  it('leaves out proposals that repeat an input, and says how many', async () => {
+    const plain = await api.ai.testCases(seedIds.items.twoSum, { count: 6 });
+    expect(plain.duplicatesDropped).toBe(0);
+    expect(plain.cases).toHaveLength(6);
+    // The mock can be asked for two repeats.
+    const repeated = await api.ai.testCases(seedIds.items.twoSum, { count: 6, instruction: 'stress the limits MOCK:REPEAT' });
+    expect(repeated.duplicatesDropped).toBe(2);
+    expect(repeated.cases).toHaveLength(4);
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 1, instruction: 'MOCK:REPEAT' })).cases).toHaveLength(1);
+    // All of them can be repeats: the answer is still a proposal, with nothing in it.
+    const none = await api.ai.testCases(seedIds.items.twoSum, { count: 8, instruction: 'MOCK:REPEAT-ALL' });
+    expect(none).toMatchObject({ cases: [], duplicatesDropped: 8 });
+    expect(none.usage.logId).not.toBeNull();
+  });
+
   it('keeps predictions unverified without a judge', async () => {
     start({ judge: 'none' });
     const res = await api.ai.testCases(seedIds.items.twoSum, { count: 6 });
@@ -1382,6 +1798,146 @@ describe('AI test cases', () => {
       expect(c).toMatchObject({ verified: false, predictionMatched: null });
       expect(c.expectedStdout).toBe(c.predictedStdout);
     }
+  });
+});
+
+describe('AI activity log', () => {
+  /** Every entry, newest first, through the cursors. */
+  const all = async (filters: Parameters<typeof api.settings.log>[0] = {}) => {
+    const items = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = await api.settings.log({ ...filters, limit: 100, before });
+      items.push(...page.items);
+      if (page.next === null) return { items, total: page.total };
+      before = page.next;
+    }
+  };
+
+  it('lists the requests newest first, a batch at a time', async () => {
+    const first = await api.settings.log();
+    expect(first.items).toHaveLength(50);
+    expect(first.total).toBe(246);
+    expect(first.next).not.toBeNull();
+    expect(first.items[0]).toMatchObject({ operation: 'draft', title: 'Merge k Sorted Lists', providerName: 'Personal key', model: 'claude-opus-5-5', status: 'ok', durationMs: 48200 });
+    expect(first.items[0]).not.toHaveProperty('request');
+    expect(first.items[0]).not.toHaveProperty('response');
+
+    const { items, total } = await all();
+    expect(items).toHaveLength(total);
+    expect(new Set(items.map((e) => e.id)).size).toBe(total);
+    const times = items.map((e) => Date.parse(e.createdAt));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    expect((await api.settings.log({ limit: 200 })).items).toHaveLength(200);
+    expect((await failure(api.settings.log({ limit: 201 }))).status).toBe(400);
+    expect((await failure(api.settings.log({ before: 'yesterday' }))).status).toBe(400);
+  });
+
+  it('keeps a cursor valid while new requests arrive', async () => {
+    const first = await api.settings.log({ limit: 10 });
+    await api.ai.draft({ text: 'two sum', styleId: null });
+    const second = await api.settings.log({ limit: 10, before: first.next! });
+    // Nothing repeats and nothing is skipped: the new entry belongs before the first batch.
+    const again = await api.settings.log({ limit: 21 });
+    expect(again.items.map((e) => e.id)).toEqual([again.items[0]!.id, ...first.items.map((e) => e.id), ...second.items.map((e) => e.id)]);
+    expect(again.total).toBe(first.total + 1);
+  });
+
+  it('filters by provider, kind of request and outcome on the server', async () => {
+    const [personal, ollama] = (await api.settings.getAi()).providers;
+    const local = await all({ providerId: ollama!.id });
+    expect(local.total).toBe(9);
+    expect(local.items.every((e) => e.providerName === 'Local Ollama' && e.kind === 'openai_compatible')).toBe(true);
+    const failed = await all({ status: 'failed' });
+    expect(failed.total).toBeGreaterThan(5);
+    expect(failed.items.every((e) => e.status === 'failed' && e.error !== null && e.usage.inputTokens === null)).toBe(true);
+    const tests = await all({ operation: 'test', providerId: personal!.id, status: 'ok' });
+    expect(tests.total).toBeGreaterThan(0);
+    expect(tests.items.every((e) => e.operation === 'test' && e.title === null && e.itemId === null)).toBe(true);
+    expect((await api.settings.log({ status: 'cancelled' })).total).toBeGreaterThan(0);
+    expect((await api.settings.log({ providerId: 'nobody' })).total).toBe(0);
+    expect((await failure(api.settings.log({ operation: 'poem' as never }))).status).toBe(400);
+  });
+
+  it('gives what was sent and what came back for one entry', async () => {
+    const { items } = await api.settings.log({ limit: 10 });
+    const draft = await api.settings.logEntry(items[0]!.id);
+    expect(draft).toMatchObject({ ...items[0]!, truncated: false });
+    expect(draft.request).toMatchObject({ schema: 'item_draft', maxOutputTokens: 64000, messages: [{ role: 'user' }] });
+    expect(JSON.parse(draft.response!)).toMatchObject({ title: 'Merge k Sorted Lists' });
+    // Reasoning and cache figures where the provider reported them.
+    expect(items[1]!.usage).toEqual({ inputTokens: 3900, outputTokens: 1650, reasoningTokens: 420, cacheReadTokens: 3100, cacheWriteTokens: 0 });
+    // A failed and a cancelled request brought nothing back; one was cut off.
+    const details = await Promise.all(items.slice(0, 6).map((e) => api.settings.logEntry(e.id)));
+    expect(details.map((d) => d.status)).toEqual(['ok', 'ok', 'failed', 'cancelled', 'ok', 'ok']);
+    expect(details[2]!.response).toBeNull();
+    expect(details[3]).toMatchObject({ response: null, error: null });
+    expect(details[4]!.truncated).toBe(true);
+    expect(JSON.stringify(details)).not.toMatch(/sk-ant|x-api-key|authorization/i);
+    expect((await failure(api.settings.logEntry('nope'))).status).toBe(404);
+  });
+
+  it('writes an entry for every request to a provider, with the id the generation reports', async () => {
+    const before = (await api.settings.log()).total;
+    const { usage, draft } = await api.ai.draft({ text: 'two sum, array + target', styleId: null });
+    expect(usage).toMatchObject({ reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0 });
+    const entry = await api.settings.logEntry(usage.logId!);
+    expect(entry).toMatchObject({ operation: 'draft', itemId: null, title: 'Two Sum', status: 'ok', model: usage.model, durationMs: usage.durationMs });
+    expect(entry.usage).toMatchObject({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
+    expect((entry.request as { messages: { content: string }[] }).messages[0]!.content).toContain('two sum, array + target');
+    expect(JSON.parse(entry.response!)).toMatchObject({ title: draft.title });
+
+    const twoSum = seedIds.items.twoSum;
+    const tests = await api.ai.testCases(twoSum, { count: 2 });
+    expect(await api.settings.logEntry(tests.usage.logId!)).toMatchObject({ operation: 'testcases', itemId: twoSum, title: 'Two Sum' });
+    const variant = await api.ai.variant(twoSum, { styleId: null });
+    expect(await api.settings.logEntry(variant.usage.logId!)).toMatchObject({ operation: 'variant', itemId: twoSum, title: 'Two Sum' });
+    await failure(api.ai.variant(twoSum, { instruction: 'MOCK:FAIL' }));
+    const personal = (await api.settings.getAi()).providers[0]!;
+    await api.settings.testAi({ providerId: personal.id });
+    // Settings that are not saved belong to no provider, and are not logged.
+    await api.settings.testAi({ kind: 'anthropic', apiKey: 'sk-ant-typed' });
+
+    const log = await api.settings.log({ limit: 5 });
+    expect(log.total).toBe(before + 5);
+    expect(log.items.map((e) => [e.operation, e.status])).toEqual([['test', 'ok'], ['variant', 'failed'], ['variant', 'ok'], ['testcases', 'ok'], ['draft', 'ok']]);
+    expect(log.items[1]).toMatchObject({ error: expect.stringMatching(/overloaded/), usage: { inputTokens: null, outputTokens: null } });
+
+    // An entry outlives its item and its provider; a service that reports reasoning has it counted.
+    const ollama = (await api.settings.getAi()).providers[1]!;
+    await api.settings.putAi({ defaultProviderId: ollama.id });
+    const viaOllama = await api.ai.draft({ text: 'two sum', styleId: null });
+    expect(viaOllama.usage).toMatchObject({ model: 'qwen2.5-coder:14b', cacheReadTokens: null, cacheWriteTokens: null });
+    expect(viaOllama.usage.reasoningTokens).toBeGreaterThan(0);
+    await api.settings.removeProvider(ollama.id);
+    await api.items.remove(twoSum);
+    expect((await api.settings.log({ providerId: ollama.id })).total).toBe(10);
+    expect((await api.settings.logEntry(tests.usage.logId!)).title).toBe('Two Sum');
+  });
+
+  it('clears the older part or everything, and leaves the providers\' totals alone', async () => {
+    const usage = (await api.settings.getAi()).providers.map((p) => p.usage);
+    const before = (await api.settings.log()).total;
+    const recent = (await all()).items.filter((e) => Date.parse(e.createdAt) >= Date.now() - 30 * 86400_000);
+    expect(recent.length).toBeGreaterThan(5);
+    expect(recent.length).toBeLessThan(before);
+
+    await api.settings.clearLog(new Date(Date.now() - 30 * 86400_000).toISOString());
+    const kept = await all();
+    expect(kept.items.map((e) => e.id)).toEqual(recent.map((e) => e.id));
+    expect((await failure(api.settings.clearLog('long ago'))).status).toBe(400);
+
+    await api.settings.clearLog();
+    expect(await api.settings.log()).toEqual({ items: [], next: null, total: 0 });
+    expect((await failure(api.settings.logEntry(recent[0]!.id))).status).toBe(404);
+    expect((await api.settings.getAi()).providers.map((p) => p.usage)).toEqual(usage);
+  });
+
+  it('is empty without a seeded library or a provider', async () => {
+    start({ library: 'empty' });
+    expect((await api.settings.log()).total).toBe(0);
+    start({ ai: false });
+    expect((await api.settings.log()).total).toBe(0);
   });
 });
 
@@ -1455,151 +2011,341 @@ describe('style presets', () => {
 });
 
 describe('AI settings', () => {
-  it('never returns a key, only a hint and its source', async () => {
+  /** The saved provider the default scenario starts with. */
+  const seeded = async () => (await api.settings.getAi()).providers[0]!;
+  const local = { name: 'Ollama', kind: 'openai_compatible', model: 'llama3.1:8b', baseUrl: 'http://localhost:11434/v1' } as const;
+
+  it('never returns a key, only a hint', async () => {
     const settings = await api.settings.getAi();
-    expect(settings.activeProvider).toBe('anthropic');
-    expect(settings.providers.anthropic).toEqual({
+    expect(settings.providers.map((p) => p.name)).toEqual(['Personal key', 'Local Ollama', 'Work gateway']);
+    const provider = settings.providers[0]!;
+    expect(settings.defaultProviderId).toBe(provider.id);
+    expect(provider).toEqual({
+      id: provider.id,
+      name: 'Personal key',
+      kind: 'anthropic',
       model: 'claude-opus-5-5',
       baseUrl: null,
-      modelSource: 'settings',
-      baseUrlSource: null,
       apiKeySet: true,
       apiKeyHint: '…x7Qa',
-      apiKeySource: 'settings',
+      source: 'settings',
+      isDefault: true,
       ready: true,
+      usage: {
+        last30Days: { requests: 14, failed: 1, inputTokens: 61200, outputTokens: 48100 },
+        allTime: { requests: 52, failed: 3, inputTokens: 233000, outputTokens: 171500 },
+        lastUsedAt: provider.usage.lastUsedAt,
+      },
+      createdAt: provider.createdAt,
+      updatedAt: provider.updatedAt,
     });
-    expect(settings.providers.openai_compatible).toMatchObject({
-      model: null,
-      modelSource: null,
-      baseUrlSource: null,
-      apiKeySet: false,
-      apiKeyHint: null,
-      ready: false,
+    expect(provider.createdAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    expect(settings.kinds).toEqual({
+      anthropic: { defaultModel: 'claude-opus-5-5', defaultBaseUrl: 'https://api.anthropic.com', keyRequired: true },
+      openai_compatible: { defaultModel: null, defaultBaseUrl: 'https://api.openai.com/v1', keyRequired: false },
     });
     expect(JSON.stringify(settings)).not.toContain('sk-ant');
   });
 
-  it('says which values come from the environment', async () => {
+  it('keeps what was spent through each provider, starting from nothing', async () => {
+    const [personal, ollama, gateway] = (await api.settings.getAi()).providers;
+    expect(personal!.usage.lastUsedAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    // Used, but not in the last 30 days.
+    expect(ollama!.usage).toMatchObject({ last30Days: { requests: 0 }, allTime: { requests: 9, failed: 2 } });
+    const unused = { requests: 0, failed: 0, inputTokens: 0, outputTokens: 0 };
+    expect(gateway!.usage).toEqual({ last30Days: unused, allTime: unused, lastUsedAt: null });
+    const made = await api.settings.createProvider(local);
+    expect(made.usage).toEqual({ last30Days: unused, allTime: unused, lastUsedAt: null });
+
+    // The generation step of a saved provider's connection test is a request; a failed one is counted as such.
+    expect((await api.settings.testAi({ providerId: made.id })).ok).toBe(true);
+    expect((await api.settings.testAi({ providerId: made.id, model: 'no-such-model' })).ok).toBe(false);
+    const tested = (await api.settings.getAi()).providers.find((p) => p.id === made.id)!;
+    expect(tested.usage.allTime).toEqual({ requests: 2, failed: 1, inputTokens: 14, outputTokens: 5 });
+    expect(tested.usage.last30Days).toEqual(tested.usage.allTime);
+    expect(tested.usage.lastUsedAt).not.toBeNull();
+    // The counts stay with the entry when its settings change.
+    expect((await api.settings.updateProvider(made.id, { model: 'gemma3:12b' })).usage.allTime.requests).toBe(2);
+
+    // A test of settings that are not saved is nobody's request, and neither is one that never reaches the service.
+    await api.settings.testAi({ kind: 'anthropic', apiKey: 'sk-ant-typed' });
+    await api.settings.updateProvider(personal!.id, { apiKey: null });
+    expect((await api.settings.testAi({ providerId: personal!.id })).ok).toBe(false);
+    expect((await api.settings.getAi()).providers.find((p) => p.id === personal!.id)!.usage.allTime.requests).toBe(52);
+  });
+
+  it('starts with no providers when AI is not configured', async () => {
+    start({ ai: false });
+    expect(await api.settings.getAi()).toMatchObject({ defaultProviderId: null, providers: [] });
+  });
+
+  it('lists the default first, then saved providers by name, then environment providers', async () => {
     start(optionsFromFlags(['ai-env', 'instant']));
-    const env = (await api.settings.getAi()).providers.anthropic;
-    expect(env).toMatchObject({ modelSource: 'environment', baseUrlSource: 'environment', apiKeySource: 'environment', apiKeySet: true, ready: true });
-    expect(env.model).toBe('claude-opus-5-5');
+    const zed = await api.settings.createProvider({ name: 'zed', kind: 'anthropic', apiKey: 'sk-ant-zed-0001' });
+    await api.settings.createProvider({ name: 'Alpha', kind: 'anthropic' });
+    await api.settings.createProvider({ name: 'beta', kind: 'openai_compatible' });
+    expect((await api.settings.getAi()).providers.map((p) => p.name)).toEqual(['Anthropic (environment)', 'Alpha', 'beta', 'zed']);
+    const next = await api.settings.putAi({ defaultProviderId: zed.id });
+    expect(next.providers.map((p) => p.name)).toEqual(['zed', 'Alpha', 'beta', 'Anthropic (environment)']);
+    expect(next.providers.map((p) => p.isDefault)).toEqual([true, false, false, false]);
+  });
+
+  it('supplies a read-only provider from the environment', async () => {
+    start(optionsFromFlags(['ai-env', 'instant']));
+    const settings = await api.settings.getAi();
+    expect(settings.defaultProviderId).toBe('env-anthropic');
+    expect(settings.providers).toHaveLength(1);
+    const env = settings.providers[0]!;
+    expect(env).toMatchObject({ id: 'env-anthropic', kind: 'anthropic', source: 'environment', isDefault: true, ready: true, apiKeySet: true, createdAt: null, updatedAt: null });
     expect(env.baseUrl).toMatch(/^https:/);
-    expect((await api.meta()).ai.enabled).toBe(true);
+    expect(await api.meta()).toMatchObject({ ai: { enabled: true, providerId: 'env-anthropic', kind: 'anthropic', model: 'claude-opus-5-5' } });
 
-    // A saved value takes precedence; clearing it falls back to the environment.
-    let next = await api.settings.putAi({ providers: { anthropic: { model: 'claude-other', apiKey: 'sk-ant-saved-1234' } } });
-    expect(next.providers.anthropic).toMatchObject({ model: 'claude-other', modelSource: 'settings', apiKeySource: 'settings', baseUrlSource: 'environment' });
-    next = await api.settings.putAi({ providers: { anthropic: { model: null, apiKey: null } } });
-    expect(next.providers.anthropic).toMatchObject({ model: 'claude-opus-5-5', modelSource: 'environment', apiKeySource: 'environment' });
+    // It can be tested and chosen, but not changed or deleted.
+    expect((await api.settings.testAi({ providerId: 'env-anthropic' })).ok).toBe(true);
+    expect(await failure(api.settings.updateProvider('env-anthropic', { name: 'Mine' }))).toMatchObject({ status: 409, code: 'conflict' });
+    expect(await failure(api.settings.removeProvider('env-anthropic'))).toMatchObject({ status: 409, code: 'conflict' });
+    await api.settings.putAi({ defaultProviderId: null });
+    expect((await api.settings.putAi({ defaultProviderId: 'env-anthropic' })).defaultProviderId).toBe('env-anthropic');
+
+    // Its name is not reserved: only saved providers have to differ from each other.
+    expect((await api.settings.createProvider({ name: env.name, kind: 'anthropic' })).source).toBe('settings');
+
+    // Without CODEATROPHY_AI_PROVIDER it is there but not in use.
+    start(optionsFromFlags(['ai-env', 'no-ai', 'instant']));
+    expect(await api.settings.getAi()).toMatchObject({ defaultProviderId: null, providers: [{ id: 'env-anthropic', isDefault: false, ready: true }] });
+    expect((await api.meta()).ai.enabled).toBe(false);
   });
 
-  it('treats an empty apiKey as omitted and bounds model and key lengths', async () => {
-    const kept = await api.settings.putAi({ providers: { anthropic: { apiKey: '' } } });
-    expect(kept.providers.anthropic).toMatchObject({ apiKeySet: true, apiKeyHint: '…x7Qa', apiKeySource: 'settings' });
-    expect((await failure(api.settings.putAi({ providers: { anthropic: { model: 'm'.repeat(201) } } }))).status).toBe(422);
-    expect((await failure(api.settings.putAi({ providers: { anthropic: { apiKey: 'k'.repeat(1001) } } }))).status).toBe(422);
-    expect((await api.settings.getAi()).providers.anthropic.apiKeyHint).toBe('…x7Qa');
+  it('creates a provider without making it the default', async () => {
+    const before = await seeded();
+    const made = await api.settings.createProvider({ ...local, name: '  Ollama  ' });
+    expect(made).toMatchObject({ name: 'Ollama', kind: 'openai_compatible', model: 'llama3.1:8b', baseUrl: local.baseUrl, apiKeySet: false, source: 'settings', isDefault: false, ready: true });
+    expect((await api.settings.getAi()).defaultProviderId).toBe(before.id);
+
+    // Nothing but a name and a kind is needed, so a key can be stored before a model is chosen.
+    const bare = await api.settings.createProvider({ name: 'Work', kind: 'openai_compatible', apiKey: 'sk-work-0000ABCD' });
+    expect(bare).toMatchObject({ model: null, baseUrl: null, apiKeySet: true, apiKeyHint: '…ABCD', ready: false });
+    expect(JSON.stringify(bare)).not.toContain('sk-work');
   });
 
-  it('refuses to activate a provider that is not ready', async () => {
-    const err = await failure(api.settings.putAi({ activeProvider: 'openai_compatible' }));
-    expect(err.status).toBe(422);
-    expect(err.fields).toHaveProperty('activeProvider');
-    expect((await api.settings.getAi()).activeProvider).toBe('anthropic');
+  it('validates a provider with per-field messages', async () => {
+    const before = await seeded();
+    expect((await failure(api.settings.createProvider({ kind: 'anthropic' } as never))).fields).toEqual({ name: 'is required' });
+    expect((await failure(api.settings.createProvider({ name: '   ', kind: 'anthropic' }))).fields).toEqual({ name: 'is required' });
+    expect((await failure(api.settings.createProvider({ name: 'x' } as never))).fields).toEqual({ kind: 'is required' });
+    expect((await failure(api.settings.createProvider({ name: 'x', kind: 'gemini' as never }))).fields).toHaveProperty('kind');
+    expect((await failure(api.settings.createProvider({ name: 'n'.repeat(LIMITS.maxAiProviderNameChars + 1), kind: 'anthropic' }))).fields).toHaveProperty('name');
+    expect((await api.settings.createProvider({ name: 'é'.repeat(LIMITS.maxAiProviderNameChars), kind: 'anthropic' })).name).toHaveLength(LIMITS.maxAiProviderNameChars);
+    expect((await failure(api.settings.createProvider({ name: 'two\tparts', kind: 'anthropic' }))).fields.name).toMatch(/single line/);
+    expect((await failure(api.settings.createProvider({ name: 'PERSONAL KEY', kind: 'anthropic' }))).fields).toEqual({ name: 'is already used by another provider' });
 
-    const saved = await api.settings.putAi({
-      activeProvider: 'openai_compatible',
-      providers: { openai_compatible: { model: 'llama3.1', baseUrl: 'http://localhost:11434/v1' } },
-    });
-    expect(saved.providers.openai_compatible).toMatchObject({ ready: true, apiKeySet: false, model: 'llama3.1' });
-    expect((await api.meta()).ai).toEqual({ enabled: true, provider: 'openai_compatible', model: 'llama3.1' });
+    const many = await failure(
+      api.settings.createProvider({ name: 'x', kind: 'anthropic', model: 'm'.repeat(LIMITS.maxModelIdChars + 1), baseUrl: 'localhost:11434', apiKey: 'k'.repeat(LIMITS.maxApiKeyChars + 1) }),
+    );
+    expect(many.status).toBe(422);
+    expect(Object.keys(many.fields).sort()).toEqual(['apiKey', 'baseUrl', 'model']);
+
+    expect((await failure(api.settings.updateProvider(before.id, { name: '' }))).fields).toEqual({ name: 'is required' });
+    expect((await failure(api.settings.updateProvider(before.id, { model: 'a\nb' }))).fields.model).toMatch(/single line/);
+    expect((await failure(api.settings.updateProvider(before.id, { kind: 'openai_compatible' } as never))).fields).toEqual({ kind: 'cannot be changed after creation' });
+    expect(await failure(api.settings.updateProvider('nope', { name: 'x' }))).toMatchObject({ status: 404, code: 'not_found' });
+    expect(await failure(api.settings.removeProvider('nope'))).toMatchObject({ status: 404, code: 'not_found' });
+    // Nothing of a rejected update is applied; keeping its own name is not a clash.
+    expect(await seeded()).toEqual(before);
+    expect((await api.settings.updateProvider(before.id, { name: 'personal KEY' })).name).toBe('personal KEY');
   });
 
-  it('replaces and deletes keys, and turns AI off', async () => {
-    const replaced = await api.settings.putAi({ providers: { anthropic: { apiKey: 'sk-ant-new-key-ABCD' } } });
-    expect(replaced.providers.anthropic.apiKeyHint).toBe('…ABCD');
+  it('refuses a 21st saved provider with a conflict', async () => {
+    start(optionsFromFlags(['ai-env', 'instant']));
+    for (let i = 0; i < LIMITS.maxAiProviders; i++) await api.settings.createProvider({ name: `Provider ${i}`, kind: 'anthropic' });
+    const err = await failure(api.settings.createProvider({ name: 'One too many', kind: 'anthropic' }));
+    expect(err).toMatchObject({ status: 409, code: 'conflict' });
+    // The environment's provider is not counted.
+    expect((await api.settings.getAi()).providers).toHaveLength(LIMITS.maxAiProviders + 1);
+  });
 
-    const untouched = await api.settings.putAi({ providers: { anthropic: { model: 'claude-sonnet-5' } } });
-    expect(untouched.providers.anthropic).toMatchObject({ apiKeyHint: '…ABCD', model: 'claude-sonnet-5' });
+  it('merges an update, and replaces and deletes keys', async () => {
+    const { id } = await seeded();
+    const replaced = await api.settings.updateProvider(id, { apiKey: 'sk-ant-new-key-ABCD' });
+    expect(replaced.apiKeyHint).toBe('…ABCD');
 
-    // Deleting the key of the active provider would leave it selected but not ready.
-    expect((await failure(api.settings.putAi({ providers: { anthropic: { apiKey: null } } }))).status).toBe(422);
+    const untouched = await api.settings.updateProvider(id, { name: 'Work key', model: 'claude-sonnet-5-5' });
+    expect(untouched).toMatchObject({ name: 'Work key', model: 'claude-sonnet-5-5', apiKeyHint: '…ABCD', isDefault: true });
+    expect((await api.meta()).ai).toEqual({ enabled: true, providerId: id, providerName: 'Work key', kind: 'anthropic', model: 'claude-sonnet-5-5' });
 
-    const off = await api.settings.putAi({ activeProvider: null, providers: { anthropic: { apiKey: null } } });
-    expect(off.activeProvider).toBeNull();
-    expect(off.providers.anthropic).toMatchObject({ apiKeySet: false, apiKeySource: null, ready: false });
-    expect((await api.meta()).ai).toEqual({ enabled: false, provider: null, model: null });
+    // An empty key is treated like an omitted one.
+    expect((await api.settings.updateProvider(id, { apiKey: '' })).apiKeyHint).toBe('…ABCD');
+    expect((await failure(api.settings.updateProvider(id, { apiKey: 'k'.repeat(LIMITS.maxApiKeyChars + 1) }))).fields).toHaveProperty('apiKey');
+
+    // Clearing the model falls back to the kind's default.
+    expect((await api.settings.updateProvider(id, { model: null })).model).toBeNull();
+    expect((await api.meta()).ai.model).toBe('claude-opus-5-5');
+  });
+
+  it('keeps a default that is no longer ready selected, with AI off', async () => {
+    const { id } = await seeded();
+    const keyless = await api.settings.updateProvider(id, { apiKey: null });
+    expect(keyless).toMatchObject({ apiKeySet: false, apiKeyHint: null, ready: false, isDefault: true });
+    expect((await api.settings.getAi()).defaultProviderId).toBe(id);
+    expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
     expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+
+    await api.settings.updateProvider(id, { apiKey: 'sk-ant-back-0000WXYZ' });
+    expect((await api.meta()).ai.enabled).toBe(true);
   });
 
-  it('tests a configuration without saving it', async () => {
-    expect(await api.settings.testAi({ provider: 'anthropic' })).toMatchObject({ ok: true, model: 'claude-opus-5-5', error: null });
-    const bad = await api.settings.testAi({ provider: 'anthropic', apiKey: 'sk-ant-bad-key' });
-    expect(bad).toMatchObject({ ok: false, latencyMs: null });
-    expect(bad.error).not.toContain('sk-ant-bad-key');
-    expect((await api.settings.getAi()).providers.anthropic.apiKeyHint).toBe('…x7Qa');
+  it('chooses the default, and turns AI off without deleting anything', async () => {
+    const first = await seeded();
+    const notReady = await api.settings.createProvider({ name: 'OpenAI', kind: 'openai_compatible' });
+    let err = await failure(api.settings.putAi({ defaultProviderId: notReady.id }));
+    expect(err.status).toBe(422);
+    expect(err.fields.defaultProviderId).toMatch(/a model and an API key/);
+    expect((await failure(api.settings.putAi({ defaultProviderId: 'nope' }))).fields).toHaveProperty('defaultProviderId');
+    expect((await failure(api.settings.putAi({} as never))).fields).toHaveProperty('defaultProviderId');
+    expect((await api.settings.getAi()).defaultProviderId).toBe(first.id);
 
-    const local = await api.settings.testAi({ provider: 'openai_compatible', model: 'qwen', baseUrl: 'http://unreachable.lan:1234/v1' });
-    expect(local.ok).toBe(false);
-    expect(local.error).toContain('unreachable.lan');
-    expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(false);
+    const ollama = await api.settings.createProvider(local);
+    const chosen = await api.settings.putAi({ defaultProviderId: ollama.id });
+    expect(chosen.defaultProviderId).toBe(ollama.id);
+    expect(chosen.providers.filter((p) => p.isDefault).map((p) => p.id)).toEqual([ollama.id]);
+    expect((await api.meta()).ai).toEqual({ enabled: true, providerId: ollama.id, providerName: 'Ollama', kind: 'openai_compatible', model: 'llama3.1:8b' });
+
+    const off = await api.settings.putAi({ defaultProviderId: null });
+    expect(off.defaultProviderId).toBeNull();
+    expect(off.providers).toHaveLength(5);
+    expect(off.providers.every((p) => !p.isDefault)).toBe(true);
+    expect((await api.meta()).ai.enabled).toBe(false);
+    expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+
+    err = await failure(api.settings.putAi({ defaultProviderId: notReady.id }));
+    expect(err.status).toBe(422);
+  });
+
+  it('leaves no default when the default is deleted', async () => {
+    const first = await seeded();
+    const other = await api.settings.createProvider(local);
+    await api.settings.removeProvider(other.id);
+    expect((await api.settings.getAi()).defaultProviderId).toBe(first.id);
+
+    await api.settings.removeProvider(first.id);
+    const left = await api.settings.getAi();
+    expect(left.defaultProviderId).toBeNull();
+    expect(left.providers.map((p) => p.name)).toEqual(['Local Ollama', 'Work gateway']);
+    expect((await api.meta()).ai.enabled).toBe(false);
   });
 
   it('drops a saved key when the base URL moves to another origin', async () => {
+    const { id } = await seeded();
     // Same origin, different path: the key stays.
-    let next = await api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://api.anthropic.com/v1' } } });
-    expect(next.providers.anthropic).toMatchObject({ apiKeySet: true, apiKeyHint: '…x7Qa' });
+    let next = await api.settings.updateProvider(id, { baseUrl: 'https://api.anthropic.com/v1' });
+    expect(next).toMatchObject({ apiKeySet: true, apiKeyHint: '…x7Qa' });
 
-    // Another origin without a key in the same request: the key is gone, and
-    // the active provider would no longer be ready, so nothing is saved.
-    const refused = await failure(api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://gateway.example.org/anthropic' } } }));
-    expect(refused.status).toBe(422);
-    expect((await api.settings.getAi()).providers.anthropic).toMatchObject({ baseUrl: 'https://api.anthropic.com/v1', apiKeySet: true });
+    // Another origin without a key in the same request: the key is gone.
+    next = await api.settings.updateProvider(id, { baseUrl: 'https://gateway.example.org/anthropic' });
+    expect(next).toMatchObject({ baseUrl: 'https://gateway.example.org/anthropic', apiKeySet: false, apiKeyHint: null, ready: false });
 
-    // With the key for the new server in the same request, it is saved.
-    next = await api.settings.putAi({ providers: { anthropic: { baseUrl: 'https://gateway.example.org/anthropic', apiKey: 'sk-gw-key-WXYZ' } } });
-    expect(next.providers.anthropic).toMatchObject({ baseUrl: 'https://gateway.example.org/anthropic', apiKeyHint: '…WXYZ', ready: true });
+    // With the key for the new server in the same request, it is kept.
+    await api.settings.updateProvider(id, { apiKey: 'sk-gw-key-WXYZ' });
+    next = await api.settings.updateProvider(id, { baseUrl: 'https://other.example.org/anthropic', apiKey: 'sk-other-key-1234' });
+    expect(next).toMatchObject({ apiKeyHint: '…1234', ready: true });
 
-    // Not the active provider: the save goes through and the key is deleted.
-    next = await api.settings.putAi({ providers: { openai_compatible: { model: 'gpt-x', baseUrl: 'https://openrouter.example/api/v1', apiKey: 'sk-or-1234' } } });
-    expect(next.providers.openai_compatible).toMatchObject({ apiKeySet: true, ready: true });
-    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: 'http://localhost:11434/v1' } } });
-    expect(next.providers.openai_compatible).toMatchObject({ baseUrl: 'http://localhost:11434/v1', apiKeySet: false, apiKeyHint: null, apiKeySource: null });
     // Clearing the base URL falls back to the default one, which is another origin again.
-    await api.settings.putAi({ providers: { openai_compatible: { apiKey: 'sk-local-0000' } } });
-    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: null } } });
-    expect(next.providers.openai_compatible).toMatchObject({ baseUrl: null, apiKeySet: false });
+    next = await api.settings.updateProvider(id, { baseUrl: null });
+    expect(next).toMatchObject({ baseUrl: null, apiKeySet: false });
   });
 
   it('needs a key for the default OpenAI endpoint, but not for another one', async () => {
-    let next = await api.settings.putAi({ providers: { openai_compatible: { model: 'gpt-x' } } });
-    expect(next.providers.openai_compatible).toMatchObject({ model: 'gpt-x', baseUrl: null, apiKeySet: false, ready: false });
-    const err = await failure(api.settings.putAi({ activeProvider: 'openai_compatible' }));
-    expect(err.fields.activeProvider).toMatch(/API key/);
-    expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(false);
+    const made = await api.settings.createProvider({ name: 'OpenAI', kind: 'openai_compatible', model: 'gpt-4.1' });
+    expect(made).toMatchObject({ baseUrl: null, apiKeySet: false, ready: false });
+    const err = await failure(api.settings.putAi({ defaultProviderId: made.id }));
+    expect(err.fields.defaultProviderId).toMatch(/API key/);
+    expect(await api.settings.testAi({ providerId: made.id })).toMatchObject({ ok: false, models: null });
 
-    next = await api.settings.putAi({ providers: { openai_compatible: { apiKey: 'sk-openai-9876' } } });
-    expect(next.providers.openai_compatible.ready).toBe(true);
+    expect((await api.settings.updateProvider(made.id, { apiKey: 'sk-openai-9876' })).ready).toBe(true);
 
-    next = await api.settings.putAi({ providers: { openai_compatible: { baseUrl: 'http://localhost:1234/v1' } } });
-    expect(next.providers.openai_compatible).toMatchObject({ apiKeySet: false, ready: true });
-    expect((await api.settings.testAi({ provider: 'openai_compatible' })).ok).toBe(true);
+    const moved = await api.settings.updateProvider(made.id, { baseUrl: 'http://localhost:1234/v1', model: 'llama3.1:8b' });
+    expect(moved).toMatchObject({ apiKeySet: false, ready: true });
+    expect((await api.settings.testAi({ providerId: made.id })).ok).toBe(true);
+  });
+
+  it('tests a configuration without saving it, and lists the service\'s models', async () => {
+    const { id } = await seeded();
+    const works = await api.settings.testAi({ providerId: id });
+    expect(works).toEqual({ ok: true, model: 'claude-opus-5-5', latencyMs: works.latencyMs, error: null, models: ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'], modelsError: null });
+    expect(works.latencyMs).toBeGreaterThan(0);
+
+    const bad = await api.settings.testAi({ providerId: id, apiKey: 'sk-ant-bad-key' });
+    expect(bad).toMatchObject({ ok: false, latencyMs: null, models: null });
+    expect(bad.error).not.toContain('sk-ant-bad-key');
+    expect(bad.modelsError).not.toBeNull();
+
+    const unreachable = await api.settings.testAi({ kind: 'openai_compatible', model: 'qwen', baseUrl: 'http://unreachable.lan:1234/v1' });
+    expect(unreachable).toMatchObject({ ok: false, models: null });
+    expect(unreachable.error).toContain('unreachable.lan');
+
+    // An override applies to this test only; a model the service does not have fails it, with the list to pick from.
+    const unknown = await api.settings.testAi({ providerId: id, model: 'claude-nonesuch' });
+    expect(unknown).toMatchObject({ ok: false, model: 'claude-nonesuch', latencyMs: null });
+    expect(unknown.error).toContain('claude-nonesuch');
+    expect(unknown.models).toContain('claude-sonnet-5-5');
+    expect(await seeded()).toMatchObject({ model: 'claude-opus-5-5', apiKeyHint: '…x7Qa', baseUrl: null });
+  });
+
+  it('tests a configuration that has not been saved, by kind', async () => {
+    // Without a model, fetching the list is the whole test.
+    const listed = await api.settings.testAi({ kind: 'openai_compatible', apiKey: 'sk-openai-typed' });
+    expect(listed).toMatchObject({ ok: true, model: null, latencyMs: null, error: null, modelsError: null });
+    expect(listed.models).toContain('gpt-4.1');
+    expect(listed.models).toEqual([...new Set(listed.models)].sort());
+
+    // A local endpoint needs no key at all, and offers other models.
+    const ollama = await api.settings.testAi({ kind: 'openai_compatible', baseUrl: 'http://localhost:11434/v1' });
+    expect(ollama.ok).toBe(true);
+    expect(ollama.models).toContain('llama3.1:8b');
+    expect(ollama.models).not.toContain('gpt-4.1');
+    expect(await api.settings.testAi({ kind: 'openai_compatible', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1:8b' })).toMatchObject({ ok: true, model: 'llama3.1:8b' });
+
+    // A required key that is missing rules out any request.
+    expect(await api.settings.testAi({ kind: 'anthropic' })).toMatchObject({ ok: false, model: null, models: null });
+    expect((await api.settings.testAi({ kind: 'openai_compatible', model: 'gpt-4.1' })).error).toMatch(/key/i);
+    expect((await api.settings.testAi({ kind: 'anthropic', apiKey: 'sk-ant-typed' })).ok).toBe(true);
+    expect((await api.settings.getAi()).providers).toHaveLength(3);
+  });
+
+  it('does not fail a configured model because the service lists none', async () => {
+    const baseUrl = 'http://no-models.lan:8000/v1';
+    const typed = await api.settings.testAi({ kind: 'openai_compatible', baseUrl, model: 'my-finetune' });
+    expect(typed).toMatchObject({ ok: true, model: 'my-finetune', models: null });
+    expect(typed.modelsError).toContain('no-models.lan:8000');
+
+    // Without a model there is nothing left that could succeed.
+    const nothing = await api.settings.testAi({ kind: 'openai_compatible', baseUrl });
+    expect(nothing).toMatchObject({ ok: false, model: null, models: null });
+    expect(nothing.error).not.toBeNull();
+    expect(nothing.modelsError).not.toBeNull();
+  });
+
+  it('requires exactly one of providerId and kind for a test', async () => {
+    const { id } = await seeded();
+    expect((await failure(api.settings.testAi({}))).status).toBe(422);
+    expect((await failure(api.settings.testAi({ providerId: id, kind: 'anthropic' }))).status).toBe(422);
+    expect((await failure(api.settings.testAi({ providerId: 'nope' }))).fields).toHaveProperty('providerId');
+    expect((await failure(api.settings.testAi({ kind: 'gemini' as never }))).fields).toHaveProperty('kind');
+    expect((await failure(api.settings.testAi({ providerId: id, baseUrl: 'localhost:11434' }))).fields).toEqual({ baseUrl: 'must be an http(s) URL' });
   });
 
   it('tests another base URL only with a key typed into the same request', async () => {
+    const { id } = await seeded();
     // The saved key is not sent to a server it was not saved for.
-    const elsewhere = await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://gateway.example.org/anthropic' });
-    expect(elsewhere.ok).toBe(false);
+    const elsewhere = await api.settings.testAi({ providerId: id, baseUrl: 'https://gateway.example.org/anthropic' });
+    expect(elsewhere).toMatchObject({ ok: false, models: null });
     expect(elsewhere.error).toMatch(/key/i);
     expect(elsewhere.error).not.toContain('x7Qa');
-    expect((await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://gateway.example.org/anthropic', apiKey: 'sk-gw-typed' })).ok).toBe(true);
+    expect((await api.settings.testAi({ providerId: id, baseUrl: 'https://gateway.example.org/anthropic', apiKey: 'sk-gw-typed' })).ok).toBe(true);
     // The same origin under another path still uses the saved key.
-    expect((await api.settings.testAi({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v2' })).ok).toBe(true);
-    // A local endpoint needs no key at all.
-    expect((await api.settings.testAi({ provider: 'openai_compatible', model: 'qwen', baseUrl: 'http://localhost:11434/v1' })).ok).toBe(true);
+    expect((await api.settings.testAi({ providerId: id, baseUrl: 'https://api.anthropic.com/v2' })).ok).toBe(true);
     // Nothing was saved by any of this.
-    expect((await api.settings.getAi()).providers.anthropic).toMatchObject({ baseUrl: null, apiKeyHint: '…x7Qa' });
+    expect(await seeded()).toMatchObject({ baseUrl: null, apiKeyHint: '…x7Qa' });
   });
 });
 
@@ -1608,6 +2354,7 @@ describe('preferences', () => {
     const prefs = await api.preferences.get();
     expect(prefs).toEqual({
       hideTestCases: true,
+      generatedTestCases: 8,
       editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
     });
     expect(prefs).toEqual(DEFAULT_PREFERENCES);
@@ -1617,7 +2364,9 @@ describe('preferences', () => {
     let prefs = await api.preferences.put({ hideTestCases: false });
     expect(prefs).toEqual({ ...DEFAULT_PREFERENCES, hideTestCases: false });
     prefs = await api.preferences.put({ editor: { fontSize: 18, lineWrapping: true } });
-    expect(prefs).toEqual({ hideTestCases: false, editor: { ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true } });
+    expect(prefs).toEqual({ ...DEFAULT_PREFERENCES, hideTestCases: false, editor: { ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true } });
+    prefs = await api.preferences.put({ generatedTestCases: 12 });
+    expect(prefs.generatedTestCases).toBe(12);
     prefs = await api.preferences.put({ editor: { tabSize: 2 }, hideTestCases: true });
     expect(prefs.editor).toEqual({ ...DEFAULT_PREFERENCES.editor, fontSize: 18, lineWrapping: true, tabSize: 2 });
     expect(await api.preferences.put({})).toEqual(prefs);
@@ -1630,6 +2379,9 @@ describe('preferences', () => {
   it('rejects an unknown key or an out-of-range value and saves nothing', async () => {
     const bad: [Record<string, unknown>, string][] = [
       [{ hideTestCases: 'yes' }, 'hideTestCases'],
+      [{ generatedTestCases: 0 }, 'generatedTestCases'],
+      [{ generatedTestCases: LIMITS.maxGeneratedTestCases + 1 }, 'generatedTestCases'],
+      [{ generatedTestCases: 2.5 }, 'generatedTestCases'],
       [{ theme: 'dark' }, 'theme'],
       [{ editor: { minimap: true } }, 'editor.minimap'],
       [{ editor: { tabSize: 3 } }, 'editor.tabSize'],
@@ -1651,6 +2403,8 @@ describe('preferences', () => {
     // The bounds themselves are accepted.
     expect((await api.preferences.put({ editor: { fontSize: 10 } })).editor.fontSize).toBe(10);
     expect((await api.preferences.put({ editor: { fontSize: 24, tabSize: 8 } })).editor).toMatchObject({ fontSize: 24, tabSize: 8 });
+    expect((await api.preferences.put({ generatedTestCases: 1 })).generatedTestCases).toBe(1);
+    expect((await api.preferences.put({ generatedTestCases: LIMITS.maxGeneratedTestCases })).generatedTestCases).toBe(30);
   });
 
   it('can start with test cases shown', async () => {
@@ -1667,7 +2421,7 @@ describe('export and import', () => {
 
     const preview = await api.bundle.preview(new File([blob], filename!));
     expect(preview.bundle).toMatchObject({ name: 'Codeatrophy library', formatVersion: 1 });
-    expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 24 });
+    expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 25 });
     expect(preview.collections).toHaveLength(8);
     expect(preview.collections.every((c) => c.state === 'existing')).toBe(true);
     expect(preview.warnings).toEqual([]);
@@ -1677,7 +2431,7 @@ describe('export and import', () => {
   it('ignores what a partial export left out when comparing', async () => {
     const { blob } = await api.bundle.export({ scope: 'all', includeSolutions: false, includeHiddenTests: false });
     const preview = await api.bundle.preview(new File([blob], 'partial.zip'));
-    expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 24 });
+    expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 25 });
     expect(preview.items.find((i) => i.id === seedIds.items.twoSum)?.testCaseCount).toBe(2);
   });
 
@@ -1825,7 +2579,7 @@ describe('export and import', () => {
 
     await arrange();
     const preview = await api.bundle.preview(bundle);
-    expect(preview.counts).toEqual({ new: 1, changed: 1, unchanged: 22 });
+    expect(preview.counts).toEqual({ new: 1, changed: 1, unchanged: 23 });
     expect(preview.items.find((i) => i.id === changedId)).toMatchObject({ state: 'changed', changes: ['title'] });
     expect(preview.items.find((i) => i.id === deletedId)).toMatchObject({ state: 'new', changes: [] });
     expect(preview.items.filter((i) => i.state === 'unchanged').every((i) => i.changes.length === 0)).toBe(true);
@@ -1834,7 +2588,7 @@ describe('export and import', () => {
     expect((await failure(api.items.get(deletedId))).status).toBe(404);
 
     const skip = await api.bundle.import(bundle, 'skip');
-    expect(skip).toEqual({ created: 1, updated: 0, skipped: 1, duplicated: 0, unchanged: 22, collectionsCreated: 1, warnings: [] });
+    expect(skip).toEqual({ created: 1, updated: 0, skipped: 1, duplicated: 0, unchanged: 23, collectionsCreated: 1, warnings: [] });
     expect((await api.items.get(changedId)).title).toBe('Coin Change (local edit)');
     const restored = await api.items.get(deletedId);
     expect(restored).toMatchObject({ status: 'todo', favorite: false, notes: '', revision: 1 });
@@ -1848,12 +2602,12 @@ describe('export and import', () => {
     expect(overwrite).toMatchObject({ created: 1, updated: 1, skipped: 0, duplicated: 0 });
     // Content comes from the bundle; personal state stays.
     expect(await api.items.get(changedId)).toMatchObject({ title: 'Coin Change', status: 'done', notes: 'mine' });
-    expect((await api.bundle.preview(bundle)).counts).toEqual({ new: 0, changed: 0, unchanged: 24 });
+    expect((await api.bundle.preview(bundle)).counts).toEqual({ new: 0, changed: 0, unchanged: 25 });
 
     await arrange();
     const duplicate = await api.bundle.import(bundle, 'duplicate');
     expect(duplicate).toMatchObject({ created: 1, updated: 0, duplicated: 1 });
-    expect((await api.items.list()).total).toBe(25);
+    expect((await api.items.list()).total).toBe(26);
     expect((await api.items.get(changedId)).title).toBe('Coin Change (local edit)');
     const copies = await api.items.list({ q: 'coin change', type: 'problem' });
     expect(copies.items.map((i) => i.title).sort()).toEqual(['Coin Change', 'Coin Change (local edit)']);

@@ -4,7 +4,7 @@ import type { ImportItemState, ImportPreview, ImportResult, ImportStrategy } fro
 import type { BundleCollection, BundleItem, ParsedBundle } from '../bundle';
 import { buildBundleZip, BundleError, contentHash, parseBundleZip } from '../bundle';
 import type { MockDb, StoredCollection, StoredItem } from '../db';
-import { atMostChars, charCount, LIMITS, normaliseTags } from '../db';
+import { atMostChars, charCount, DEFAULT_PROBLEM, LIMITS, normaliseTags } from '../db';
 import type { Handler, Req } from '../http';
 import { badRequest, invalid, isStringArray, objectBody, ok, tooLarge } from '../http';
 import { sleep, slugify, uuid } from '../util';
@@ -266,7 +266,8 @@ function createFromBundle(db: MockDb, incoming: BundleItem, id: string): StoredI
     notes: '',
     rawInput: null,
     source: { ...incoming.source },
-    problem: incoming.problem ? structuredClone(incoming.problem) : null,
+    // The bundle format has no place for the interface or the harness: an imported problem is a program.
+    problem: incoming.problem ? { ...structuredClone(DEFAULT_PROBLEM), ...structuredClone(incoming.problem) } : null,
     variantOf: incoming.variantOf,
     revision: 1,
     createdAt: incoming.createdAt ?? now,
@@ -287,7 +288,8 @@ function overwrite(db: MockDb, local: StoredItem, incoming: BundleItem): void {
   local.tags = [...incoming.tags];
   local.source = { ...incoming.source };
   local.variantOf = incoming.variantOf;
-  if (incoming.problem && local.problem) local.problem = structuredClone(incoming.problem);
+  // The local interface and harness stay: the bundle does not carry them.
+  if (incoming.problem && local.problem) local.problem = { ...local.problem, ...structuredClone(incoming.problem) };
   // Solutions are replaced by the bundle's; a bundle exported without
   // solutions must not erase the local ones.
   if (incoming.solutions) {

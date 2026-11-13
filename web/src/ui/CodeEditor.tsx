@@ -25,8 +25,8 @@ export function CodeEditor(props: CodeEditorProps) {
   );
 }
 
-function Fallback({ value, className, prose }: CodeEditorProps) {
-  const options = resolveEditorOptions(usePreferences().editor, { prose });
+function Fallback({ value, className, prose, wrap }: CodeEditorProps) {
+  const options = resolveEditorOptions(usePreferences().editor, { prose, wrap });
   return (
     <pre
       className={cx('code-editor code-editor-fallback', className)}

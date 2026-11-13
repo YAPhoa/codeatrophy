@@ -30,13 +30,14 @@ type Provider struct {
 	timeout time.Duration
 }
 
-var _ ai.Provider = (*Provider)(nil)
+var (
+	_ ai.Provider    = (*Provider)(nil)
+	_ ai.ModelLister = (*Provider)(nil)
+)
 
-// New is an ai.Factory for OpenAI-compatible endpoints.
+// New is an ai.Factory for OpenAI-compatible endpoints. A provider without
+// a model can list models but not generate.
 func New(cfg ai.Config) (ai.Provider, error) {
-	if cfg.Model == "" {
-		return nil, ai.Errorf(0, "no model is configured for the OpenAI-compatible provider")
-	}
 	base := cfg.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
@@ -83,9 +84,16 @@ type chatResponse struct {
 			Refusal *string `json:"refusal"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+	// Usage is absent on some servers, and the details on most.
+	Usage *struct {
+		PromptTokens        *int `json:"prompt_tokens"`
+		CompletionTokens    *int `json:"completion_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens *int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens *int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -96,6 +104,9 @@ type chatResponse struct {
 // falls back to plain JSON mode, with the schema in the system prompt, for
 // servers that do not support schemas.
 func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.GenerateResponse, error) {
+	if p.model == "" {
+		return ai.GenerateResponse{}, ai.Errorf(0, "no model is configured for the OpenAI-compatible provider")
+	}
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	name := req.SchemaName
@@ -124,28 +135,47 @@ func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.Gen
 	if err != nil {
 		return ai.GenerateResponse{}, err
 	}
+	out := ai.GenerateResponse{Model: resp.Model}
+	if out.Model == "" {
+		out.Model = p.model
+	}
+	// prompt_tokens includes the cached part; the contract counts cache
+	// reads in addition to the input, so they are taken out of it. The API
+	// does not report cache writes.
+	if u := resp.Usage; u != nil {
+		out.InputTokens, out.OutputTokens = u.PromptTokens, u.CompletionTokens
+		if d := u.PromptTokensDetails; d != nil && d.CachedTokens != nil {
+			out.CacheReadTokens = d.CachedTokens
+			if u.PromptTokens != nil {
+				out.InputTokens = ai.IntPtr(max(0, *u.PromptTokens-*d.CachedTokens))
+			}
+		}
+		if d := u.CompletionTokensDetails; d != nil {
+			out.ReasoningTokens = d.ReasoningTokens
+		}
+	}
 	if len(resp.Choices) == 0 {
-		return ai.GenerateResponse{}, ai.Errorf(0, "the provider returned no choices")
+		return out, ai.Errorf(0, "the provider returned no choices")
 	}
 	ch := resp.Choices[0]
+	if ch.Message.Content != nil {
+		out.Text = *ch.Message.Content
+	}
 	if ch.Message.Refusal != nil && *ch.Message.Refusal != "" {
-		return ai.GenerateResponse{}, ai.Errorf(0, ai.Redact("the model declined: "+*ch.Message.Refusal, p.apiKey))
+		return out, ai.Errorf(0, ai.Redact("the model declined: "+*ch.Message.Refusal, p.apiKey))
 	}
 	if ch.FinishReason == "length" {
-		return ai.GenerateResponse{}, ai.Errorf(0, "the model's output was cut off at the token limit")
+		return out, ai.Errorf(0, "the model's output was cut off at the token limit")
 	}
 	if ch.Message.Content == nil {
-		return ai.GenerateResponse{}, ai.Errorf(0, "the provider returned an empty response")
+		return out, ai.Errorf(0, "the provider returned an empty response")
 	}
-	raw, err := ai.ExtractJSON(*ch.Message.Content)
+	raw, err := ai.ExtractJSON(out.Text)
 	if err != nil {
-		return ai.GenerateResponse{}, err
+		return out, err
 	}
-	model := resp.Model
-	if model == "" {
-		model = p.model
-	}
-	return ai.GenerateResponse{JSON: raw, Model: model, InputTokens: resp.Usage.PromptTokens, OutputTokens: resp.Usage.CompletionTokens}, nil
+	out.JSON = raw
+	return out, nil
 }
 
 func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, int, error) {
@@ -207,4 +237,66 @@ func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, in
 		return out, resp.StatusCode, ai.Errorf(0, "the provider's response is not valid JSON")
 	}
 	return out, resp.StatusCode, nil
+}
+
+// ListModels implements ai.ModelLister with GET {baseURL}/models, which
+// answers {"data": [{"id": ...}, ...]}. Servers that do not implement it
+// (404, or another body) are reported as an error.
+func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, ai.ModelListTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
+	if err != nil {
+		return nil, ai.Errorf(0, "invalid provider URL")
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, ai.Errorf(0, "the AI provider did not list its models in time")
+		}
+		cause := err.Error()
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			cause = ue.Err.Error()
+		}
+		return nil, ai.Errorf(0, ai.Redact("could not reach the AI provider: "+cause, p.apiKey))
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		return nil, ai.Errorf(resp.StatusCode, "the provider rejected the API key")
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
+		return nil, ai.Errorf(resp.StatusCode, "the provider does not list its models")
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return nil, ai.Errorf(resp.StatusCode, fmt.Sprintf("the provider returned HTTP %d for its model list", resp.StatusCode))
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, ai.MaxModelListBytes+1))
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, ai.Errorf(0, "the AI provider did not list its models in time")
+		}
+		return nil, ai.Errorf(0, "could not read the provider's model list")
+	}
+	if len(data) > ai.MaxModelListBytes {
+		return nil, ai.Errorf(0, "the provider's model list is too large")
+	}
+	var list struct {
+		Data []struct {
+			ID any `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil || list.Data == nil {
+		return nil, ai.Errorf(0, "the provider's model list is not in the expected format")
+	}
+	ids := make([]string, 0, min(len(list.Data), ai.MaxModelListEntries))
+	for _, m := range list.Data {
+		if id, ok := m.ID.(string); ok && len(ids) < ai.MaxModelListEntries {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }

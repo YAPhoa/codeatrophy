@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,79 +16,128 @@ import (
 	"codeatrophy/internal/store"
 )
 
-// ProviderDefaults are what a provider uses when no model or base URL is set.
+// ProviderDefaults are what a provider kind uses when no model or base URL
+// is set.
 type ProviderDefaults struct {
-	Model   *string `json:"model"`
-	BaseURL string  `json:"baseUrl"`
+	Model   *string
+	BaseURL string
 }
 
-// ProviderSettings are the effective settings of one provider. The API key
-// itself is never included.
-type ProviderSettings struct {
-	Model         *string `json:"model"`
-	BaseURL       *string `json:"baseUrl"`
-	ModelSource   *string `json:"modelSource"`
-	BaseURLSource *string `json:"baseUrlSource"`
-	APIKeySet     bool    `json:"apiKeySet"`
-	APIKeyHint    *string `json:"apiKeyHint"`
-	APIKeySource  *string `json:"apiKeySource"`
-	Ready         bool    `json:"ready"`
+// AIKind describes a provider kind.
+type AIKind struct {
+	DefaultModel   *string `json:"defaultModel"`
+	DefaultBaseURL string  `json:"defaultBaseUrl"`
+	KeyRequired    bool    `json:"keyRequired"`
+}
+
+// AIProvider is a saved or environment AI provider. The API key itself is
+// never included.
+type AIProvider struct {
+	ID         string        `json:"id"`
+	Name       string        `json:"name"`
+	Kind       string        `json:"kind"`
+	Model      *string       `json:"model"`
+	BaseURL    *string       `json:"baseUrl"`
+	APIKeySet  bool          `json:"apiKeySet"`
+	APIKeyHint *string       `json:"apiKeyHint"`
+	Source     string        `json:"source"`
+	IsDefault  bool          `json:"isDefault"`
+	Ready      bool          `json:"ready"`
+	Usage      ProviderUsage `json:"usage"`
+	CreatedAt  *time.Time    `json:"createdAt"`
+	UpdatedAt  *time.Time    `json:"updatedAt"`
 }
 
 // AISettings is the body of GET /settings/ai.
 type AISettings struct {
-	ActiveProvider *string                     `json:"activeProvider"`
-	Providers      map[string]ProviderSettings `json:"providers"`
-	Defaults       map[string]ProviderDefaults `json:"defaults"`
+	DefaultProviderID *string           `json:"defaultProviderId"`
+	Providers         []AIProvider      `json:"providers"`
+	Kinds             map[string]AIKind `json:"kinds"`
 }
 
-// ProviderInput is a partial update of one provider's settings.
-type ProviderInput struct {
+// AISettingsInput is the body of PUT /settings/ai.
+type AISettingsInput struct {
+	DefaultProviderID domain.Opt[string] `json:"defaultProviderId"`
+}
+
+// AIProviderInput is the body of provider create and update requests.
+type AIProviderInput struct {
+	Name    domain.Opt[string] `json:"name"`
+	Kind    domain.Opt[string] `json:"kind"`
 	Model   domain.Opt[string] `json:"model"`
 	BaseURL domain.Opt[string] `json:"baseUrl"`
 	APIKey  domain.Opt[string] `json:"apiKey"`
 }
 
-// AISettingsInput is the body of PUT /settings/ai.
-type AISettingsInput struct {
-	ActiveProvider domain.Opt[string]       `json:"activeProvider"`
-	Providers      map[string]ProviderInput `json:"providers"`
-}
-
-// Settings keys.
+// Settings keys and fixed values.
 const (
-	keyActiveProvider = "ai.active_provider"
-	maxModelChars     = domain.MaxModelIDChars
-	maxAPIKeyChars    = domain.MaxAPIKeyChars
+	// keyDefaultProvider holds the default provider's id once a default has
+	// been saved; "" means explicitly none.
+	keyDefaultProvider = "ai.default_provider"
+	maxModelChars      = domain.MaxModelIDChars
+	maxAPIKeyChars     = domain.MaxAPIKeyChars
+	// maxListedModels bounds the model list a connection test returns.
+	maxListedModels = 500
+
+	sourceSettings    = "settings"
+	sourceEnvironment = "environment"
 )
 
-func providerKey(provider, field string) string { return "ai." + provider + "." + field }
+// envProviderIDs are the fixed ids of the environment providers, per kind.
+var envProviderIDs = map[string]string{
+	ai.ProviderAnthropic:        "env-anthropic",
+	ai.ProviderOpenAICompatible: "env-openai-compatible",
+}
 
-func knownProvider(p string) bool {
-	for _, id := range ai.ProviderIDs {
-		if id == p {
+// kindNames name each kind for people.
+var kindNames = map[string]string{
+	ai.ProviderAnthropic:        "Anthropic",
+	ai.ProviderOpenAICompatible: "OpenAI-compatible",
+}
+
+func knownKind(k string) bool { return slices.Contains(ai.ProviderIDs, k) }
+
+func isEnvProviderID(id string) bool {
+	for _, v := range envProviderIDs {
+		if v == id {
 			return true
 		}
 	}
 	return false
 }
 
-// resolvedProvider is the effective configuration of one provider.
-type resolvedProvider struct {
-	model, baseURL, apiKey     string // effective values ("" when none)
-	modelSource, baseURLSource string // "settings", "environment" or ""
-	keySource                  string
-	decryptFailed              bool
+// provider is the resolved configuration of one saved or environment
+// provider.
+type provider struct {
+	id, name, kind, source string
+	model, baseURL         string // configured values; "" means the kind's default
+	apiKey                 string // the key usable with the effective base URL, "" for none
+	createdAt, updatedAt   *time.Time
 }
 
-func (a *App) envFor(provider string) (model, baseURL, key string) {
-	switch provider {
+func (a *App) envFor(kind string) (model, baseURL, key string) {
+	switch kind {
 	case ai.ProviderAnthropic:
 		return a.aiEnv.AnthropicModel, a.aiEnv.AnthropicBaseURL, a.aiEnv.AnthropicAPIKey
 	case ai.ProviderOpenAICompatible:
 		return a.aiEnv.OpenAIModel, a.aiEnv.OpenAIBaseURL, a.aiEnv.OpenAIAPIKey
 	}
 	return "", "", ""
+}
+
+// envProviders returns one read-only provider per kind whose environment
+// variables are set. Its key belongs to its own base URL.
+func (a *App) envProviders() []provider {
+	var out []provider
+	for _, kind := range ai.ProviderIDs {
+		model, base, key := a.envFor(kind)
+		if model == "" && base == "" && key == "" {
+			continue
+		}
+		out = append(out, provider{id: envProviderIDs[kind], name: kindNames[kind] + " (environment)", kind: kind,
+			source: sourceEnvironment, model: model, baseURL: base, apiKey: key})
+	}
+	return out
 }
 
 // originOf returns the scheme://host[:port] of a URL, lower-cased with the
@@ -110,133 +161,118 @@ func originOf(raw string) string {
 }
 
 // effectiveBase is the base URL a provider will actually call.
-func (a *App) effectiveBase(provider, baseURL string) string {
+func (a *App) effectiveBase(kind, baseURL string) string {
 	if baseURL != "" {
 		return baseURL
 	}
-	return a.defaultBaseURL(provider)
+	return a.defaultBaseURL(kind)
 }
 
-// keyContext binds a stored key to its provider and origin (AEAD
+// keyContext binds a stored key to its provider kind and origin (AEAD
 // additional data), so it never decrypts for any other.
-func keyContext(provider, origin string) string { return provider + "\n" + origin }
+func keyContext(kind, origin string) string { return kind + "\n" + origin }
 
-// resolve returns a provider's effective settings. An API key is only ever
-// used with the origin it belongs to: a saved key with the origin it was
-// saved for, an environment key with the environment (or default) base URL.
-func (a *App) resolve(tx store.Tx, provider string) (resolvedProvider, error) {
-	var r resolvedProvider
-	envModel, envBase, envKey := a.envFor(provider)
-	if v, ok, err := tx.GetSetting(providerKey(provider, "model")); err != nil {
-		return r, err
-	} else if ok {
-		r.model, r.modelSource = v, "settings"
-	} else if envModel != "" {
-		r.model, r.modelSource = envModel, "environment"
+// fromRecord resolves a saved provider. Its stored key is only used with
+// the origin it was saved for.
+func (a *App) fromRecord(r store.AIProvider) provider {
+	created, updated := r.CreatedAt, r.UpdatedAt
+	p := provider{id: r.ID, name: r.Name, kind: r.Kind, source: sourceSettings, model: r.Model, baseURL: r.BaseURL,
+		createdAt: &created, updatedAt: &updated}
+	if r.APIKey == "" || r.APIKeyOrigin != originOf(a.effectiveBase(r.Kind, r.BaseURL)) {
+		return p
 	}
-	if v, ok, err := tx.GetSetting(providerKey(provider, "base_url")); err != nil {
-		return r, err
-	} else if ok {
-		r.baseURL, r.baseURLSource = v, "settings"
-	} else if envBase != "" {
-		r.baseURL, r.baseURLSource = envBase, "environment"
-	}
-	origin := originOf(a.effectiveBase(provider, r.baseURL))
-	stored, storedOrigin, err := a.storedKey(tx, provider)
+	plain, err := a.secrets.DecryptBound(r.APIKey, keyContext(r.Kind, r.APIKeyOrigin))
 	if err != nil {
-		return r, err
+		a.log.Warn("a stored API key cannot be decrypted; it is ignored", "provider", r.ID)
+		return p
 	}
-	if stored != "" && storedOrigin == origin {
-		r.apiKey, r.keySource = stored, "settings"
-	}
-	if r.apiKey == "" && envKey != "" && originOf(a.effectiveBase(provider, envBase)) == origin {
-		r.apiKey, r.keySource = envKey, "environment"
-	}
-	return r, nil
+	p.apiKey = plain
+	return p
 }
 
-// storedKey returns the saved key and the origin it is bound to.
-func (a *App) storedKey(tx store.Tx, provider string) (key, origin string, err error) {
-	ct, ok, err := tx.GetSetting(providerKey(provider, "api_key"))
-	if err != nil || !ok {
-		return "", "", err
-	}
-	origin, _, err = tx.GetSetting(providerKey(provider, "api_key_origin"))
+// listProviders lists the saved providers by name, then the environment ones.
+func (a *App) listProviders(tx store.Tx) ([]provider, error) {
+	recs, err := tx.ListAIProviders()
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
-	plain, derr := a.secrets.DecryptBound(ct, keyContext(provider, origin))
-	if derr != nil {
-		a.log.Warn("a stored API key cannot be decrypted; it is ignored", "provider", provider)
-		return "", "", nil
+	out := make([]provider, 0, len(recs)+2)
+	for _, r := range recs {
+		out = append(out, a.fromRecord(r))
 	}
-	return plain, origin, nil
+	return append(out, a.envProviders()...), nil
 }
 
-func (a *App) saveKey(tx store.Tx, provider, key, origin string) error {
-	ct, err := a.secrets.EncryptBound(key, keyContext(provider, origin))
+func findProvider(ps []provider, id string) *provider {
+	for i := range ps {
+		if ps[i].id == id {
+			return &ps[i]
+		}
+	}
+	return nil
+}
+
+// defaultProviderID returns the id of the default provider, or "" for none.
+// Until a default has been saved, CODEATROPHY_AI_PROVIDER picks the
+// environment provider of that kind. A saved default that names no
+// existing provider (an environment provider whose variables were removed)
+// counts as none.
+func (a *App) defaultProviderID(tx store.Tx, ps []provider) (string, error) {
+	id, ok, err := tx.GetSetting(keyDefaultProvider)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := tx.SetSetting(providerKey(provider, "api_key"), ct); err != nil {
-		return err
+	if !ok {
+		id = envProviderIDs[a.aiEnv.Provider]
 	}
-	return tx.SetSetting(providerKey(provider, "api_key_origin"), origin)
+	if findProvider(ps, id) == nil {
+		return "", nil
+	}
+	return id, nil
 }
 
-func (a *App) deleteKey(tx store.Tx, provider string) error {
-	if err := tx.DeleteSetting(providerKey(provider, "api_key")); err != nil {
-		return err
-	}
-	return tx.DeleteSetting(providerKey(provider, "api_key_origin"))
-}
-
-func (a *App) defaultModel(provider string) string {
-	if d, ok := a.defaults[provider]; ok && d.Model != nil {
+func (a *App) defaultModel(kind string) string {
+	if d, ok := a.defaults[kind]; ok && d.Model != nil {
 		return *d.Model
 	}
 	return ""
 }
 
-func (a *App) defaultBaseURL(provider string) string { return a.defaults[provider].BaseURL }
+func (a *App) defaultBaseURL(kind string) string { return a.defaults[kind].BaseURL }
 
-// ready reports whether the provider has everything it needs, counting
-// defaults: a model, plus an API key for Anthropic or a base URL for
-// OpenAI-compatible endpoints (whose key is optional).
-func (a *App) ready(provider string, r resolvedProvider) bool {
-	model, base := r.model, r.baseURL
-	if model == "" {
-		model = a.defaultModel(provider)
-	}
-	if base == "" {
-		base = a.defaultBaseURL(provider)
-	}
-	if model == "" {
-		return false
-	}
-	switch provider {
+// keyRequired reports whether a kind needs an API key with this base URL:
+// always for Anthropic; for OpenAI-compatible endpoints only on the default
+// (public OpenAI) endpoint, since local servers need none.
+func (a *App) keyRequired(kind, baseURL string) bool {
+	switch kind {
 	case ai.ProviderAnthropic:
-		return r.apiKey != ""
+		return true
 	case ai.ProviderOpenAICompatible:
-		// A key is optional for local servers, but the default (public
-		// OpenAI) endpoint needs one.
-		if base == "" {
-			return false
-		}
-		return r.apiKey != "" || originOf(base) != originOf(a.defaultBaseURL(provider))
+		return originOf(a.effectiveBase(kind, baseURL)) == originOf(a.defaultBaseURL(kind))
 	}
 	return false
 }
 
-func (a *App) activeProvider(tx store.Tx) (string, error) {
-	v, ok, err := tx.GetSetting(keyActiveProvider)
-	if err != nil {
-		return "", err
+// missing lists what a provider still needs to be ready, counting the
+// kind's defaults: a model, a base URL, and a key where one is required.
+func (a *App) missing(p provider) []string {
+	var out []string
+	if p.model == "" && a.defaultModel(p.kind) == "" {
+		out = append(out, "a model")
 	}
-	if ok {
-		return v, nil // "" means explicitly turned off
+	if a.effectiveBase(p.kind, p.baseURL) == "" {
+		out = append(out, "a base URL")
+	} else if p.apiKey == "" && a.keyRequired(p.kind, p.baseURL) {
+		out = append(out, "an API key")
 	}
-	return a.aiEnv.Provider, nil
+	return out
+}
+
+func (a *App) ready(p provider) bool { return knownKind(p.kind) && len(a.missing(p)) == 0 }
+
+// notReady is the reason a provider cannot be used yet.
+func (a *App) notReady(p provider) string {
+	return "the provider is not ready — it needs " + strings.Join(a.missing(p), " and ")
 }
 
 func keyHint(k string) *string {
@@ -258,39 +294,54 @@ func strPtrOrNil(s string) *string {
 	return &s
 }
 
+func (a *App) view(p provider, isDefault bool, usage map[string]store.AIUsage) AIProvider {
+	u, ok := usage[p.id]
+	return AIProvider{
+		Usage: usageView(u, ok),
+		ID:    p.id, Name: p.name, Kind: p.kind,
+		Model:      strPtrOrNil(p.model),
+		BaseURL:    strPtrOrNil(p.baseURL),
+		APIKeySet:  p.apiKey != "",
+		APIKeyHint: keyHint(p.apiKey),
+		Source:     p.source,
+		IsDefault:  isDefault,
+		Ready:      a.ready(p),
+		CreatedAt:  p.createdAt,
+		UpdatedAt:  p.updatedAt,
+	}
+}
+
 func (a *App) aiSettings(tx store.Tx) (AISettings, error) {
-	out := AISettings{Providers: map[string]ProviderSettings{}, Defaults: map[string]ProviderDefaults{}}
-	active, err := a.activeProvider(tx)
+	out := AISettings{Providers: []AIProvider{}, Kinds: map[string]AIKind{}}
+	ps, err := a.listProviders(tx)
 	if err != nil {
 		return out, err
 	}
-	out.ActiveProvider = strPtrOrNil(active)
-	for _, p := range ai.ProviderIDs {
-		r, err := a.resolve(tx, p)
-		if err != nil {
-			return out, err
+	def, err := a.defaultProviderID(tx, ps)
+	if err != nil {
+		return out, err
+	}
+	usage, err := a.providerUsage(tx)
+	if err != nil {
+		return out, err
+	}
+	out.DefaultProviderID = strPtrOrNil(def)
+	if p := findProvider(ps, def); p != nil {
+		out.Providers = append(out.Providers, a.view(*p, true, usage))
+	}
+	for _, p := range ps {
+		if p.id != def {
+			out.Providers = append(out.Providers, a.view(p, false, usage))
 		}
-		ps := ProviderSettings{
-			Model:         strPtrOrNil(r.model),
-			BaseURL:       strPtrOrNil(r.baseURL),
-			ModelSource:   strPtrOrNil(r.modelSource),
-			BaseURLSource: strPtrOrNil(r.baseURLSource),
-			APIKeySet:     r.apiKey != "",
-			APIKeyHint:    keyHint(r.apiKey),
-			Ready:         a.ready(p, r),
-		}
-		if r.keySource != "" {
-			src := r.keySource
-			ps.APIKeySource = &src
-		}
-		out.Providers[p] = ps
-		d := a.defaults[p]
-		out.Defaults[p] = ProviderDefaults{Model: d.Model, BaseURL: d.BaseURL}
+	}
+	for _, kind := range ai.ProviderIDs {
+		d := a.defaults[kind]
+		out.Kinds[kind] = AIKind{DefaultModel: d.Model, DefaultBaseURL: d.BaseURL, KeyRequired: kind == ai.ProviderAnthropic}
 	}
 	return out, nil
 }
 
-// GetAISettings returns the effective AI settings.
+// GetAISettings returns the AI providers and the default.
 func (a *App) GetAISettings(ctx context.Context) (AISettings, error) {
 	var out AISettings
 	err := a.store.Read(ctx, func(tx store.Tx) error {
@@ -301,169 +352,325 @@ func (a *App) GetAISettings(ctx context.Context) (AISettings, error) {
 	return out, err
 }
 
-// UpdateAISettings applies a merge update to the AI settings.
+// UpdateAISettings chooses the default provider; null turns AI features
+// off.
 func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISettings, error) {
-	fe := domain.FieldErrors{}
-	for p, pi := range in.Providers {
-		prefix := "providers." + p + "."
-		if !knownProvider(p) {
-			fe.Add("providers."+p, "unknown provider")
-			continue
-		}
-		if pi.Model.HasValue() {
-			m := strings.TrimSpace(pi.Model.Val)
-			if utf8.RuneCountInString(m) > maxModelChars || domain.HasDisallowedControl(m) || strings.ContainsAny(m, "\n\t") {
-				fe.Add(prefix+"model", "is not a valid model id")
-			}
-		}
-		if pi.BaseURL.HasValue() && strings.TrimSpace(pi.BaseURL.Val) != "" {
-			if msg := domain.ValidateURL(strings.TrimSpace(pi.BaseURL.Val)); msg != "" {
-				fe.Add(prefix+"baseUrl", msg)
-			}
-		}
-		if pi.APIKey.HasValue() {
-			k := strings.TrimSpace(pi.APIKey.Val)
-			if utf8.RuneCountInString(k) > maxAPIKeyChars || strings.ContainsFunc(k, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
-				fe.Add(prefix+"apiKey", "is not a valid API key")
-			}
-		}
-	}
-	if in.ActiveProvider.HasValue() && in.ActiveProvider.Val != "" && !knownProvider(in.ActiveProvider.Val) {
-		fe.Add("activeProvider", "unknown provider")
-	}
-	if err := errValidation(fe); err != nil {
-		return AISettings{}, err
-	}
 	var out AISettings
 	err := a.store.Write(ctx, func(tx store.Tx) error {
-		for p, pi := range in.Providers {
-			_, storedOrigin, err := a.storedKey(tx, p)
-			if err != nil {
-				return err
-			}
-			set := func(field string, o domain.Opt[string]) error {
-				if !o.Set {
-					return nil
-				}
-				v := strings.TrimSpace(o.Val)
-				if o.Null || v == "" {
-					return tx.DeleteSetting(providerKey(p, field))
-				}
-				return tx.SetSetting(providerKey(p, field), v)
-			}
-			if err := set("model", pi.Model); err != nil {
-				return err
-			}
-			if err := set("base_url", pi.BaseURL); err != nil {
-				return err
-			}
-			after, err := a.resolve(tx, p)
-			if err != nil {
-				return err
-			}
-			origin := originOf(a.effectiveBase(p, after.baseURL))
-			switch key := strings.TrimSpace(pi.APIKey.Val); {
-			case pi.APIKey.Set && pi.APIKey.Null:
-				if err := a.deleteKey(tx, p); err != nil {
+		if in.DefaultProviderID.Set {
+			id := strings.TrimSpace(in.DefaultProviderID.Val)
+			if id != "" {
+				ps, err := a.listProviders(tx)
+				if err != nil {
 					return err
 				}
-			case pi.APIKey.Set && key != "":
-				// A new key belongs to the base URL it is saved with.
-				if err := a.saveKey(tx, p, key, origin); err != nil {
-					return err
+				p := findProvider(ps, id)
+				if p == nil {
+					return errField("defaultProviderId", "unknown provider")
 				}
-			default:
-				// Omitted (or empty) key: a stored key never follows the
-				// base URL to another origin.
-				if storedOrigin != "" && storedOrigin != origin {
-					if err := a.deleteKey(tx, p); err != nil {
-						return err
-					}
+				if !a.ready(*p) {
+					return errField("defaultProviderId", a.notReady(*p))
 				}
 			}
-		}
-		if in.ActiveProvider.Set {
-			if err := tx.SetSetting(keyActiveProvider, in.ActiveProvider.Val); err != nil {
+			if err := tx.SetSetting(keyDefaultProvider, id); err != nil {
 				return err
 			}
 		}
 		var err error
 		out, err = a.aiSettings(tx)
-		if err != nil {
-			return err
-		}
-		if in.ActiveProvider.HasValue() && in.ActiveProvider.Val != "" && !out.Providers[in.ActiveProvider.Val].Ready {
-			return errField("activeProvider", "the provider is not ready — it needs a model"+
-				map[string]string{ai.ProviderAnthropic: " and an API key", ai.ProviderOpenAICompatible: " and a base URL"}[in.ActiveProvider.Val])
-		}
-		return nil
+		return err
 	})
 	return out, err
 }
 
-// providerConfig builds the configuration for constructing a provider.
-func (a *App) providerConfig(provider string, r resolvedProvider) ai.Config {
-	model := r.model
-	if model == "" {
-		model = a.defaultModel(provider)
-	}
-	return ai.Config{Model: model, BaseURL: r.baseURL, APIKey: r.apiKey, Timeout: a.aiEnv.Timeout}
+func validModel(m string) bool {
+	return utf8.RuneCountInString(m) <= maxModelChars && domain.IsSingleLine(m)
 }
 
-// activeAI resolves the provider to use for a request from the current
-// settings.
-func (a *App) activeAI(ctx context.Context) (ai.Provider, string, error) {
-	var (
-		provider string
-		r        resolvedProvider
-	)
-	err := a.store.Read(ctx, func(tx store.Tx) error {
-		var err error
-		if provider, err = a.activeProvider(tx); err != nil || provider == "" {
-			return err
+func validAPIKey(k string) bool {
+	return utf8.RuneCountInString(k) <= maxAPIKeyChars && !strings.ContainsFunc(k, func(r rune) bool { return r <= ' ' || r == 0x7f })
+}
+
+// checkConnection validates the model, base URL and API key of a provider
+// input or a connection test.
+func checkConnection(fe domain.FieldErrors, model, baseURL, apiKey domain.Opt[string]) {
+	if model.HasValue() && !validModel(strings.TrimSpace(model.Val)) {
+		fe.Add("model", "is not a valid model id")
+	}
+	if v := strings.TrimSpace(baseURL.Val); baseURL.HasValue() && v != "" {
+		if msg := domain.ValidateURL(v); msg != "" {
+			fe.Add("baseUrl", msg)
 		}
-		r, err = a.resolve(tx, provider)
+	}
+	if apiKey.HasValue() && !validAPIKey(strings.TrimSpace(apiKey.Val)) {
+		fe.Add("apiKey", "is not a valid API key")
+	}
+}
+
+func checkProviderName(tx store.Tx, r *store.AIProvider) error {
+	all, err := tx.ListAIProviders()
+	if err != nil {
 		return err
-	})
-	if err != nil {
-		return nil, "", err
 	}
-	if provider == "" || !a.ready(provider, r) {
-		return nil, "", &Error{Code: CodeAIUnavailable, Message: "no AI provider is configured"}
-	}
-	factory, ok := a.providers[provider]
-	if !ok {
-		return nil, "", &Error{Code: CodeAIUnavailable, Message: "the configured AI provider is not available in this build"}
-	}
-	p, err := factory(a.providerConfig(provider, r))
-	if err != nil {
-		return nil, "", &Error{Code: CodeAIUnavailable, Message: ai.SafeMessage(err, r.apiKey)}
-	}
-	return p, r.apiKey, nil
-}
-
-// AIInfo describes the active provider for the meta endpoint.
-type AIInfo struct {
-	Enabled  bool    `json:"enabled"`
-	Provider *string `json:"provider"`
-	Model    *string `json:"model"`
-}
-
-// AIInfo returns whether AI features are available.
-func (a *App) AIInfo(ctx context.Context) (AIInfo, error) {
-	out := AIInfo{}
-	err := a.store.Read(ctx, func(tx store.Tx) error {
-		provider, err := a.activeProvider(tx)
-		if err != nil || provider == "" || !knownProvider(provider) {
-			return err
+	for _, o := range all {
+		if o.ID != r.ID && strings.EqualFold(o.Name, r.Name) {
+			return errField("name", "an AI provider with this name already exists")
 		}
-		r, err := a.resolve(tx, provider)
+	}
+	return nil
+}
+
+// setKey applies an apiKey input to a record whose base URL is final: null
+// deletes the stored key, a non-empty string replaces it, bound to the
+// origin of the effective base URL. Omitted (or empty), the stored key is
+// kept unless the base URL moved to another origin, where it is deleted so
+// it never follows.
+func (a *App) setKey(r *store.AIProvider, key domain.Opt[string]) error {
+	origin := originOf(a.effectiveBase(r.Kind, r.BaseURL))
+	switch k := strings.TrimSpace(key.Val); {
+	case key.Set && key.Null:
+		r.APIKey, r.APIKeyOrigin = "", ""
+	case key.Set && k != "":
+		ct, err := a.secrets.EncryptBound(k, keyContext(r.Kind, origin))
 		if err != nil {
 			return err
 		}
-		if _, ok := a.providers[provider]; ok && a.ready(provider, r) {
-			cfg := a.providerConfig(provider, r)
-			out = AIInfo{Enabled: true, Provider: &provider, Model: &cfg.Model}
+		r.APIKey, r.APIKeyOrigin = ct, origin
+	case r.APIKey != "" && r.APIKeyOrigin != origin:
+		r.APIKey, r.APIKeyOrigin = "", ""
+	}
+	return nil
+}
+
+// optText is the trimmed value of an optional text input; null and omitted
+// are "".
+func optText(o domain.Opt[string]) string { return strings.TrimSpace(o.Val) }
+
+// providerView returns one provider as listed.
+func (a *App) providerView(tx store.Tx, id string) (AIProvider, error) {
+	ps, err := a.listProviders(tx)
+	if err != nil {
+		return AIProvider{}, err
+	}
+	def, err := a.defaultProviderID(tx, ps)
+	if err != nil {
+		return AIProvider{}, err
+	}
+	p := findProvider(ps, id)
+	if p == nil {
+		return AIProvider{}, errNotFound("AI provider")
+	}
+	usage, err := a.providerUsage(tx)
+	if err != nil {
+		return AIProvider{}, err
+	}
+	return a.view(*p, p.id == def, usage), nil
+}
+
+// errEnvProvider rejects changes to an environment provider, or reports a
+// missing one.
+func (a *App) errEnvProvider(id string) error {
+	if findProvider(a.envProviders(), id) == nil {
+		return errNotFound("AI provider")
+	}
+	return errConflict("environment providers are configured by the server's environment and cannot be changed here", nil)
+}
+
+// CreateAIProvider saves a new provider. It is not made the default. The
+// limits are fixed: see domain.MaxAIProviders and friends.
+func (a *App) CreateAIProvider(ctx context.Context, in AIProviderInput) (AIProvider, error) {
+	now := a.clock()
+	r := store.AIProvider{ID: newID(), CreatedAt: now, UpdatedAt: now}
+	fe := domain.FieldErrors{}
+	if !in.Name.HasValue() {
+		fe.Add("name", "is required")
+	} else if name, msg := domain.ValidateAIProviderName(in.Name.Val); msg != "" {
+		fe.Add("name", msg)
+	} else {
+		r.Name = name
+	}
+	switch kind := optText(in.Kind); {
+	case !in.Kind.HasValue() || kind == "":
+		fe.Add("kind", "is required")
+	case !knownKind(kind):
+		fe.Add("kind", "unknown provider kind")
+	default:
+		r.Kind = kind
+	}
+	checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+	if err := errValidation(fe); err != nil {
+		return AIProvider{}, err
+	}
+	r.Model, r.BaseURL = optText(in.Model), optText(in.BaseURL)
+	var out AIProvider
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		all, err := tx.ListAIProviders()
+		if err != nil {
+			return err
+		}
+		if len(all) >= domain.MaxAIProviders {
+			return errConflict(fmt.Sprintf("at most %d AI providers can be saved", domain.MaxAIProviders), nil)
+		}
+		if err := checkProviderName(tx, &r); err != nil {
+			return err
+		}
+		if err := a.setKey(&r, in.APIKey); err != nil {
+			return err
+		}
+		if err := tx.InsertAIProvider(&r); err != nil {
+			return err
+		}
+		out, err = a.providerView(tx, r.ID)
+		return err
+	})
+	return out, err
+}
+
+// UpdateAIProvider applies a merge update to a saved provider's name,
+// model, base URL and key. The kind cannot change.
+func (a *App) UpdateAIProvider(ctx context.Context, id string, in AIProviderInput) (AIProvider, error) {
+	if isEnvProviderID(id) {
+		return AIProvider{}, a.errEnvProvider(id)
+	}
+	var out AIProvider
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		r, err := tx.GetAIProvider(id)
+		if err != nil {
+			return notFoundAs(err, "AI provider")
+		}
+		fe := domain.FieldErrors{}
+		if in.Name.Set {
+			if name, msg := domain.ValidateAIProviderName(in.Name.Val); in.Name.Null {
+				fe.Add("name", "cannot be null")
+			} else if msg != "" {
+				fe.Add("name", msg)
+			} else {
+				r.Name = name
+			}
+		}
+		if in.Kind.Set && (in.Kind.Null || optText(in.Kind) != r.Kind) {
+			fe.Add("kind", "cannot be changed after creation")
+		}
+		checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+		if err := errValidation(fe); err != nil {
+			return err
+		}
+		if err := checkProviderName(tx, &r); err != nil {
+			return err
+		}
+		if in.Model.Set {
+			r.Model = optText(in.Model)
+		}
+		if in.BaseURL.Set {
+			r.BaseURL = optText(in.BaseURL)
+		}
+		if err := a.setKey(&r, in.APIKey); err != nil {
+			return err
+		}
+		r.UpdatedAt = a.clock()
+		if err := tx.UpdateAIProvider(&r); err != nil {
+			return notFoundAs(err, "AI provider")
+		}
+		out, err = a.providerView(tx, r.ID)
+		return err
+	})
+	return out, err
+}
+
+// DeleteAIProvider deletes a saved provider. Deleting the default leaves no
+// default.
+func (a *App) DeleteAIProvider(ctx context.Context, id string) error {
+	if isEnvProviderID(id) {
+		return a.errEnvProvider(id)
+	}
+	return a.store.Write(ctx, func(tx store.Tx) error {
+		if err := tx.DeleteAIProvider(id); err != nil {
+			return notFoundAs(err, "AI provider")
+		}
+		// Its counts go with it.
+		if err := tx.DeleteAIUsage(id); err != nil {
+			return err
+		}
+		def, ok, err := tx.GetSetting(keyDefaultProvider)
+		if err != nil || !ok || def != id {
+			return err
+		}
+		return tx.SetSetting(keyDefaultProvider, "")
+	})
+}
+
+// providerConfig builds the configuration for constructing a provider.
+func (a *App) providerConfig(p provider) ai.Config {
+	model := p.model
+	if model == "" {
+		model = a.defaultModel(p.kind)
+	}
+	return ai.Config{Model: model, BaseURL: p.baseURL, APIKey: p.apiKey, Timeout: a.aiEnv.Timeout}
+}
+
+// activeAI constructs the default provider for a request from the current
+// settings.
+func (a *App) activeAI(ctx context.Context) (activeProvider, error) {
+	var p *provider
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		ps, err := a.listProviders(tx)
+		if err != nil {
+			return err
+		}
+		def, err := a.defaultProviderID(tx, ps)
+		p = findProvider(ps, def)
+		return err
+	})
+	if err != nil {
+		return activeProvider{}, err
+	}
+	if p == nil {
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: "no default AI provider is chosen"}
+	}
+	if !a.ready(*p) {
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: fmt.Sprintf("the default AI provider %q is not ready — it needs %s",
+			p.name, strings.Join(a.missing(*p), " and "))}
+	}
+	factory, ok := a.providers[p.kind]
+	if !ok {
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: "the default AI provider is not available in this build"}
+	}
+	prov, err := factory(a.providerConfig(*p))
+	if err != nil {
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: ai.SafeMessage(err, p.apiKey)}
+	}
+	return activeProvider{Provider: prov, id: p.id, name: p.name, kind: p.kind, secret: p.apiKey}, nil
+}
+
+// AIInfo describes the default provider for the meta endpoint.
+type AIInfo struct {
+	Enabled      bool    `json:"enabled"`
+	ProviderID   *string `json:"providerId"`
+	ProviderName *string `json:"providerName"`
+	Kind         *string `json:"kind"`
+	Model        *string `json:"model"`
+}
+
+// AIInfo returns whether AI features are available, and with which
+// provider.
+func (a *App) AIInfo(ctx context.Context) (AIInfo, error) {
+	out := AIInfo{}
+	err := a.store.Read(ctx, func(tx store.Tx) error {
+		ps, err := a.listProviders(tx)
+		if err != nil {
+			return err
+		}
+		def, err := a.defaultProviderID(tx, ps)
+		if err != nil {
+			return err
+		}
+		p := findProvider(ps, def)
+		if p == nil || !a.ready(*p) {
+			return nil
+		}
+		if _, ok := a.providers[p.kind]; ok {
+			model := a.providerConfig(*p).Model
+			out = AIInfo{Enabled: true, ProviderID: &p.id, ProviderName: &p.name, Kind: &p.kind, Model: &model}
 		}
 		return nil
 	})
@@ -472,91 +679,154 @@ func (a *App) AIInfo(ctx context.Context) (AIInfo, error) {
 
 // AITestInput is the body of POST /settings/ai/test.
 type AITestInput struct {
-	Provider string             `json:"provider"`
-	Model    domain.Opt[string] `json:"model"`
-	BaseURL  domain.Opt[string] `json:"baseUrl"`
-	APIKey   domain.Opt[string] `json:"apiKey"`
+	ProviderID domain.Opt[string] `json:"providerId"`
+	Kind       domain.Opt[string] `json:"kind"`
+	Model      domain.Opt[string] `json:"model"`
+	BaseURL    domain.Opt[string] `json:"baseUrl"`
+	APIKey     domain.Opt[string] `json:"apiKey"`
 }
 
 // AITestResult reports a connection test.
 type AITestResult struct {
-	OK        bool    `json:"ok"`
-	Model     *string `json:"model"`
-	LatencyMs *int    `json:"latencyMs"`
-	Error     *string `json:"error"`
+	OK          bool     `json:"ok"`
+	Model       *string  `json:"model"`
+	LatencyMs   *int     `json:"latencyMs"`
+	Error       *string  `json:"error"`
+	Models      []string `json:"models"`
+	ModelsError *string  `json:"modelsError"`
 }
 
-// TestAIProvider makes one minimal request with the given overrides on top
-// of the saved settings. Nothing is saved.
-func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult, error) {
-	if !knownProvider(in.Provider) {
-		return AITestResult{}, errField("provider", "unknown provider")
-	}
-	if in.BaseURL.HasValue() && strings.TrimSpace(in.BaseURL.Val) != "" {
-		if msg := domain.ValidateURL(strings.TrimSpace(in.BaseURL.Val)); msg != "" {
-			return AITestResult{}, errField("baseUrl", msg)
+// cleanModelIDs makes a service's model list safe to show: ids that are
+// not a single line of 1 to maxModelChars characters without surrounding
+// whitespace are dropped, as is anything containing the key; the rest are
+// de-duplicated, sorted and capped.
+func cleanModelIDs(ids []string, secret string) []string {
+	out := []string{}
+	for _, id := range ids {
+		if id == "" || id != strings.TrimSpace(id) || !utf8.ValidString(id) || !validModel(id) ||
+			(len(secret) >= 4 && strings.Contains(id, secret)) {
+			continue
 		}
+		out = append(out, id)
 	}
-	var r resolvedProvider
-	if err := a.store.Read(ctx, func(tx store.Tx) error {
-		var err error
-		r, err = a.resolve(tx, in.Provider)
-		return err
-	}); err != nil {
+	slices.Sort(out)
+	out = slices.Compact(out)
+	if len(out) > maxListedModels {
+		out = out[:maxListedModels]
+	}
+	return out
+}
+
+// TestAIProvider checks a provider configuration: it lists the service's
+// models and, when a model is configured, makes one minimal generation
+// request. Overrides apply on top of a saved or environment provider, or
+// describe an unsaved configuration of a kind. Nothing is saved.
+func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult, error) {
+	id, kind := optText(in.ProviderID), optText(in.Kind)
+	fe := domain.FieldErrors{}
+	switch {
+	case (id == "") == (kind == ""):
+		fe.Add("providerId", "give exactly one of providerId and kind")
+	case kind != "" && !knownKind(kind):
+		fe.Add("kind", "unknown provider kind")
+	}
+	checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+	if err := errValidation(fe); err != nil {
 		return AITestResult{}, err
 	}
-	if v := strings.TrimSpace(in.Model.Val); in.Model.HasValue() && v != "" {
-		r.model, r.modelSource = v, "request"
+	p := provider{kind: kind}
+	if id != "" {
+		var found *provider
+		if err := a.store.Read(ctx, func(tx store.Tx) error {
+			ps, err := a.listProviders(tx)
+			found = findProvider(ps, id)
+			return err
+		}); err != nil {
+			return AITestResult{}, err
+		}
+		if found == nil {
+			return AITestResult{}, errField("providerId", "unknown provider")
+		}
+		p = *found
 	}
-	if v := strings.TrimSpace(in.BaseURL.Val); in.BaseURL.HasValue() && v != "" {
-		if originOf(v) != originOf(a.effectiveBase(in.Provider, r.baseURL)) {
+	if v := optText(in.Model); v != "" {
+		p.model = v
+	}
+	if v := optText(in.BaseURL); v != "" {
+		if originOf(v) != originOf(a.effectiveBase(p.kind, p.baseURL)) {
 			// A saved or environment key is never sent to another origin;
 			// only a key given in this request may be.
-			r.apiKey, r.keySource = "", ""
+			p.apiKey = ""
 		}
-		r.baseURL, r.baseURLSource = v, "request"
+		p.baseURL = v
 	}
-	if v := strings.TrimSpace(in.APIKey.Val); in.APIKey.HasValue() && v != "" {
-		r.apiKey = v
+	if v := optText(in.APIKey); v != "" {
+		p.apiKey = v
 	}
-	cfg := a.providerConfig(in.Provider, r)
-	res := AITestResult{Model: strPtrOrNil(cfg.Model)}
-	fail := func(msg string) (AITestResult, error) {
-		m := ai.Redact(msg, r.apiKey)
-		res.Error = &m
+	cfg := a.providerConfig(p)
+	res := AITestResult{}
+	safe := func(msg string) *string {
+		m := ai.Redact(msg, p.apiKey)
+		return &m
+	}
+	if p.apiKey == "" && a.keyRequired(p.kind, p.baseURL) {
+		res.Error = safe("no API key is configured for this base URL")
 		return res, nil
 	}
-	if !a.ready(in.Provider, r) {
-		if cfg.Model == "" {
-			return fail("no model is configured")
-		}
-		return fail("no API key is configured for this base URL")
-	}
-	factory, ok := a.providers[in.Provider]
+	factory, ok := a.providers[p.kind]
 	if !ok {
-		return fail("this provider is not available in this build")
+		res.Error = safe("this provider is not available in this build")
+		return res, nil
 	}
-	p, err := factory(cfg)
+	prov, err := factory(cfg)
 	if err != nil {
-		return fail(ai.SafeMessage(err, r.apiKey))
+		res.Error = safe(ai.SafeMessage(err, p.apiKey))
+		return res, nil
 	}
+
+	// 1. The model list.
+	if lister, ok := prov.(ai.ModelLister); ok {
+		ids, err := lister.ListModels(ctx)
+		if err != nil {
+			res.ModelsError = safe(ai.SafeMessage(err, p.apiKey))
+		} else {
+			res.Models = cleanModelIDs(ids, p.apiKey)
+		}
+	} else {
+		res.ModelsError = safe("this provider cannot list its models")
+	}
+	if cfg.Model == "" {
+		// Nothing to generate with: the list shows whether the base URL
+		// and key work.
+		res.OK = res.Models != nil
+		if !res.OK {
+			res.Error = res.ModelsError
+		}
+		return res, nil
+	}
+
+	// 2. One minimal generation with the configured model.
+	res.Model = &cfg.Model
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	start := time.Now()
-	resp, err := p.Generate(ctx, ai.GenerateRequest{
+	// Counted in the provider's usage when one was named; a configuration
+	// that is not saved has no counts.
+	ap := activeProvider{Provider: prov, id: id, name: p.name, kind: p.kind, secret: p.apiKey}
+	u, err := a.generate(ctx, "test", ap, nil, ai.GenerateRequest{
 		System:     "You are answering an automated connectivity check.",
 		User:       `Reply with the JSON object {"ok": true}.`,
 		Schema:     ai.PingSchema(),
 		SchemaName: "ping",
 		Light:      true,
-	})
-	ms := int(time.Since(start).Milliseconds())
-	res.LatencyMs = &ms
+	}, nil)
+	res.LatencyMs = &u.DurationMs
 	if err != nil {
-		return fail(ai.SafeMessage(err, r.apiKey))
+		res.Error = safe(AsError(err).Message)
+		return res, nil
 	}
-	if resp.Model != "" {
-		res.Model = &resp.Model
+	if u.Model != "" && validModel(u.Model) {
+		m := ai.Redact(u.Model, p.apiKey)
+		res.Model = &m
 	}
 	res.OK = true
 	return res, nil

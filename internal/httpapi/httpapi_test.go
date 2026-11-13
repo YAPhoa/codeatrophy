@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -22,7 +21,7 @@ import (
 	"codeatrophy/internal/httpapi"
 	"codeatrophy/internal/judge/judgetest"
 	"codeatrophy/internal/secrets"
-	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store/teststore"
 	"codeatrophy/internal/webui"
 )
 
@@ -39,10 +38,7 @@ var lastHandler http.Handler
 func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "h.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := teststore.Open(t)
 	box, _ := secrets.NewBox(bytes.Repeat([]byte{9}, 32))
 	fake := &aitest.Provider{}
 	model := "claude-opus-5-5"
@@ -58,6 +54,14 @@ func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	})
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
+	}
+	presets, _ := a.ListStylePresets(ctx)
+	// Tests start without the built-in style presets, which have tests of
+	// their own in the store.
+	for _, p := range presets.Items {
+		if err := a.DeleteStylePreset(ctx, p.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	web := webui.NewHandler(fstest.MapFS{
 		"index.html":      {Data: []byte("<!doctype html><title>UI</title>")},
@@ -75,7 +79,6 @@ func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	t.Cleanup(func() {
 		srv.Close()
 		a.Stop()
-		db.Close()
 	})
 	return &client{t: t, srv: srv, ai: fake}
 }
@@ -254,11 +257,14 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxCollectionDescriptionChars", "timeLimitMs", "memoryLimitKb", "maxTestCasesPerItem", "maxTestDataBytes",
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
 		"maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
-		"maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
+		"maxAiProviders", "maxAiProviderNameChars", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
 		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
+	}
+	if len(lim) != 37 {
+		t.Errorf("limits has %d keys, want 37", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -266,7 +272,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	for k, want := range map[string]float64{"maxGeneratedTestCases": 30, "maxSummaryChars": 5000, "maxTextBytes": 1048576,
 		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
 		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxImportCollections": 10000,
-		"maxImportEntries": 1000000} {
+		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60} {
 		if lim[k] != want {
 			t.Errorf("limits.%s = %v, want %v", k, lim[k], want)
 		}
@@ -278,29 +284,58 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	if stats["items"].(map[string]any)["byDifficulty"].(map[string]any)["none"] != float64(0) {
 		t.Errorf("stats keys: %v", stats)
 	}
-	c.expect("PUT", api+"/settings/ai", `{"activeProvider":"anthropic"}`, 422)
-	r := c.expect("PUT", api+"/settings/ai", `{"activeProvider":"anthropic","providers":{"anthropic":{"apiKey":"sk-ant-SECRETVALUE-abcd"}}}`, 200)
-	if strings.Contains(string(r.body), "SECRETVALUE") {
-		t.Fatal("PUT echoed the key")
+	if m := meta["ai"].(map[string]any); len(m) != 5 || m["providerId"] != nil || m["providerName"] != nil || m["kind"] != nil {
+		t.Errorf("meta ai: %v", m)
+	}
+	settings := c.expect("GET", api+"/settings/ai", "", 200).json(t)
+	if settings["defaultProviderId"] != nil || len(settings["providers"].([]any)) != 0 ||
+		settings["kinds"].(map[string]any)["anthropic"].(map[string]any)["keyRequired"] != true {
+		t.Errorf("initial settings: %v", settings)
+	}
+	p := c.expect("POST", api+"/settings/ai/providers", `{"name":"Personal key","kind":"anthropic"}`, 201).json(t)
+	id := p["id"].(string)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+id+`"}`, 422)
+	c.expect("POST", api+"/settings/ai/providers", `{"name":"personal KEY","kind":"anthropic"}`, 422)
+	r := c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"apiKey":"sk-ant-SECRETVALUE-abcd"}`, 200)
+	if strings.Contains(string(r.body), "SECRETVALUE") || !strings.Contains(string(r.body), `"apiKeyHint":"…abcd"`) {
+		t.Fatalf("PATCH: %s", r.body)
+	}
+	c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"kind":"openai_compatible"}`, 422)
+	c.expect("PATCH", api+"/settings/ai/providers/nope", `{"model":"x"}`, 404)
+	r = c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+id+`"}`, 200)
+	if strings.Contains(string(r.body), "SECRETVALUE") || r.json(t)["defaultProviderId"] != id {
+		t.Errorf("PUT settings: %s", r.body)
 	}
 	r = c.expect("GET", api+"/settings/ai", "", 200)
-	if strings.Contains(string(r.body), "SECRETVALUE") || !strings.Contains(string(r.body), `"apiKeyHint":"…abcd"`) {
+	if strings.Contains(string(r.body), "SECRETVALUE") || !strings.Contains(string(r.body), `"isDefault":true`) {
 		t.Errorf("GET settings: %s", r.body)
 	}
-	res := c.expect("POST", api+"/settings/ai/test", `{"provider":"anthropic"}`, 200).json(t)
-	if res["ok"] != true || res["error"] != nil {
+	res := c.expect("POST", api+"/settings/ai/test", `{"providerId":"`+id+`"}`, 200).json(t)
+	if res["ok"] != true || res["error"] != nil || res["modelsError"] != nil || len(res["models"].([]any)) != 1 {
 		t.Errorf("test: %v", res)
 	}
-	c.expect("POST", api+"/settings/ai/test", `{"provider":"gemini"}`, 422)
-	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != true || m["model"] != "claude-opus-5-5" {
+	res = c.expect("POST", api+"/settings/ai/test", `{"kind":"anthropic"}`, 200).json(t)
+	if v, ok := res["models"]; res["ok"] != false || !ok || v != nil {
+		t.Errorf("test without a key: %v", res)
+	}
+	c.expect("POST", api+"/settings/ai/test", `{"kind":"gemini"}`, 422)
+	c.expect("POST", api+"/settings/ai/test", `{}`, 422)
+	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != true ||
+		m["model"] != "claude-opus-5-5" || m["providerId"] != id || m["providerName"] != "Personal key" || m["kind"] != "anthropic" {
 		t.Errorf("meta ai after setup: %v", m)
+	}
+	c.expect("DELETE", api+"/settings/ai/providers/"+id, "", 204)
+	c.expect("DELETE", api+"/settings/ai/providers/"+id, "", 404)
+	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != false {
+		t.Errorf("meta ai after deleting the default: %v", m)
 	}
 }
 
 func TestStylesAndDraftEndpoints(t *testing.T) {
 	c := newServer(t)
 	c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 503)
-	c.expect("PUT", api+"/settings/ai", `{"activeProvider":"anthropic","providers":{"anthropic":{"apiKey":"sk-1234"}}}`, 200)
+	ap := c.expect("POST", api+"/settings/ai/providers", `{"name":"A","kind":"anthropic","apiKey":"sk-1234"}`, 201).json(t)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+ap["id"].(string)+`"}`, 200)
 	p := c.expect("POST", api+"/styles", `{"name":"House","instructions":"HOUSE-STYLE","isDefault":true}`, 201).json(t)
 	c.expect("POST", api+"/styles", `{"name":"house","instructions":"x"}`, 422)
 	list := c.expect("GET", api+"/styles", "", 200).json(t)
@@ -330,6 +365,47 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 	if r := c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 502); r.errorCode(t) != "upstream_error" {
 		t.Error("upstream error code")
 	}
+
+	// The usage of a generation, and the AI log.
+	u := d["usage"].(map[string]any)
+	if u["logId"] == nil || u["model"] != "fake-model" || u["inputTokens"] != nil {
+		t.Errorf("usage: %v", u)
+	}
+	for _, k := range []string{"durationMs", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"} {
+		if _, ok := u[k]; !ok {
+			t.Errorf("usage lacks %s: %v", k, u)
+		}
+	}
+	page := c.expect("GET", api+"/settings/ai/log?limit=2", "", 200).json(t)
+	items := page["items"].([]any)
+	if page["total"] != float64(3) || len(items) != 2 || page["next"] == nil {
+		t.Fatalf("log page: %v", page)
+	}
+	first := items[0].(map[string]any)
+	if first["status"] != "failed" || first["operation"] != "draft" || first["request"] != nil || first["usage"] == nil {
+		t.Errorf("entry: %v", first)
+	}
+	next := c.expect("GET", api+"/settings/ai/log?limit=2&before="+page["next"].(string), "", 200).json(t)
+	if len(next["items"].([]any)) != 1 || next["next"] != nil {
+		t.Errorf("second page: %v", next)
+	}
+	detail := c.expect("GET", api+"/settings/ai/log/"+u["logId"].(string), "", 200).json(t)
+	if detail["request"].(map[string]any)["schema"] != "item_draft" || detail["truncated"] != false || detail["response"] == nil {
+		t.Errorf("detail: %v", detail)
+	}
+	c.expect("GET", api+"/settings/ai/log?before=garbage", "", 400)
+	c.expect("GET", api+"/settings/ai/log/nope", "", 404)
+	c.expect("DELETE", api+"/settings/ai/log?before=nonsense", "", 400)
+	c.expect("DELETE", api+"/settings/ai/log", "", 204)
+	if page := c.expect("GET", api+"/settings/ai/log", "", 200).json(t); page["total"] != float64(0) {
+		t.Errorf("cleared: %v", page)
+	}
+	st := c.expect("GET", api+"/settings/ai", "", 200).json(t)
+	pu := st["providers"].([]any)[0].(map[string]any)["usage"].(map[string]any)
+	if pu["allTime"].(map[string]any)["requests"] != float64(3) || pu["allTime"].(map[string]any)["failed"] != float64(1) ||
+		pu["lastUsedAt"] == nil {
+		t.Errorf("provider usage: %v", pu)
+	}
 }
 
 func TestSubmissionsEndpoints(t *testing.T) {
@@ -354,6 +430,26 @@ func TestSubmissionsEndpoints(t *testing.T) {
 	}
 	c.expect("POST", api+"/items/"+id+"/submissions", `{"language":"python","source":"`+strings.Repeat("x", 2000)+`"}`, 422)
 	c.expect("POST", api+"/items/"+id+"/testcases/verify", `{}`, 422) // no reference solution
+	if s0["lineOffset"] != float64(0) || sub["lineOffset"] != float64(0) {
+		t.Errorf("lineOffset: %v %v", s0["lineOffset"], sub["lineOffset"])
+	}
+
+	// A solution-only problem: the item carries its interface and harness,
+	// and a language without a harness is 422.
+	fn := c.expect("POST", api+"/items", `{"type":"problem","title":"F","problem":{"interface":"function",
+		"harness":{"python":{"prefix":"x = 1\n","suffix":""}}},"testCases":[{"stdin":"1 2","expectedStdout":"3","isSample":true}]}`, 201).json(t)
+	p := fn["problem"].(map[string]any)
+	if p["interface"] != "function" || p["harness"].(map[string]any)["python"].(map[string]any)["prefix"] != "x = 1\n" {
+		t.Errorf("function problem: %v", p)
+	}
+	fid := fn["id"].(string)
+	c.expect("POST", api+"/items/"+fid+"/submissions", `{"language":"cpp","source":"sum"}`, 422)
+	sub = c.expect("POST", api+"/items/"+fid+"/submissions", `{"language":"python","source":"sum"}`, 202).json(t)
+	if sub["lineOffset"] != float64(1) || sub["source"] != "sum" {
+		t.Errorf("function submission: %v", sub)
+	}
+	c.expect("PATCH", api+"/items/"+fid, `{"problem":{"interface":"program"}}`, 422)
+	c.expect("PATCH", api+"/items/"+fid, `{"problem":{"interface":"program","harness":{}}}`, 200)
 }
 
 func multipartBody(t *testing.T, data []byte, strategy string) (string, *bytes.Buffer) {
@@ -554,7 +650,7 @@ func TestPreferencesEndpoints(t *testing.T) {
 	c := newServer(t)
 	def := c.expect("GET", api+"/settings/preferences", "", 200).json(t)
 	ed := def["editor"].(map[string]any)
-	if def["hideTestCases"] != true || ed["tabSize"] != float64(4) || ed["fontSize"] != float64(14) || ed["lineWrapping"] != false ||
+	if def["hideTestCases"] != true || def["generatedTestCases"] != float64(8) || ed["tabSize"] != float64(4) || ed["fontSize"] != float64(14) || ed["lineWrapping"] != false ||
 		ed["autocomplete"] != true || ed["closeBrackets"] != true || ed["matchBrackets"] != true {
 		t.Errorf("defaults: %v", def)
 	}
@@ -563,7 +659,8 @@ func TestPreferencesEndpoints(t *testing.T) {
 		t.Errorf("deep merge: %v", got)
 	}
 	for _, bad := range []string{`{"editor":{"tabSize":3}}`, `{"editor":{"fontSize":25}}`, `{"theme":"dark"}`,
-		`{"editor":{"tabSize":8,"vim":true}}`, `{"hideTestCases":"yes"}`, `{"editor":true}`, `[]`} {
+		`{"editor":{"tabSize":8,"vim":true}}`, `{"hideTestCases":"yes"}`, `{"editor":true}`, `[]`,
+		`{"generatedTestCases":0}`, `{"generatedTestCases":31}`} {
 		if r := c.do("PUT", api+"/settings/preferences", bad); r.status != 422 && r.status != 400 {
 			t.Errorf("%s: %d", bad, r.status)
 		}

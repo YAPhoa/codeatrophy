@@ -51,7 +51,7 @@ reports the current state (the item revision conflict described under
 | 413 | `too_large` | Body or upload exceeds a limit |
 | 422 | `validation_failed` | Well-formed but invalid |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
-| 503 | `ai_unavailable` | No AI provider is configured |
+| 503 | `ai_unavailable` | No default AI provider is chosen, or it is not ready |
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
 | 500 | `internal` | Unexpected server error |
 
@@ -95,6 +95,7 @@ and `\r` count as newlines.
 | `ItemType` | `problem`, `reading` |
 | `Difficulty` | `easy`, `medium`, `hard` |
 | `ItemStatus` | `todo`, `in_progress`, `done` |
+| `ProblemInterface` | `program` (a submission is a complete program that reads stdin and writes stdout), `function` (a submission is only the solution — a function or class — and a hidden per-language harness turns it into such a program; see [Problem interface](#problem-interface)) |
 | `CompareMode` | `tokens` (whitespace-insensitive token comparison), `exact` (byte comparison after stripping trailing whitespace on each line and trailing blank lines) |
 | `TestOrigin` | `manual`, `ai`, `import` |
 | `SubmissionMode` | `run`, `submit` |
@@ -118,7 +119,7 @@ to show.
 ```json
 {
   "version": "0.1.0",
-  "ai": { "enabled": true, "provider": "anthropic", "model": "claude-opus-5-5" },
+  "ai": { "enabled": true, "providerId": "...", "providerName": "Personal key", "kind": "anthropic", "model": "claude-opus-5-5" },
   "judge": {
     "enabled": true,
     "engine": "judge0",
@@ -157,6 +158,8 @@ to show.
     "maxStyleInstructionsChars": 2000,
     "maxModelIdChars": 200,
     "maxApiKeyChars": 1000,
+    "maxAiProviders": 20,
+    "maxAiProviderNameChars": 60,
     "maxBundleNameChars": 200,
     "maxBundleDescriptionChars": 5000,
     "maxSolutionsPerItem": 50,
@@ -176,7 +179,8 @@ to show.
   `maxRequestBytes` bounds any JSON request body (`413` beyond it);
   `maxPageSize` is the largest `limit`. `maxPreviousDraftBytes` bounds the
   re-encoded `previousDraft` of a draft or variant revision.
-  `maxModelIdChars` and `maxApiKeyChars` bound `PUT /settings/ai` values.
+  `maxModelIdChars`, `maxApiKeyChars`, `maxAiProviders` and
+  `maxAiProviderNameChars` bound [AI providers](#ai-settings).
   `maxBundleNameChars` applies to an export's `name` and `author`,
   `maxBundleDescriptionChars` to its `description`. `maxImportUncompressedBytes`
   and `maxImportEntries` bound the contents of an uploaded bundle
@@ -191,8 +195,10 @@ to show.
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`.
-- `ai.enabled` is `true` when an active provider is fully configured (see
-  [AI settings](#ai-settings)). When `false`, `provider` and `model` are `null`.
+- `ai.enabled` is `true` when a default provider is chosen and `ready` (see
+  [AI settings](#ai-settings)); `providerId`, `providerName`, `kind` and
+  `model` then describe it, `model` being the one in effect. When `false`,
+  all four are `null`.
 - `judge.enabled: false` (engine `none`) → `healthy` is `false`, `languages` is `[]`.
 - `judge.healthy` reflects a recent health probe; it may lag by a few seconds.
 
@@ -278,10 +284,12 @@ sample cases all pass is not counted.
   "rawInput": "two sum, array + target, return indices, O(n)?",
   "source": { "url": null, "note": null },
   "problem": {
+    "interface": "program",
     "timeLimitMs": 2000,
     "memoryLimitKb": 262144,
     "compare": "tokens",
     "starterCode": { "python": "import sys\n..." },
+    "harness": {},
     "referenceSolution": { "id": "...", "language": "python", "source": "..." }
   }
 }
@@ -299,6 +307,54 @@ sample cases all pass is not counted.
   text an AI draft was generated from, or `null`. Neither is ever exported.
 - `problem` is `null` for readings and always an object for problems.
   `referenceSolution` is nullable. `starterCode` is keyed by language id.
+- `problem.interface` and `problem.harness` are described under
+  [Problem interface](#problem-interface).
+
+#### Problem interface
+
+Every problem is judged the same way: a program is run with a test case's
+`stdin` and its standard output is compared with `expectedStdout`. The
+interface says what the person solving it writes.
+
+- `program` (the default) — the whole program. `harness` is `{}`.
+- `function` — only the solution: a function or a class, as on interview
+  sites. `starterCode[language]` is the stub they start from (the signature,
+  with any helper types described in comments), and `harness[language]` is
+  code they do not have to look at:
+
+  ```json
+  "harness": {
+    "python": {
+      "prefix": "import json, sys\n\nclass ListNode: ...\n",
+      "suffix": "\nif __name__ == \"__main__\":\n    ...\n"
+    }
+  }
+  ```
+
+  The program that runs is `prefix`, the submitted source and `suffix`, each
+  starting on a new line. The prefix defines what the solution relies on
+  (imports, helper types); the suffix reads the test case from stdin, calls
+  the solution and prints the result.
+
+Rules:
+
+- A `function` problem can be run in exactly the languages that have a
+  `harness` entry; any other language is `422`. It may be saved with no
+  entries (it cannot be run until one is added). With `program`, a non-empty
+  `harness` is `422`.
+- `prefix` and `suffix` are each at most `limits.maxSourceBytes`; either may
+  be empty. Keys are language ids.
+- Wherever the server runs code for the item — submissions, `testcases/verify`
+  and the verification step of AI test generation and drafts — it assembles
+  the program this way. Saved [solutions](#solutions), including the
+  reference solution, therefore hold only the solution part.
+- `interface` may be changed later; saved solutions are not converted. A
+  `PATCH` that sets `interface: "program"` on a problem with a stored harness
+  must send `harness: {}` with it (`422` otherwise), so runner code is never
+  discarded by accident.
+- Test cases stay plain stdin/stdout. By convention (not enforced) the stdin
+  of a `function` problem carries one JSON value per line, one line per
+  argument in signature order, and the expected output is one JSON value.
 
 `ItemInput` — body of create and (partially) update:
 
@@ -315,7 +371,7 @@ sample cases all pass is not counted.
   "notes": "",
   "rawInput": null,
   "source": { "url": null, "note": null },
-  "problem": { "timeLimitMs": 2000, "memoryLimitKb": 262144, "compare": "tokens", "starterCode": {}, "referenceSolution": null },
+  "problem": { "interface": "program", "timeLimitMs": 2000, "memoryLimitKb": 262144, "compare": "tokens", "starterCode": {}, "harness": {}, "referenceSolution": null },
   "collectionIds": [],
   "variantOf": null,
   "testCases": []
@@ -465,7 +521,11 @@ Body: `{ "updateExpected": false, "solutionId": null }`
 
 `solutionId` selects which of the item's [solutions](#solutions) to run; when
 `null` or omitted, the reference solution is used (`422` if the item has
-none, or if `solutionId` is not one of this item's solutions).
+none, or if `solutionId` is not one of this item's solutions). For a
+`function` problem the solution's language must have a harness, and the
+assembled program must be of a size the engine accepts (`422` on
+`solutionId`, or on `referenceSolution` when none was given); a solution in
+another language can be saved but not run.
 
 ```json
 {
@@ -617,6 +677,7 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   "mode": "submit",
   "language": "python",
   "source": "...",
+  "lineOffset": 0,
   "status": "completed",
   "verdict": "wrong_answer",
   "passedCount": 4,
@@ -669,6 +730,15 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   `timeMs` / `memoryKb` are `null`.
 - `error` is a human-readable message when `verdict` is `internal_error`
   (engine unreachable, etc.), otherwise `null`.
+- `source` is what was submitted: for a `function` problem, the solution part
+  only. `lineOffset` is the number of lines the harness placed before it in
+  the program that ran (`0` for a `program` problem). In `compileOutput` and
+  `stderr` the server rewrites line numbers that refer to the assembled file
+  to the corresponding line of `source` where it recognises the toolchain's
+  message format. A location inside the harness is shown with the file name
+  replaced by `<runner prefix>` or `<runner suffix>` and a line number
+  relative to that part. This is best effort, and `lineOffset` lets a client
+  explain any number that was not rewritten.
 - If the engine fails part-way through, the results that finished are kept,
   no further cases are started, and the remaining cases are reported as
   `internal_error`.
@@ -677,7 +747,7 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   and an `error` saying judging was interrupted.
 
 `SubmissionSummary` is `Submission` without `source`, `results`,
-`compileOutput`.
+`compileOutput`; it keeps `lineOffset`.
 
 ### `POST /items/{id}/submissions`
 
@@ -689,9 +759,10 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
   `stdin` it executes once with that input and reports verdict `executed` (or a
   failure verdict).
 - `mode: "submit"` runs every test case. `stdin` must be `null`.
-- `422` if the item is a reading, the language is not offered by the engine,
-  `source` is empty or over `limits.maxSourceBytes`, or there are no test cases
-  to run. `503 judge_unavailable` only if no engine is configured. If an
+- `422` if the item is a reading, the language is not offered by the engine
+  or, for a `function` problem, has no harness, `source` is empty or over `limits.maxSourceBytes`, or there are no test cases
+  to run. Also `422` (on `source`) if the assembled program of a `function`
+  problem is larger than the engine accepts for that language. `503 judge_unavailable` only if no engine is configured. If an
   engine is configured but turns out to be unreachable, the submission is
   still accepted and completes with verdict `internal_error` and `error` set.
 
@@ -712,16 +783,16 @@ Query: `mode` (optional filter), `limit`, `offset`. Newest first. Returns
 
 ## AI
 
-These endpoints call the active AI provider (see [AI settings](#ai-settings))
+These endpoints call the default AI provider (see [AI settings](#ai-settings))
 synchronously and can take from a few seconds to a couple of minutes. They
 never write to the library; the client saves results through the item and
 test-case endpoints after the user has reviewed them. All return
-`503 ai_unavailable` when no provider is configured and `502 upstream_error`
+`503 ai_unavailable` when no default provider is chosen and ready, and `502 upstream_error`
 when the provider fails or returns output that does not validate.
 
 If the client disconnects, the server cancels the provider request. Operators
 who put a reverse proxy in front of the server must raise its read timeout for
-`/api/v1/ai/` and `/api/v1/items/*/ai/` to at least five minutes.
+`/api/v1/ai/` and `/api/v1/items/*/ai/` to at least six minutes.
 
 ### `POST /ai/draft`
 
@@ -739,6 +810,14 @@ Turn rough input into a complete item draft.
 
 - `text` — required, 1–50000 chars. Whatever the user has.
 - `typeHint` — `auto` (default), `problem` or `reading`.
+- `interfaceHint` — `auto` (default), `program` or `function`: the
+  [interface](#problem-interface) a drafted problem should have. With `auto`
+  the model chooses: `function` for an algorithmic problem whose natural form
+  is a function or class, `program` when input and output handling is part of
+  the task or the problem is not about one routine. An explicit value
+  overrides the model's choice; with `program` any harness it wrote is
+  dropped. `program` or `function` together with `typeHint: "reading"` is
+  `422`.
 - `instruction` — optional extra guidance ("make it harder", "use 1-based
   indices").
 - `previousDraft` — optional `ItemDraft` from an earlier call; with
@@ -758,30 +837,94 @@ Response:
     "difficulty": "easy",
     "tags": ["array", "hash-map"],
     "problem": {
+      "interface": "function",
       "timeLimitMs": 2000,
       "memoryLimitKb": 262144,
       "compare": "tokens",
-      "starterCode": { "python": "..." }
+      "starterCode": { "python": "class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        " },
+      "harness": { "python": { "prefix": "...", "suffix": "..." } },
+      "referenceSolution": { "language": "python", "source": "..." }
     },
     "testCases": [
-      { "name": "Example 1", "stdin": "...", "expectedStdout": "...", "isSample": true }
+      { "name": "Example 1", "stdin": "...", "expectedStdout": "...", "isSample": true, "verified": true }
     ],
     "assumptions": [
       "The original text did not give constraints; assumed 2 ≤ n ≤ 10^5.",
       "Assumed exactly one valid answer exists."
     ]
   },
-  "style": { "id": "...", "name": "LeetCode style" }
+  "style": { "id": "...", "name": "LeetCode style" },
+  "check": {
+    "attempted": true, "engine": "judge0", "passed": 1, "total": 1, "error": null,
+    "runners": [{ "language": "python", "status": "ok", "error": null }]
+  },
+  "usage": {
+    "logId": "...", "model": "claude-haiku-5-5", "durationMs": 48200,
+    "inputTokens": 5210, "outputTokens": 4380,
+    "reasoningTokens": null, "cacheReadTokens": 0, "cacheWriteTokens": 0
+  }
 }
 ```
 
 `style` is the preset that was applied, or `null`.
 
+`usage` is what the generation cost, as the provider reported it: the model
+that answered, the time the provider took, and the token counts. Each count
+is `null` when the provider does not report it. `outputTokens` is everything
+generated, including reasoning; `reasoningTokens` is the part of it spent on
+reasoning where the provider says so; `cacheReadTokens` and
+`cacheWriteTokens` are input tokens served from or written to the provider's
+prompt cache, counted in addition to `inputTokens`. `logId` is the entry in
+the [AI activity log](#ai-activity-log) (`null` if it could not be written).
+Every AI endpoint that generates (`/ai/draft`, `/items/{id}/ai/variant`,
+`/items/{id}/ai/testcases`) returns `usage`, and the server's own log gets
+the same figures, never the content.
+
+For a problem the model also writes a reference solution
+(`problem.referenceSolution`, `null` if it gave none; for a `function`
+problem it is the solution part, and should be in a language that has a
+harness; one that is not is kept, and `check.error` says so). When a
+judge engine is available the server runs it on the draft's test cases —
+through the harness for a `function` problem — so a wrong example or a
+broken harness shows before anything is saved:
+
+- each test case's `verified` is `true` when the run finished and its output
+  matched `expectedStdout` under the draft's compare mode, else `false`;
+- `check` summarises it: `passed` of `total` cases, and `error` with the
+  first failure in plain words (a compile error, a mismatch, …). Nothing in
+  the draft is corrected automatically, with one exception: a Python harness
+  prefix that lacks `from __future__ import annotations` gets it added.
+- the check is bounded: at most the first 10 test cases and 50 seconds. Cases
+  it did not reach stay unverified, and `check.error` says how far it got.
+
+`check.attempted` is `false` (with `engine: null`, `passed: 0`, `error: null`
+and every `verified` `false`) when there is no engine, no reference solution
+or no test case; `total` is still the number of test cases. `check` is `null`
+for a reading. An engine that cannot be reached is not a failed request:
+`attempted` is `true`, `passed` is `0` and `check.error` says why. A client
+should keep the reference solution out of sight unless the user asks to see
+it.
+
+For a `function` problem the check also proves every harness, not only the
+one the reference solution uses: `check.runners` has one entry per harness
+language, in language order. The server runs that language's starter code,
+unchanged, on the first test case; `status` is `ok` when the program compiled
+and ran to an answer of any kind (a wrong answer is expected), `failed` with
+`error` when it did not compile or crashed, and `skipped` — with the reason
+in `error` — when the engine does not offer the language or could not run
+it, there is no starter code for it, or the check's time ran out. The
+reference solution's cases run first; the runners share what is left of the
+check's time. Starter code is therefore written to run as it stands, with a
+placeholder result. `runners` is `[]` for a `program` problem and whenever
+`attempted` is `false`.
+
 `ItemDraft` maps directly onto `ItemInput` (the client adds `rawInput: text`
 and sets each test case's `origin` to `ai`). `problem` is `null` and
 `testCases` is `[]` for a reading. `assumptions` lists everything the model
 inferred or invented that was not in the input; it is for display during
-review and is not stored.
+review and is not stored. `tags` are the model's suggestions, normalised like
+item tags and with whitespace inside a tag replaced by `-`, so they match
+tags typed in the UI; ones that are not valid tags are left out.
 
 ### `POST /items/{id}/ai/variant`
 
@@ -808,8 +951,11 @@ it asks for a revision of that variant rather than a fresh one.
 mode. For readings only `similar` (with an `instruction`) is meaningful; the
 other modes are `422`.
 
-Returns `{ "draft": ItemDraft, "style": ... }` in the same shape as
-`POST /ai/draft`. Here
+Returns `{ "draft": ItemDraft, "style": ..., "check": ... }` in the same
+shape as `POST /ai/draft`, with the same reference solution and check. A
+variant keeps the original's [interface](#problem-interface) unless the
+request gives an `interfaceHint` of `program` or `function` (`auto` or
+omitted keeps it; any value is `422` for a reading). Here
 `assumptions` describes how the variant differs from the original. The client
 saves it with `POST /items`, setting `variantOf` to the original's id; the
 original's tags and collections are a sensible default for the new item. Test
@@ -826,6 +972,8 @@ Propose test cases for an existing problem.
 - `count` — 1–30, default 8.
 - `language` — language for the reference solution; default `python`. If the
   item already has a reference solution it is given to the model as context.
+  For a `function` problem the language must have a harness (`422`), and the
+  reference solution is the solution part only.
 - `instruction` — optional, at most 2000 characters.
 - `422` for a reading.
 
@@ -835,6 +983,8 @@ Response:
 {
   "referenceSolution": { "language": "python", "source": "..." },
   "verification": { "attempted": true, "engine": "judge0", "error": null },
+  "duplicatesDropped": 0,
+  "usage": { "logId": "...", "model": "claude-haiku-5-5", "durationMs": 21800, "inputTokens": 3900, "outputTokens": 1650, "reasoningTokens": null, "cacheReadTokens": 0, "cacheWriteTokens": 0 },
   "cases": [
     {
       "name": "Minimum size",
@@ -860,6 +1010,12 @@ each proposed input:
 - Run failed → `expectedStdout` is the model's prediction, `verified` is
   `false`, `predictionMatched` is `null`, and `error` describes the failure.
 
+The inputs the problem already has are given to the model so that it adds to
+them. A proposed case whose `stdin` equals that of an existing test case or of
+an earlier proposed case (ignoring trailing whitespace) is left out, and
+`duplicatesDropped` counts those; `cases` can therefore be shorter than
+`count`, and empty when every proposal was a repeat. `usage` is as for [`POST /ai/draft`](#post-aidraft).
+
 When no engine is available, `verification.attempted` is `false`, and every
 case has `expectedStdout = predictedStdout`, `verified: false`,
 `predictionMatched: null`. When an engine is configured but cannot be
@@ -872,123 +1028,281 @@ passing `origin: "ai"`, each case's `verified` flag, and the
 
 ## AI settings
 
-Which provider the AI endpoints use, and its credentials. Settings saved here
-are stored in the database; API keys are encrypted at rest and are never
-returned by any endpoint. Environment variables (see `.env.example`) supply
-values for anything not saved here, so an instance can also be configured
-without the UI.
+The AI endpoints use one of the instance's saved **providers**: a named
+connection to an AI service, with its own API key, base URL and model. An
+instance can keep several — a work key and a personal one, a hosted service
+and a local server — and one of them is the default the AI endpoints use.
+Providers are stored in the database; API keys are encrypted at rest and are
+never returned by any endpoint.
 
-Providers:
+A provider is of one of two kinds:
 
-| Id | Covers |
+| `kind` | Covers |
 | --- | --- |
 | `anthropic` | The Anthropic API |
 | `openai_compatible` | Any endpoint speaking the OpenAI chat-completions API: OpenAI, OpenRouter, Ollama, LM Studio, vLLM, … |
+
+`AiProvider`:
+
+```json
+{
+  "id": "...",
+  "name": "Personal key",
+  "kind": "anthropic",
+  "model": "claude-opus-5-5",
+  "baseUrl": null,
+  "apiKeySet": true,
+  "apiKeyHint": "…x7Qa",
+  "source": "settings",
+  "isDefault": true,
+  "ready": true,
+  "usage": {
+    "last30Days": { "requests": 14, "failed": 1, "inputTokens": 61200, "outputTokens": 48100 },
+    "allTime": { "requests": 52, "failed": 3, "inputTokens": 233000, "outputTokens": 171500 },
+    "lastUsedAt": "..."
+  },
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+- `usage` is what this instance has spent through the provider: every request
+  the server sent to the service on its behalf — drafts, variants, test
+  generation, and the generation step of a connection test — counted when it
+  ends. `failed` is the part of `requests` that returned no usable answer,
+  cancelled ones included; the token sums are the figures the service
+  reported (a request without figures adds nothing to them), and
+  `inputTokens` here is every input token it processed, cache reads and
+  writes included. `last30Days` covers today and the 29 days
+  before it, in UTC. `lastUsedAt` is `null` before the first request.
+  The counts belong to the provider entry: they continue when its key, model
+  or base URL changes, and go with it when it is deleted. An environment
+  provider keeps its counts under its fixed id. A connection test of
+  settings that are not saved (`kind` instead of `providerId`) is not
+  counted.
+- `model` and `baseUrl` are the saved values; `null` means the kind's default
+  applies (see `kinds` below).
+- `apiKeyHint` is `…` plus the last four characters, or `null` without a key.
+- A key is only ever sent to the origin (scheme, host and port) it was stored
+  for: it is stored together with the origin of the provider's effective base
+  URL at the time it was saved, and `apiKeySet` / `apiKeyHint` describe the
+  key that would actually be used with the current base URL.
+- `ready` — the provider has everything it needs, counting the kind's
+  defaults: a model, plus an API key for `anthropic`. A key is optional for
+  `openai_compatible` (local servers), which requires a model and a base URL
+  — except that on the default OpenAI base URL (`https://api.openai.com`) a
+  key is required too.
+- `source` is `settings` for a provider saved through this API, and
+  `environment` for one supplied by the server's environment variables (see
+  `.env.example`), so an instance can also be configured without the UI. For
+  each kind whose variables are set there is one such provider, with the
+  fixed id `env-anthropic` or `env-openai-compatible`. Environment providers
+  can be tested and chosen as the default, but not changed or deleted here
+  (`409`); their `createdAt` and `updatedAt` are `null`.
+
+Hard limits, enforced by the server:
+
+| Limit | Value |
+| --- | --- |
+| `name` | 1–60 characters, a [single line](#single-line-fields), unique among saved providers (case-insensitive) |
+| `model` | at most `maxModelIdChars`, a single line |
+| `apiKey` | at most `maxApiKeyChars` |
+| Saved providers per instance | 20 |
+
+Violations are `422 validation_failed`; a 21st provider is `409 conflict`.
+
+Providers are local configuration: they are never written to or read from
+bundles and are not available over MCP.
 
 ### `GET /settings/ai`
 
 ```json
 {
-  "activeProvider": "anthropic",
-  "providers": {
-    "anthropic": {
-      "model": "claude-opus-5-5",
-      "baseUrl": null,
-      "modelSource": "settings",
-      "baseUrlSource": null,
-      "apiKeySet": true,
-      "apiKeyHint": "…x7Qa",
-      "apiKeySource": "settings",
-      "ready": true
-    },
-    "openai_compatible": {
-      "model": null,
-      "baseUrl": null,
-      "modelSource": null,
-      "baseUrlSource": null,
-      "apiKeySet": false,
-      "apiKeyHint": null,
-      "apiKeySource": null,
-      "ready": false
-    }
-  },
-  "defaults": {
-    "anthropic": { "model": "claude-opus-5-5", "baseUrl": "https://api.anthropic.com" },
-    "openai_compatible": { "model": null, "baseUrl": "https://api.openai.com/v1" }
+  "defaultProviderId": "...",
+  "providers": [ AiProvider ],
+  "kinds": {
+    "anthropic": { "defaultModel": "claude-opus-5-5", "defaultBaseUrl": "https://api.anthropic.com", "keyRequired": true },
+    "openai_compatible": { "defaultModel": null, "defaultBaseUrl": "https://api.openai.com/v1", "keyRequired": false }
   }
 }
 ```
 
-- Every provider id is always present under `providers`.
-- `model` and `baseUrl` are the effective values (saved, else environment,
-  else `null`); `defaults` are what the server uses when they are `null`.
-  `modelSource` and `baseUrlSource` say where each came from: `settings`,
-  `environment`, or `null` when the default applies.
-- `apiKeyHint` is `…` plus the last four characters. `apiKeySource` is
-  `settings`, `environment` or `null`.
-- A key is only ever sent to the origin (scheme, host and port) it was stored
-  for. A saved key is stored together with the origin of the effective base
-  URL at the time it was saved. The environment key belongs to the
-  environment's base URL, or the default when none is set. `apiKeySet`,
-  `apiKeyHint` and `apiKeySource` describe the key that would actually be
-  used with the current effective base URL: a key bound to another origin
-  does not count.
-- `ready` — the provider has everything it needs, counting defaults: a model,
-  plus an API key for `anthropic`. A key is optional for `openai_compatible`
-  (local servers), which requires a model and a base URL — except that on
-  the default OpenAI base URL (`https://api.openai.com`) a key is required too.
-- `activeProvider` is `null` when none is selected; AI features are then off.
-  `CODEATROPHY_AI_PROVIDER` gives its initial value only: once
-  `activeProvider` has been saved through `PUT` — including as `null` — the
-  saved value applies and the environment default no longer does.
+- `providers` lists the default first, then saved providers by name, then
+  environment providers. Not paginated.
+- `defaultProviderId` is the provider the AI endpoints use; `null` means AI
+  features are off. It always names a provider in `providers`.
+  `CODEATROPHY_AI_PROVIDER` gives its initial value only (the environment
+  provider of that kind): once a default has been saved through `PUT` —
+  including `null` — the saved value applies.
+- A default that is no longer `ready` (its key was deleted, say) stays
+  selected, and AI features are off until it is fixed or another is chosen.
+  A default that names an environment provider whose variables have since
+  been removed is reported as `null`.
+- `kinds[kind].keyRequired` is whether a key is always required for the kind;
+  see `ready` for the conditional case.
 
 ### `PUT /settings/ai`
 
-Merge update. Every field is optional.
+```json
+{ "defaultProviderId": "..." }
+```
+
+Chooses the default provider; `null` turns AI features off and keeps every
+provider. An unknown id, or a provider that is not `ready`, is `422`. Returns
+the same body as `GET /settings/ai`.
+
+### Providers
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `POST /settings/ai/providers` | Body `{ "name", "kind", "model"?, "baseUrl"?, "apiKey"? }`. `201` `AiProvider` |
+| `PATCH /settings/ai/providers/{id}` | Merge update of `name`, `model`, `baseUrl`, `apiKey`. Returns `AiProvider` |
+| `DELETE /settings/ai/providers/{id}` | `204`. Deleting the default leaves no default: AI features are off until another is chosen |
+
+- `kind` cannot be changed after creation (`422`). An unknown id is `404`.
+- A new provider is not made the default; choose it with `PUT /settings/ai`.
+- `apiKey` omitted → the stored key is unchanged. `apiKey: null` → the stored
+  key is deleted. A string replaces it; an empty string is treated like an
+  omitted key. A key given here is bound to the origin of the provider's
+  effective base URL after the update.
+- An update that changes the origin of the effective base URL without giving
+  a new `apiKey` deletes the stored key, so it is never sent to the new
+  origin. Changing only the path on the same origin keeps it.
+- `model: null` / `baseUrl: null` clear the saved value, so the kind's
+  default applies.
+- A provider need not be `ready` to be saved, so a key can be stored before a
+  model is chosen.
+
+### `POST /settings/ai/test`
+
+Checks a provider configuration against the service and lists the models it
+offers. Nothing is saved, so a key can be tried before it is stored.
+
+```json
+{ "providerId": "...", "kind": null, "model": null, "baseUrl": null, "apiKey": null }
+```
+
+Give `providerId` to test a saved or environment provider; any of `model`,
+`baseUrl`, `apiKey` given with it override its values for this test. Give
+`kind` instead (and no `providerId`) to test a configuration that has not
+been saved yet. Exactly one of the two is required (`422` otherwise); an
+unknown `providerId` is `422` too.
+
+When `baseUrl` points at a different origin from the one the provider's key
+belongs to, that key is not used: only an `apiKey` given in the same request
+is sent, and with none the test is made without a key.
+
+The test does two things:
+
+1. It asks the service for its model list.
+2. If a model is configured — given here, saved on the provider, or the
+   kind's default — it makes one minimal generation request with that model.
 
 ```json
 {
-  "activeProvider": "anthropic",
-  "providers": {
-    "anthropic": { "model": "claude-opus-5-5", "baseUrl": null, "apiKey": "sk-ant-..." }
+  "ok": true,
+  "model": "claude-opus-5-5",
+  "latencyMs": 640,
+  "error": null,
+  "models": ["claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"],
+  "modelsError": null
+}
+```
+
+- `model` is the model the generation request used, or `null` when there was
+  none to test; `latencyMs` is that request's duration, or `null`.
+- `ok` — with a model: the generation request succeeded. Without one: the
+  model list was fetched, which shows that the base URL and key work.
+- `error` is a safe, human-readable reason when `ok` is `false` (never
+  echoing the key), else `null`.
+- `models` is the service's model ids, de-duplicated and sorted, at most 500;
+  ids that are not a single line of at most `maxModelIdChars` are left out.
+  It is `null` when the list could not be fetched, and `modelsError` then
+  says why. A service that does not list its models does not fail the test
+  of a configured model.
+- When the configuration is incomplete in a way that rules out any request
+  (a required key is missing), no request is made: `ok` is `false`, `models`
+  is `null` and `error` says what is missing.
+
+Always `200` when the request itself is valid; failures of the service are
+reported in the body.
+
+### AI activity log
+
+The server keeps a record of each request it sends to an AI provider — the
+same requests that [`AiProvider.usage`](#ai-settings) counts — so that what a
+generation cost, and exactly what was sent and what came back, can be looked
+up afterwards.
+
+`AiLogEntry`:
+
+```json
+{
+  "id": "...",
+  "createdAt": "...",
+  "operation": "draft",
+  "itemId": null,
+  "title": "Remove Duplicates from Sorted Array II",
+  "providerId": "...",
+  "providerName": "Personal key",
+  "kind": "anthropic",
+  "model": "claude-haiku-5-5",
+  "status": "ok",
+  "error": null,
+  "durationMs": 48200,
+  "usage": {
+    "inputTokens": 5210, "outputTokens": 4380,
+    "reasoningTokens": null, "cacheReadTokens": 0, "cacheWriteTokens": 0
   }
 }
 ```
 
-- `apiKey` omitted → the stored key is unchanged. `apiKey: null` → the stored
-  key is deleted (an environment key, if any, applies again). A string
-  replaces it; an empty string is treated like an omitted key. A key given
-  here is bound to the origin of the effective base URL after the update.
-- An update that changes the origin of the effective base URL without giving
-  a new `apiKey` deletes the stored key, so it is never sent to the new
-  origin. Changing only the path on the same origin keeps it.
-- `model: null` / `baseUrl: null` clear the saved value.
-- `activeProvider: null` turns AI features off. Selecting a provider that is
-  not `ready` after the update is `422`.
+- `operation` — `draft`, `variant`, `testcases` or `test` (a connection
+  test).
+- `itemId` is the item the request was about (`null` for a new draft and for
+  a test); `title` is a short label fixed when the entry is written — the
+  item's title (for a variant, the original's), or the title of the draft
+  that came back — or `null`. An entry outlives its item.
+- `providerName`, `kind` and `model` are as they were at the time.
+- `status` — `ok`, `failed` (with `error`) or `cancelled` (the client went
+  away).
+- `usage` counts are `null` where the provider reported none.
 
-Returns the same body as `GET /settings/ai`.
-
-### `POST /settings/ai/test`
-
-Makes one minimal request to a provider to check that the configuration
-works. Nothing is saved.
+`AiLogDetail` is `AiLogEntry` plus:
 
 ```json
-{ "provider": "anthropic", "model": null, "baseUrl": null, "apiKey": null }
+{
+  "request": { "system": "...", "messages": [{ "role": "user", "content": "..." }], "schema": "item_draft", "maxOutputTokens": 64000 },
+  "response": "...",
+  "truncated": false
+}
 ```
 
-Only `provider` is required. Any of `model`, `baseUrl`, `apiKey` given here
-override the saved values for this test, so the UI can test a key before
-saving it. When `baseUrl` points at a different origin from the one a saved
-or environment key belongs to, that key is not used: only an `apiKey` given
-in the same request is sent, and with none the test is made without a key.
+`request` is what the server asked the provider for (`maxOutputTokens` and
+`effort` are `null` where the provider's default applies) and `response` the
+text the model returned (`null` if none arrived). They are for reading, not for
+programs: the fields of `request` may change between versions. They never
+contain an API key or any request header. Either is cut off at 256 KiB, and
+`truncated` says so.
 
-```json
-{ "ok": true, "model": "claude-opus-5-5", "latencyMs": 640, "error": null }
-```
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /settings/ai/log` | Query: `providerId`, `operation`, `status` (optional filters), `limit` (default 50, max 200), `before` (a cursor). Newest first. `{ "items": [AiLogEntry], "next": "<cursor>", "total": n }` |
+| `GET /settings/ai/log/{id}` | `AiLogDetail`. `404` for an unknown or removed entry |
+| `DELETE /settings/ai/log` | Query: `before` (optional timestamp). `204`. Removes every entry, or those created before the timestamp |
 
-Always `200` when the request itself is valid; a provider failure is reported
-as `ok: false` with a safe, human-readable `error` (never echoing the key).
+The log is append-only: an entry is written once and never changed, and
+nothing is removed unless the user asks. Listing is meant for loading as the
+user scrolls. `next` is the cursor to pass as `before` for the following
+page, `null` at the end; a cursor stays valid while new entries arrive, so a
+page never repeats or skips entries. `total` counts the entries matching the
+filters. The list carries no request or response text; that is fetched per
+entry.
+
+The counts in `AiProvider.usage` are kept separately and are not reduced when
+entries are removed. Deleting a provider keeps its entries. The log holds the
+text the user gave the AI, so it is not part of bundles and is not offered
+over MCP.
 
 ## Style presets
 
@@ -1027,6 +1341,10 @@ At most one preset has `isDefault: true`. Setting it on one preset clears it
 on the others in the same transaction. With no default, generation uses the
 built-in conventions alone unless a request names a preset.
 
+A new instance starts with a few built-in presets, one of them the default.
+They are ordinary presets: they can be edited or deleted like any other,
+count towards the limit, and are not recreated once changed or deleted.
+
 | Endpoint | Behaviour |
 | --- | --- |
 | `GET /styles` | `{ "items": [StylePreset] }`, default first, then by name. Not paginated |
@@ -1041,8 +1359,9 @@ with a rule the app depends on (the JSON structure, the stdin/stdout
 convention) the built-in rule wins.
 
 Presets are local configuration. They are never written to or read from
-bundles and cannot be created or modified over MCP, so the only way
-instructions get into this slot is the instance's own user typing them.
+bundles and cannot be created or modified over MCP, so apart from the
+built-in presets the app ships with, the only way instructions get into this
+slot is the instance's own user typing them.
 They are independent of the AI provider and remain when it changes.
 
 ### Choosing a preset for a generation
@@ -1071,6 +1390,7 @@ on them — they are for clients to honour.
 ```json
 {
   "hideTestCases": true,
+  "generatedTestCases": 8,
   "editor": {
     "autocomplete": true,
     "closeBrackets": true,
@@ -1087,6 +1407,7 @@ Every key is always present; the values above are the defaults.
 | Key | Values | Meaning for a client |
 | --- | --- | --- |
 | `hideTestCases` | boolean | When `true`, show how many test cases a problem has and how many a run used, but keep the content of non-sample cases (in the test list and in submission results) out of sight until the user asks to reveal it. Sample cases are part of the statement and stay visible |
+| `generatedTestCases` | integer 1–`limits.maxGeneratedTestCases` | How many test cases to ask for by default when generating them: the initial value of the count a client sends as `count` to `POST /items/{id}/ai/testcases` |
 | `editor.autocomplete` | boolean | Offer code completion while typing |
 | `editor.closeBrackets` | boolean | Insert the closing bracket or quote automatically |
 | `editor.matchBrackets` | boolean | Highlight the bracket matching the one at the cursor |
@@ -1158,8 +1479,8 @@ or `existing`.
 For a `changed` item, `changes` names what differs from the local item, so
 the user can choose a strategy knowingly. Values are content field names —
 `type`, `title`, `summary`, `body`, `difficulty`, `tags`, `source`, `variantOf`,
-`limits`, `compare`, `starterCode`, `solutions`, `testCases` — in
-that order. It is `[]` for `new` and `unchanged` items.
+`limits`, `compare`, `starterCode`, `interface`, `harness`, `solutions`,
+`testCases` — in that order. It is `[]` for `new` and `unchanged` items.
 
 `422 validation_failed` if the archive is not a valid bundle or its
 `formatVersion` is newer than the server supports.

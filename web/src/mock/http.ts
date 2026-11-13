@@ -37,7 +37,7 @@ export const conflict = (message: string, fields?: Record<string, string | numbe
 export const tooLarge = (message: string) => new HttpError(413, 'too_large', message);
 export const upstream = (message: string) => new HttpError(502, 'upstream_error', message);
 export const aiUnavailable = () =>
-  new HttpError(503, 'ai_unavailable', 'no AI provider is configured');
+  new HttpError(503, 'ai_unavailable', 'no default AI provider is chosen, or it is not ready');
 export const judgeUnavailable = (message = 'no judge engine is configured') =>
   new HttpError(503, 'judge_unavailable', message);
 

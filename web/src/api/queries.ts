@@ -10,7 +10,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { Item, ItemListParams, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
+import type { AiLogFilters, Item, ItemListParams, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -20,6 +20,10 @@ export const qk = {
   collections: ['collections'] as const,
   tags: ['tags'] as const,
   aiSettings: ['settings', 'ai'] as const,
+  /** Prefix of everything cached from the AI activity log. */
+  aiLog: ['settings', 'ai-log'] as const,
+  aiLogPages: (filters: AiLogFilters) => ['settings', 'ai-log', 'pages', filters] as const,
+  aiLogEntry: (id: string) => ['settings', 'ai-log', 'entry', id] as const,
   styles: ['styles'] as const,
   items: ['items'] as const,
   /** Prefix of every cached item list, whatever its shape. */
@@ -120,6 +124,7 @@ export function useSolutions(itemId: string, enabled = true) {
 /** What the server uses until the user changes something (docs/api.md, "Preferences"). */
 export const DEFAULT_PREFERENCES: Preferences = {
   hideTestCases: true,
+  generatedTestCases: 8,
   editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
 };
 
@@ -128,9 +133,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
  * loaded) the defaults apply, so nothing waits on them.
  */
 export function usePreferences(): Preferences {
-  const query = useQuery({ queryKey: qk.preferences, queryFn: ({ signal }) => api.preferences.get(signal), staleTime: 60_000 });
+  const query = useQuery({ queryKey: qk.preferences, queryFn: ({ signal }) => api.preferences.get(signal), staleTime: 60_000, select: withDefaults });
   return query.data ?? DEFAULT_PREFERENCES;
 }
+
+/** A server that does not know a preference yet leaves it out; its default then applies. */
+const withDefaults = (saved: Preferences): Preferences => ({ ...DEFAULT_PREFERENCES, ...saved });
 
 /** Change preferences. The change applies at once and is rolled back if the server rejects it. */
 export function useUpdatePreferences() {
@@ -175,9 +183,33 @@ export function useAiSettings() {
   return useQuery({ queryKey: qk.aiSettings, queryFn: ({ signal }) => api.settings.getAi(signal) });
 }
 
+/** The AI activity log, newest first, loaded a batch at a time as the user reaches the end. */
+export function useAiLog(filters: AiLogFilters) {
+  return useInfiniteQuery({
+    queryKey: qk.aiLogPages(filters),
+    queryFn: ({ pageParam, signal }) => api.settings.log({ ...filters, limit: PAGE_SIZE, before: pageParam ?? undefined }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next ?? undefined,
+  });
+}
+
+/**
+ * One entry of the log with its raw request and response. It is fetched when
+ * the entry is opened and dropped as soon as nothing shows it any more: the
+ * texts are large, and the list can be long.
+ */
+export function useAiLogEntry(id: string) {
+  return useQuery({ queryKey: qk.aiLogEntry(id), queryFn: ({ signal }) => api.settings.logEntry(id, signal), retry: false, gcTime: 0 });
+}
+
 /** The limits published by `GET /meta`, or `undefined` until it has loaded (the app shell waits for it). */
 export function useLimits(): Limits | undefined {
   return useMeta().data?.limits;
+}
+
+/** Refresh the AI providers and what `GET /meta` says about the one in use. */
+export function invalidateAi(qc: QueryClient): Promise<unknown> {
+  return Promise.all([qc.invalidateQueries({ queryKey: qk.aiSettings }), qc.invalidateQueries({ queryKey: qk.meta })]);
 }
 
 /** Refresh everything derived from the set of items: lists, counts, collections and tags. */

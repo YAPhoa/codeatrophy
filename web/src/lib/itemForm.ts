@@ -5,12 +5,15 @@
 import type {
   CompareMode,
   Difficulty,
+  HarnessCode,
   Item,
   ItemDraft,
   ItemInput,
   ItemPatch,
   ItemType,
   Limits,
+  ProblemInterface,
+  SourceCode,
   TestCaseInput,
   TestOrigin,
 } from '../api/types';
@@ -24,6 +27,8 @@ export interface FormTestCase {
   expectedStdout: string;
   isSample: boolean;
   origin: TestOrigin;
+  /** Carried from a draft whose reference solution printed this output; cleared when the case is edited. */
+  verified: boolean;
 }
 
 export interface ItemFormState {
@@ -39,12 +44,21 @@ export interface ItemFormState {
   timeLimitMs: number;
   memoryLimitKb: number;
   compare: CompareMode;
+  interface: ProblemInterface;
   starterCode: Record<string, string>;
+  /**
+   * Runner code per language. Kept while the form is open even when the
+   * interface is `program`, so that switching back and forth loses nothing;
+   * what is saved is `effectiveHarness`.
+   */
+  harness: Record<string, HarnessCode>;
   /** Only used when creating: a new item is saved together with these cases. */
   testCases: FormTestCase[];
+  /** Only used when creating: the solution a draft came with, saved as the item's reference solution. */
+  referenceSolution: SourceCode | null;
 }
 
-export const PROBLEM_DEFAULTS = { timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens' as CompareMode };
+export const PROBLEM_DEFAULTS = { timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens' as CompareMode, interface: 'program' as ProblemInterface };
 
 // Keys only need to be unique within a form, including one restored from
 // storage after a reload, hence the per-load random prefix.
@@ -65,8 +79,19 @@ export function emptyForm(type: ItemType = 'problem'): ItemFormState {
     sourceNote: '',
     ...PROBLEM_DEFAULTS,
     starterCode: {},
+    harness: {},
     testCases: [],
+    referenceSolution: null,
   };
+}
+
+/**
+ * A form restored from storage may have been written before a field
+ * existed. Fill in what is missing, so the rest of the app can rely on the
+ * whole shape.
+ */
+export function upgradeForm(form: ItemFormState): ItemFormState {
+  return { ...emptyForm(form.type), ...form, testCases: form.testCases.map((t) => ({ ...t, verified: t.verified === true })) };
 }
 
 export function normalizeTags(tags: readonly string[]): string[] {
@@ -86,8 +111,11 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
     timeLimitMs: draft.problem?.timeLimitMs ?? PROBLEM_DEFAULTS.timeLimitMs,
     memoryLimitKb: draft.problem?.memoryLimitKb ?? PROBLEM_DEFAULTS.memoryLimitKb,
     compare: draft.problem?.compare ?? PROBLEM_DEFAULTS.compare,
+    interface: draft.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(draft.problem?.starterCode ?? {}) },
-    testCases: draft.testCases.map((t) => ({ ...t, key: newKey(), origin: 'ai' as const })),
+    harness: structuredClone(draft.problem?.harness ?? {}),
+    testCases: draft.testCases.map((t) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const })),
+    referenceSolution: draft.problem?.referenceSolution ? { ...draft.problem.referenceSolution } : null,
   };
 }
 
@@ -106,14 +134,17 @@ export function draftFromForm(form: ItemFormState, assumptions: readonly string[
     tags: normalizeTags(form.tags),
     problem: isProblem
       ? {
+          interface: form.interface,
           timeLimitMs: form.timeLimitMs,
           memoryLimitKb: form.memoryLimitKb,
           compare: form.compare,
           starterCode: { ...form.starterCode },
+          harness: effectiveHarness(form),
+          referenceSolution: form.referenceSolution ? { ...form.referenceSolution } : null,
         }
       : null,
     testCases: isProblem
-      ? form.testCases.map(({ name, stdin, expectedStdout, isSample }) => ({ name, stdin, expectedStdout, isSample }))
+      ? form.testCases.map(({ name, stdin, expectedStdout, isSample, verified }) => ({ name, stdin, expectedStdout, isSample, verified }))
       : [],
     assumptions: [...assumptions],
   };
@@ -133,8 +164,12 @@ export function formFromItem(item: Item): ItemFormState {
     timeLimitMs: item.problem?.timeLimitMs ?? PROBLEM_DEFAULTS.timeLimitMs,
     memoryLimitKb: item.problem?.memoryLimitKb ?? PROBLEM_DEFAULTS.memoryLimitKb,
     compare: item.problem?.compare ?? PROBLEM_DEFAULTS.compare,
+    interface: item.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(item.problem?.starterCode ?? {}) },
+    harness: structuredClone(item.problem?.harness ?? {}),
     testCases: [],
+    // Solutions of a saved item are edited on their own page.
+    referenceSolution: null,
   };
 }
 
@@ -144,6 +179,44 @@ function cleanStarter(starter: Record<string, string>): Record<string, string> {
     if (src.trim() !== '') out[lang] = src;
   }
   return out;
+}
+
+/**
+ * The harness a form stands for: none for a `program` problem, and for a
+ * `function` problem the languages whose runner has any code in it. A
+ * language with an empty runner is left out, so it is not offered as one
+ * that can be run.
+ */
+export function effectiveHarness(form: Pick<ItemFormState, 'interface' | 'harness'>): Record<string, HarnessCode> {
+  const out: Record<string, HarnessCode> = {};
+  if (form.interface !== 'function') return out;
+  for (const [lang, code] of Object.entries(form.harness)) {
+    if (code.prefix.trim() !== '' || code.suffix.trim() !== '') out[lang] = { prefix: code.prefix, suffix: code.suffix };
+  }
+  return out;
+}
+
+/** The languages the code section of a form lists: those with starter code and, for a `function` problem, those with a runner. */
+export function formLanguages(form: Pick<ItemFormState, 'interface' | 'starterCode' | 'harness'>): string[] {
+  return Array.from(new Set([...Object.keys(form.starterCode), ...(form.interface === 'function' ? Object.keys(form.harness) : [])]));
+}
+
+/** Add a language to a form: starter code, and a runner to fill in for a `function` problem. */
+export function addFormLanguage<T extends Pick<ItemFormState, 'interface' | 'starterCode' | 'harness'>>(form: T, language: string): T {
+  return {
+    ...form,
+    starterCode: { ...form.starterCode, [language]: form.starterCode[language] ?? '' },
+    harness: form.interface === 'function' ? { ...form.harness, [language]: form.harness[language] ?? { prefix: '', suffix: '' } } : form.harness,
+  };
+}
+
+/** Remove a language from a form, starter code and runner together. */
+export function removeFormLanguage<T extends Pick<ItemFormState, 'starterCode' | 'harness'>>(form: T, language: string): T {
+  const starterCode = { ...form.starterCode };
+  const harness = { ...form.harness };
+  delete starterCode[language];
+  delete harness[language];
+  return { ...form, starterCode, harness };
 }
 
 const orNull = (s: string): string | null => (s.trim() === '' ? null : s.trim());
@@ -170,10 +243,13 @@ export function inputFromForm(form: ItemFormState, extras: CreateExtras = {}): I
   };
   if (isProblem) {
     input.problem = {
+      interface: form.interface,
       timeLimitMs: form.timeLimitMs,
       memoryLimitKb: form.memoryLimitKb,
       compare: form.compare,
       starterCode: cleanStarter(form.starterCode),
+      harness: effectiveHarness(form),
+      referenceSolution: form.referenceSolution && form.referenceSolution.source.trim() !== '' ? { ...form.referenceSolution } : null,
     };
     input.testCases = form.testCases.map(
       (t): TestCaseInput => ({
@@ -182,6 +258,7 @@ export function inputFromForm(form: ItemFormState, extras: CreateExtras = {}): I
         expectedStdout: t.expectedStdout,
         isSample: t.isSample,
         origin: t.origin,
+        verified: t.verified,
       }),
     );
   }
@@ -194,6 +271,12 @@ const sameRecord = (a: Record<string, string>, b: Record<string, string>) => {
   const ka = Object.keys(a).sort();
   const kb = Object.keys(b).sort();
   return sameList(ka, kb) && ka.every((k) => a[k] === b[k]);
+};
+
+const sameHarness = (a: Record<string, HarnessCode>, b: Record<string, HarnessCode>) => {
+  const ka = Object.keys(a).sort();
+  const kb = Object.keys(b).sort();
+  return sameList(ka, kb) && ka.every((k) => a[k]!.prefix === b[k]!.prefix && a[k]!.suffix === b[k]!.suffix);
 };
 
 /**
@@ -228,6 +311,12 @@ export function patchFromForm(original: Item, form: ItemFormState): ItemPatch {
     if (form.compare !== original.problem.compare) p.compare = form.compare;
     const starter = cleanStarter(form.starterCode);
     if (!sameRecord(starter, original.problem.starterCode)) p.starterCode = starter;
+    const originalInterface = original.problem.interface ?? PROBLEM_DEFAULTS.interface;
+    const originalHarness = original.problem.harness ?? {};
+    const harness = effectiveHarness(form);
+    if (form.interface !== originalInterface) p.interface = form.interface;
+    // Sent with a change of interface as well: a `program` problem must not keep a harness.
+    if (!sameHarness(harness, originalHarness) || (p.interface === 'program' && Object.keys(originalHarness).length > 0)) p.harness = harness;
     if (Object.keys(p).length > 0) patch.problem = p;
   }
   return patch;
@@ -239,7 +328,7 @@ export function patchTouchesContent(patch: ItemPatch): boolean {
 }
 
 export type FormErrors = Partial<
-  Record<'title' | 'summary' | 'body' | 'timeLimitMs' | 'memoryLimitKb' | 'tags' | 'sourceUrl' | 'sourceNote' | 'testCases', string>
+  Record<'title' | 'summary' | 'body' | 'timeLimitMs' | 'memoryLimitKb' | 'tags' | 'sourceUrl' | 'sourceNote' | 'code' | 'testCases', string>
 >;
 
 /** Length as the server counts it: in Unicode code points. */
@@ -298,6 +387,10 @@ export function validateForm(form: ItemFormState, limits: Limits | undefined): F
   if (form.type === 'problem') {
     if (limits) {
       const { timeLimitMs: time, memoryLimitKb: memory } = limits;
+      const runner = Object.values(effectiveHarness(form)).flatMap((h) => [h.prefix, h.suffix]);
+      if ([...Object.values(form.starterCode), ...runner].some((src) => byteLength(src) > limits.maxSourceBytes)) {
+        errors.code = `Starter or runner code is larger than ${formatBytes(limits.maxSourceBytes)}.`;
+      }
       if (!Number.isFinite(form.timeLimitMs) || form.timeLimitMs < time.min || form.timeLimitMs > time.max) {
         errors.timeLimitMs = `Between ${time.min} and ${time.max} ms.`;
       }
@@ -317,6 +410,15 @@ export function validateForm(form: ItemFormState, limits: Limits | undefined): F
     }
   }
   return errors;
+}
+
+/**
+ * Everything a draft's check depends on: the solution, the runner and the
+ * cases it was run on. While this is unchanged the check still describes the
+ * form; once it differs the check is out of date.
+ */
+export function checkedState(form: ItemFormState): string {
+  return JSON.stringify([form.interface, form.compare, form.referenceSolution, effectiveHarness(form), form.testCases.map((t) => [t.stdin, t.expectedStdout])]);
 }
 
 /**
@@ -359,6 +461,7 @@ export function formErrorsFromFields(fields: Record<string, string | number>): {
     const target = FIELD_KEYS[key];
     if (testCase) errors.testCases ??= `Case ${Number(testCase[1]) + 1}, ${testCase[2]}: ${String(value)}.`;
     else if (key === 'testCases') errors.testCases = message;
+    else if (/^problem\.(interface|harness|starterCode)\b/.test(key)) errors.code ??= `${key.replace(/^problem\./, '')}: ${String(value)}.`;
     else if (target) errors[target] = message;
     else rest.push(`${key}: ${String(value)}`);
   }
@@ -380,7 +483,9 @@ export const EDITABLE_FIELDS = [
   'timeLimitMs',
   'memoryLimitKb',
   'compare',
+  'interface',
   'starterCode',
+  'harness',
 ] as const satisfies readonly (keyof ItemFormState)[];
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -397,7 +502,9 @@ export const FIELD_LABEL: Record<EditableField, string> = {
   timeLimitMs: 'Time limit',
   memoryLimitKb: 'Memory limit',
   compare: 'Output comparison',
+  interface: 'What you write',
   starterCode: 'Starter code',
+  harness: 'Runner',
 };
 
 function fieldEquals(field: EditableField, a: ItemFormState, b: ItemFormState): boolean {
@@ -408,6 +515,8 @@ function fieldEquals(field: EditableField, a: ItemFormState, b: ItemFormState): 
       return sameList(a.collectionIds.slice().sort(), b.collectionIds.slice().sort());
     case 'starterCode':
       return sameRecord(cleanStarter(a.starterCode), cleanStarter(b.starterCode));
+    case 'harness':
+      return sameHarness(effectiveHarness(a), effectiveHarness(b));
     case 'title':
     case 'summary':
     case 'sourceUrl':
@@ -442,7 +551,7 @@ export interface MergeResult {
 export function mergeForms(base: ItemFormState, mine: ItemFormState, theirs: ItemFormState): MergeResult {
   const mineChanged = new Set(changedFields(base, mine));
   const theirsChanged = new Set(changedFields(base, theirs));
-  const merged: ItemFormState = { ...theirs, testCases: mine.testCases };
+  const merged: ItemFormState = { ...theirs, testCases: mine.testCases, referenceSolution: mine.referenceSolution };
   const overlapping: EditableField[] = [];
   const assign = <K extends EditableField>(field: K) => {
     merged[field] = mine[field];

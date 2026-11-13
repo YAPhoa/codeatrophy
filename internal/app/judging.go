@@ -11,6 +11,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/grader"
+	"codeatrophy/internal/harness"
 	"codeatrophy/internal/judge"
 	"codeatrophy/internal/store"
 )
@@ -106,6 +107,13 @@ func (a *App) requireLanguage(ctx context.Context, lang string) error {
 	return nil
 }
 
+func sameHarness(a, b *domain.HarnessCode) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 func hasLanguage(langs []judge.Language, id string) bool {
 	return slices.ContainsFunc(langs, func(l judge.Language) bool { return l.ID == id })
 }
@@ -159,6 +167,10 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 	if err != nil {
 		return domain.Submission{}, err
 	}
+	h, ok := it.Problem.HarnessFor(in.Language)
+	if !ok {
+		fe.Add("language", noHarnessMessage(it.Problem, in.Language))
+	}
 	if err := errValidation(fe); err != nil {
 		return domain.Submission{}, err
 	}
@@ -184,8 +196,15 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 	if err := a.requireLanguage(ctx, in.Language); err != nil && AsError(err).Code != CodeJudgeUnavailable {
 		return domain.Submission{}, err
 	}
+	// What is stored is what was submitted, with the harness it runs in;
+	// what runs is the two assembled.
+	_, asm, err := a.runnable(ctx, it.Problem, in.Language, h, in.Source, "source")
+	if err != nil {
+		return domain.Submission{}, err
+	}
 	sub := domain.Submission{
 		ID: newID(), ItemID: itemID, Mode: mode, Language: in.Language, Source: in.Source,
+		LineOffset: asm.LineOffset, Harness: h,
 		Status: domain.SubmissionQueued, TotalCount: total, Stdin: in.Stdin.Ptr(), CaseIDs: caseIDs,
 		CreatedAt: a.clock(), Results: []domain.SubmissionResult{},
 	}
@@ -301,10 +320,8 @@ func (a *App) judge(id string) {
 			gcases = append(gcases, grader.Case{TestCaseID: &tcID, Name: c.Name, IsSample: c.IsSample, Stdin: c.Stdin, Expected: &exp})
 		}
 	}
-	prog := grader.Program{
-		Language: sub.Language, Source: sub.Source,
-		TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb,
-	}
+	// The harness is the one the submission was created with.
+	prog := a.graderProgram(it.Problem, harness.Assemble(sub.Language, sub.Harness, sub.Source))
 	start := time.Now()
 	out := a.grader.Grade(ctx, prog, it.Problem.Compare, gcases, func(i int, r domain.SubmissionResult) {
 		if err := a.store.Write(ctx, func(tx store.Tx) error { return tx.AddSubmissionResult(id, i, r) }); err != nil &&
@@ -466,6 +483,11 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	var cases []domain.TestCase
 	var ref domain.Solution
 	var isRef bool
+	var h *domain.HarnessCode
+	field := "solutionId"
+	if solutionID == "" {
+		field = "referenceSolution"
+	}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
 		if it, err = problemItem(tx, itemID); err != nil {
@@ -477,6 +499,9 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		if updateExpected && !isRef {
 			return errField("updateExpected", "only applies when verifying with the reference solution")
 		}
+		if h, err = harnessFor(it.Problem, ref.Language, field); err != nil {
+			return err
+		}
 		cases, err = tx.ListTestCases(itemID)
 		return err
 	})
@@ -486,12 +511,14 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	if err := a.requireLanguage(ctx, ref.Language); err != nil {
 		return VerifyResponse{}, err
 	}
+	prog, _, err := a.runnable(ctx, it.Problem, ref.Language, h, ref.Source, field)
+	if err != nil {
+		return VerifyResponse{}, err
+	}
 	stdins := make([]string, len(cases))
 	for i, c := range cases {
 		stdins[i] = c.Stdin
 	}
-	prog := grader.Program{Language: ref.Language, Source: ref.Source,
-		TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb}
 	execs := a.grader.RunAll(ctx, prog, stdins, nil)
 	if len(execs) > 0 {
 		allFailed := true
@@ -536,6 +563,9 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		now := a.clock()
 		if cur.Problem == nil || !domain.RefEqual(cur.Problem.ReferenceSolution, &ref) {
 			return nil // the reference solution changed meanwhile
+		}
+		if hn, ok := cur.Problem.HarnessFor(ref.Language); !ok || !sameHarness(hn, h) {
+			return nil // so did the harness it ran in
 		}
 		for i, c := range cases {
 			r := resp.Results[i]

@@ -21,6 +21,7 @@ import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { ReferenceBadge, WriteProblems } from './parts';
 import { SolutionForm } from './SolutionForm';
+import { TestButton, TestOutcome, useSolutionTest } from './SolutionTest';
 import { lineCount, refreshSolutions, serverFieldErrors, useOpenInEditor, useSolutionWrite, validateSolution } from './solutionWrites';
 
 export default function SolutionsPage() {
@@ -223,6 +224,7 @@ function SolutionsManager({ item }: { item: Item }) {
                     ) : (
                       <li key={s.id}>
                         <SolutionCard
+                          item={item}
                           solution={s}
                           languageName={languageLabel(s.language, meta?.judge.languages)}
                           revealed={shown.has(s.id)}
@@ -249,6 +251,7 @@ function SolutionsManager({ item }: { item: Item }) {
 }
 
 interface SolutionCardProps {
+  item: Item;
   solution: Solution;
   /** The language with its toolchain version. */
   languageName: string;
@@ -262,10 +265,11 @@ interface SolutionCardProps {
   onDelete: () => void;
 }
 
-function SolutionCard({ solution, languageName, revealed, busy, onReveal, onOpen, onEdit, onRename, onReference, onDelete }: SolutionCardProps) {
+function SolutionCard({ item, solution, languageName, revealed, busy, onReveal, onOpen, onEdit, onRename, onReference, onDelete }: SolutionCardProps) {
   const titleId = useId();
   const sourceId = useId();
   const lines = lineCount(solution.source);
+  const test = useSolutionTest(item, solution);
   return (
     <article className={cx('card solution-item', solution.isReference && 'is-reference')} aria-labelledby={titleId}>
       <header className="solution-head">
@@ -282,10 +286,12 @@ function SolutionCard({ solution, languageName, revealed, busy, onReveal, onOpen
         </time>
       </p>
       {solution.notes.trim() !== '' && <Markdown source={solution.notes} className="solution-notes" />}
+      <TestOutcome item={item} test={test} className="solution-outcome" />
       <div className="solution-actions">
         <Button size="sm" icon={revealed ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={revealed} aria-controls={revealed ? sourceId : undefined} onClick={() => onReveal(!revealed)}>
           {revealed ? 'Hide solution' : 'Show solution'}
         </Button>
+        <TestButton test={test} />
         <Button size="sm" icon={<Code2 size={13} />} onClick={onOpen} title="Put this code into the Solve editor">
           Open in the editor
         </Button>

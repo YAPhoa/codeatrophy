@@ -17,14 +17,15 @@ between them, and the reasoning behind the main design decisions.
                  │   ├─ grader    submissions, verdicts       │──► judge engine
                  │   ├─ assist    drafting, test generation   │──► AI provider
                  │   └─ bundle    import / export             │
-                 │  store (SQLite)                            │
+                 │  store (PostgreSQL or SQLite)              │
                  └────────────────────────────────────────────┘
                    codeatrophy server (Go, one binary)
 ```
 
-The server is the only stateful component the project owns. The judge engine
-and the AI provider are external dependencies reached through interfaces; the
-app remains usable (as a library and reader) with either one absent.
+The server is the only stateful component the project owns; its database is
+PostgreSQL (the Compose default) or a SQLite file. The judge engine and the AI
+provider are external dependencies reached through interfaces; the app
+remains usable (as a library and reader) with either one absent.
 
 There are two ways in — the HTTP API used by the web UI, and an MCP server
 used by AI assistants — and both are thin adapters over the same application
@@ -38,7 +39,10 @@ same change made through the other.
   or `reading` (a technical note or article). Both share a title, Markdown
   body, summary, tags, source attribution and personal state (status, favorite,
   notes). Problems additionally carry limits, starter code, saved solutions
-  and test cases.
+  and test cases, and an *interface*: `program` (the solver writes a whole
+  program) or `function` (the solver writes only a function or class, and a
+  per-language *harness* turns it into a program; see
+  [Solution-only problems](#solution-only-problems)).
 - **Solution** — a saved program for a problem: another approach, another
   language, a brute force. At most one per problem is the *reference
   solution*, the one that computes and verifies expected outputs;
@@ -52,7 +56,9 @@ same change made through the other.
 - **Tag** — a free-form label on an item. Tags are not separate records; they
   exist while at least one item carries them.
 - **Submission** — one execution of user code against a problem, with a
-  per-test-case result list and an overall verdict.
+  per-test-case result list and an overall verdict. For a function problem
+  it keeps the harness it ran in and how many lines that harness put before
+  the submitted code.
 
 Organisation is deliberately three independent axes: *collections* for curated,
 ordered structure (a study plan, a topic tree), *tags* for cross-cutting
@@ -70,10 +76,11 @@ bundle update existing items instead of duplicating them.
 | `cmd/codeatrophy` | Entry point: configuration, wiring, subcommands |
 | `internal/config` | Environment-based configuration |
 | `internal/domain` | Core types and validation; no I/O |
-| `internal/store` | Persistence interface and the SQLite implementation, migrations |
+| `internal/store` | Persistence interface and logical schema; `sqlite` and `postgres` implementations with their migrations; `dbcopy` (copying between stores), `dbopen` (choosing and opening the configured one); `storetest` (the conformance suite) |
 | `internal/ai` | `Provider` interface, provider implementations, prompt and schema definitions |
 | `internal/judge` | `Engine` interface and engine implementations |
 | `internal/grader` | Runs submissions through an engine, compares output, assigns verdicts |
+| `internal/harness` | Assembles the program of a solution-only problem and maps line numbers in toolchain output back to the solver's code; no I/O |
 | `internal/bundle` | Bundle reading, writing, validation and import planning |
 | `internal/secrets` | Encryption of stored credentials (AES-256-GCM) and key management |
 | `internal/app` | Application services: the transport-independent use cases built from the packages above |
@@ -98,15 +105,119 @@ tools both use it.
 
 ## Storage
 
-SQLite is the database. A personal library is small, single-writer data;
-a single file makes backup (`cp`) and deployment (one volume) trivial and
-keeps the default stack free of a database container. The pure-Go driver
-avoids cgo so the server builds into a static binary. Search uses SQLite FTS5.
+The library lives in one of two databases behind the `store` interface:
 
-All SQL lives in `internal/store/sqlite` behind the `store` interface, so a
-PostgreSQL implementation can be added without touching callers. Schema
-changes are forward-only numbered migrations embedded in the binary and
-applied at startup.
+- **PostgreSQL**, selected by `CODEATROPHY_DATABASE_URL`, is what the Compose
+  stack runs: a database service of its own, on an internal network.
+- **SQLite**, a single file in the data directory, is used when no URL is
+  set: by a bare binary, by the tests, and by anyone who prefers one file to
+  a database container. It stays fully supported.
+
+Both are pure Go (`modernc.org/sqlite`, `pgx`), so the server still builds
+into a static binary. All SQL lives in `internal/store/sqlite` and
+`internal/store/postgres`; the services and both transports are the same for
+either, and nothing outside `internal/store` knows which one is in use. The
+data directory is needed with either, since it holds the secret key that
+encrypts stored API keys.
+
+**Same behaviour.** The application was written against SQLite, and the
+PostgreSQL store reproduces what it relies on rather than asking the services
+to change:
+
+- *Writers are serialised.* SQLite allows one writer at a time, and the
+  services' read-check-write sequences (revision checks, name uniqueness,
+  limits, positions) depend on it. Every PostgreSQL write transaction
+  therefore starts by taking one transaction-level advisory lock, so writes
+  run one at a time and each sees everything committed before it; reads run
+  in parallel on a repeatable-read snapshot, as SQLite readers do. This costs
+  write concurrency, which a single-user library does not need.
+- *Same values.* Ids, Unix-second timestamps, revisions and insertion order
+  (`seq`) are stored as on SQLite. Text is ordered byte-wise (the `C`
+  collation, like SQLite's `BINARY`; title sorting folds ASCII letters only,
+  like `NOCASE`). Free text that has no control-character rule (bodies,
+  sources, program input and output) is `bytea`, because PostgreSQL text
+  cannot hold NUL and program output need not be valid UTF-8.
+- *Same guards.* What SQLite enforces with constraints and triggers
+  (immutable provider kind, at most 20 providers and 20 presets, 50 solutions
+  per problem, one default preset, one reference solution, single-line
+  names, case-insensitive unique names, length limits) PostgreSQL enforces
+  with constraints and triggers too.
+- *Same search.* SQLite uses FTS5 (`unicode61`, diacritics removed). The
+  PostgreSQL store splits text with that same tokenizer, run on a private
+  in-memory SQLite database, and stores each column as its token sequence; a
+  query word is a phrase whose last token is a prefix, matched as a substring
+  at a token boundary, and relevance is FTS5's bm25 computed in SQL with the
+  same weights and statistics. Results and their order are the same; the
+  PostgreSQL search scans the index table rather than using an inverted
+  index, which is fine for a personal library (thousands of items) and would
+  need an index for far larger ones.
+
+`internal/store/storetest` is a conformance suite that both stores run, and
+the application, HTTP and MCP tests run on either (`make test`,
+`make test-postgres`).
+
+### Schema migrations
+
+Each backend has its own embedded, numbered, forward-only migrations and a
+`schema_migrations` record, and applies pending ones at startup, each in its
+own transaction, logging each one. The numbers are *logical schema versions*
+shared by both backends: PostgreSQL starts from one consolidated migration
+(`0005_initial_schema.sql`) that yields the schema SQLite reaches with
+0001–0005, including the built-in style presets seeded the same way (only
+into an empty table, only once).
+
+The rule for every later schema change: **add one migration per backend with
+the same new number**, bump `store.SchemaVersion`, and update `store.Tables`
+if tables or columns change. A test fails when the two backends' latest
+versions differ or a number is missing on one side, and another when a
+backend's tables differ from `store.Tables`.
+
+- A database whose version is newer than the server knows is not opened:
+  startup fails with "this database was last used by a newer Codeatrophy;
+  upgrade the server", and nothing is written.
+- Before migrating an existing SQLite database, the server writes a
+  consistent copy next to it (`VACUUM INTO`), named after the version it was
+  at (`codeatrophy.db.backup-v4-<timestamp>`), and keeps the three newest.
+  PostgreSQL migrations hold an advisory lock for the whole step, so two
+  servers starting together cannot both migrate; take a `pg_dump` before
+  upgrading.
+- `CODEATROPHY_DB_AUTO_MIGRATE=off` turns migrating at startup off: the
+  server then opens only a database at its own version and otherwise stops,
+  changing nothing, with both versions and the command to run. The automatic
+  SQLite import (below) does not run in this mode either, since it migrates
+  the SQLite file; with an empty PostgreSQL database and a SQLite file
+  waiting, the server stops and points to `db copy`.
+- `codeatrophy db status` and `codeatrophy db migrate` show and apply
+  migrations without starting the server; `db migrate` lists the pending
+  ones first, always migrates whatever the setting, and on PostgreSQL warns
+  that no backup is taken.
+
+### Moving between backends
+
+`internal/store/dbcopy` copies the complete contents of one store into
+another, in either direction, through the `store.Bulk` interface: every
+table of the logical schema, rows in insertion order, values unchanged, then
+the destination rebuilds its search index and sequences and checks foreign
+keys. It runs in one transaction on the destination, which commits only when
+every table has the same row count on both sides, and it refuses a
+destination that already holds library data unless told to replace it.
+"Holds no library data" means every table is empty except style presets, and
+those are only built-in presets exactly as seeded, never edited; any setting,
+provider, usage count, AI log entry, item, collection or submission counts. The destination's own seeded
+presets are replaced by the source's. Stored API keys travel as ciphertext,
+so the destination needs the same secret key.
+
+The server uses it for an **automatic import**: when it opens PostgreSQL and
+finds no library data there, and a SQLite file exists at
+`CODEATROPHY_DB_PATH`, it migrates that file to the current version, copies
+it in, checks the counts and renames the file (with its `-wal` and `-shm`) to
+`<name>.migrated-<UTC timestamp>`, so it stays as a backup and is never
+imported twice. A failure rolls everything back, leaves the file in place and
+stops startup with what to do. If PostgreSQL already holds data, the file is
+ignored with one log line. `CODEATROPHY_SQLITE_IMPORT=off` turns the import
+off. This is how an existing Compose install moves to PostgreSQL on its first
+start after the upgrade. `codeatrophy db copy` runs the same copy by hand,
+including from PostgreSQL back to SQLite.
 
 ## Judge engines
 
@@ -176,6 +287,58 @@ the result's message instead, so the program's own stderr is kept intact.
 Problems are judged on a stdin/stdout basis. That is the model every sandbox
 supports natively and it keeps problems language-agnostic.
 
+### Solution-only problems
+
+A problem whose interface is `function` asks only for a function or class,
+as interview sites do. Judging stays stdin/stdout: for each language the
+problem carries a harness, a prefix and a suffix of hidden code, and the
+program that runs is
+
+```
+prefix ⏎ submitted source ⏎ suffix
+```
+
+where ⏎ is a newline added only when the part before it does not already
+end with one; nothing else is added or removed. The prefix defines what the
+solution relies on (imports, helper types such as a list node), the suffix
+reads one test case (one JSON value per line, one line per argument),
+calls the solution and prints one JSON value. The test cases themselves are
+plain stdin/stdout, so the grader, the comparison and the engines are
+unchanged.
+
+- **One place builds every program.** Submissions, test-case verification,
+  the verification step of test generation and the AI draft check all take
+  their program from the same application function, which checks that the
+  language has a harness (a `422` otherwise) and that the engine accepts the
+  assembled program's size. Saved solutions, including the reference
+  solution, hold only the solution part. A submission stores the harness it
+  was created with, so a runner edited while it waits does not change what
+  it runs.
+- **Line numbers.** The solver's first line is line `lineOffset + 1` of the
+  program, `lineOffset` being the prefix's line count. Compiler output and
+  stderr are rewritten before anyone sees them (in the grader, for every
+  execution): a location in the program's own file inside the solver's
+  code gets the solver's line number; a location inside the runner gets
+  its file name replaced by `<runner prefix>` or `<runner suffix>` and a
+  line number relative to that part, so it is never mistaken for one of
+  the solver's lines. The message formats were derived from real output of
+  each toolchain Judge0 1.13 ships (CPython tracebacks; gcc, javac,
+  kotlinc, rustc, mcs and tsc diagnostics, including gcc's and rustc's
+  numbered source snippets; Go, Node.js, Ruby and JVM stack traces; C
+  `assert`). Which file names count as the program's is the engine's
+  knowledge, offered through the optional `judge.SourceNamer` interface;
+  TypeScript runtime errors refer to the compiled JavaScript and are left
+  alone, and Mono stack traces carry no line numbers. Anything not
+  recognised is left as it is; `lineOffset` lets a client explain it.
+- **Size.** An engine may report, through the optional `judge.SourceLimiter`
+  interface, the largest program it accepts per language. Judge0 accepts
+  single-file programs of any practical size (40 MB were tested), but
+  extracts the files of a multi-file program — Java and Kotlin in
+  per-process mode — only up to `MAX_EXTRACT_SIZE` (10 MiB by default,
+  reported in `/config_info`); a larger file fails with a misleading
+  "run: No such file or directory". Such a program is refused up front with
+  a `422` that says why.
+
 ## AI providers
 
 ```go
@@ -195,18 +358,84 @@ independent:
   item (statement, I/O format, constraints, examples, difficulty, tags, starter
   code) *and a list of assumptions*: everything it inferred or invented to fill
   gaps. Nothing is saved until the user has reviewed the draft.
-- **Test-case generation.** The model returns a reference solution and a set of
-  inputs with the outputs it predicts. Models are unreliable at computing
+  For a problem the model also chooses the interface (`function` for an
+  algorithmic problem whose heart is one routine, `program` when input and
+  output are part of the task; the user may decide instead), writes the
+  stubs and harnesses of a function problem, and writes a reference
+  solution. The server then runs that solution on the draft's own examples
+  — through the harness, with the judge's real toolchains — and reports per
+  example whether it printed the stated output, so a wrong example or a
+  runner that does not compile shows during review. This *draft check* runs
+  code for something that is not saved, never fails the draft (no engine, an
+  unreachable one, a compile error or a timeout are reported in it), runs at
+  most 10 cases and stops after 50 seconds or when the request is
+  cancelled, and corrects nothing. For a function problem it then proves
+  every harness, not only the reference solution's: each language's starter
+  code, which is written to compile and run with a placeholder result, runs
+  unchanged on the first example in the time the reference solution left
+  (the languages in parallel), and any answer counts as a working runner.
+  The prompts tell the model which languages and versions the judge runs
+  (Judge0 ships old toolchains: Python 3.8, Java 13, Go 1.13, ...), and the
+  conventions require a Python harness prefix to start with
+  `from __future__ import annotations`, without which hints such as
+  `list[ListNode | None]` fail on Python 3.8. A model that forgets it gets
+  it added to its draft's Python prefixes by the server; nothing else in
+  model output is rewritten.
+- **Test-case generation.** The model returns a reference solution (for a
+  function problem only the solution part, written against the stub and
+  harness it is shown) and a set of inputs with the outputs it predicts. Models are unreliable at computing
   outputs by hand, so when a judge engine is available the server executes the
   reference solution on every input and uses the *actual* output as the
   expected output, marking the case `verified`. Disagreements between predicted
   and actual output are surfaced to the user as a signal that the solution or
   the statement may be wrong. Without an engine, predicted outputs are kept and
-  the cases stay unverified.
+  the cases stay unverified. The model is shown the problem's existing
+  inputs (bounded, long ones cut) so that it adds to them, and a proposal
+  whose input repeats an existing or earlier one (ignoring trailing
+  whitespace) is dropped and counted; a draft's own repeated inputs are
+  dropped too.
 - **Variants.** From an existing item the model drafts a related new one — the
   same technique in a different setting, an easier or harder version, or a
   twist that breaks the original approach. A saved variant keeps a `variantOf`
-  link to its origin, so families of related problems stay connected.
+  link to its origin, so families of related problems stay connected. A
+  variant keeps the original's interface unless asked otherwise, and gets
+  the same reference solution and check as a draft.
+
+### Accounting for AI requests
+
+Every request the server sends to a provider — draft, variant, test
+generation, and the generation step of a connection test of a saved or
+environment provider — goes through one application function. When the
+request ends (answered, failed, cancelled, or answered with something the
+server cannot use) it writes, in one transaction:
+
+- the provider's **usage counts**, a roll-up per provider id and UTC day in
+  `ai_usage` (requests, failed, input tokens including cache reads and
+  writes, output tokens, last use) updated by an atomic upsert, so the
+  30-day window is a range sum and concurrent requests add up. The counts
+  belong to the provider entry: they go when it is deleted.
+- an entry in the **AI activity log**, kept in the database with every
+  other record: the index row in `ai_log` (operation, item and title,
+  provider, model, status, duration, the token breakdown), the request and
+  response gzip-compressed in `ai_log_bodies`, and each distinct system
+  text once in `ai_log_texts`. The log is append-only and keeps every
+  request with its content until the user clears or prunes it; it outlives
+  providers and items, is paged by a keyset cursor over (created time, id),
+  and is not part of bundles or MCP. What it stores of a request is built
+  from the server's own provider-neutral request, never from the HTTP call,
+  so no key or header can get in; request and response are each cut at
+  256 KiB.
+
+The write is bounded (five seconds) and never fails the request: a failed
+write is logged and the response's `usage.logId` is `null`. The server's own
+log gets one line per request with the operation and figures, never the
+content. Token counts are what the service reports, and stay `null` where it
+reports none: Anthropic reports input, output (including thinking), the
+thinking part, cache reads and cache writes; an OpenAI-compatible service
+reports input (from which its cached part is taken out and shown as cache
+reads), output and, where it says so, the reasoning part, but no cache
+writes. A retry inside an adapter (the Anthropic fallback retry) is one
+request, with the figures of the call that answered.
 
 Output is constrained at two levels. The JSON schema fixes the *structure* of
 a response and is not negotiable, because the app has to parse and store it.
@@ -231,7 +460,9 @@ The design limits what such text can achieve rather than trying to detect it:
   test-case proposal is shown to the user first.
 - **Output is schema-checked** server-side before it is returned.
 - **Untrusted text is passed as data**, in delimited blocks in the user turn,
-  never concatenated into the system prompt.
+  never concatenated into the system prompt. That includes stubs and
+  harnesses taken from the library, and the language versions the judge
+  engine reports (cut to one short line each).
 - **Block delimiters cannot be forged.** Every data block (and the style
   preset block) is wrapped in tags carrying a random nonce chosen per prompt,
   such as `<user_input-3f9c…>`, and the nonce is guaranteed not to occur in
@@ -241,19 +472,33 @@ The design limits what such text can achieve rather than trying to detect it:
   MCP prompts and the authoring guide use the same scheme.
 - **The one user-controlled slot in the system prompt is small and local.**
   Style presets have hard, non-configurable caps on length and count, reject
-  control characters (and any line break in a name), and can only be created through the instance's own
-  settings — never by importing a bundle and never over MCP. Shared content
-  therefore cannot plant standing instructions. Per-request instructions are
-  length-capped as well.
+  control characters (and any line break in a name), and can only be created
+  through the instance's own settings — never by importing a bundle and never
+  over MCP. The one exception is the three built-in presets a new instance
+  starts with: they ship with the app (seeded once, by a database migration,
+  into an empty preset list) and are then ordinary presets the user can edit
+  or delete. Shared content therefore cannot plant standing instructions.
+  Per-request instructions are length-capped as well.
 
 A default preset, rather than "last used", decides what applies when a caller
 does not choose: it is predictable, and it gives MCP clients and scripts —
 which have no notion of a previous choice — the same behaviour as the UI.
 
-Providers: Anthropic and any OpenAI-compatible endpoint, which covers most
-hosted services and locally run models. The user chooses the provider and
-model and enters credentials in the UI; environment variables can supply the
-same values for unattended setups.
+Provider kinds: Anthropic and any OpenAI-compatible endpoint, which covers
+most hosted services and locally run models. The user saves any number of
+named providers (up to 20), each with its own kind, key, base URL and model,
+and chooses one as the default that the AI endpoints use; a provider stands
+on its own values plus its kind's defaults. Environment variables add one
+read-only provider per kind for unattended setups, and
+`CODEATROPHY_AI_PROVIDER` makes one of them the initial default until a
+default is saved. Providers are local configuration: they are never part of
+a bundle and are not reachable over MCP.
+
+Implementations may also satisfy an optional `ModelLister` interface, which
+the connection test uses to show the service's models, so a model can be
+picked from a list instead of typed. The list is bounded (time, response
+size, entry count) and treated as untrusted text: ids that are not a short
+single line are dropped before they reach the UI.
 
 Stored API keys are encrypted (AES-256-GCM) with a key that is kept outside
 the database: taken from an environment variable if set, otherwise generated
@@ -263,18 +508,18 @@ the API — responses carry only a "set" flag and the last four characters — a
 are never exposed over MCP, written to logs, or included in bundles.
 
 A key is only ever sent to the origin it was stored for. A saved key is
-stored with the origin (scheme, host, port) of the provider's base URL at the
-time, and that origin is bound into the ciphertext as AEAD additional data,
-so a key cannot be decrypted for another origin even by editing the database.
-Changing the base URL to another origin without entering a new key deletes
-the saved one; an environment key belongs to the environment's (or default)
-base URL; and a connection test against another origin sends only a key
-given in that request. Without this, anyone able to change the settings —
+stored with the origin (scheme, host, port) of its provider's base URL at the
+time, and the provider kind and that origin are bound into the ciphertext as
+AEAD additional data, so a key cannot be decrypted for another origin even by
+editing the database. Changing a provider's base URL to another origin
+without entering a new key deletes its saved key; an environment key belongs
+to the environment's (or default) base URL; and a connection test against
+another origin sends only a key given in that request. Without this, anyone able to change the settings —
 including a page that got past the request checks — could redirect the
 stored key to a server of their choosing.
 
-With no provider configured the AI endpoints return `ai_unavailable` and the
-UI falls back to manual authoring.
+With no default provider chosen, or one that is not ready, the AI endpoints
+return `ai_unavailable` and the UI falls back to manual authoring.
 
 ## MCP server
 
@@ -314,6 +559,10 @@ in a git repository.
 
 - Bundles carry *content* only — never personal state (status, notes,
   favorites, submissions) or raw AI input. They are safe to share by default.
+- The format is versioned. Version 2 adds solution-only problems (interface
+  and harness); a bundle is written in version 1 unless it holds such a
+  problem, so older servers keep importing everything they can represent
+  and refuse, by version, what they cannot. Readers accept both versions.
 - Items and collections keep their ids, so importing is idempotent. A preview
   step reports what an import would create, update or leave alone before
   anything is written, and the user picks a conflict strategy.
@@ -330,8 +579,10 @@ the API so UI work does not require the backend.
 
 ## Deployment
 
-`compose.yaml` defines the server and the judge engine's containers. The
-server's port is published on loopback only by default: the app has no
+`compose.yaml` defines the server, its PostgreSQL database and the judge
+engine's containers. The database is on an internal network shared only with
+the server and is not published to the host. The server's port is published
+on loopback only by default: the app has no
 authentication and can execute code, so exposing it beyond the host is an
 explicit operator decision (put it behind a reverse proxy that authenticates).
 
@@ -360,6 +611,5 @@ Configuration is by environment variable, documented in `.env.example`.
 ## Out of scope for the first version
 
 - Multiple users and built-in authentication.
-- Function-signature ("LeetCode-style") judging with per-language harnesses;
-  custom checkers and interactive problems.
+- Custom checkers and interactive problems.
 - File attachments. The bundle format reserves an `assets/` directory per item.

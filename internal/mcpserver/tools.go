@@ -70,7 +70,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body and revision. include selects optional parts: testCases, solutions, submissions (the 10 most recent).",
+		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness. include selects optional parts: testCases, solutions, submissions (the 10 most recent).",
 		object(props{
 			"id":      str("Item id"),
 			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
@@ -158,7 +158,7 @@ func (t *tools) register(s *mcp.Server) {
 	createProps["type"] = enumStr("Item type", "problem", "reading")
 	createProps["testCases"] = arrayOf(testCaseSchema(), "Test cases to create with the item (problems only)")
 	t.add(s, "create_item", "Create item",
-		"Create a problem or reading. May include tags, collectionIds, variantOf and test cases in the same call. Returns the item with its revision.",
+		"Create a problem or reading. May include tags, collectionIds, variantOf and test cases in the same call. A solution-only problem sets problem.interface to function, with starterCode (the stubs) and a harness entry per language. Returns the item with its revision.",
 		object(createProps, "type", "title"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in domain.ItemInput
 			if err := decodeArgs(raw, &in); err != nil {
@@ -171,7 +171,7 @@ func (t *tools) register(s *mcp.Server) {
 	updateProps["id"] = str("Item id")
 	updateProps["expectedRevision"] = expectedRevision
 	t.add(s, "update_item", "Update item",
-		"Partial update of an item (merge semantics: omitted fields are unchanged; arrays replace; null clears a nullable field; problem and source merge field by field). Pass expectedRevision.",
+		"Partial update of an item (merge semantics: omitted fields are unchanged; arrays replace; null clears a nullable field; problem and source merge field by field; problem.starterCode and problem.harness replace all entries). Setting problem.interface to program on a problem with a harness needs harness: {} in the same call. Pass expectedRevision.",
 		object(updateProps, "id"), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var id idArg
 			var in domain.ItemInput
@@ -363,7 +363,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Test cases and execution.
 	t.add(s, "add_test_cases", "Add test cases",
-		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then). Test-case changes do not change the item revision. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
+		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Test-case changes do not change the item revision. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
 		object(props{
 			"itemId":            str("Problem id"),
 			"cases":             arrayOf(testCaseSchema(), "Test cases to add"),
@@ -415,7 +415,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "verify_test_cases", "Verify test cases",
-		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and changes nothing. Needs a judge engine.",
+		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and changes nothing. For a function problem the solution runs inside its language's harness, and a language without one is rejected. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
 			"solutionId":     str("Solution to run; omit for the reference solution"),
@@ -439,7 +439,7 @@ func (t *tools) register(s *mcp.Server) {
 			"id":               str("Solution id, to change an existing solution"),
 			"name":             str("Short single-line name, e.g. the approach"),
 			"language":         languageEnum("Language id"),
-			"source":           str("Complete program reading stdin and writing stdout"),
+			"source":           str(solutionSource),
 			"notes":            str("Markdown notes, e.g. complexity"),
 			"isReference":      boolean("Make this the reference solution"),
 			"expectedRevision": expectedRevision,
@@ -478,11 +478,11 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "run_code", "Run code",
-		"Execute code for a problem and wait for the verdict: mode run (sample cases, or custom stdin) or submit (all cases). Needs a judge engine.",
+		"Execute code for a problem and wait for the verdict: mode run (sample cases, or custom stdin) or submit (all cases). For a function problem give only the solution part: it runs inside the language's harness, line numbers in errors refer to it (<runner prefix> and <runner suffix> mark lines inside the runner), and lineOffset is how many lines the harness put before it. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
-			"language":       languageEnum("Language id"),
-			"source":         str("Program source"),
+			"language":       languageEnum("Language id; for a function problem, one with a harness"),
+			"source":         str(solutionSource),
 			"mode":           enumStr("run (default) or submit", "run", "submit"),
 			"stdin":          nullableStr("Custom input for a run; omit to use the sample cases"),
 			"timeoutSeconds": integer("How long to wait for the verdict (default 120, max 600)"),

@@ -3,7 +3,6 @@ package app_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 	"codeatrophy/internal/judge"
 	"codeatrophy/internal/judge/judgetest"
 	"codeatrophy/internal/store"
-	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store/teststore"
 )
 
 func (e *env) submit(t *testing.T, itemID, js string) domain.Submission {
@@ -142,13 +141,9 @@ func TestEngineFailureFinishesAsInternalError(t *testing.T) {
 }
 
 func TestInterruptedSubmissionsAreFinishedOnStart(t *testing.T) {
-	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "a.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := teststore.Open(t)
 	now := time.Now().UTC().Truncate(time.Second)
-	err = db.Write(context.Background(), func(tx store.Tx) error {
+	err := db.Write(context.Background(), func(tx store.Tx) error {
 		it := domain.Item{ItemSummary: domain.ItemSummary{ID: "i", Type: domain.TypeProblem, Title: "t", Status: domain.StatusTodo,
 			Revision: 1, CreatedAt: now, UpdatedAt: now}, Problem: domain.DefaultProblemSpec()}
 		if err := tx.InsertItem(&it); err != nil {

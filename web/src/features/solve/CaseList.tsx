@@ -76,7 +76,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
 
       {concealed > 0 && (
         <p className="tcases-note">
-          Hidden cases are counted, but their input and expected output stay out of sight until you reveal them. <Link to="/settings#preferences">Change this in Settings</Link>
+          Hidden cases are counted, but their input and expected output stay out of sight until you reveal them. <Link to="/settings/preferences">Change this in Settings</Link>
         </p>
       )}
 

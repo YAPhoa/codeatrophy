@@ -6,6 +6,7 @@ import { byteLength, LIMITS, normaliseText } from '../db';
 import type { Handler, Req } from '../http';
 import { accepted, enumParam, invalid, judgeUnavailable, notFound, objectBody, ok, pagination, Validator } from '../http';
 import type { Behaviour, CaseSpec } from '../judge';
+import { assemble } from '../harness';
 import { compileOutputFor, detectBehaviour, judgeCase } from '../judge';
 import { hash32, uuid } from '../util';
 
@@ -24,6 +25,7 @@ export function summaryOf(s: Submission): SubmissionSummary {
     timeMs: s.timeMs,
     memoryKb: s.memoryKb,
     error: s.error,
+    lineOffset: s.lineOffset,
     createdAt: s.createdAt,
     finishedAt: s.finishedAt,
   };
@@ -80,6 +82,8 @@ function createSubmission(db: MockDb, req: Req) {
   const language = raw.language;
   if (typeof language !== 'string' || !db.judgeLanguages.some((l) => l.id === language)) {
     v.add('language', 'is not offered by the judge engine');
+  } else if (item.problem?.interface === 'function' && !(language in item.problem.harness)) {
+    v.add('language', 'has no harness on this problem');
   }
   const source = raw.source;
   if (typeof source !== 'string' || source.trim() === '') v.add('source', 'is required');
@@ -101,12 +105,17 @@ function createSubmission(db: MockDb, req: Req) {
     throw invalid('testCases', mode === 'submit' ? 'there are no test cases to run' : 'there are no sample test cases to run');
   }
 
+  // What is stored is what was submitted; what runs is that inside the harness.
+  const submitted = normaliseText(source as string);
+  const harness = item.problem?.interface === 'function' ? item.problem.harness[language as string] : undefined;
+  const { program, lineOffset } = assemble(harness, submitted);
   const submission: Submission = {
     id: uuid(),
     itemId: item.id,
     mode,
     language: language as string,
-    source: normaliseText(source as string),
+    source: submitted,
+    lineOffset,
     status: 'queued',
     verdict: null,
     passedCount: 0,
@@ -123,7 +132,7 @@ function createSubmission(db: MockDb, req: Req) {
   if (item.status === 'todo') item.status = 'in_progress';
 
   const behaviour: Behaviour =
-    db.options.judge === 'down' ? 'ie' : detectBehaviour(submission.source, item.problem?.starterCode[submission.language]);
+    db.options.judge === 'down' ? 'ie' : detectBehaviour(submission.source, item.problem?.starterCode[submission.language], program);
   const response = accepted(structuredClone(submission));
   judge(db, submission, cases, behaviour, item);
   return response;

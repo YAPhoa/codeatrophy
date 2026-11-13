@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import { Download, Folder, Library, Moon, Plus, Search, Settings, Sun, Tags, Upload } from 'lucide-react';
 import { useCollections, useItemQuery } from '../api/queries';
 import { TypeIcon } from '../features/item/controls';
+import { useNewItemHref } from '../lib/newItem';
 import { resolveTheme, setThemePreference, getThemePreference } from '../lib/theme';
 import { cx } from '../ui/Button';
 import { Spinner } from '../ui/misc';
@@ -33,6 +34,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
 function PaletteBody({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
+  const newHref = useNewItemHref();
   const [text, setText] = useState('');
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
@@ -50,7 +52,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     const go = (to: string) => () => navigate(to);
     const needle = text.trim().toLowerCase();
     const commands: Entry[] = [
-      { key: 'new', icon: <Plus size={15} />, label: 'Capture a new item', hint: 'C', run: go('/new') },
+      { key: 'new', icon: <Plus size={15} />, label: 'Capture a new item', hint: 'C', run: go(newHref) },
       { key: 'lib', icon: <Library size={15} />, label: 'Go to library', run: go('/') },
       { key: 'tags', icon: <Tags size={15} />, label: 'Manage tags', run: go('/tags') },
       { key: 'import', icon: <Upload size={15} />, label: 'Import a bundle', run: go('/import') },
@@ -84,7 +86,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       : [];
 
     return needle ? [...itemEntries, ...collectionEntries, ...searchAll, ...commands] : [...commands.slice(0, 1), ...itemEntries, ...commands.slice(1)];
-  }, [text, items.data, recent.data, collections.data, navigate]);
+  }, [text, items.data, recent.data, collections.data, navigate, newHref]);
 
   useEffect(() => setActive(0), [text]);
 

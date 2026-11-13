@@ -5,19 +5,29 @@
 import type {
   AiTestCasesResponse,
   Difficulty,
+  DraftCheck,
+  DraftProblemSpec,
   DraftTestCase,
+  HarnessCode,
+  InterfaceHint,
   ItemDraft,
+  ProblemInterface,
   ProposedTestCase,
+  RunnerCheck,
+  SourceCode,
   StylePreset,
   VariantMode,
 } from '../api/types';
 import type { MockDb, StoredItem } from './db';
+import { JUDGE_LANGUAGES } from './db';
+import type { Signature } from './harness';
+import { assemble, functionKit } from './harness';
 import { invalid, isRecord, isStringArray } from './http';
-import { perturbOutput } from './judge';
+import { detectBehaviour, perturbOutput } from './judge';
 import { seedBody } from './seed';
 import { SEED_PROBLEMS } from './seed/problems';
 import { genericSolution, starterCode } from './starter';
-import { hash32, titleCase } from './util';
+import { hash32, isLanguage, titleCase } from './util';
 
 const DRAFT_LANGUAGES = ['python', 'cpp', 'java', 'javascript', 'go'];
 
@@ -65,6 +75,19 @@ const CANNED: { pattern: RegExp; key: string; assumptions: string[] }[] = [
   },
 ];
 
+/** A drafted problem's settings as a complete program, with the model's own solution. */
+function programSpec(reference: string): DraftProblemSpec {
+  return {
+    interface: 'program',
+    timeLimitMs: 2000,
+    memoryLimitKb: 262144,
+    compare: 'tokens',
+    starterCode: starterCode(DRAFT_LANGUAGES),
+    harness: {},
+    referenceSolution: { language: 'python', source: reference },
+  };
+}
+
 function cannedDraft(key: string, assumptions: string[]): ItemDraft {
   const p = SEED_PROBLEMS.find((x) => x.key === key)!;
   return {
@@ -74,12 +97,175 @@ function cannedDraft(key: string, assumptions: string[]): ItemDraft {
     body: seedBody(key),
     difficulty: p.difficulty,
     tags: [...p.tags].sort(),
-    problem: { timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', starterCode: starterCode(DRAFT_LANGUAGES) },
+    problem: programSpec(p.reference ?? genericSolution('python')),
     testCases: p.cases
       .filter((c) => c.sample)
-      .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.out, isSample: true })),
+      .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.out, isSample: true, verified: false })),
     assumptions: [...assumptions],
   };
+}
+
+// ---- "Solution only" drafts -----------------------------------------------------
+//
+// What the model writes when a problem is about one routine: a signature, a
+// statement in terms of its arguments, a stub and a hidden runner per
+// language, and examples as one JSON value per line.
+
+interface FunctionForm {
+  signature: Signature;
+  body: string;
+  /** Input lines (one JSON value per argument) and the expected JSON value. */
+  examples: [stdin: string, out: string][];
+  /** The solution part, in Python. */
+  solution: string;
+}
+
+const FUNCTION_FORMS: Record<string, FunctionForm> = {
+  'two-sum': {
+    signature: { name: 'twoSum', params: [{ name: 'nums', type: 'int[]' }, { name: 'target', type: 'int' }], returns: 'int[]' },
+    body: [
+      '## Problem',
+      '',
+      'Given an array of integers `nums` and an integer `target`, return the indices of the two numbers that add up to `target`, smaller index first.',
+      '',
+      'Exactly one pair is valid, and the same element may not be used twice.',
+      '',
+      '## Examples',
+      '',
+      '```text',
+      'Input',
+      'nums = [2,7,11,15], target = 9',
+      '',
+      'Output',
+      '[0,1]',
+      '```',
+      '',
+      '```text',
+      'Input',
+      'nums = [3,2,4], target = 6',
+      '',
+      'Output',
+      '[1,2]',
+      '```',
+      '',
+      '## Constraints',
+      '',
+      '- $2 \\le n \\le 10^5$',
+      '- $-10^9 \\le \\text{nums}_i, \\text{target} \\le 10^9$',
+      '- Exactly one valid pair exists.',
+      '',
+    ].join('\n'),
+    examples: [
+      ['[2,7,11,15]\n9\n', '[0,1]\n'],
+      ['[3,2,4]\n6\n', '[1,2]\n'],
+    ],
+    solution: [
+      'class Solution:',
+      '    def twoSum(self, nums: list[int], target: int) -> list[int]:',
+      '        seen = {}',
+      '        for i, x in enumerate(nums):',
+      '            if target - x in seen:',
+      '                return [seen[target - x], i]',
+      '            seen[x] = i',
+      '        return []',
+      '',
+    ].join('\n'),
+  },
+  'valid-parentheses': {
+    signature: { name: 'isValid', params: [{ name: 's', type: 'string' }], returns: 'bool' },
+    body: [
+      '## Problem',
+      '',
+      'Given a string `s` of the characters `(`, `)`, `[`, `]`, `{` and `}`, return whether it is valid: every bracket is closed by one of the same kind, in the right order.',
+      '',
+      '## Examples',
+      '',
+      '```text',
+      'Input',
+      's = "()[]{}"',
+      '',
+      'Output',
+      'true',
+      '```',
+      '',
+      '```text',
+      'Input',
+      's = "(]"',
+      '',
+      'Output',
+      'false',
+      '```',
+      '',
+      '## Constraints',
+      '',
+      '- $1 \\le |s| \\le 10^5$',
+      '- `s` contains brackets only.',
+      '',
+    ].join('\n'),
+    examples: [
+      ['"()[]{}"\n', 'true\n'],
+      ['"(]"\n', 'false\n'],
+    ],
+    solution: [
+      'class Solution:',
+      '    def isValid(self, s: str) -> bool:',
+      '        pairs = {")": "(", "]": "[", "}": "{"}',
+      '        stack = []',
+      '        for ch in s:',
+      '            if ch in pairs:',
+      '                if not stack or stack.pop() != pairs[ch]:',
+      '                    return False',
+      '            else:',
+      '                stack.append(ch)',
+      '        return not stack',
+      '',
+    ].join('\n'),
+  },
+};
+
+function functionSpec(form: FunctionForm): Pick<ItemDraft, 'problem' | 'testCases'> {
+  return {
+    problem: {
+      interface: 'function',
+      timeLimitMs: 2000,
+      memoryLimitKb: 262144,
+      compare: 'tokens',
+      ...functionKit(form.signature),
+      referenceSolution: { language: 'python', source: form.solution },
+    },
+    testCases: form.examples.map(([stdin, out], i) => ({ name: `Example ${i + 1}`, stdin, expectedStdout: out, isSample: true, verified: false })),
+  };
+}
+
+function cannedFunctionDraft(key: string, assumptions: string[]): ItemDraft {
+  const p = SEED_PROBLEMS.find((x) => x.key === key)!;
+  const form = FUNCTION_FORMS[key]!;
+  const name = form.signature.name;
+  return {
+    type: 'problem',
+    title: p.title,
+    summary: p.summary,
+    body: form.body,
+    difficulty: p.difficulty,
+    tags: [...p.tags].sort(),
+    ...functionSpec(form),
+    assumptions: [
+      // What the program form assumes about the layout of stdin does not apply here.
+      ...assumptions.filter((a) => !/input layout|input is one|output format/i.test(a)),
+      `It is about one routine, so I wrote it as a function, \`${name}\`, with a hidden runner; the signature is my choice.`,
+    ],
+  };
+}
+
+/** Signals that reading input and writing output is part of the task, or that it is not about one routine. */
+const PROGRAM_SIGNALS =
+  /\b(design|simulat\w+|stdin|stdout|(input|output) format|read(s|ing)? (the |from )?(input|file|lines?)|print(s|ed|ing)?|pars(e|er|ing)|log file|commands?|queries|operations|interactive|line by line)\b/i;
+
+/** Whether a draft should be "Solution only": the hint when it gives one, otherwise the model's own reading of the text. */
+function wantsFunction(text: string, hint: InterfaceHint, cannedKey: string | undefined): boolean {
+  if (hint !== 'auto') return hint === 'function';
+  if (cannedKey !== undefined) return cannedKey in FUNCTION_FORMS;
+  return !PROGRAM_SIGNALS.test(text);
 }
 
 // ---- Drafts built from the text -------------------------------------------------
@@ -165,14 +351,78 @@ function paragraphs(text: string): string {
 }
 
 const GENERIC_SAMPLES: DraftTestCase[] = [
-  { name: 'Example 1', stdin: '5\n3 -1 4 -1 5\n', expectedStdout: '10\n', isSample: true },
-  { name: 'Example 2', stdin: '3\n-2 -7 -4\n', expectedStdout: '-2\n', isSample: true },
-  { name: 'Example 3', stdin: '1\n42\n', expectedStdout: '42\n', isSample: true },
+  { name: 'Example 1', stdin: '5\n3 -1 4 -1 5\n', expectedStdout: '10\n', isSample: true, verified: false },
+  { name: 'Example 2', stdin: '3\n-2 -7 -4\n', expectedStdout: '-2\n', isSample: true, verified: false },
+  { name: 'Example 3', stdin: '1\n42\n', expectedStdout: '42\n', isSample: true, verified: false },
 ];
 
-function problemFromText(text: string): ItemDraft {
+function inferDifficulty(text: string): Difficulty {
   const wordCount = text.split(/\s+/).filter(Boolean).length;
-  const difficulty: Difficulty = /\b(hard|tricky|optimal|np-)/i.test(text) ? 'hard' : wordCount < 14 ? 'easy' : 'medium';
+  return /\b(hard|tricky|optimal|np-)/i.test(text) ? 'hard' : wordCount < 14 ? 'easy' : 'medium';
+}
+
+const GENERIC_FUNCTION: Omit<FunctionForm, 'body'> = {
+  signature: { name: 'solve', params: [{ name: 'nums', type: 'int[]' }], returns: 'int' },
+  examples: [
+    ['[3,-1,4,-1,5]\n', '10\n'],
+    ['[-2,-7,-4]\n', '-2\n'],
+    ['[42]\n', '42\n'],
+  ],
+  solution: [
+    'class Solution:',
+    '    def solve(self, nums: list[int]) -> int:',
+    '        best = nums[0]',
+    '        running = 0',
+    '        for v in nums:',
+    '            running = max(v, running + v)',
+    '            best = max(best, running)',
+    '        return best',
+    '',
+  ].join('\n'),
+};
+
+function functionFromText(text: string): ItemDraft {
+  const difficulty = inferDifficulty(text);
+  const example = ([stdin, out]: [string, string]) => ['```text', 'Input', `nums = ${stdin.trimEnd()}`, '', 'Output', out.trimEnd(), '```'].join('\n');
+  const body = [
+    '## Problem',
+    '',
+    paragraphs(text),
+    '',
+    'Implement `solve`, which takes the values as an array `nums` and returns the answer.',
+    '',
+    '## Examples',
+    '',
+    example(GENERIC_FUNCTION.examples[0]!),
+    '',
+    example(GENERIC_FUNCTION.examples[1]!),
+    '',
+    '## Constraints',
+    '',
+    '- $1 \\le n \\le 10^5$',
+    '- $-10^9 \\le \\text{nums}_i \\le 10^9$',
+    '',
+  ].join('\n');
+  return {
+    type: 'problem',
+    title: inferTitle(text, 'Untitled problem'),
+    summary: inferSummary(text),
+    body,
+    difficulty,
+    tags: inferTags(text, 'array'),
+    ...functionSpec({ ...GENERIC_FUNCTION, body }),
+    assumptions: [
+      'It is about one routine, so I wrote it as a function, `solve`, with a hidden runner; your text gave no signature, so that is my choice.',
+      'No constraints were given; assumed 1 ≤ n ≤ 10^5 and |nums_i| ≤ 10^9.',
+      'The examples and their outputs are my own reading of the task, not taken from your text — check them before relying on them.',
+      `Difficulty (${difficulty}) and tags are estimates.`,
+      'Kept your wording for the statement and only added the sections around it.',
+    ],
+  };
+}
+
+function problemFromText(text: string): ItemDraft {
+  const difficulty = inferDifficulty(text);
   const example = (c: DraftTestCase) =>
     ['```text', 'Input', c.stdin.trimEnd(), '', 'Output', c.expectedStdout.trimEnd(), '```'].join('\n');
   const body = [
@@ -210,7 +460,7 @@ function problemFromText(text: string): ItemDraft {
     body,
     difficulty,
     tags: inferTags(text, 'array'),
-    problem: { timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', starterCode: starterCode(DRAFT_LANGUAGES) },
+    problem: programSpec(genericSolution('python')),
     testCases: structuredClone(GENERIC_SAMPLES),
     assumptions: [
       'Your text did not describe an input format; I chose a common one (n, then n integers on one line).',
@@ -279,6 +529,13 @@ function parsePreviousDraft(value: unknown): ItemDraft {
     throw invalid('previousDraft', 'must be an item draft as returned by an earlier call');
   }
   const problem = isRecord(value.problem) ? value.problem : null;
+  const harness: Record<string, HarnessCode> = {};
+  for (const [language, code] of Object.entries(isRecord(problem?.harness) ? problem.harness : {})) {
+    if (isLanguage(language) && isRecord(code)) {
+      harness[language] = { prefix: typeof code.prefix === 'string' ? code.prefix : '', suffix: typeof code.suffix === 'string' ? code.suffix : '' };
+    }
+  }
+  const reference = problem?.referenceSolution;
   return {
     type: value.type,
     title: value.title,
@@ -290,10 +547,16 @@ function parsePreviousDraft(value: unknown): ItemDraft {
     problem:
       value.type === 'problem'
         ? {
+            interface: problem?.interface === 'function' ? 'function' : 'program',
             timeLimitMs: typeof problem?.timeLimitMs === 'number' ? problem.timeLimitMs : 2000,
             memoryLimitKb: typeof problem?.memoryLimitKb === 'number' ? problem.memoryLimitKb : 262144,
             compare: problem?.compare === 'exact' ? 'exact' : 'tokens',
             starterCode: isRecord(problem?.starterCode) ? (problem.starterCode as Record<string, string>) : {},
+            harness: problem?.interface === 'function' ? harness : {},
+            referenceSolution:
+              isRecord(reference) && isLanguage(reference.language) && typeof reference.source === 'string'
+                ? { language: reference.language, source: reference.source }
+                : null,
           }
         : null,
     testCases:
@@ -303,6 +566,7 @@ function parsePreviousDraft(value: unknown): ItemDraft {
             stdin: typeof c.stdin === 'string' ? c.stdin : '',
             expectedStdout: typeof c.expectedStdout === 'string' ? c.expectedStdout : '',
             isSample: c.isSample !== false,
+            verified: false,
           }))
         : [],
     assumptions: isStringArray(value.assumptions) ? value.assumptions : [],
@@ -399,7 +663,16 @@ export function applyStyle(draft: ItemDraft, style: StylePreset | null): ItemDra
   const starterSentence = sentences(text).find((s) => /starter/i.test(s));
   if (starterSentence && out.problem) {
     const languages = STYLE_LANGUAGES.filter(([pattern]) => pattern.test(starterSentence)).map(([, id]) => id);
-    if (languages.length > 0) out.problem.starterCode = starterCode(languages);
+    if (out.problem.interface === 'function') {
+      // A stub is no use without its runner: the two are narrowed together,
+      // and only to languages the draft has both for.
+      const kept = languages.filter((l) => l in out.problem!.harness);
+      const only = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([l]) => kept.includes(l)));
+      if (kept.length > 0) {
+        out.problem.starterCode = only(out.problem.starterCode);
+        out.problem.harness = only(out.problem.harness);
+      }
+    } else if (languages.length > 0) out.problem.starterCode = starterCode(languages);
   }
 
   let sections = splitSections(out.body);
@@ -443,14 +716,140 @@ export function draftFromText(
   typeHint: 'auto' | 'problem' | 'reading',
   instruction: string | null,
   previousDraft: unknown,
+  interfaceHint: InterfaceHint = 'auto',
 ): ItemDraft {
+  // A revision keeps the interface of the draft it reworks.
   if (previousDraft != null && instruction) return reviseDraft(previousDraft, instruction);
   const canned = typeHint === 'reading' ? undefined : CANNED.find((c) => c.pattern.test(text));
   let draft: ItemDraft;
-  if (canned) draft = cannedDraft(canned.key, canned.assumptions);
-  else if (typeHint === 'reading' || (typeHint === 'auto' && looksLikeReading(text))) draft = readingFromText(text);
-  else draft = problemFromText(text);
+  if (canned) {
+    if (!wantsFunction(text, interfaceHint, canned.key)) draft = cannedDraft(canned.key, canned.assumptions);
+    // Asked for as a function, but written up only as a program: draft it from the text instead.
+    else draft = canned.key in FUNCTION_FORMS ? cannedFunctionDraft(canned.key, canned.assumptions) : functionFromText(text);
+  } else if (typeHint === 'reading' || (typeHint === 'auto' && looksLikeReading(text))) draft = readingFromText(text);
+  else draft = wantsFunction(text, interfaceHint, undefined) ? functionFromText(text) : problemFromText(text);
   return instruction ? revise(draft, instruction) : draft;
+}
+
+/** Typing `MOCK:MISMATCH` in a draft request makes the reference solution disagree with the last example. */
+export const MISMATCH_MARKER = 'MOCK:MISMATCH';
+
+/**
+ * The check a draft comes with: its reference solution "run" on its test
+ * cases. Sets each case's `verified` and returns the summary; `null` for a
+ * reading. Nothing is executed — the solution is taken to print the expected
+ * output, unless `mismatch` asks for a disagreement on the last case.
+ */
+export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): DraftCheck | null {
+  if (draft.type !== 'problem' || !draft.problem) return null;
+  const cases = draft.testCases;
+  for (const c of cases) c.verified = false;
+  const reference = draft.problem.referenceSolution;
+  const judge = db.options.judge;
+  if (judge === 'none' || !reference || cases.length === 0) {
+    return { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total: cases.length, error: null, runners: [] };
+  }
+  // Every harness is tried, whatever becomes of the reference solution.
+  const runners = checkRunners(draft, judge === 'down');
+  const unchecked = (attempted: boolean, error: string | null): DraftCheck => ({ attempted, engine: 'judge0', passed: 0, total: cases.length, error, runners });
+  if (judge === 'down') return unchecked(true, 'judge engine unreachable: dial tcp: connection refused');
+  const runner = draft.problem.harness[reference.language];
+  if (draft.problem.interface === 'function' && !runner) {
+    return unchecked(true, `the reference solution is in ${reference.language}, which has no harness`);
+  }
+  const behaviour = detectBehaviour(reference.source, undefined, assemble(runner, reference.source).program);
+  if (behaviour === 'ce') return unchecked(true, 'the reference solution did not compile');
+  if (behaviour === 're') return unchecked(true, `the reference solution crashed on ${cases[0]!.name || 'the first case'}`);
+
+  const last = cases.length - 1;
+  cases.forEach((c, i) => {
+    c.verified = !(mismatch && i === last);
+  });
+  const failed = mismatch ? cases[last]! : null;
+  return {
+    attempted: true,
+    engine: 'judge0',
+    passed: cases.filter((c) => c.verified).length,
+    total: cases.length,
+    error: failed
+      ? `${failed.name || `case ${last + 1}`}: expected ${failed.expectedStdout.trim()}, but the reference solution printed ${perturbOutput(failed.expectedStdout).trim() || 'nothing'}`
+      : null,
+    runners,
+  };
+}
+
+/**
+ * Prove each harness of a "solution only" draft: its language's starter
+ * code, unchanged, has to compile and run to an answer of any kind. A
+ * language the engine does not offer, or one without starter code, is
+ * skipped, and so is everything when the engine cannot be reached.
+ */
+function checkRunners(draft: ItemDraft, engineDown: boolean): RunnerCheck[] {
+  const problem = draft.problem;
+  if (!problem || problem.interface !== 'function') return [];
+  return Object.keys(problem.harness)
+    .sort()
+    .map((language): RunnerCheck => {
+      const starter = problem.starterCode[language] ?? '';
+      if (engineDown || starter.trim() === '' || !JUDGE_LANGUAGES.some((l) => l.id === language)) return { language, status: 'skipped', error: null };
+      const behaviour = detectBehaviour(starter, undefined, assemble(problem.harness[language], starter).program);
+      if (behaviour === 'ce') return { language, status: 'failed', error: `the ${language} starter code did not compile inside its harness: ${RUNNER_ERRORS[language] ?? 'syntax error'}` };
+      if (behaviour === 're') return { language, status: 'failed', error: `the ${language} starter code crashed inside its harness on the first test case` };
+      return { language, status: 'ok', error: null };
+    });
+}
+
+const RUNNER_ERRORS: Record<string, string> = {
+  go: './main.go:24:2: undefined: readArgs',
+  java: 'Main.java:11: error: cannot find symbol Json.longs',
+  javascript: 'SyntaxError: Unexpected token )',
+  python: "SyntaxError: unexpected EOF while parsing",
+};
+
+export const RUNNER_MARKER = 'MOCK:RUNNER';
+
+/**
+ * Leave one runner of a "solution only" draft broken, the way a model can:
+ * Go's when the draft has it, else the last one that is not the reference
+ * solution's. The pretend judge reads the marker as a compile error.
+ */
+export function breakRunner(draft: ItemDraft): ItemDraft {
+  const problem = draft.problem;
+  if (!problem || problem.interface !== 'function') return draft;
+  const others = Object.keys(problem.harness).filter((l) => l !== problem.referenceSolution?.language);
+  const language = others.includes('go') ? 'go' : others[others.length - 1];
+  const harness = language === undefined ? undefined : problem.harness[language];
+  if (language === undefined || !harness || harness.suffix.includes('MOCK:CE')) return draft;
+  const comment = language === 'python' ? '#' : '//';
+  const out = structuredClone(draft);
+  out.problem!.harness[language] = { ...harness, suffix: `${harness.suffix}${harness.suffix.endsWith('\n') ? '' : '\n'}${comment} MOCK:CE (the mock reads this as a runner that does not compile)\n` };
+  return out;
+}
+
+/**
+ * Give a variant the other interface than its original has. The mock cannot
+ * rewrite a problem for that: it changes the setting and says what is left
+ * to do.
+ */
+export function withInterface(draft: ItemDraft, wanted: ProblemInterface): ItemDraft {
+  if (!draft.problem || draft.problem.interface === wanted) return draft;
+  const out = structuredClone(draft);
+  out.problem = {
+    ...out.problem!,
+    interface: wanted,
+    starterCode: wanted === 'program' ? starterCode(DRAFT_LANGUAGES) : {},
+    harness: {},
+    referenceSolution: null,
+  };
+  out.testCases = [];
+  out.assumptions = [
+    wanted === 'program'
+      ? 'Recast as a full program that reads its input and prints the answer; the statement still describes the function.'
+      : 'Recast as “solution only”; the stubs and runners are still to be written.',
+    'No sample cases or reference solution are included: those of the original use the other input convention.',
+    ...out.assumptions,
+  ];
+  return out;
 }
 
 const SETTINGS = [
@@ -529,7 +928,9 @@ export function variantOfItem(
   const samples: DraftTestCase[] = db
     .casesOf(item.id)
     .filter((c) => c.isSample)
-    .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.expectedStdout, isSample: true }));
+    .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.expectedStdout, isSample: true, verified: false }));
+  const reference = db.referenceOf(item.id);
+  const noStarter = Object.keys(problem.starterCode).length === 0 && problem.interface === 'program';
   const base: ItemDraft = {
     type: 'problem',
     title: item.title,
@@ -537,11 +938,15 @@ export function variantOfItem(
     body: item.body,
     difficulty: item.difficulty,
     tags: [...item.tags],
+    // A variant keeps the original's interface, and with it the stubs and runners.
     problem: {
+      interface: problem.interface,
       timeLimitMs: problem.timeLimitMs,
       memoryLimitKb: problem.memoryLimitKb,
       compare: problem.compare,
-      starterCode: Object.keys(problem.starterCode).length > 0 ? { ...problem.starterCode } : starterCode(DRAFT_LANGUAGES),
+      starterCode: noStarter ? starterCode(DRAFT_LANGUAGES) : { ...problem.starterCode },
+      harness: structuredClone(problem.harness),
+      referenceSolution: reference ? { language: reference.language, source: reference.source } : null,
     },
     testCases: samples,
     assumptions: [],
@@ -642,16 +1047,39 @@ function maxSubarray(values: number[]): number {
   return best;
 }
 
+/**
+ * The reference solution a proposal comes with: the problem's own when it is
+ * in the requested language, else something believable. For a "solution
+ * only" problem that is the solution part only: another saved solution in
+ * that language, or failing that the stub itself.
+ */
+function proposedSolution(db: MockDb, item: StoredItem, language: string): SourceCode {
+  const reference = db.referenceOf(item.id);
+  if (reference && reference.language === language) return { language, source: reference.source };
+  if (item.problem?.interface !== 'function') return { language, source: genericSolution(language) };
+  const saved = db.solutionsOf(item.id).find((s) => s.language === language);
+  return { language, source: saved?.source ?? item.problem.starterCode[language] ?? '' };
+}
+
+export const REPEAT_MARKER = 'MOCK:REPEAT';
+export const REPEAT_ALL_MARKER = 'MOCK:REPEAT-ALL';
+
+/**
+ * `repeats` of the proposed cases are treated as repeating an input the
+ * problem already has, and left out as the server would; that can be all of
+ * them.
+ */
 export function proposeTestCases(
   db: MockDb,
   item: StoredItem,
   count: number,
   language: string,
-): AiTestCasesResponse {
+  repeats = 0,
+): Omit<AiTestCasesResponse, 'usage'> {
   const existing = db.casesOf(item.id);
-  const reference = db.referenceOf(item.id);
   const judge = db.options.judge;
   const verifying = judge === 'ok';
+  const solutionOnly = item.problem?.interface === 'function';
 
   const cases: ProposedTestCase[] = [];
   for (let i = 0; i < count; i++) {
@@ -660,7 +1088,8 @@ export function proposeTestCases(
     // With existing cases their inputs are reused, so the outputs are right
     // for this problem; otherwise fall back to inputs the stock solution fits.
     const base = existing.length > 0 ? existing[i % existing.length]! : null;
-    const stdin = base ? base.stdin : `${values.length}\n${values.join(' ')}\n`;
+    // A "solution only" problem takes its arguments as JSON, one per line.
+    const stdin = base ? base.stdin : solutionOnly ? `${JSON.stringify(values)}\n` : `${values.length}\n${values.join(' ')}\n`;
     const actual = base ? (db.truth.get(base.id) ?? base.expectedStdout) : `${maxSubarray(values)}\n`;
 
     const mismatch = i === Math.min(2, count - 1);
@@ -683,16 +1112,15 @@ export function proposeTestCases(
     });
   }
 
+  const dropped = Math.min(repeats, cases.length);
   return {
-    referenceSolution:
-      reference && reference.language === language
-        ? { language, source: reference.source }
-        : { language, source: genericSolution(language) },
+    referenceSolution: proposedSolution(db, item, language),
     verification: {
       attempted: judge !== 'none',
       engine: judge === 'none' ? null : 'judge0',
       error: judge === 'down' ? 'judge engine unreachable: dial tcp: connection refused' : null,
     },
-    cases,
+    duplicatesDropped: dropped,
+    cases: cases.slice(0, cases.length - dropped),
   };
 }

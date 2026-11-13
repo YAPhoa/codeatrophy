@@ -88,3 +88,35 @@ func TestHostAllowList(t *testing.T) {
 		t.Errorf("defaults: %v %d", d.HostAllowList(), d.MCP.MaxSessions)
 	}
 }
+
+func TestDatabase(t *testing.T) {
+	c, err := LoadFrom(env(nil))
+	if err != nil || c.DatabaseURL != "" || !c.SQLiteImport {
+		t.Errorf("defaults: %q %v %v", c.DatabaseURL, c.SQLiteImport, err)
+	}
+	for _, u := range []string{"postgres://u:p@db:5432/x?sslmode=disable", "postgresql://db/x"} {
+		c, err := LoadFrom(env(map[string]string{"CODEATROPHY_DATABASE_URL": u, "CODEATROPHY_SQLITE_IMPORT": "off"}))
+		if err != nil || c.DatabaseURL != u || c.SQLiteImport {
+			t.Errorf("%s: %+v %v", u, c, err)
+		}
+	}
+	for _, u := range []string{"mysql://u:s3cret@db/x", "/data/codeatrophy.db", "postgres://u:s3cret@db:port/x"} {
+		_, err := LoadFrom(env(map[string]string{"CODEATROPHY_DATABASE_URL": u}))
+		if err == nil || !strings.Contains(err.Error(), "CODEATROPHY_DATABASE_URL") || strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_SQLITE_IMPORT": "maybe"})); err == nil {
+		t.Error("a bad CODEATROPHY_SQLITE_IMPORT was accepted")
+	}
+	if !c.DBAutoMigrate {
+		t.Error("automatic migration is on by default")
+	}
+	if c, err := LoadFrom(env(map[string]string{"CODEATROPHY_DB_AUTO_MIGRATE": "OFF"})); err != nil || c.DBAutoMigrate {
+		t.Errorf("CODEATROPHY_DB_AUTO_MIGRATE=OFF: %v %v", c.DBAutoMigrate, err)
+	}
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_DB_AUTO_MIGRATE": "later"})); err == nil ||
+		!strings.Contains(err.Error(), "CODEATROPHY_DB_AUTO_MIGRATE: must be on or off") {
+		t.Errorf("a bad CODEATROPHY_DB_AUTO_MIGRATE: %v", err)
+	}
+}

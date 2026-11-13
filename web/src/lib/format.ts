@@ -1,4 +1,4 @@
-import type { Difficulty, ItemStatus, ItemType, TestOrigin, Verdict } from '../api/types';
+import type { Difficulty, GenerationUsage, ItemStatus, ItemType, TestOrigin, TokenUsage, UsageTotals, Verdict } from '../api/types';
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
   todo: 'To do',
@@ -116,6 +116,58 @@ export function plural(n: number, one: string, many: string = `${one}s`): string
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** A token count, short: 850, 5.2k, 61k, 1.2M. */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 9950) return `${Math.round(n / 100) / 10}k`;
+  if (n < 999_500) return `${Math.round(n / 1000)}k`;
+  return `${Math.round(n / 100_000) / 10}M`;
+}
+
+/** How long a generation took: whole seconds from ten up, minutes from sixty. */
+export function formatDuration(ms: number): string {
+  if (ms < 10_000) return formatMs(ms);
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  return seconds % 60 === 0 ? `${seconds / 60} min` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+}
+
+/**
+ * The token counts of a request, in a line: in and out when the provider
+ * reported them, reasoning and cache figures only when there were any.
+ */
+export function describeTokens(usage: TokenUsage): string {
+  const extra = (n: number | null | undefined, what: string) => (n != null && n > 0 ? `${formatTokens(n)} ${what}` : null);
+  return [
+    usage.inputTokens != null ? `${formatTokens(usage.inputTokens)} in` : null,
+    usage.outputTokens != null ? `${formatTokens(usage.outputTokens)} out` : null,
+    extra(usage.reasoningTokens, 'reasoning'),
+    extra(usage.cacheReadTokens, 'cache read'),
+    extra(usage.cacheWriteTokens, 'cache write'),
+  ]
+    .filter((part) => part !== null)
+    .join(' · ');
+}
+
+/** What one generation cost, in a line; figures the provider did not report are left out. */
+export function describeUsage(usage: GenerationUsage): string {
+  return [usage.model, describeTokens(usage), usage.durationMs > 0 ? formatDuration(usage.durationMs) : '']
+    .filter((part) => part !== '')
+    .join(' · ');
+}
+
+/** What a provider was used for over a period; failed requests and tokens only when there are any. */
+export function describeTotals(totals: UsageTotals): string {
+  if (totals.requests === 0) return 'No requests';
+  return [
+    plural(totals.requests, 'request'),
+    totals.failed > 0 ? `${totals.failed} failed` : null,
+    ...(totals.inputTokens > 0 || totals.outputTokens > 0 ? [`${formatTokens(totals.inputTokens)} in`, `${formatTokens(totals.outputTokens)} out`] : []),
+  ]
+    .filter((part) => part !== null)
+    .join(' · ');
+}
+
 /**
  * One line about a problem's test cases. While hidden cases are concealed
  * the line says how many there are and how many are shown as examples —
@@ -154,6 +206,8 @@ const CHANGE_LABEL: Record<string, string> = {
   limits: 'time and memory limits',
   compare: 'output comparison',
   starterCode: 'starter code',
+  interface: 'what the solver writes',
+  harness: 'runner code',
   solutions: 'solutions',
   testCases: 'test cases',
 };

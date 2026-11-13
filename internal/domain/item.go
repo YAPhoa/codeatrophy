@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -47,22 +48,49 @@ type Solution struct {
 	Source   string `json:"source"`
 }
 
+// HarnessCode is the hidden code of one language of a function problem:
+// the program that runs is the prefix, the submitted source and the suffix
+// (see package harness).
+type HarnessCode struct {
+	Prefix string `json:"prefix"`
+	Suffix string `json:"suffix"`
+}
+
 // ProblemSpec holds the fields only problems have.
 type ProblemSpec struct {
-	TimeLimitMs       int               `json:"timeLimitMs"`
-	MemoryLimitKb     int               `json:"memoryLimitKb"`
-	Compare           CompareMode       `json:"compare"`
-	StarterCode       map[string]string `json:"starterCode"`
-	ReferenceSolution *Solution         `json:"referenceSolution"`
+	Interface     ProblemInterface  `json:"interface"`
+	TimeLimitMs   int               `json:"timeLimitMs"`
+	MemoryLimitKb int               `json:"memoryLimitKb"`
+	Compare       CompareMode       `json:"compare"`
+	StarterCode   map[string]string `json:"starterCode"`
+	// Harness is keyed by language id; empty for a program problem.
+	Harness           map[string]HarnessCode `json:"harness"`
+	ReferenceSolution *Solution              `json:"referenceSolution"`
+}
+
+// HarnessFor returns the harness a solution in lang runs in: nil for a
+// program problem; for a function problem, the language's entry and
+// whether there is one.
+func (p *ProblemSpec) HarnessFor(lang string) (*HarnessCode, bool) {
+	if p == nil || p.Interface != InterfaceFunction {
+		return nil, true
+	}
+	h, ok := p.Harness[lang]
+	if !ok {
+		return nil, false
+	}
+	return &h, true
 }
 
 // DefaultProblemSpec returns the defaults for a new problem.
 func DefaultProblemSpec() *ProblemSpec {
 	return &ProblemSpec{
+		Interface:     InterfaceProgram,
 		TimeLimitMs:   DefaultTimeLimitMs,
 		MemoryLimitKb: DefaultMemoryLimitKb,
 		Compare:       CompareTokens,
 		StarterCode:   map[string]string{},
+		Harness:       map[string]HarnessCode{},
 	}
 }
 
@@ -111,8 +139,16 @@ func (s *ItemSummary) Normalize() {
 // Normalize replaces nil slices and maps with empty ones.
 func (it *Item) Normalize() {
 	it.ItemSummary.Normalize()
-	if it.Problem != nil && it.Problem.StarterCode == nil {
-		it.Problem.StarterCode = map[string]string{}
+	if p := it.Problem; p != nil {
+		if p.StarterCode == nil {
+			p.StarterCode = map[string]string{}
+		}
+		if p.Harness == nil {
+			p.Harness = map[string]HarnessCode{}
+		}
+		if p.Interface == "" {
+			p.Interface = InterfaceProgram
+		}
 	}
 }
 
@@ -128,10 +164,8 @@ func (it Item) Clone() Item {
 	c.Source = Source{URL: clonePtr(it.Source.URL), Note: clonePtr(it.Source.Note)}
 	if it.Problem != nil {
 		p := *it.Problem
-		p.StarterCode = make(map[string]string, len(it.Problem.StarterCode))
-		for k, v := range it.Problem.StarterCode {
-			p.StarterCode[k] = v
-		}
+		p.StarterCode = maps.Clone(it.Problem.StarterCode)
+		p.Harness = maps.Clone(it.Problem.Harness)
 		p.ReferenceSolution = clonePtr(it.Problem.ReferenceSolution)
 		c.Problem = &p
 	}
@@ -154,11 +188,13 @@ type SourcePatch struct {
 
 // ProblemPatch is a partial ProblemSpec.
 type ProblemPatch struct {
-	TimeLimitMs       Opt[int]               `json:"timeLimitMs"`
-	MemoryLimitKb     Opt[int]               `json:"memoryLimitKb"`
-	Compare           Opt[CompareMode]       `json:"compare"`
-	StarterCode       Opt[map[string]string] `json:"starterCode"`
-	ReferenceSolution Opt[Solution]          `json:"referenceSolution"`
+	Interface         Opt[ProblemInterface]       `json:"interface"`
+	TimeLimitMs       Opt[int]                    `json:"timeLimitMs"`
+	MemoryLimitKb     Opt[int]                    `json:"memoryLimitKb"`
+	Compare           Opt[CompareMode]            `json:"compare"`
+	StarterCode       Opt[map[string]string]      `json:"starterCode"`
+	Harness           Opt[map[string]HarnessCode] `json:"harness"`
+	ReferenceSolution Opt[Solution]               `json:"referenceSolution"`
 }
 
 // ItemInput is the body of item create and update requests. Every field is
@@ -306,6 +342,20 @@ func ApplyItemInput(it *Item, in ItemInput) FieldErrors {
 					it.Problem.Compare = p.Compare.Val
 				}
 			}
+			if p.Interface.Set {
+				if p.Interface.Null {
+					errs.Add("problem.interface", "cannot be null")
+				} else {
+					it.Problem.Interface = p.Interface.Val
+				}
+			}
+			if p.Harness.Set {
+				// Like starterCode: null clears it, a value replaces it.
+				it.Problem.Harness = maps.Clone(p.Harness.Val)
+				if it.Problem.Harness == nil {
+					it.Problem.Harness = map[string]HarnessCode{}
+				}
+			}
 			if p.StarterCode.Set {
 				if p.StarterCode.Null {
 					it.Problem.StarterCode = map[string]string{}
@@ -385,6 +435,9 @@ func NormalizeItem(it *Item) {
 	if it.Problem != nil {
 		for k, v := range it.Problem.StarterCode {
 			it.Problem.StarterCode[k] = NormalizeText(v)
+		}
+		for k, h := range it.Problem.Harness {
+			it.Problem.Harness[k] = HarnessCode{Prefix: NormalizeText(h.Prefix), Suffix: NormalizeText(h.Suffix)}
 		}
 		if rs := it.Problem.ReferenceSolution; rs != nil {
 			rs.Source = NormalizeText(rs.Source)
@@ -493,6 +546,24 @@ func ValidateProblem(p *ProblemSpec, lim Limits) FieldErrors {
 	if !p.Compare.Valid() {
 		errs.Add("compare", "must be tokens or exact")
 	}
+	if !p.Interface.Valid() {
+		errs.Add("interface", "must be program or function")
+	}
+	if p.Interface == InterfaceProgram && len(p.Harness) > 0 {
+		errs.Add("harness", "must be {} for a program problem (send harness: {} with interface: program to discard the runner code)")
+	}
+	for lang, h := range p.Harness {
+		if !KnownLanguage(lang) {
+			errs.Add("harness."+lang, "unknown language")
+			continue
+		}
+		if lim.MaxSourceBytes > 0 && len(h.Prefix) > lim.MaxSourceBytes {
+			errs.Add("harness."+lang+".prefix", fmt.Sprintf("must be at most %d bytes", lim.MaxSourceBytes))
+		}
+		if lim.MaxSourceBytes > 0 && len(h.Suffix) > lim.MaxSourceBytes {
+			errs.Add("harness."+lang+".suffix", fmt.Sprintf("must be at most %d bytes", lim.MaxSourceBytes))
+		}
+	}
 	for lang, src := range p.StarterCode {
 		if !KnownLanguage(lang) {
 			errs.Add("starterCode."+lang, "unknown language")
@@ -543,16 +614,12 @@ func ContentEqual(a, b *Item) bool {
 	}
 	if a.Problem != nil {
 		p, q := a.Problem, b.Problem
-		if p.TimeLimitMs != q.TimeLimitMs || p.MemoryLimitKb != q.MemoryLimitKb || p.Compare != q.Compare {
+		if p.TimeLimitMs != q.TimeLimitMs || p.MemoryLimitKb != q.MemoryLimitKb || p.Compare != q.Compare ||
+			p.Interface != q.Interface {
 			return false
 		}
-		if len(p.StarterCode) != len(q.StarterCode) {
+		if !maps.Equal(p.StarterCode, q.StarterCode) || !maps.Equal(p.Harness, q.Harness) {
 			return false
-		}
-		for k, v := range p.StarterCode {
-			if w, ok := q.StarterCode[k]; !ok || w != v {
-				return false
-			}
 		}
 		if !RefEqual(p.ReferenceSolution, q.ReferenceSolution) {
 			return false

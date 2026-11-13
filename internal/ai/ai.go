@@ -36,13 +36,27 @@ type GenerateRequest struct {
 	Light bool
 }
 
-// GenerateResponse carries the model's JSON output.
+// GenerateResponse carries the model's JSON output. A provider that fails
+// after the answer arrived (output that is not JSON, a cut-off answer)
+// still fills in Text, Model and the counts it has.
 type GenerateResponse struct {
-	JSON         json.RawMessage
-	Model        string
-	InputTokens  int
-	OutputTokens int
+	JSON  json.RawMessage
+	Model string
+	// Text is the model's answer as it arrived.
+	Text string
+	// Token counts as the service reported them, nil where it reported none.
+	// InputTokens excludes tokens read from or written to a prompt cache,
+	// which are counted separately; OutputTokens includes reasoning, of
+	// which ReasoningTokens is the part the service says it spent on it.
+	InputTokens      *int
+	OutputTokens     *int
+	ReasoningTokens  *int
+	CacheReadTokens  *int
+	CacheWriteTokens *int
 }
+
+// IntPtr returns a pointer to n.
+func IntPtr(n int) *int { return &n }
 
 // Provider is a model endpoint that can produce schema-conforming JSON.
 type Provider interface {
@@ -51,7 +65,24 @@ type Provider interface {
 	Generate(ctx context.Context, req GenerateRequest) (GenerateResponse, error)
 }
 
-// Config is what a provider needs to be constructed.
+// ModelLister is an optional capability of a Provider: listing the model ids
+// the service offers. It needs no model to be configured. Implementations
+// bound the call with ModelListTimeout and the response with
+// MaxModelListBytes, and return at most MaxModelListEntries ids as the
+// service sent them; callers treat the ids as untrusted text.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]string, error)
+}
+
+// Bounds on listing models.
+const (
+	ModelListTimeout    = 15 * time.Second
+	MaxModelListBytes   = 4 << 20
+	MaxModelListEntries = 5000
+)
+
+// Config is what a provider needs to be constructed. Model may be empty for
+// a provider that is only used to list models.
 type Config struct {
 	Model   string
 	BaseURL string

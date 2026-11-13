@@ -1,11 +1,11 @@
-import { useCallback, useId, useRef, useState } from 'react';
-import { Check, Minus, Plus } from 'lucide-react';
-import { usePreferences, useUpdatePreferences } from '../../api/queries';
+import { useCallback, useId, useRef, useState, type ComponentProps } from 'react';
+import { Check } from 'lucide-react';
+import { useLimits, usePreferences, useUpdatePreferences } from '../../api/queries';
 import type { EditorPreferences, Preferences, PreferencesUpdate } from '../../api/types';
-import { IconButton } from '../../ui/Button';
-import { Checkbox, Segmented } from '../../ui/Field';
+import { setThemePreference, useThemePreference } from '../../lib/theme';
+import { Checkbox, NumberStepper, Segmented } from '../../ui/Field';
 import { ErrorCallout, Spinner } from '../../ui/misc';
-import { clampFontSize, FONT_SIZE_MAX, FONT_SIZE_MIN, lineHeightFor, parseFontSize, TAB_SIZES, type TabSize } from '../../ui/editorOptions';
+import { FONT_SIZE_MAX, FONT_SIZE_MIN, lineHeightFor, TAB_SIZES, type TabSize } from '../../ui/editorOptions';
 
 function merge(base: PreferencesUpdate | null, change: PreferencesUpdate): PreferencesUpdate {
   return { ...base, ...change, editor: { ...base?.editor, ...change.editor } };
@@ -75,72 +75,20 @@ function SaveStatus({ state }: { state: SaveState }) {
   );
 }
 
-function FontSizeControl({ value, onChange }: { value: number; onChange: (size: number) => void }) {
+/** A numeric setting: its name and hint on the left, a stepper on the right. */
+function StepperRow({ label, hint, ...stepper }: { label: string; hint: string } & Omit<ComponentProps<typeof NumberStepper>, 'id' | 'aria-describedby'>) {
   const id = useId();
-  // What is being typed, while it differs from the saved size.
-  const [draft, setDraft] = useState<string | null>(null);
-
-  const commit = (size: number) => {
-    setDraft(null);
-    if (size !== value) onChange(size);
-  };
-
   return (
     <div className="prefs-row">
       <div className="prefs-row-text">
         <label htmlFor={id} className="prefs-row-label">
-          Font size
+          {label}
         </label>
         <div id={`${id}-hint`} className="field-hint">
-          {FONT_SIZE_MIN} to {FONT_SIZE_MAX} pixels. Applies to code; notes and descriptions keep their own size.
+          {hint}
         </div>
       </div>
-      <div className="prefs-stepper">
-        <IconButton
-          label="Smaller font"
-          size="sm"
-          icon={<Minus size={14} aria-hidden="true" />}
-          disabled={value <= FONT_SIZE_MIN}
-          onClick={() => commit(clampFontSize(value - 1))}
-        />
-        <input
-          id={id}
-          className="input prefs-number"
-          type="number"
-          inputMode="numeric"
-          min={FONT_SIZE_MIN}
-          max={FONT_SIZE_MAX}
-          step={1}
-          value={draft ?? String(value)}
-          aria-describedby={`${id}-hint`}
-          aria-invalid={draft != null && parseFontSize(draft) == null ? true : undefined}
-          onChange={(e) => {
-            const text = e.target.value;
-            const size = parseFontSize(text);
-            // A size in range is saved as it is typed; anything else waits until the field is left.
-            if (size == null) setDraft(text);
-            else commit(size);
-          }}
-          onBlur={() => {
-            if (draft == null) return;
-            const typed = Number(draft);
-            commit(draft.trim() === '' || Number.isNaN(typed) ? value : clampFontSize(typed));
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
-          }}
-        />
-        <span className="prefs-unit" aria-hidden="true">
-          px
-        </span>
-        <IconButton
-          label="Larger font"
-          size="sm"
-          icon={<Plus size={14} aria-hidden="true" />}
-          disabled={value >= FONT_SIZE_MAX}
-          onClick={() => commit(clampFontSize(value + 1))}
-        />
-      </div>
+      <NumberStepper id={id} aria-describedby={`${id}-hint`} {...stepper} />
     </div>
   );
 }
@@ -174,40 +122,70 @@ export function PreferencesSection() {
   const shown: Preferences = { ...saved, ...pending, editor: { ...saved.editor, ...pending?.editor } };
   const { editor } = shown;
   const setEditor = (change: Partial<EditorPreferences>) => save({ editor: change });
+  const theme = useThemePreference();
+  const maxGenerated = useLimits()?.maxGeneratedTestCases ?? 30;
 
   return (
-    <section id="preferences" className="settings-section" aria-labelledby="preferences-title">
+    <section className="settings-section" aria-labelledby="preferences-title">
       <div className="row">
-        <h2 id="preferences-title">Preferences</h2>
+        <h1 id="preferences-title" className="page-title">
+          Preferences
+        </h1>
         <SaveStatus state={state} />
       </div>
       <p className="settings-lead">
-        Changes are saved as you make them. Preferences are stored on the server, so they follow you to any browser you use; the theme, under Appearance, is kept per
-        browser.
+        Changes are saved as you make them and follow you to any browser, except the theme, which is kept per browser.
       </p>
       {state.status === 'error' && <ErrorCallout error={state.error} title="That change was not saved, and the setting is back to what it was" />}
 
+      <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-appearance-title">
+        <h2 id="preferences-appearance-title" className="prefs-group-title">
+          Appearance
+        </h2>
+        <div className="prefs-row">
+          <div className="prefs-row-text">
+            <div className="prefs-row-label">Theme</div>
+            <div className="field-hint">Stored in this browser.</div>
+          </div>
+          <Segmented
+            label="Theme"
+            value={theme}
+            onChange={setThemePreference}
+            options={[
+              { value: 'system', label: 'Match system' },
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ]}
+          />
+        </div>
+      </div>
+
       <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-tests-title">
-        <h3 id="preferences-tests-title" className="prefs-group-title">
+        <h2 id="preferences-tests-title" className="prefs-group-title">
           Test cases
-        </h3>
+        </h2>
         <Checkbox
           checked={shown.hideTestCases}
           onChange={(hideTestCases) => save({ hideTestCases })}
           label="Hide test cases by default"
-          hint={
-            <>
-              The inputs and expected outputs of a problem’s test cases stay out of sight until you choose to reveal them, so they cannot give the answer away. Counts
-              are always shown (“7 test cases · 2 shown as examples”, “Ran 7 test cases — 5 passed”), and so are the cases marked as examples.
-            </>
-          }
+          hint="Only the counts and the example cases are shown until you reveal the rest."
+        />
+        <StepperRow
+          label="Test cases to generate"
+          hint="How many the AI is asked for, unless you change it for a run."
+          value={Math.min(maxGenerated, Math.max(1, shown.generatedTestCases))}
+          onChange={(generatedTestCases) => save({ generatedTestCases })}
+          min={1}
+          max={maxGenerated}
+          decreaseLabel="Fewer test cases"
+          increaseLabel="More test cases"
         />
       </div>
 
       <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-editor-title">
-        <h3 id="preferences-editor-title" className="prefs-group-title">
+        <h2 id="preferences-editor-title" className="prefs-group-title">
           Code editor
-        </h3>
+        </h2>
         <Checkbox
           checked={editor.autocomplete}
           onChange={(autocomplete) => setEditor({ autocomplete })}
@@ -236,7 +214,17 @@ export function PreferencesSection() {
           />
         </div>
 
-        <FontSizeControl value={editor.fontSize} onChange={(fontSize) => setEditor({ fontSize })} />
+        <StepperRow
+          label="Font size"
+          hint={`${FONT_SIZE_MIN} to ${FONT_SIZE_MAX} pixels. Applies to code; notes and descriptions keep their own size.`}
+          value={editor.fontSize}
+          onChange={(fontSize) => setEditor({ fontSize })}
+          min={FONT_SIZE_MIN}
+          max={FONT_SIZE_MAX}
+          unit="px"
+          decreaseLabel="Smaller font"
+          increaseLabel="Larger font"
+        />
         <EditorPreview editor={editor} />
       </div>
     </section>

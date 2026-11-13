@@ -47,6 +47,21 @@ func (s ItemStatus) Valid() bool {
 // Statuses lists all statuses.
 var Statuses = []ItemStatus{StatusTodo, StatusInProgress, StatusDone}
 
+// ProblemInterface says what the solver of a problem writes.
+type ProblemInterface string
+
+const (
+	// InterfaceProgram: a complete program that reads stdin and writes
+	// stdout.
+	InterfaceProgram ProblemInterface = "program"
+	// InterfaceFunction: only the solution (a function or class); a
+	// per-language harness turns it into a program.
+	InterfaceFunction ProblemInterface = "function"
+)
+
+// Valid reports whether p is a known interface.
+func (p ProblemInterface) Valid() bool { return p == InterfaceProgram || p == InterfaceFunction }
+
 // CompareMode selects how actual output is compared with expected output.
 type CompareMode string
 

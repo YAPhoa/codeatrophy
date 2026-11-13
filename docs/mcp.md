@@ -69,7 +69,9 @@ expires; open sessions are unaffected. A request body may be at most
   and `message` the HTTP API would return.
 - Tools are annotated (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so
   clients can apply their own confirmation policy.
-- AI provider settings and credentials are not reachable through MCP.
+- AI provider settings and credentials, their usage counts and the AI
+  activity log are not reachable through MCP. MCP has no AI generation of its
+  own: the connected assistant is the model.
 
 ## Tools
 
@@ -79,7 +81,7 @@ expires; open sessions are unaffected. A request body may be at most
 | --- | --- |
 | `get_overview` | Library statistics, the collection tree, the tag list, and which languages the judge offers. A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
-| `get_item` | One item in full. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent) |
+| `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent) |
 | `list_test_cases` | Test cases of a problem |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
 | `get_submission` | A submission with per-case results |
@@ -89,8 +91,8 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `create_item` | Create a problem or reading; may include test cases, collections, tags and `variantOf` in the same call |
-| `update_item` | Partial update of any item field (merge semantics) |
+| `create_item` | Create a problem or reading; may include test cases, collections, tags and `variantOf` in the same call. A solution-only problem sets `problem.interface: "function"`, with `starterCode` (the stubs) and `harness` (`{ <language>: { prefix, suffix } }`) |
+| `update_item` | Partial update of any item field (merge semantics; `problem.starterCode` and `problem.harness` replace all entries). Setting `problem.interface` to `program` on a problem with a harness requires `harness: {}` in the same call |
 | `edit_item_text` | Exact-match text replacements inside `body` or `notes`, for small changes to long text |
 | `delete_item` | Delete an item with its test cases, solutions and submissions |
 | `bulk_update_items` | One action on many items: tag, untag, set status, favorite, add to or remove from a collection, delete |
@@ -112,13 +114,13 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `add_test_cases` | Append (or replace all) test cases; may set the reference solution in the same call |
+| `add_test_cases` | Append (or replace all) test cases; may set the reference solution in the same call (for a function problem, the solution part only) |
 | `update_test_case` | Change one test case |
 | `delete_test_case` | Delete one test case |
-| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and changes nothing |
-| `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision` |
+| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and changes nothing. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
+| `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only |
 | `delete_solution` | Delete one saved solution; deleting the reference leaves the problem without one |
-| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands) |
+| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected |
 
 The execution tools need a judge engine and return `judge_unavailable`
 without one.
@@ -133,11 +135,26 @@ languages, a brute force — of which at most one is the reference solution
 (see "Solutions" in `docs/api.md`). To check another one against the tests,
 pass its id as `solutionId` to `verify_test_cases`.
 
+### Solution-only problems
+
+A problem whose `interface` is `function` asks only for a function or class
+(see "Problem interface" in `docs/api.md`). The program that runs is the
+language's harness prefix, the solution and the harness suffix; every tool
+that runs code assembles it the same way, and saved solutions hold only the
+solution part. In the results of `run_code` and `verify_test_cases`, line
+numbers in compiler output and stderr refer to the solution's own lines; a
+location inside the runner names `<runner prefix>` or `<runner suffix>` with
+a line within that part, and a submission's `lineOffset` is how many lines
+the prefix adds. To prove a runner, verify the sample cases with the
+reference solution and run the unchanged stub with `run_code` in each
+language: it should run and end in a wrong answer. The authoring guide describes how stubs
+and runners are written.
+
 ## Prompts
 
 | Prompt | Arguments | Purpose |
 | --- | --- | --- |
-| `draft_item` | `text`, `type?`, `style?` | Turn a rough or incomplete snippet into a complete item and save it |
+| `draft_item` | `text`, `type?`, `style?` | Turn a rough or incomplete snippet into a complete item and save it, choosing a problem's interface |
 | `write_test_cases` | `itemId`, `count?` | Write a reference solution and a verified test set for a problem |
 | `create_variant` | `itemId`, `mode?`, `instruction?`, `style?` | Derive a related new item and save it linked to the original |
 
@@ -162,4 +179,27 @@ The user's style presets (see `docs/api.md`) are available read-only:
 
 There is deliberately no tool that creates or edits presets: they are standing
 instructions for a model, and may only be written by the instance's user in
-the app's settings.
+the app's settings. The only exception is the built-in presets a new
+instance starts with, which ship with the app and are then edited like any
+other.
+
+## Companion skill
+
+The tools say what an assistant *can* do; the companion skill in
+`skills/codeatrophy/` tells it how to go about it: what to do with a rough
+problem you paste, when to make a problem solution-only, how to write test
+cases whose expected outputs come from running a reference solution, and to
+keep solutions out of the conversation unless you ask to see them.
+
+It is optional — everything works over MCP without it — and it is an ordinary
+Agent Skill: a folder with a `SKILL.md`.
+
+```sh
+# Claude Code, for your user account
+mkdir -p ~/.claude/skills && cp -r skills/codeatrophy ~/.claude/skills/
+```
+
+Other clients that support skills take the same folder, usually as a zip
+uploaded in their skills settings. The skill describes workflow only; the
+format rules still come from the server's authoring guide, so it does not go
+stale when those change.

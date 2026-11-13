@@ -78,12 +78,12 @@ export function ErrorState({ error, onRetry, compact, title }: ErrorStateProps) 
       <div className="empty-text">{view.message}</div>
       <div className="empty-actions">
         {view.action === 'ai-settings' && (
-          <Link className="btn btn-default" to="/settings#ai">
+          <Link className="btn btn-default" to="/settings/ai">
             Open AI settings
           </Link>
         )}
         {view.action === 'judge-settings' && (
-          <Link className="btn btn-default" to="/settings#judge">
+          <Link className="btn btn-default" to="/settings/judge">
             Judge status
           </Link>
         )}
@@ -142,8 +142,8 @@ export function ErrorCallout({ error, onRetry, title }: { error: unknown; onRetr
       title={title ?? view.title}
       actions={
         <>
-          {view.action === 'ai-settings' && <Link to="/settings#ai">Open AI settings</Link>}
-          {view.action === 'judge-settings' && <Link to="/settings#judge">Judge status</Link>}
+          {view.action === 'ai-settings' && <Link to="/settings/ai">Open AI settings</Link>}
+          {view.action === 'judge-settings' && <Link to="/settings/judge">Judge status</Link>}
           {onRetry && view.action !== 'ai-settings' && (
             <Button size="sm" icon={<RotateCw size={13} />} onClick={onRetry}>
               Try again

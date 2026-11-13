@@ -16,6 +16,8 @@ const (
 	BlockExistingSolution = "existing_solution"
 	BlockInstruction      = "instruction"
 	BlockStylePreset      = "style_preset"
+	BlockJudgeLanguages   = "judge_languages"
+	BlockExistingCases    = "existing_cases"
 )
 
 // Envelope delimits untrusted text in a prompt. Every block is wrapped in
@@ -88,7 +90,7 @@ func (e Envelope) Rules() string {
 }
 
 // blockTagRe matches anything that could be read as a block tag.
-var blockTagRe = regexp.MustCompile(`(?i)<\s*/?\s*(user_input|previous_draft|original|problem|existing_solution|instruction|style_preset)\b`)
+var blockTagRe = regexp.MustCompile(`(?i)<\s*/?\s*(user_input|previous_draft|original|problem|existing_solution|instruction|style_preset|judge_languages|existing_cases)\b`)
 
 // Defang neutralises tag-like occurrences of block names in untrusted text by
 // replacing their "<" with a look-alike character.

@@ -1,5 +1,6 @@
-import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import { cx } from './Button';
+import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { Minus, Plus } from 'lucide-react';
+import { IconButton, cx } from './Button';
 
 interface FieldProps {
   label: string;
@@ -171,6 +172,82 @@ export function Segmented<T extends string>({ label, value, onChange, options, s
           <span>{o.label}</span>
         </label>
       ))}
+    </div>
+  );
+}
+
+/** Read a whole number typed into a field. Returns null unless it is inside the range, so that a half-typed value is not acted on. */
+export function parseWholeNumber(text: string, min: number, max: number): number | null {
+  if (!/^\s*\d+\s*$/.test(text)) return null;
+  const n = Number(text);
+  return n >= min && n <= max ? n : null;
+}
+
+interface NumberStepperProps {
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  /** Names of the two buttons, e.g. "Smaller font" and "Larger font". */
+  decreaseLabel: string;
+  increaseLabel: string;
+  /** Shown after the number, e.g. "px". */
+  unit?: string;
+  disabled?: boolean;
+  id?: string;
+  'aria-describedby'?: string;
+}
+
+/**
+ * A whole number with a step button on either side. A typed value in range
+ * is passed on as it is typed; anything else waits until the field is left,
+ * and is then brought into range or dropped.
+ */
+export function NumberStepper({ value, onChange, min, max, decreaseLabel, increaseLabel, unit, disabled, id, 'aria-describedby': describedBy }: NumberStepperProps) {
+  // What is being typed, while it differs from the value.
+  const [draft, setDraft] = useState<string | null>(null);
+  const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
+  const commit = (next: number) => {
+    setDraft(null);
+    if (next !== value) onChange(next);
+  };
+
+  return (
+    <div className="stepper">
+      <IconButton label={decreaseLabel} size="sm" icon={<Minus size={14} aria-hidden="true" />} disabled={disabled || value <= min} onClick={() => commit(clamp(value - 1))} />
+      <input
+        id={id}
+        className="input stepper-input"
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={draft ?? String(value)}
+        disabled={disabled}
+        aria-describedby={describedBy}
+        aria-invalid={draft != null && parseWholeNumber(draft, min, max) == null ? true : undefined}
+        onChange={(e) => {
+          const text = e.target.value;
+          const typed = parseWholeNumber(text, min, max);
+          if (typed == null) setDraft(text);
+          else commit(typed);
+        }}
+        onBlur={() => {
+          if (draft == null) return;
+          const typed = Number(draft);
+          commit(draft.trim() === '' || Number.isNaN(typed) ? value : clamp(typed));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+      />
+      {unit && (
+        <span className="stepper-unit" aria-hidden="true">
+          {unit}
+        </span>
+      )}
+      <IconButton label={increaseLabel} size="sm" icon={<Plus size={14} aria-hidden="true" />} disabled={disabled || value >= max} onClick={() => commit(clamp(value + 1))} />
     </div>
   );
 }

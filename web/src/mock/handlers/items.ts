@@ -3,6 +3,7 @@
 import type {
   CompareMode,
   Difficulty,
+  HarnessCode,
   ItemSort,
   ItemSource,
   ItemStatus,
@@ -91,6 +92,25 @@ function isHttpUrl(value: string): boolean {
 
 function parseProblem(value: Record<string, unknown>, v: Validator): Partial<ProblemSpec> {
   const out: Partial<ProblemSpec> = {};
+  if (value.interface !== undefined) {
+    if (value.interface !== 'program' && value.interface !== 'function') v.add('problem.interface', 'must be program or function');
+    else out.interface = value.interface;
+  }
+  if (value.harness !== undefined) {
+    const harness: Record<string, HarnessCode> = {};
+    for (const [language, code] of Object.entries(isRecord(value.harness) ? value.harness : { '': null })) {
+      if (!isLanguage(language) || !isRecord(code) || typeof code.prefix !== 'string' || typeof code.suffix !== 'string') {
+        v.add('problem.harness', 'must map known language ids to { prefix, suffix }');
+        break;
+      }
+      if (byteLength(code.prefix) > LIMITS.maxSourceBytes || byteLength(code.suffix) > LIMITS.maxSourceBytes) {
+        v.add(`problem.harness.${language}`, `prefix and suffix must each be at most ${LIMITS.maxSourceBytes} bytes`);
+        break;
+      }
+      harness[language] = { prefix: normaliseText(code.prefix), suffix: normaliseText(code.suffix) };
+    }
+    out.harness = harness;
+  }
   if (value.timeLimitMs !== undefined) {
     const n = value.timeLimitMs;
     const range = LIMITS.timeLimitMs;
@@ -429,10 +449,11 @@ function createItem(db: MockDb, req: Req) {
     else raw.testCases.forEach((tc, i) => cases.push(parseTestCaseInput(tc, v, `testCases.${i}.`)));
   }
   if (type === 'reading' && fields.problem != null) v.add('problem', 'must be null for a reading');
-  v.check();
-
   // The reference solution is not stored on the item: it becomes its first saved solution.
   const { referenceSolution, ...problem } = fields.problem ?? {};
+  checkHarness({ ...DEFAULT_PROBLEM, ...problem }, v);
+  v.check();
+
   const now = db.now();
   const item: StoredItem = {
     id: uuid(),
@@ -461,6 +482,13 @@ function createItem(db: MockDb, req: Req) {
   return created(db.full(item));
 }
 
+/** Only a `function` problem has a harness. Checked on the problem as it would be stored. */
+function checkHarness(problem: Pick<ProblemSpec, 'interface' | 'harness'>, v: Validator): void {
+  if (problem.interface === 'program' && Object.keys(problem.harness).length > 0) {
+    v.add('problem.harness', 'must be empty for a program problem');
+  }
+}
+
 /** Fail with the contract's revision conflict when `expectedRevision` is stale. */
 export function checkRevision(item: StoredItem, raw: Record<string, unknown>): void {
   const expected = raw.expectedRevision;
@@ -486,6 +514,7 @@ function patchItem(db: MockDb, req: Req) {
   const fields = parseFields(db, raw, v, item);
   if (item.type === 'reading' && fields.problem != null) v.add('problem', 'must be null for a reading');
   if (item.type === 'problem' && fields.problem === null) v.add('problem', 'cannot be null for a problem');
+  if (item.problem && fields.problem) checkHarness({ ...item.problem, ...fields.problem }, v);
   v.check();
   checkRevision(item, raw);
 

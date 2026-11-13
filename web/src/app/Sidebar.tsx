@@ -34,6 +34,7 @@ import { invalidateLibrary, useCollections, useStats } from '../api/queries';
 import type { Collection, Meta } from '../api/types';
 import { useCollectionActions } from '../features/collections/CollectionActions';
 import { MOD } from '../lib/hotkeys';
+import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { setThemePreference, useThemePreference, type ThemePreference } from '../lib/theme';
 import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
@@ -200,6 +201,7 @@ const THEME_ICON: Record<ThemePreference, ReactNode> = {
 export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const newHref = useNewItemHref();
   const { collectionId } = useParams();
   const stats = useStats();
   const collections = useCollections();
@@ -240,7 +242,8 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       }))}
     />
   );
-  const aiTitle = meta.ai.enabled ? `AI drafting: ${meta.ai.model ?? 'on'}` : 'AI drafting is not set up';
+  const onSettings = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
+  const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is not set up';
   const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
 
   if (minimised) {
@@ -253,7 +256,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           </span>
         </Link>
         <IconButton label={`Expand navigation (${MOD}+B)`} size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
-        <Link to="/new" className="rail-item rail-new" aria-label="New item" title="New item (C)">
+        <Link to={newHref} className="rail-item rail-new" aria-label="New item" title="New item (C)">
           <Plus size={16} />
         </Link>
         <button type="button" className="rail-item" onClick={onOpenPalette} aria-label="Search and commands" title={`Search and commands (${MOD}+K)`}>
@@ -268,14 +271,14 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} />
           <RailEntry to="/import" icon={<Upload size={16} />} label="Import" active={location.pathname === '/import'} />
           <RailEntry to="/export" icon={<Download size={16} />} label="Export" active={location.pathname === '/export'} />
-          <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={location.pathname === '/settings'} />
+          <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />
         </nav>
         <div className="rail-foot">
-          <Link to="/settings#ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
+          <Link to="/settings/ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
             <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
             <span aria-hidden="true">AI</span>
           </Link>
-          <Link to="/settings#judge" className="rail-svc" title={judgeTitle} aria-label={judgeTitle}>
+          <Link to="/settings/judge" className="rail-svc" title={judgeTitle} aria-label={judgeTitle}>
             <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
             <span aria-hidden="true">Judge</span>
           </Link>
@@ -300,7 +303,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       </div>
 
       <div className="sidebar-actions">
-        <LinkButton to="/new" variant="primary" icon={<Plus size={15} />} className="sidebar-new">
+        <LinkButton to={newHref} variant="primary" icon={<Plus size={15} />} className="sidebar-new">
           New item
           <Kbd>C</Kbd>
         </LinkButton>
@@ -364,17 +367,17 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
             <NavEntry to="/export" icon={<Download size={15} />} label="Export" active={location.pathname === '/export'} />
           </li>
           <li>
-            <NavEntry to="/settings" icon={<Settings size={15} />} label="Settings" active={location.pathname === '/settings'} />
+            <NavEntry to="/settings" icon={<Settings size={15} />} label="Settings" active={onSettings} />
           </li>
         </ul>
       </nav>
 
       <div className="sidebar-foot">
-        <Link to="/settings#ai" className="svc" title={aiTitle}>
+        <Link to="/settings/ai" className="svc" title={aiTitle}>
           <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
           AI<span className="sr-only">: {meta.ai.enabled ? 'on' : 'off'}</span>
         </Link>
-        <Link to="/settings#judge" className="svc" title={judgeTitle}>
+        <Link to="/settings/judge" className="svc" title={judgeTitle}>
           <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
           Judge<span className="sr-only">: {judgeState === 'ok' ? 'healthy' : judgeState === 'down' ? 'not responding' : 'off'}</span>
         </Link>

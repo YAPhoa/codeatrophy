@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -20,7 +19,7 @@ import (
 	"codeatrophy/internal/judge/judgetest"
 	"codeatrophy/internal/mcpserver"
 	"codeatrophy/internal/secrets"
-	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store/teststore"
 )
 
 type fixture struct {
@@ -32,15 +31,20 @@ type fixture struct {
 func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *fixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "m.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := teststore.Open(t)
 	box, _ := secrets.NewBox(bytes.Repeat([]byte{1}, 32))
 	a := app.New(app.Options{Store: db, Engine: judgetest.New("python"), Secrets: box, Version: "test",
 		Limits: domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 16}})
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
+	}
+	presets, _ := a.ListStylePresets(ctx)
+	// Tests start without the built-in style presets, which have tests of
+	// their own in the store.
+	for _, p := range presets.Items {
+		if err := a.DeleteStylePreset(ctx, p.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	o := mcpserver.Options{App: a, Token: token,
 		OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, nil, nil) }}
@@ -52,7 +56,6 @@ func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *f
 	t.Cleanup(func() {
 		srv.Close()
 		a.Stop()
-		db.Close()
 	})
 	return &fixture{app: a, srv: srv, ctx: ctx}
 }
@@ -459,5 +462,46 @@ func TestIdleSessionsExpire(t *testing.T) {
 	c := f.connect(t, "")
 	if _, err := c.ListTools(f.ctx, nil); err != nil {
 		t.Errorf("a new session after the idle one expired: %v", err)
+	}
+}
+
+func TestFunctionProblemTools(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	it, isErr := call(t, s, "create_item", map[string]any{"type": "problem", "title": "Sum",
+		"problem": map[string]any{"interface": "function",
+			"starterCode": map[string]string{"python": "class Solution:\n    def f(self):\n        "},
+			"harness":     map[string]any{"python": map[string]string{"prefix": "", "suffix": "\nmain()\n"}}},
+		"testCases": []map[string]any{{"stdin": "1 2", "expectedStdout": "3", "isSample": true}}})
+	if isErr {
+		t.Fatalf("create_item: %v", it)
+	}
+	id := it["id"].(string)
+	got, _ := call(t, s, "get_item", map[string]any{"id": id})
+	p := got["item"].(map[string]any)["problem"].(map[string]any)
+	if p["interface"] != "function" || p["harness"].(map[string]any)["python"] == nil {
+		t.Errorf("get_item: %v", p)
+	}
+	// The solution part runs inside the harness; the empty prefix adds no lines.
+	run, isErr := call(t, s, "run_code", map[string]any{"itemId": id, "language": "python", "source": "sum"})
+	if isErr || run["verdict"] != "accepted" || run["lineOffset"] != float64(0) {
+		t.Errorf("run_code: %v", run)
+	}
+	if res, isErr := call(t, s, "run_code", map[string]any{"itemId": id, "language": "cpp", "source": "x"}); !isErr ||
+		res["error"].(map[string]any)["code"] != "validation_failed" {
+		t.Errorf("run_code without a harness: %v", res)
+	}
+	sol, _ := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "C++", "language": "cpp", "source": "int f();"})
+	if res, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": sol["id"]}); !isErr ||
+		res["error"].(map[string]any)["code"] != "validation_failed" {
+		t.Errorf("verify without a harness: %v", res)
+	}
+	// Back to a program only with an empty harness.
+	if res, isErr := call(t, s, "update_item", map[string]any{"id": id, "problem": map[string]any{"interface": "program"}}); !isErr {
+		t.Errorf("program with a harness: %v", res)
+	}
+	if res, isErr := call(t, s, "update_item", map[string]any{"id": id, "problem": map[string]any{"interface": "program", "harness": map[string]any{}}}); isErr ||
+		res["problem"].(map[string]any)["interface"] != "program" {
+		t.Errorf("program: %v", res)
 	}
 }

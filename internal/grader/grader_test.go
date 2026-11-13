@@ -273,3 +273,27 @@ func TestBatchFailureKeepsFinishedResults(t *testing.T) {
 		t.Errorf("finished results must be kept: %+v", out.Results)
 	}
 }
+
+func TestMapOutputAppliesToEveryExecution(t *testing.T) {
+	g := New(judgetest.New(), 2)
+	ctx := context.Background()
+	upper := strings.ToUpper
+	p := Program{Language: "python", Source: "crash", TimeLimitMs: 1000, MemoryLimitKb: 65536, MapOutput: upper}
+	out := g.Grade(ctx, p, domain.CompareTokens, cases("1", "1", "2", "2", "3", "3"), nil)
+	for _, r := range out.Results {
+		if r.Stderr != "BOOM\n" {
+			t.Errorf("stderr not mapped: %q", r.Stderr)
+		}
+	}
+	p.Source = "compile_error"
+	out = g.Grade(ctx, p, domain.CompareTokens, cases("1", "1"), nil)
+	if out.CompileOutput != "MAIN.CPP:1: ERROR: EXPECTED ';'" {
+		t.Errorf("compile output not mapped: %q", out.CompileOutput)
+	}
+	execs := g.RunAll(ctx, p, []string{"a", "b"}, nil)
+	for _, e := range execs {
+		if e.Result.CompileOutput != "MAIN.CPP:1: ERROR: EXPECTED ';'" {
+			t.Errorf("RunAll compile output not mapped: %q", e.Result.CompileOutput)
+		}
+	}
+}

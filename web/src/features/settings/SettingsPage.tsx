@@ -1,82 +1,61 @@
-import { useEffect } from 'react';
-import { useLocation } from 'react-router';
+import { NavLink, Navigate, useLocation, useParams } from 'react-router';
 import { useMeta } from '../../api/queries';
+import { NotFoundPage } from '../../app/NotFoundPage';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
-import { setThemePreference, useThemePreference } from '../../lib/theme';
-import { Segmented } from '../../ui/Field';
+import { cx } from '../../ui/Button';
+import { AiActivitySection } from './AiActivitySection';
 import { AiSection } from './AiSection';
+import { SETTINGS_PAGES, findSettingsPage, movedSettingsPage, settingsLanding, settingsPath, type SettingsSlug } from './pages';
 import { PreferencesSection } from './PreferencesSection';
 import { JudgeSection, McpSection } from './ServiceSections';
 import { StylesSection } from './StylesSection';
 
-const SECTIONS = [
-  { id: 'ai', label: 'AI provider' },
-  { id: 'styles', label: 'Writing styles' },
-  { id: 'judge', label: 'Judge' },
-  { id: 'mcp', label: 'MCP' },
-  { id: 'preferences', label: 'Preferences' },
-  { id: 'appearance', label: 'Appearance' },
-] as const;
-
+/**
+ * Settings: one page per category under `/settings/<slug>`, with the list of
+ * categories beside it. Only the category shown is rendered, so each loads
+ * its own data and nothing else's.
+ */
 export default function SettingsPage() {
-  useDocumentTitle('Settings');
-  const meta = useMeta().data;
+  const { section } = useParams();
   const location = useLocation();
-  const theme = useThemePreference();
+  const page = findSettingsPage(section);
+  if (section === undefined) return <Navigate to={settingsLanding(location.hash)} replace />;
+  const moved = movedSettingsPage(section);
+  if (!page && moved) return <Navigate to={settingsPath(moved)} replace />;
+  if (!page) return <NotFoundPage />;
+  return <SettingsCategory slug={page.slug} label={page.label} />;
+}
 
-  // Links elsewhere in the app point at a section (`/settings#ai`).
-  useEffect(() => {
-    const id = location.hash.slice(1);
-    if (!id) return;
-    const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }), 50);
-    return () => window.clearTimeout(t);
-  }, [location.hash]);
-
+function SettingsCategory({ slug, label }: { slug: SettingsSlug; label: string }) {
+  const meta = useMeta().data;
+  useDocumentTitle(`${label} · Settings`);
   if (!meta) return null;
 
   return (
     <div className="page settings">
-      <header className="page-header">
-        <h1 className="page-title">Settings</h1>
-      </header>
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
-          {SECTIONS.map((s) => (
-            <a key={s.id} href={`#${s.id}`}>
-              {s.label}
-            </a>
+        <nav className="settings-nav" aria-labelledby="settings-nav-title">
+          <div id="settings-nav-title" className="settings-nav-title">
+            Settings
+          </div>
+          {SETTINGS_PAGES.map((p) => (
+            <NavLink key={p.slug} to={settingsPath(p.slug)} className={({ isActive }) => cx(isActive && 'is-active')}>
+              {p.label}
+            </NavLink>
           ))}
+          <p className="about">
+            Codeatrophy {meta.version}
+            <br />
+            AGPL-3.0-only
+          </p>
         </nav>
         <div className="settings-body">
-          <AiSection meta={meta} />
-          <StylesSection />
-          <JudgeSection meta={meta} />
-          <McpSection meta={meta} />
-          <PreferencesSection />
-
-          <section id="appearance" className="settings-section" aria-labelledby="appearance-title">
-            <h2 id="appearance-title">Appearance</h2>
-            <div className="card card-pad row-wrap">
-              <span className="grow">
-                <strong>Theme</strong>
-                <div className="muted">Stored in this browser.</div>
-              </span>
-              <Segmented
-                label="Theme"
-                value={theme}
-                onChange={setThemePreference}
-                options={[
-                  { value: 'system', label: 'Match system' },
-                  { value: 'light', label: 'Light' },
-                  { value: 'dark', label: 'Dark' },
-                ]}
-              />
-            </div>
-          </section>
-
-          <p className="about">
-            Codeatrophy {meta.version} · Licensed under AGPL-3.0-only
-          </p>
+          {slug === 'ai' && <AiSection meta={meta} />}
+          {slug === 'ai-activity' && <AiActivitySection />}
+          {slug === 'styles' && <StylesSection />}
+          {slug === 'preferences' && <PreferencesSection />}
+          {slug === 'judge' && <JudgeSection meta={meta} />}
+          {slug === 'mcp' && <McpSection meta={meta} />}
         </div>
       </div>
     </div>

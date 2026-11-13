@@ -13,6 +13,7 @@ type SubmissionSummary struct {
 	ItemID      string           `json:"itemId"`
 	Mode        SubmissionMode   `json:"mode"`
 	Language    string           `json:"language"`
+	LineOffset  int              `json:"lineOffset"`
 	Status      SubmissionStatus `json:"status"`
 	Verdict     *Verdict         `json:"verdict"`
 	PassedCount int              `json:"passedCount"`
@@ -31,6 +32,7 @@ type Submission struct {
 	Mode          SubmissionMode     `json:"mode"`
 	Language      string             `json:"language"`
 	Source        string             `json:"source"`
+	LineOffset    int                `json:"lineOffset"`
 	Status        SubmissionStatus   `json:"status"`
 	Verdict       *Verdict           `json:"verdict"`
 	PassedCount   int                `json:"passedCount"`
@@ -48,12 +50,15 @@ type Submission struct {
 	Stdin *string `json:"-"`
 	// CaseIDs are the test cases the submission runs, fixed at creation.
 	CaseIDs []string `json:"-"`
+	// Harness is the harness the source runs in, as it was when the
+	// submission was created; nil for a program problem.
+	Harness *HarnessCode `json:"-"`
 }
 
 // Summary returns the summary form of the submission.
 func (s *Submission) Summary() SubmissionSummary {
 	return SubmissionSummary{
-		ID: s.ID, ItemID: s.ItemID, Mode: s.Mode, Language: s.Language, Status: s.Status,
+		ID: s.ID, ItemID: s.ItemID, Mode: s.Mode, Language: s.Language, LineOffset: s.LineOffset, Status: s.Status,
 		Verdict: s.Verdict, PassedCount: s.PassedCount, TotalCount: s.TotalCount,
 		TimeMs: s.TimeMs, MemoryKb: s.MemoryKb, Error: s.Error,
 		CreatedAt: s.CreatedAt, FinishedAt: s.FinishedAt,

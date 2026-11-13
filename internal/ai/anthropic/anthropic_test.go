@@ -36,13 +36,17 @@ func sse(w http.ResponseWriter, text, stopReason string) {
 	ev("message_stop", map[string]any{"type": "message_stop"})
 }
 
+// effortCapability is the part of a Models API answer that says the model
+// accepts output_config.effort at the levels the provider uses.
+const effortCapability = `"capabilities":{"effort":{"supported":true,"low":{"supported":true},"high":{"supported":true}}}`
+
 func TestGenerateStreamsStructuredOutput(t *testing.T) {
 	var body map[string]any
 	var headers http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":"claude-opus-5-5","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z","max_tokens":128000,"max_input_tokens":1000000}`)
+			fmt.Fprint(w, `{"id":"claude-opus-5-5","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z","max_tokens":128000,"max_input_tokens":1000000,`+effortCapability+`}`)
 			return
 		}
 		if !strings.HasSuffix(r.URL.Path, "/v1/messages") {
@@ -67,7 +71,8 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(resp.JSON) != `{"ok": true}` || resp.Model != "claude-opus-5-5" || resp.InputTokens != 12 {
+	if string(resp.JSON) != `{"ok": true}` || resp.Model != "claude-opus-5-5" ||
+		resp.InputTokens == nil || *resp.InputTokens != 12 || resp.OutputTokens == nil || *resp.OutputTokens != 7 {
 		t.Errorf("response: %+v", resp)
 	}
 	if headers.Get("Authorization") != "Bearer "+testKey && headers.Get("X-Api-Key") != testKey {
@@ -97,9 +102,13 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 	}
 }
 
-func TestParamsForFirstPartyAPI(t *testing.T) {
+func TestParamsFollowTheModelFacts(t *testing.T) {
 	p, _ := New(ai.Config{APIKey: testKey})
-	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true}, 0)
+	if !p.(*Provider).firstParty {
+		t.Error("the default endpoint is the first-party API")
+	}
+	able := modelFacts{maxTokens: 128000, effortHigh: true, effortLow: true}
+	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true}, able, true)
 	b, _ := json.Marshal(params)
 	var m map[string]any
 	json.Unmarshal(b, &m)
@@ -112,11 +121,76 @@ func TestParamsForFirstPartyAPI(t *testing.T) {
 	if m["max_tokens"] != float64(4096) || m["output_config"].(map[string]any)["effort"] != "low" {
 		t.Errorf("light request: %v", m)
 	}
-	// Models without effort or fallback support get neither.
-	old, _ := New(ai.Config{APIKey: testKey, Model: "claude-haiku-4-5"})
-	b, _ = json.Marshal(old.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema()}, 0))
+	// A model that reports no effort support, asked without the fallback,
+	// gets neither — whatever it is called.
+	b, _ = json.Marshal(p.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema()}, modelFacts{maxTokens: 64000}, false))
 	if strings.Contains(string(b), "effort") || strings.Contains(string(b), "fallbacks") {
-		t.Errorf("older model params: %s", b)
+		t.Errorf("params without effort or fallback: %s", b)
+	}
+	// Only the level the request needs has to be supported.
+	b, _ = json.Marshal(p.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema(), Light: true}, modelFacts{effortHigh: true}, false))
+	if strings.Contains(string(b), "effort") {
+		t.Errorf("a light request must not fall back to another level: %s", b)
+	}
+}
+
+// Which models take the server-side fallback is not published, so it is
+// offered on the first-party API and dropped for a model that rejects it.
+func TestFallbackIsLearnedFromTheAPI(t *testing.T) {
+	var withFallback, without atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"id":"some-model","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z","max_tokens":64000,"max_input_tokens":200000}`)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(b), `"fallbacks"`) {
+			withFallback.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"not accepted for this model"}}`)
+			return
+		}
+		without.Add(1)
+		sse(w, `{"ok": true}`, "end_turn")
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "some-model"})
+	p.(*Provider).firstParty = true
+	for range 2 {
+		if _, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if withFallback.Load() != 1 || without.Load() != 2 {
+		t.Errorf("requests with the fallback: %d, without: %d; want 1 and 2", withFallback.Load(), without.Load())
+	}
+}
+
+// A request that is invalid for another reason still reports its own error,
+// and the model is not written off.
+func TestBadRequestIsNotBlamedOnTheFallback(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.WriteHeader(404)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"schema is too large"}}`)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "some-model"})
+	p.(*Provider).firstParty = true
+	_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+	if err == nil || !strings.Contains(err.Error(), "schema is too large") {
+		t.Errorf("error: %v", err)
+	}
+	if _, refused := noFallback.Load(p.(*Provider).key()); refused || calls.Load() != 2 {
+		t.Errorf("refused=%v after %d calls", refused, calls.Load())
 	}
 }
 
@@ -211,8 +285,11 @@ func TestMaxTokensFitsTheModel(t *testing.T) {
 					t.Errorf("max_tokens %v, want %v", body["max_tokens"], tc.want)
 				}
 			}
-			if tc.want == 8192 && lookups.Load() != 1 {
-				t.Errorf("the cap was looked up %d times", lookups.Load())
+			if lookups.Load() != 1 {
+				t.Errorf("the model was looked up %d times", lookups.Load())
+			}
+			if oc, _ := body["output_config"].(map[string]any); oc["effort"] != nil {
+				t.Errorf("effort %v sent to a model that does not report it", oc["effort"])
 			}
 		})
 	}
@@ -243,5 +320,100 @@ func TestTimeoutBoundsRetries(t *testing.T) {
 	}
 	if d := time.Since(start); d > 1200*time.Millisecond {
 		t.Errorf("Generate took %s with a 400ms timeout (%d attempts)", d.Round(time.Millisecond), attempts.Load())
+	}
+}
+
+func TestListModels(t *testing.T) {
+	var status int
+	var huge bool
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Api-Key") != testKey && r.Header.Get("Authorization") != "Bearer "+testKey {
+			t.Errorf("API key header missing: %v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if status != 0 {
+			w.WriteHeader(status)
+			fmt.Fprintf(w, `{"type":"error","error":{"type":"x","message":"bad key %s"}}`, testKey)
+			return
+		}
+		queries = append(queries, r.URL.RawQuery)
+		model := func(id string) string {
+			return `{"id":"` + id + `","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z"}`
+		}
+		switch {
+		case huge:
+			fmt.Fprintf(w, `{"data":[%s],"has_more":false}`, model(strings.Repeat("x", ai.MaxModelListBytes)))
+		case r.URL.Query().Get("after_id") == "":
+			fmt.Fprintf(w, `{"data":[%s,%s],"has_more":true,"first_id":"claude-b","last_id":"claude-a"}`, model("claude-b"), model("claude-a"))
+		default:
+			fmt.Fprintf(w, `{"data":[%s],"has_more":false,"first_id":"claude-c","last_id":"claude-c"}`, model("claude-c"))
+		}
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
+	lister := p.(ai.ModelLister)
+	ids, err := lister.ListModels(context.Background())
+	if err != nil || strings.Join(ids, ",") != "claude-b,claude-a,claude-c" {
+		t.Fatalf("ids %v, err %v", ids, err)
+	}
+	if len(queries) != 2 || !strings.Contains(queries[0], "limit=1000") || !strings.Contains(queries[1], "after_id=claude-a") {
+		t.Errorf("queries: %v", queries)
+	}
+	for s, want := range map[int]string{401: "rejected the API key", 404: "does not list", 500: "HTTP 500"} {
+		status = s
+		_, err := lister.ListModels(context.Background())
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), testKey) {
+			t.Errorf("%d: %v", s, err)
+		}
+	}
+	status, huge = 0, true
+	if _, err := lister.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("too large: %v", err)
+	}
+}
+
+// The usage the API reports: input without the cache's, cache reads and
+// writes apart, output including thinking with the thinking part in
+// output_tokens_details.
+func TestGenerateReportsTheTokenBreakdown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/messages") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		ev := func(name string, v any) {
+			b, _ := json.Marshal(v)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
+		}
+		ev("message_start", map[string]any{"type": "message_start", "message": map[string]any{
+			"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": []any{},
+			"stop_reason": nil, "usage": map[string]any{"input_tokens": 20, "output_tokens": 1,
+				"cache_read_input_tokens": 300, "cache_creation_input_tokens": 40}}})
+		ev("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
+		ev("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": `{"ok": true}`}})
+		ev("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+		ev("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"},
+			"usage": map[string]any{"output_tokens": 90, "output_tokens_details": map[string]any{"thinking_tokens": 60}}})
+		ev("message_stop", map[string]any{"type": "message_stop"})
+	}))
+	defer srv.Close()
+	p, err := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *resp.InputTokens != 20 || *resp.OutputTokens != 90 || *resp.ReasoningTokens != 60 || *resp.CacheReadTokens != 300 ||
+		*resp.CacheWriteTokens != 40 || resp.Text != `{"ok": true}` {
+		t.Errorf("usage: in %v out %v reasoning %v read %v write %v", *resp.InputTokens, *resp.OutputTokens,
+			resp.ReasoningTokens, *resp.CacheReadTokens, *resp.CacheWriteTokens)
 	}
 }

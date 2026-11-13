@@ -75,6 +75,15 @@ type problemJSON struct {
 	MemoryLimitKb int               `json:"memoryLimitKb"`
 	Compare       string            `json:"compare"`
 	Starter       map[string]string `json:"starter"`
+	// Format version 2, solution-only problems only.
+	Interface string                 `json:"interface,omitempty"`
+	Harness   map[string]harnessJSON `json:"harness,omitempty"`
+}
+
+// harnessJSON names the files holding one language's runner code.
+type harnessJSON struct {
+	Prefix string `json:"prefix"`
+	Suffix string `json:"suffix"`
 }
 
 type solutionsJSON struct {
@@ -138,7 +147,7 @@ func Write(w io.Writer, b *Bundle) error {
 	}
 
 	manifest := bundleJSON{
-		Format: FormatName, FormatVersion: FormatVersion, Name: b.Meta.Name, Description: b.Meta.Description,
+		Format: FormatName, FormatVersion: RequiredVersion(b.Items), Name: b.Meta.Name, Description: b.Meta.Description,
 		Author: b.Meta.Author, CreatedAt: mod.UTC().Truncate(time.Second),
 		Generator:   generatorJSON{Name: b.Meta.GeneratorName, Version: b.Meta.GeneratorVersion},
 		Items:       []itemEntryJSON{},
@@ -187,6 +196,18 @@ func Write(w io.Writer, b *Bundle) error {
 				rel := "starter/" + lang + "." + extension(lang)
 				pj.Starter[lang] = rel
 				files = append(files, pending{dir + "/" + rel, []byte(src)})
+			}
+			if p.Interface == domain.InterfaceFunction {
+				pj.Interface = string(p.Interface)
+				pj.Harness = map[string]harnessJSON{}
+				for _, lang := range slices.Sorted(maps.Keys(p.Harness)) {
+					h := p.Harness[lang]
+					ext := extension(lang)
+					hj := harnessJSON{Prefix: "harness/" + lang + "-prefix." + ext, Suffix: "harness/" + lang + "-suffix." + ext}
+					pj.Harness[lang] = hj
+					files = append(files, pending{dir + "/" + hj.Prefix, []byte(h.Prefix)},
+						pending{dir + "/" + hj.Suffix, []byte(h.Suffix)})
+				}
 			}
 			if it.SolutionsIncluded {
 				// Written even when empty, so that "no solutions" and

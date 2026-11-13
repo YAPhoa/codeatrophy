@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/client';
 import type { Limits, Solution } from '../../api/types';
-import { defaultSolutionName, isSolutionLimitError, lineCount, serverFieldErrors, touchesReference, validateSolution } from './solutionWrites';
+import { defaultSolutionName, isSolutionLimitError, lineCount, savedWithCode, serverFieldErrors, touchesReference, validateSolution } from './solutionWrites';
 
 const limits = { maxSolutionNameChars: 10, maxSolutionNotesChars: 20, maxSourceBytes: 16 } as Limits;
 
@@ -77,6 +77,21 @@ describe('defaultSolutionName', () => {
   it('numbers the name when it is taken', () => {
     expect(defaultSolutionName('python', [solution('Python solution')])).toBe('Python solution 2');
     expect(defaultSolutionName('python', [solution('Python solution'), solution('Python solution 2')])).toBe('Python solution 3');
+  });
+});
+
+describe('savedWithCode', () => {
+  const saved = [solution('First'), { ...solution('Mine'), source: 'print(2)' }, { ...solution('Reference'), source: 'print(2)', isReference: true }];
+
+  it('finds the solution that holds the very same code in the same language', () => {
+    expect(savedWithCode(saved, { language: 'python', source: 'print(1)' })?.name).toBe('First');
+    expect(savedWithCode(saved, { language: 'go', source: 'print(1)' })).toBeUndefined();
+    expect(savedWithCode(saved, { language: 'python', source: 'print(1)\n' })).toBeUndefined();
+    expect(savedWithCode(undefined, { language: 'python', source: 'print(1)' })).toBeUndefined();
+  });
+
+  it('names the reference solution when several hold it', () => {
+    expect(savedWithCode(saved, { language: 'python', source: 'print(2)' })?.name).toBe('Reference');
   });
 });
 
