@@ -334,7 +334,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         </ul>
 
         <div className="nav-heading">
-          <span id="nav-collections">Collections</span>
+          <h2 id="nav-collections">Collections</h2>
           <IconButton label="New collection" size="sm" icon={<Plus size={14} />} onClick={() => actions.create(null)} />
         </div>
         {tree.length === 0 ? (
@@ -353,9 +353,9 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         )}
 
         <div className="nav-heading">
-          <span>Manage</span>
+          <h2 id="nav-manage">Manage</h2>
         </div>
-        <ul className="nav-group">
+        <ul className="nav-group" aria-labelledby="nav-manage">
           <li>
             <NavEntry to="/tags" icon={<Tags size={15} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} />
           </li>

@@ -40,7 +40,7 @@ export default function EditItemPage() {
     if (isApiError(item.error) && item.error.code === 'not_found') return <ItemMissing />;
     return (
       <div className="page">
-        <ErrorState error={item.error} onRetry={() => void item.refetch()} />
+        <ErrorState page error={item.error} onRetry={() => void item.refetch()} />
       </div>
     );
   }

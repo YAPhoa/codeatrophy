@@ -41,9 +41,12 @@ interface EmptyStateProps {
   children?: ReactNode;
   actions?: ReactNode;
   compact?: boolean;
+  /** The state is all the page shows, so its title is the page's heading. */
+  page?: boolean;
 }
 
-export function EmptyState({ icon, title, children, actions, compact }: EmptyStateProps) {
+export function EmptyState({ icon, title, children, actions, compact, page }: EmptyStateProps) {
+  const Heading = page ? 'h1' : 'h2';
   return (
     <div className={cx('empty', compact && 'empty-compact')}>
       {icon && (
@@ -51,7 +54,7 @@ export function EmptyState({ icon, title, children, actions, compact }: EmptySta
           {icon}
         </div>
       )}
-      <h2 className="empty-title">{title}</h2>
+      <Heading className="empty-title">{title}</Heading>
       {children && <div className="empty-text">{children}</div>}
       {actions && <div className="empty-actions">{actions}</div>}
     </div>
@@ -64,17 +67,20 @@ interface ErrorStateProps {
   compact?: boolean;
   /** Overrides the generic title for the error code. */
   title?: string;
+  /** The error is all the page shows, so its title is the page's heading. */
+  page?: boolean;
 }
 
 /** Full presentation of a failed load or action, with the way forward that fits the error. */
-export function ErrorState({ error, onRetry, compact, title }: ErrorStateProps) {
+export function ErrorState({ error, onRetry, compact, title, page }: ErrorStateProps) {
   const view = describeError(error);
+  const Heading = page ? 'h1' : 'h2';
   return (
     <div className={cx('empty', 'empty-error', compact && 'empty-compact')} role="alert">
       <div className="empty-icon" aria-hidden="true">
         <XCircle size={compact ? 18 : 26} />
       </div>
-      <h2 className="empty-title">{title ?? view.title}</h2>
+      <Heading className="empty-title">{title ?? view.title}</Heading>
       <div className="empty-text">{view.message}</div>
       <div className="empty-actions">
         {view.action === 'ai-settings' && (

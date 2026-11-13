@@ -33,14 +33,14 @@ export default function GenerateTestsPage() {
     if (isApiError(item.error) && item.error.code === 'not_found') return <ItemMissing />;
     return (
       <div className="page">
-        <ErrorState error={item.error} onRetry={() => void item.refetch()} />
+        <ErrorState page error={item.error} onRetry={() => void item.refetch()} />
       </div>
     );
   }
   if (item.data.type !== 'problem') {
     return (
       <div className="page">
-        <EmptyState icon={<CircleSlash size={24} />} title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
+        <EmptyState icon={<CircleSlash size={24} />} page title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
           Test cases belong to problems.
         </EmptyState>
       </div>

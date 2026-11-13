@@ -302,7 +302,7 @@ export function LibraryPage() {
   if (collectionId && collectionsQuery.isSuccess && !collection) {
     return (
       <div className="page">
-        <EmptyState icon={<FolderSearch size={24} />} title="This collection does not exist" actions={<LinkButton to="/">Back to the library</LinkButton>}>
+        <EmptyState icon={<FolderSearch size={24} />} page title="This collection does not exist" actions={<LinkButton to="/">Back to the library</LinkButton>}>
           It may have been deleted. Its items, if any, are still in the library.
         </EmptyState>
       </div>

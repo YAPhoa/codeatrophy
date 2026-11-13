@@ -46,7 +46,7 @@ export default function VariantPage() {
   if (item.isError) {
     return (
       <div className="page">
-        <ErrorState error={item.error} onRetry={() => void item.refetch()} title={undefined} />
+        <ErrorState page error={item.error} onRetry={() => void item.refetch()} title={undefined} />
       </div>
     );
   }

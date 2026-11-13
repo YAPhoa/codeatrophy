@@ -49,7 +49,7 @@ export default function SavedPage() {
   if (item.isError) {
     return (
       <div className="page">
-        <ErrorState error={item.error} onRetry={() => void item.refetch()} />
+        <ErrorState page error={item.error} onRetry={() => void item.refetch()} />
       </div>
     );
   }

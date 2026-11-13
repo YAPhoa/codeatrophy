@@ -13,7 +13,7 @@ import { libraryHref } from './itemActions';
 export function ItemMissing() {
   return (
     <div className="page">
-      <EmptyState icon={<FileQuestion size={24} />} title="This item does not exist" actions={<LinkButton to={libraryHref()}>Back to the library</LinkButton>}>
+      <EmptyState icon={<FileQuestion size={24} />} page title="This item does not exist" actions={<LinkButton to={libraryHref()}>Back to the library</LinkButton>}>
         It may have been deleted — here, in another tab, or by an assistant connected over MCP.
       </EmptyState>
     </div>
@@ -33,7 +33,7 @@ export default function ItemPage() {
     if (isApiError(item.error) && item.error.code === 'not_found') return <ItemMissing />;
     return (
       <div className="page">
-        <ErrorState error={item.error} onRetry={() => void item.refetch()} />
+        <ErrorState page error={item.error} onRetry={() => void item.refetch()} />
       </div>
     );
   }
