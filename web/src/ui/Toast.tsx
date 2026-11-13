@@ -60,11 +60,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       {createPortal(
-        <div className="toasts" role="region" aria-label="Notifications">
+        // The live region is there before any toast is, which is what gets a new one read out.
+        <div className="toasts" role="region" aria-label="Notifications" aria-live="polite">
           {toasts.map((t) => {
             const Icon = ICONS[t.kind];
             return (
-              <div key={t.id} className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
+              <div key={t.id} className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : undefined}>
                 <Icon size={16} aria-hidden="true" className="toast-icon" />
                 <span className="grow">{t.message}</span>
                 {t.action && (
