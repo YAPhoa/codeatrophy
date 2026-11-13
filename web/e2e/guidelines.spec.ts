@@ -91,3 +91,23 @@ test('reduced motion: looping animations stop', async ({ page }) => {
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.locator('.generating-pulse')).toHaveCSS('animation-iteration-count', '1');
 });
+
+test('deep links: the open tabs of the solve page are part of the address', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('tab', { name: /^Notes/ }).click();
+  await expect(page).toHaveURL(/[?&]tab=notes/);
+  await page.getByRole('button', { name: 'Show tests and results' }).click();
+  await page.getByRole('tab', { name: 'Custom input' }).click();
+  await expect(page).toHaveURL(/[?&]tab=notes&panel=custom|[?&]panel=custom&tab=notes/);
+  // Back to a default leaves it out of the address again.
+  await page.getByRole('tab', { name: 'Description' }).click();
+  await expect(page).not.toHaveURL(/tab=/);
+
+  // Arriving with the parameters opens the same view.
+  const url = new URL(page.url());
+  url.searchParams.set('tab', 'submissions');
+  await page.goto(url.toString());
+  await expect(page.getByRole('tab', { name: 'Submissions' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Custom input' })).toHaveAttribute('aria-selected', 'true');
+});

@@ -12,6 +12,7 @@ import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { LANGUAGES, languageName, sortLanguages } from '../../lib/languages';
 import { isLargeText, textFilename } from '../../lib/largeText';
 import { readJson, writeJson } from '../../lib/storage';
+import { useUrlChoice } from '../../lib/urlState';
 import { useMediaQuery } from '../../lib/useMediaQuery';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
@@ -33,8 +34,11 @@ import { ResultPanel } from './ResultPanel';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
 
-type LeftTab = 'description' | 'notes' | 'submissions';
-type DrawerTab = 'tests' | 'result' | 'custom';
+// The open tabs are part of the address (`?tab=notes&panel=result&pane=code`), so a link or a reload lands on the same view.
+const LEFT_TABS = ['description', 'notes', 'submissions'] as const;
+const DRAWER_TABS = ['tests', 'result', 'custom'] as const;
+const NARROW_PANES = ['problem', 'code'] as const;
+type DrawerTab = (typeof DRAWER_TABS)[number];
 
 /** What is remembered about the workspace's panes, per browser. Their sizes are kept by the split panes themselves. */
 interface PaneState {
@@ -102,11 +106,12 @@ export function SolveView({ item }: { item: Item }) {
 
   const [language, setLanguageState] = useState<string | null>(() => pickLanguage(item.id, languages, starter));
   const [code, setCode] = useState(() => (language ? initialCode(item.id, language, starter) : ''));
-  const [leftTab, setLeftTab] = useState<LeftTab>('description');
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>('tests');
+  const [leftTab, setLeftTab] = useUrlChoice('tab', LEFT_TABS, 'description');
+  const [drawerTab, setDrawerTab] = useUrlChoice('panel', DRAWER_TABS, 'tests');
   const [panes, setPanes] = useState(readPanes);
   // Running opens the drawer for the visit without changing what is remembered.
-  const [drawerOpen, setDrawerOpen] = useState(panes.drawer);
+  // A link that names a drawer tab opens the drawer on it.
+  const [drawerOpen, setDrawerOpen] = useState(panes.drawer || drawerTab !== 'tests');
   const statementMin = panes.statement && !narrow;
   const reveal = useReveal();
   const shell = useShellLayout();
@@ -114,7 +119,7 @@ export function SolveView({ item }: { item: Item }) {
   const [savedFrom, setSavedFrom] = useState<ReadonlySet<string>>(() => new Set());
   const [customInput, setCustomInput] = useState('');
   const [historic, setHistoric] = useState(false);
-  const [narrowPane, setNarrowPane] = useState<'problem' | 'code'>('problem');
+  const [narrowPane, setNarrowPane] = useUrlChoice('pane', NARROW_PANES, 'problem');
   const runner = useSubmissionRunner(item.id);
 
   // The judge's language list can arrive or change after the first render.
@@ -185,7 +190,7 @@ export function SolveView({ item }: { item: Item }) {
   const showInDrawer = useCallback((tab: DrawerTab) => {
     setDrawerTab(tab);
     setDrawerOpen(true);
-  }, []);
+  }, [setDrawerTab]);
 
   // Maximising gives the editor everything: the statement and the drawer are
   // minimised together, and come back the way they were.

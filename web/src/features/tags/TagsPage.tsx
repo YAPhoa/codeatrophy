@@ -8,6 +8,7 @@ import type { Tag } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { tagProblem } from '../../lib/itemForm';
 import { plural } from '../../lib/format';
+import { useUrlText } from '../../lib/urlState';
 import { Button, IconButton, LinkButton } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { SelectField, TextField } from '../../ui/Field';
@@ -26,7 +27,7 @@ export default function TagsPage() {
   const confirm = useConfirm();
   const tags = useTags();
   const limits = useLimits();
-  const [filter, setFilter] = useState('');
+  const [filter, setFilter] = useUrlText('q');
   const [editing, setEditing] = useState<Editing>(null);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
