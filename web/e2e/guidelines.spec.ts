@@ -301,3 +301,22 @@ test('undo: a test case removed from a draft can be put back where it was', asyn
   await expect(inputs).toHaveCount(2);
   await expect(inputs.first()).toHaveValue(first);
 });
+
+test('assumptions: each is a checkbox named by its own text, ticked from anywhere on the line', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  const line = page.locator('.assumptions-list li').first();
+  const text = (await line.innerText()).trim();
+  const box = line.getByRole('checkbox');
+  await expect(box).toHaveAccessibleName(text);
+  await line.getByText(text).click();
+  await expect(box).toBeChecked();
+  await expect(box).toHaveAccessibleName(text);
+});
+
+test('AI activity: a row says which column each of its values belongs to', async ({ page }) => {
+  await open(page, '/settings/ai-activity');
+  const row = page.getByRole('list', { name: 'Requests' }).getByRole('button').first();
+  await expect(row).toHaveAccessibleName(/Provider: .+Model: .+Tokens in: .+Tokens out: .+Time: .+When: /);
+});

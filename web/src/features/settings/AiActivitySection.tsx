@@ -148,6 +148,11 @@ const STATUS_TONE = { failed: 'danger', cancelled: 'warn' } as const;
 const tokens = (n: number | null) => (n == null ? '—' : formatTokens(n));
 
 /** One request: what it was and its key figures in a line, opening in place to the rest. */
+/** The column a value belongs to, for a screen reader: the visible header row is not tied to the rows. */
+function Col({ children }: { children: string }) {
+  return <span className="sr-only">, {children}: </span>;
+}
+
 function LogRow({ entry, open, onToggle }: { entry: AiLogEntry; open: boolean; onToggle: () => void }) {
   const what = `${OPERATION_LABEL[entry.operation]}${entry.title ? ` · ${entry.title}` : ''}`;
   return (
@@ -161,20 +166,32 @@ function LogRow({ entry, open, onToggle }: { entry: AiLogEntry; open: boolean; o
           </span>
           {entry.status !== 'ok' && <Badge tone={STATUS_TONE[entry.status]}>{entry.status}</Badge>}
         </span>
-        <span className="truncate">{entry.providerName}</span>
+        <span className="truncate">
+          <Col>Provider</Col>
+          {entry.providerName}
+        </span>
         <span className="truncate" title={entry.model}>
+          <Col>Model</Col>
           {entry.model}
         </span>
         <span className="log-num" title={entry.usage.inputTokens == null ? undefined : `${entry.usage.inputTokens.toLocaleString()} tokens in`}>
+          <Col>Tokens in</Col>
           {tokens(entry.usage.inputTokens)}
         </span>
         <span className="log-num" title={entry.usage.outputTokens == null ? undefined : `${entry.usage.outputTokens.toLocaleString()} tokens out`}>
+          <Col>Tokens out</Col>
           {tokens(entry.usage.outputTokens)}
         </span>
-        <span className="log-num">{formatDuration(entry.durationMs)}</span>
-        <time className="log-when" dateTime={entry.createdAt} title={absoluteTime(entry.createdAt)}>
-          {relativeTime(entry.createdAt)}
-        </time>
+        <span className="log-num">
+          <Col>Time</Col>
+          {formatDuration(entry.durationMs)}
+        </span>
+        <span className="log-when">
+          <Col>When</Col>
+          <time dateTime={entry.createdAt} title={absoluteTime(entry.createdAt)}>
+            {relativeTime(entry.createdAt)}
+          </time>
+        </span>
       </button>
       {open && <LogDetail entry={entry} />}
     </li>

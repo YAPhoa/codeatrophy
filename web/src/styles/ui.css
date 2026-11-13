@@ -371,6 +371,9 @@ input[type='radio'] {
   align-items: center;
   justify-content: center;
   width: 26px;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text-3);
   cursor: pointer;
 }

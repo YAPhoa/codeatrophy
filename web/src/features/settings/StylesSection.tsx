@@ -259,7 +259,7 @@ export function StylesSection() {
               hint={
                 <span className="style-counter">
                   <span>Layout, tone, starter languages. It cannot add or remove fields, or change the stdin/stdout convention.</span>
-                  <span className={cx('style-count', textLen > bounds.instructionsMax && 'is-over')} aria-live="polite">
+                  <span className={cx('style-count', textLen > bounds.instructionsMax && 'is-over')}>
                     {textLen.toLocaleString()} / {bounds.instructionsMax.toLocaleString()}
                   </span>
                 </span>

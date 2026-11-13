@@ -100,10 +100,14 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
             onKeyDown={onKeyDown}
           />
           {models !== null && models.length > 0 && (
-            // A pointer affordance only: the input itself opens the list from the keyboard.
-            <span
+            // Out of the tab order: the input itself opens the list from the keyboard.
+            <button
+              type="button"
               className="combo-toggle"
-              aria-hidden="true"
+              tabIndex={-1}
+              aria-label="Show models"
+              aria-expanded={showList}
+              aria-controls={listId}
               onMouseDown={(e) => {
                 e.preventDefault();
                 wrapRef.current?.querySelector('input')?.focus();
@@ -111,8 +115,8 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
                 else show();
               }}
             >
-              <ChevronsUpDown size={14} />
-            </span>
+              <ChevronsUpDown size={14} aria-hidden="true" />
+            </button>
           )}
           <Popover anchorRef={wrapRef} open={showList} onClose={() => setOpen(false)} matchWidth noAutoFocus className="menu combo-menu">
             <ul id={listId} role="listbox" aria-label="Models">
