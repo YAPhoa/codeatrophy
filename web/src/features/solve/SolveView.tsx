@@ -10,11 +10,13 @@ import { errorLine } from '../../lib/errors';
 import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, plural, verdictTone } from '../../lib/format';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { LANGUAGES, languageName, sortLanguages } from '../../lib/languages';
+import { isLargeText, textFilename } from '../../lib/largeText';
 import { readJson, writeJson } from '../../lib/storage';
 import { useMediaQuery } from '../../lib/useMediaQuery';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { useConfirm } from '../../ui/Dialog';
+import { LargeText } from '../../ui/LargeText';
 import { Markdown } from '../../ui/Markdown';
 import { SplitPane } from '../../ui/SplitPane';
 import { Callout, ErrorCallout, PageLoading, Tabs, tabPanelProps } from '../../ui/misc';
@@ -28,11 +30,10 @@ import { savedWithCode } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
 import { HistoryList } from './HistoryList';
 import { ResultPanel } from './ResultPanel';
-import { RunnerView } from './RunnerView';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
 
-type LeftTab = 'description' | 'notes' | 'submissions' | 'runner';
+type LeftTab = 'description' | 'notes' | 'submissions';
 type DrawerTab = 'tests' | 'result' | 'custom';
 
 /** What is remembered about the workspace's panes, per browser. Their sizes are kept by the split panes themselves. */
@@ -362,9 +363,8 @@ export function SolveView({ item }: { item: Item }) {
 
   if (!problem) return <PageLoading />;
 
+  // Shown around the solver's code, collapsed, for the curious; it is changed by editing the problem.
   const activeRunner = language ? runners[language] : undefined;
-  // The tab goes away with the runner it shows, when the language changes.
-  const shownTab: LeftTab = leftTab === 'runner' && !activeRunner ? 'description' : leftTab;
 
   const description = (
     <div className="statement">
@@ -398,14 +398,12 @@ export function SolveView({ item }: { item: Item }) {
         <Tabs
           idBase="left"
           label="Problem information"
-          value={shownTab}
+          value={leftTab}
           onChange={setLeftTab}
           tabs={[
             { value: 'description', label: 'Description' },
             { value: 'notes', label: 'Notes', count: item.notes.trim() ? 1 : null },
             { value: 'submissions', label: 'Submissions' },
-            // Hidden code, one deliberate click away; here it takes nothing from the editor.
-            ...(activeRunner ? [{ value: 'runner' as const, label: 'Runner' }] : []),
           ]}
         />
         <span className="spacer" />
@@ -419,11 +417,10 @@ export function SolveView({ item }: { item: Item }) {
           />
         )}
       </div>
-      <div className="pane-body" {...tabPanelProps('left', shownTab)} tabIndex={0}>
-        {shownTab === 'description' && description}
-        {shownTab === 'notes' && <Notes item={item} />}
-        {shownTab === 'runner' && activeRunner && language && <RunnerView runner={activeRunner} language={language} />}
-        {shownTab === 'submissions' && (
+      <div className="pane-body" {...tabPanelProps('left', leftTab)} tabIndex={0}>
+        {leftTab === 'description' && description}
+        {leftTab === 'notes' && <Notes item={item} />}
+        {leftTab === 'submissions' && (
           <HistoryList
             itemId={item.id}
             activeId={runner.submission?.id ?? null}
@@ -504,6 +501,9 @@ export function SolveView({ item }: { item: Item }) {
           value={code}
           onChange={setCode}
           language={language}
+          // Keyed by language, so the runner rows start collapsed and the regions folded for each language.
+          runner={activeRunner}
+          foldRegions
           ariaLabel={`Solution code${language ? ` (${languageName(language)})` : ''}. Press Escape then Tab to leave the editor.`}
           shortcuts={[
             { key: 'Mod-Enter', run: runSamples },
@@ -670,18 +670,33 @@ export function SolveView({ item }: { item: Item }) {
         {drawerTab === 'result' && resultTab}
         {drawerTab === 'custom' && (
           <div className="custom-input">
-            <label htmlFor="custom-stdin" className="field-label">
-              Standard input for one run
-            </label>
-            <textarea
-              id="custom-stdin"
-              className="input textarea mono"
-              rows={5}
-              spellCheck={false}
-              value={customInput}
-              onChange={(e) => setCustomInput(e.target.value)}
-              placeholder={solutionOnly ? 'One JSON value per line, one per argument.' : 'Type or paste the input your program should read.'}
-            />
+            {/* A test case's input can be far too large for a textarea; it is run as it is. */}
+            {isLargeText(customInput) ? (
+              <>
+                <span className="field-label">Standard input for one run</span>
+                <LargeText
+                  text={customInput}
+                  filename={textFilename(item.title, 'custom input')}
+                  onClear={() => setCustomInput('')}
+                  label="Standard input for one run"
+                />
+              </>
+            ) : (
+              <>
+                <label htmlFor="custom-stdin" className="field-label">
+                  Standard input for one run
+                </label>
+                <textarea
+                  id="custom-stdin"
+                  className="input textarea mono"
+                  rows={5}
+                  spellCheck={false}
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  placeholder={solutionOnly ? 'One JSON value per line, one per argument.' : 'Type or paste the input your program should read.'}
+                />
+              </>
+            )}
             <div className="row">
               <Button size="sm" icon={<Play size={13} />} onClick={() => begin('run', customInput)} disabled={runner.judging}>
                 Run with this input

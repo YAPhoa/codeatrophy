@@ -323,6 +323,7 @@ type PreferenceRule = { kind: 'boolean' } | { kind: 'oneOf'; values: readonly nu
 const PREFERENCE_RULES: Readonly<Record<string, PreferenceRule>> = {
   hideTestCases: { kind: 'boolean' },
   generatedTestCases: { kind: 'range', min: 1, max: LIMITS.maxGeneratedTestCases },
+  largeTestCase: { kind: 'boolean' },
   'editor.autocomplete': { kind: 'boolean' },
   'editor.closeBrackets': { kind: 'boolean' },
   'editor.matchBrackets': { kind: 'boolean' },

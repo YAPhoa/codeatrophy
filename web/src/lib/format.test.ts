@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, describeTotals, describeUsage, formatDuration, formatRunTime, formatTokens } from './format';
+import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens } from './format';
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
@@ -102,17 +102,3 @@ describe('describeUsage', () => {
   });
 });
 
-describe('describeTotals', () => {
-  const totals = { requests: 14, failed: 1, inputTokens: 61200, outputTokens: 48100 };
-
-  it('counts requests and tokens, and failures only when there are any', () => {
-    expect(describeTotals(totals)).toBe('14 requests · 1 failed · 61k in · 48k out');
-    expect(describeTotals({ ...totals, failed: 0 })).toBe('14 requests · 61k in · 48k out');
-    expect(describeTotals({ requests: 1, failed: 0, inputTokens: 900, outputTokens: 120 })).toBe('1 request · 900 in · 120 out');
-  });
-
-  it('says nothing about tokens no request reported, and so when there were no requests', () => {
-    expect(describeTotals({ requests: 2, failed: 2, inputTokens: 0, outputTokens: 0 })).toBe('2 requests · 2 failed');
-    expect(describeTotals({ requests: 0, failed: 0, inputTokens: 0, outputTokens: 0 })).toBe('No requests');
-  });
-});

@@ -115,6 +115,17 @@
   text-decoration: underline;
 }
 
+/* In place of an editor or renderer that an upgrade took away. */
+.reload-notice {
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
 .spinner {
   width: 13px;
   height: 13px;
@@ -1136,6 +1147,25 @@ button.chip:hover {
   color: var(--text-3);
   font-style: italic;
   font-family: var(--font-sans);
+}
+
+/* ---- Large text: kept out of sight, offered as a download ---- */
+
+/* Builds on .concealed (solve.css), the block of a hidden test case. */
+.large-text {
+  min-height: 44px;
+}
+
+.large-text-size {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* The buttons stay together, at the right, on the line below when there is no room. */
+.large-text-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
 }
 
 /* ---- Diff ---- */

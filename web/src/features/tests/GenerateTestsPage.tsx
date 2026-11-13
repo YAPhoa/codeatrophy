@@ -9,6 +9,7 @@ import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
 import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
+import { textFilename } from '../../lib/largeText';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { DiffView } from '../../ui/DiffView';
@@ -19,6 +20,8 @@ import { GeneratingPanel, UsageLine } from '../capture/parts';
 import { useGeneration } from '../capture/useGeneration';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
+import { Output } from '../solve/ResultPanel';
+import { LargeCaseOutcome } from './LargeCaseOutcome';
 
 export default function GenerateTestsPage() {
   const { id = '' } = useParams();
@@ -115,9 +118,12 @@ function Generator({ item }: { item: Item }) {
 
   // The count starts from the user's preference and can be changed for this run.
   const maxCount = meta?.limits.maxGeneratedTestCases ?? 30;
-  const preferredCount = usePreferences().generatedTestCases;
+  const preferences = usePreferences();
   const [chosenCount, setCount] = useState<number | null>(null);
-  const count = Math.min(maxCount, Math.max(1, chosenCount ?? preferredCount));
+  const count = Math.min(maxCount, Math.max(1, chosenCount ?? preferences.generatedTestCases));
+  // So does the choice of a large test case, which needs a judge to be built.
+  const [chosenLarge, setLarge] = useState<boolean | null>(null);
+  const large = judgeOn && (chosenLarge ?? preferences.largeTestCase);
   const [language, setLanguage] = useState(() => {
     const preferred = storedSolution?.language ?? 'python';
     return languageOptions.some((o) => o.value === preferred) ? preferred : (languageOptions[0]?.value ?? 'python');
@@ -125,6 +131,8 @@ function Generator({ item }: { item: Item }) {
   const [instruction, setInstruction] = useState('');
 
   const [proposal, setProposal] = useState<AiTestCasesResponse | null>(null);
+  // Counts the proposals, so that what was opened in one is closed in the next.
+  const [proposalNo, setProposalNo] = useState(0);
   const [keep, setKeep] = useState<boolean[]>([]);
   const [samples, setSamples] = useState<boolean[]>([]);
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -141,9 +149,10 @@ function Generator({ item }: { item: Item }) {
 
   const generate = async () => {
     if (noRunner) return;
-    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null }, signal));
+    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCase: large }, signal));
     if (!res) return;
     setProposal(res);
+    setProposalNo((n) => n + 1);
     // Cases whose run failed have no trustworthy expected output; leave them out by default.
     setKeep(res.cases.map((c) => !c.error));
     setSamples(res.cases.map((c) => c.isSample));
@@ -281,6 +290,7 @@ function Generator({ item }: { item: Item }) {
                 </Field>
                 <SelectField label="Reference solution in" value={language} onChange={setLanguage} options={languageOptions} disabled={generation.running || noRunner} />
               </div>
+              <Checkbox checked={large} onChange={setLarge} disabled={generation.running || !judgeOn} label="Add a large test case" hint={judgeOn ? undefined : 'Needs a judge engine.'} />
               <TextAreaField
                 label="Anything to focus on? (optional)"
                 value={instruction}
@@ -309,16 +319,19 @@ function Generator({ item }: { item: Item }) {
 
           {generation.running && (
             <GeneratingPanel title="Writing a solution and test cases…" startedAt={generation.startedAt} onCancel={generation.cancel}>
-              {judgeOn ? 'The solution is run on each proposed input, which adds to the wait.' : 'This can take up to a couple of minutes.'} Your settings above are kept if it fails.
+              {judgeOn ? 'The solution is run on each proposed input, which adds to the wait.' : 'This can take up to a couple of minutes.'}
             </GeneratingPanel>
           )}
           {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed — nothing was changed" onRetry={() => void generate()} />}
 
           {allRepeats && proposal && !generation.running && (
-            <p className="editor-empty row proposal-none" role="status">
-              {proposal.duplicatesDropped === 1 ? 'The one proposal repeated an existing case.' : `All ${proposal.duplicatesDropped} proposals repeated existing cases.`}
-              <UsageLine usage={proposal.usage} newTab />
-            </p>
+            <>
+              <p className="editor-empty row proposal-none" role="status">
+                {proposal.duplicatesDropped === 1 ? 'The one proposal repeated an existing case.' : `All ${proposal.duplicatesDropped} proposals repeated existing cases.`}
+                <UsageLine usage={proposal.usage} newTab />
+              </p>
+              {proposal.largeCase && <LargeCaseOutcome key={proposalNo} report={proposal.largeCase} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />}
+            </>
           )}
 
           {proposal && !allRepeats && !generation.running && (
@@ -408,9 +421,12 @@ function Generator({ item }: { item: Item }) {
                 </Button>
               </div>
 
+              {proposal.largeCase && <LargeCaseOutcome key={proposalNo} report={proposal.largeCase} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />}
+
               <ol className="proposal-list">
                 {proposal.cases.map((c, i) => {
                   const isOpen = open.has(i);
+                  const isLarge = proposal.largeCase?.status === 'added' && proposal.largeCase.index === i;
                   return (
                     <li key={i} className={cx('proposal-case card', !keep[i] && 'is-off', c.predictionMatched === false && 'is-flagged', c.error && 'is-failed')}>
                       <div className="proposal-row">
@@ -427,6 +443,7 @@ function Generator({ item }: { item: Item }) {
                             <span className="proposal-rationale">{c.rationale}</span>
                           </span>
                         </button>
+                        {isLarge && <Badge>large</Badge>}
                         <CaseStatus c={c} attempted={proposal.verification.attempted} revealed={showSolution} />
                         <label className="proposal-sample">
                           <input type="checkbox" checked={samples[i] ?? false} onChange={(e) => setSamples((s) => s.map((v, j) => (j === i ? e.target.checked : v)))} />
@@ -441,21 +458,19 @@ function Generator({ item }: { item: Item }) {
                             </Callout>
                           )}
                           <div className="io-pair">
-                            <div className="io-block">
-                              <div className="io-label">Input</div>
-                              <pre className={cx('code-block', c.stdin === '' && 'code-block-empty')}>{c.stdin}</pre>
-                            </div>
+                            <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name, 'input')} />
                             {c.predictionMatched !== false && (
-                              <div className="io-block">
-                                <div className="io-label">{c.verified ? 'Expected output (from running the solution)' : 'Expected output (the model’s prediction)'}</div>
-                                <pre className={cx('code-block', c.expectedStdout === '' && 'code-block-empty')}>{c.expectedStdout}</pre>
-                              </div>
+                              <Output
+                                label={c.verified ? 'Expected output (from running the solution)' : 'Expected output (the model’s prediction)'}
+                                text={c.expectedStdout}
+                                filename={textFilename(item.title, c.name, 'output')}
+                              />
                             )}
                           </div>
                           {c.predictionMatched === false && (
                             <div className="io-block">
                               <div className="io-label">What the model predicted vs. what the solution printed (kept as the expected output)</div>
-                              <DiffView expected={c.predictedStdout} actual={c.expectedStdout} mode={item.problem?.compare} leftLabel="Model’s prediction" rightLabel="Actual output" variant="before-after" />
+                              <DiffView expected={c.predictedStdout ?? ''} actual={c.expectedStdout} mode={item.problem?.compare} leftLabel="Model’s prediction" rightLabel="Actual output" variant="before-after" />
                             </div>
                           )}
                         </div>

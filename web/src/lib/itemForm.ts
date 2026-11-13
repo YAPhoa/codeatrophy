@@ -3,14 +3,19 @@
 // create request, and a minimal PATCH containing only what changed.
 
 import type {
+  CheckedCase,
   CompareMode,
   Difficulty,
+  DraftCheck,
   HarnessCode,
   Item,
+  ItemCheckRequest,
+  ItemCheckResponse,
   ItemDraft,
   ItemInput,
   ItemPatch,
   ItemType,
+  LargeCaseReport,
   Limits,
   ProblemInterface,
   SourceCode,
@@ -18,6 +23,7 @@ import type {
   TestOrigin,
 } from '../api/types';
 import { formatBytes } from './format';
+import { isLargeText } from './largeText';
 
 export interface FormTestCase {
   /** Client-side key for list rendering; never sent to the server. */
@@ -29,6 +35,10 @@ export interface FormTestCase {
   origin: TestOrigin;
   /** Carried from a draft whose reference solution printed this output; cleared when the case is edited. */
   verified: boolean;
+  /** The large test case the generation built; a revision does not carry it over. */
+  large?: boolean;
+  /** What "Verify all" found for this case, while the form is as it was checked. */
+  outcome?: CheckedCase;
 }
 
 export interface ItemFormState {
@@ -98,7 +108,9 @@ export function normalizeTags(tags: readonly string[]): string[] {
   return Array.from(new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))).sort();
 }
 
-export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}): ItemFormState {
+/** `largeCase` says which of the draft's test cases is the large one, if any. */
+export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}, largeCase: LargeCaseReport | null = null): ItemFormState {
+  const largeAt = largeCase?.status === 'added' ? largeCase.index : null;
   return {
     ...emptyForm(draft.type),
     ...defaults,
@@ -114,7 +126,7 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
     interface: draft.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(draft.problem?.starterCode ?? {}) },
     harness: structuredClone(draft.problem?.harness ?? {}),
-    testCases: draft.testCases.map((t) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const })),
+    testCases: draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...(i === largeAt ? { large: true } : {}) })),
     referenceSolution: draft.problem?.referenceSolution ? { ...draft.problem.referenceSolution } : null,
   };
 }
@@ -122,6 +134,9 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
 /**
  * The draft to send back as `previousDraft` when asking for a revision: the
  * form as the user has edited it, so their changes are not thrown away.
+ * Large test data is left out: it is never shown to the model, so a
+ * revision could not carry it over, and it would only take up the bound on
+ * the request's size.
  */
 export function draftFromForm(form: ItemFormState, assumptions: readonly string[]): ItemDraft {
   const isProblem = form.type === 'problem';
@@ -144,7 +159,9 @@ export function draftFromForm(form: ItemFormState, assumptions: readonly string[
         }
       : null,
     testCases: isProblem
-      ? form.testCases.map(({ name, stdin, expectedStdout, isSample, verified }) => ({ name, stdin, expectedStdout, isSample, verified }))
+      ? form.testCases
+          .filter((t) => !t.large && !isLargeText(t.stdin) && !isLargeText(t.expectedStdout))
+          .map(({ name, stdin, expectedStdout, isSample, verified }) => ({ name, stdin, expectedStdout, isSample, verified }))
       : [],
     assumptions: [...assumptions],
   };
@@ -419,6 +436,69 @@ export function validateForm(form: ItemFormState, limits: Limits | undefined): F
  */
 export function checkedState(form: ItemFormState): string {
   return JSON.stringify([form.interface, form.compare, form.referenceSolution, effectiveHarness(form), form.testCases.map((t) => [t.stdin, t.expectedStdout])]);
+}
+
+/** Body of `POST /items/check` for a form: its problem and test cases, as they would be saved. */
+export function checkRequestFromForm(form: ItemFormState): ItemCheckRequest {
+  const input = inputFromForm({ ...form, type: 'problem' });
+  return { problem: input.problem ?? {}, testCases: input.testCases ?? [] };
+}
+
+/** A draft under review, as the capture and variant pages keep it. */
+export interface CheckedDraft {
+  form: ItemFormState | null;
+  /** What running the reference solution found, and the `checkedState` of the form it ran on. */
+  check?: DraftCheck | null;
+  checked?: string;
+}
+
+/**
+ * Apply the answer of `POST /items/check` to a draft, as a draft's own check
+ * is applied when it arrives: each case's verified mark by position, and the
+ * check. Each case also keeps its outcome. `sent` is the `checkedState` of the form that was checked; when the
+ * form has moved on from it the answer is stale and `null` is returned. The
+ * large test case belongs to the generation, not to the check, so its report
+ * is kept.
+ */
+export function withCheck<S extends CheckedDraft>(draft: S, sent: string, answer: ItemCheckResponse): S | null {
+  if (!draft.form) return null;
+  const current = upgradeForm(draft.form);
+  if (checkedState(current) !== sent) return null;
+  const form = {
+    ...current,
+    testCases: current.testCases.map((t, i) => {
+      const outcome = answer.cases[i] ?? { outcome: 'not_run' as const, error: null };
+      return { ...t, verified: outcome.outcome === 'passed', outcome };
+    }),
+  };
+  return { ...draft, form, check: { ...answer.check, largeCase: draft.check?.largeCase ?? null }, checked: checkedState(form) };
+}
+
+/**
+ * The cases "Verify all" found wrong, or that made the reference solution
+ * fail: they can be discarded together. None when no case passed, since then
+ * the reference solution or the runner is the likelier culprit, and none for
+ * cases the check did not get to.
+ */
+export function discardableCases(form: Pick<ItemFormState, 'testCases'>): string[] {
+  const bad = form.testCases.filter((t) => t.outcome?.outcome === 'wrong' || t.outcome?.outcome === 'failed');
+  return form.testCases.some((t) => t.outcome?.outcome === 'passed') ? bad.map((t) => t.key) : [];
+}
+
+/**
+ * A draft without some of its test cases. When its check still describes
+ * the form, the check is brought along: it then counts only the cases that
+ * are left, and has nothing to report once all of those passed.
+ */
+export function withoutCases<S extends CheckedDraft>(draft: S, keys: readonly string[]): S {
+  if (!draft.form) return draft;
+  const current = upgradeForm(draft.form);
+  const form = { ...current, testCases: current.testCases.filter((t) => !keys.includes(t.key)) };
+  if (!draft.check || draft.checked !== checkedState(current)) return { ...draft, form };
+  const left = form.testCases;
+  const allPassed = left.every((t) => t.outcome?.outcome === 'passed');
+  const check = { ...draft.check, total: left.length, passed: left.filter((t) => t.verified).length, error: allPassed ? null : draft.check.error };
+  return { ...draft, form, check, checked: checkedState(form) };
 }
 
 /**

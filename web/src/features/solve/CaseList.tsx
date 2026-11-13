@@ -3,6 +3,7 @@ import { Eye, EyeOff, FlaskConical, Settings2 } from 'lucide-react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { Item, TestCase } from '../../api/types';
 import { describeCases } from '../../lib/format';
+import { textFilename } from '../../lib/largeText';
 import { Button, LinkButton } from '../../ui/Button';
 import { Callout, ErrorState, PageLoading } from '../../ui/misc';
 import { Output } from './ResultPanel';
@@ -108,8 +109,8 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
                 )}
               </div>
               <div className="io-pair">
-                <Output label="Input" text={c.stdin} />
-                <Output label="Expected output" text={c.expectedStdout} />
+                <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name || `case ${number}`, 'input')} />
+                <Output label="Expected output" text={c.expectedStdout} filename={textFilename(item.title, c.name || `case ${number}`, 'output')} />
               </div>
             </li>
           );

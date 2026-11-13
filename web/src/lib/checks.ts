@@ -2,9 +2,9 @@
 // draft, and a saved solution tested against a problem's test cases. Neither
 // says anything about the solution's code, which stays out of sight.
 
-import type { DraftCheck, RunnerCheck, TestCase, Verdict, VerifyResult } from '../api/types';
+import type { DraftCheck, LargeCaseReport, RunnerCheck, TestCase, Verdict, VerifyResult } from '../api/types';
 import { sentence } from './errors';
-import { formatRunTime, plural, type Tone } from './format';
+import { formatBytes, formatMs, formatRunTime, plural, type Tone } from './format';
 
 export interface CheckLine {
   tone: Tone;
@@ -36,6 +36,22 @@ export function describeDraftCheck(check: DraftCheck | null, stale = false): Che
 export function runnerChecks(check: DraftCheck | null, stale = false): ReadonlyMap<string, RunnerCheck> {
   const tried = stale ? [] : (check?.runners ?? []).filter((r) => r.status !== 'skipped');
   return new Map(tried.map((r) => [r.language, r]));
+}
+
+/**
+ * What became of the large test case of a generation. When it was added, its
+ * name and size, and the reference solution's time against the time limit —
+ * a warning once that is more than half of it.
+ */
+export function describeLargeCase(report: LargeCaseReport, timeLimitMs?: number): CheckLine {
+  if (report.status !== 'added') {
+    return { tone: report.status === 'failed' ? 'warn' : 'neutral', text: report.error ? `Large case not added. ${sentence(report.error)}` : 'Large case not added' };
+  }
+  const parts = [report.name ? `Large case “${report.name}” added` : 'Large case added'];
+  if (report.inputBytes != null) parts.push(formatBytes(report.inputBytes));
+  if (report.timeMs != null) parts.push(`reference solution ${formatMs(report.timeMs)}${timeLimitMs ? ` of ${formatMs(timeLimitMs)}` : ''}`);
+  const slow = report.timeMs != null && timeLimitMs != null && report.timeMs > timeLimitMs / 2;
+  return { tone: slow ? 'warn' : 'ok', text: parts.join(' · ') };
 }
 
 const FAILURE: Record<Verdict, string> = {

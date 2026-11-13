@@ -23,7 +23,7 @@ export function GeneratingPanel({ title, startedAt, onCancel, children }: { titl
         <div className="generating-title">
           {title} <span className="generating-time">{seconds}s</span>
         </div>
-        <div className="generating-text">{children ?? 'This usually takes a few seconds, occasionally up to a couple of minutes. Your input is kept if it fails.'}</div>
+        <div className="generating-text">{children ?? 'This usually takes a few seconds, occasionally up to a couple of minutes.'}</div>
       </div>
       <Button icon={<Square size={12} />} onClick={onCancel}>
         Cancel

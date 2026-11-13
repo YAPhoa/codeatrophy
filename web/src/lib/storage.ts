@@ -26,7 +26,9 @@ export function writeJson(key: string, value: unknown): void {
   try {
     store()?.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
-    // Quota exceeded or storage disabled: the value simply is not remembered.
+    // Quota exceeded or storage disabled: the value is not remembered, and
+    // an older copy must not come back in its place.
+    remove(key);
   }
 }
 

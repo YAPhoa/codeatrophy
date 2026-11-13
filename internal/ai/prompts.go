@@ -62,6 +62,10 @@ a **reading** (a technical note or article).
 
 - Starter code, when given, reads the input in the documented format and
   leaves the solving to the user.
+- In starter code, put the lines that only read the input between two
+  comment lines, ` + "`# region input`" + ` and ` + "`# endregion`" + ` (` + "`// region input`" + ` and
+  ` + "`// endregion`" + ` in languages with ` + "`//`" + ` comments). The editor shows them
+  folded. The place where the solver writes stays outside the region.
 - Java code uses ` + "`public class Main`" + `; Kotlin uses a top-level ` + "`fun main()`" + `.
 
 ### Function problems
@@ -244,6 +248,32 @@ const problemRules = `- For a problem, include sample test cases matching the ex
 - starterCode and harness are lists of {language, ...} entries.
 `
 
+// LargeCaseRules ask for the generator of one large test case. maxBytes is
+// the cap on what it may print.
+func largeCaseRules(maxBytes int) string {
+	return fmt.Sprintf(`- Also write "largeCase": a generator of one large test case. It is a complete program, in a language
+  the judge runs (preferably the reference solution's), that reads nothing and prints the stdin of one
+  test case: as large as the constraints allow but at most %d bytes, in the shape that makes a solution
+  of the wrong complexity run out of time (worst-case values and structure, not just a big n). It must
+  be deterministic (a fixed seed; no clock or system randomness) and every value it prints must satisfy
+  every constraint in the statement. For a function problem it prints what the harness suffix reads.
+  "name" says what the input is. The server runs it and takes the expected output from the reference
+  solution, so do not predict the output.
+`, maxBytes)
+}
+
+// OmittedCasesKey is the key under which a previous draft lists the test
+// cases that were too large to show.
+const OmittedCasesKey = "largeTestCasesOmitted"
+
+func omittedNote(previous string) string {
+	if !strings.Contains(previous, `"`+OmittedCasesKey+`"`) {
+		return ""
+	}
+	return "Its test cases larger than a few kilobytes are not shown; " + OmittedCasesKey +
+		" names them with their sizes. Leave them out of the revision.\n"
+}
+
 // assumptionRules say what belongs in a draft's assumptions.
 const assumptionRules = `- "assumptions" lists only what you inferred or invented about the problem's content that the user
   should check: a constraint that was not given, a rule or format you had to pick, an example you
@@ -261,6 +291,17 @@ type DraftPrompt struct {
 	Instruction   string
 	PreviousDraft string // JSON, or ""
 	Toolchains    []Toolchain
+	// LargeCaseBytes, when positive, asks for a large test case of at most
+	// that many bytes.
+	LargeCaseBytes int
+}
+
+// largeSection is the large-case rule, or "".
+func largeSection(maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	return largeCaseRules(maxBytes)
 }
 
 // Build returns the system and user prompts.
@@ -278,7 +319,7 @@ func (p DraftPrompt) Build() (system, user string) {
 - Starter code languages: those the user's text or instruction names; if they name none, those the
   style preset names; if neither does, python and cpp. Use exactly that set.
 ` + assumptionRules + `
-` + problemRules + `
+` + problemRules + largeSection(p.LargeCaseBytes) + `
 ` + jsonOnly
 
 	var b strings.Builder
@@ -297,7 +338,7 @@ func (p DraftPrompt) Build() (system, user string) {
 	b.WriteString(env.Block(BlockUserInput, p.Text) + "\n")
 	if p.PreviousDraft != "" {
 		b.WriteString("\nThis is a revision of the previous draft below. Keep what the instruction does not ask to change.\n" +
-			env.Block(BlockPreviousDraft, p.PreviousDraft) + "\n")
+			omittedNote(p.PreviousDraft) + env.Block(BlockPreviousDraft, p.PreviousDraft) + "\n")
 	}
 	if p.Instruction != "" {
 		b.WriteString("\n" + env.Block(BlockInstruction, p.Instruction) + "\n")
@@ -322,6 +363,8 @@ type VariantPrompt struct {
 	Instruction   string
 	PreviousDraft string // JSON, or ""
 	Toolchains    []Toolchain
+	// LargeCaseBytes is as for DraftPrompt.
+	LargeCaseBytes int
 }
 
 // Build returns the system and user prompts.
@@ -341,7 +384,7 @@ func (p VariantPrompt) Build() (system, user string) {
 - Never copy the original's tests: sample test cases are for the NEW problem.
 - Starter code languages: those the instruction names; if it names none, those the original has; if
   it has none, those the style preset names; if neither does, python and cpp.
-` + problemRules + `
+` + problemRules + largeSection(p.LargeCaseBytes) + `
 ` + jsonOnly
 
 	mode := p.Mode
@@ -356,7 +399,7 @@ func (p VariantPrompt) Build() (system, user string) {
 	user += judgeSection(env, p.Toolchains)
 	if p.PreviousDraft != "" {
 		user += "\nThis is a revision of the variant drafted earlier, below. Keep what the instruction does not ask to change.\n" +
-			env.Block(BlockPreviousDraft, p.PreviousDraft) + "\n"
+			omittedNote(p.PreviousDraft) + env.Block(BlockPreviousDraft, p.PreviousDraft) + "\n"
 	}
 	if p.Instruction != "" {
 		user += "\n" + env.Block(BlockInstruction, p.Instruction) + "\n"
@@ -377,6 +420,9 @@ type TestCasesPrompt struct {
 	ExistingSolution string
 	Instruction      string
 	Toolchains       []Toolchain
+	// LargeCaseBytes is as for DraftPrompt; the large case is in addition
+	// to Count.
+	LargeCaseBytes int
 }
 
 // Build returns the system and user prompts.
@@ -401,7 +447,7 @@ func (p TestCasesPrompt) Build() (system, user string) {
 - Mark one or two simple cases as samples (isSample: true) only if the problem has fewer than two
   sample cases already; otherwise mark none.
 - Java programs use "public class Main"; Kotlin programs use a top-level "fun main()".
-
+` + largeSection(p.LargeCaseBytes) + `
 ` + jsonOnly
 	kind := "a reference solution"
 	if p.Function {

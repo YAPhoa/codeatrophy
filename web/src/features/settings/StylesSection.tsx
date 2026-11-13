@@ -271,7 +271,6 @@ export function StylesSection() {
               checked={editing.isDefault}
               onChange={(v) => setEditing({ ...editing, isDefault: v })}
               label="Use by default"
-              hint="Preselected whenever you draft, and given to connected assistants as part of the authoring guide. Only one style is the default."
             />
             {error != null && !(isApiError(error) && error.code === 'validation_failed' && (serverFields.name != null || serverFields.instructions != null)) && (
               <ErrorCallout error={error} title={isApiError(error) && error.code === 'conflict' ? 'The limit of styles has been reached' : 'Could not save the style'} />

@@ -87,12 +87,24 @@ For a "solution only" problem the markers are looked for in the whole program
 that runs, the runner included. The seed has one such problem, "Merge k Sorted
 Lists".
 
+The mock's starter code, in the seed and in drafts, marks the lines that read
+the input as a [folded region](../docs/api.md#folded-regions); "Number of
+Islands" has starter code of its own with a larger one in Python and C++.
+
 For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
 `502 upstream_error`, `MOCK:MISMATCH` a draft whose reference solution
 disagrees with its last example, and `MOCK:RUNNER` a "solution only" draft
 with one runner that does not compile. `MOCK:REPEAT` in the instruction of a
 test generation leaves two proposals out as repeats, `MOCK:REPEAT-ALL` all of
-them. Every generation adds to
+them. A request with `largeTestCase` gets a large test case of about 300 KB on
+one line, the same every time; `MOCK:LARGE-FAIL` in the input text or
+instruction reports it as failed (the generator crashed), `MOCK:LARGE-SKIP` as
+skipped, and without a judge, or with `judge-down`, it is skipped as well.
+Results of a run cut each stream at 64 KiB, as the server does.
+"Verify all" on a draft (`POST /items/check`) reports a case as `wrong` when
+its input or expected output contains `MOCK:WA` and as `failed` when it
+contains `MOCK:RE`; `MOCK:CE` in the reference solution fails every case, and
+`MOCK:TIMEOUT` there leaves the second half `not_run`. Every generation adds to
 the usage counts of the default provider. In Settings, an API key containing `bad` or a base URL
 containing `unreachable` makes the connection test of a provider fail, and a
 base URL containing `no-models` stands for a server that does not list its
@@ -113,9 +125,11 @@ connected over MCP would), then save.
 
 `npm run test:e2e` runs a short Playwright suite (`e2e/smoke.spec.ts`) over
 the flows the product stands on: capture → draft → revise → save; the coding
-workspace with a judged submission, a hidden failing case and its panes;
+workspace with a judged submission, a hidden failing case and its panes; the
+runner rows and folded regions of the solve editor;
 keeping an accepted submission as a solution and making it the reference;
-preferences taking effect; the pages of Settings; adding an AI provider
+preferences taking effect; the large test case, from its preference to the
+Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
 (key → connection test → model → save → default); and filing selected items
 into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
@@ -192,6 +206,16 @@ A few conventions worth knowing:
   drawer and the navigation can each be minimised (the shortcuts dialog, `?`,
   lists the keys); what is minimised and the pane sizes are remembered in
   `localStorage`, per browser.
+- **The solve editor holds only the solver's code.** For a "solution only"
+  problem the runner is shown as collapsed rows above and below that code
+  (block widgets, `src/ui/editorRunner.ts`) that expand to it read-only; it is
+  never part of the editor's text, so line numbers, selection, copying, undo,
+  saved drafts and submissions cover the solver's code alone. Code put into
+  the editor from outside (opening the problem, changing language, reset,
+  loading a submission) opens with its
+  [marked regions](../docs/api.md#folded-regions) folded; typing never folds.
+  Every code editor can fold a marked region from the gutter, in any
+  language.
 - **Preferences live on the server** (`/settings/preferences`), so they follow
   the user between browsers; only the theme is local. `usePreferences()`
   returns them, with the defaults until they have loaded. Every CodeMirror

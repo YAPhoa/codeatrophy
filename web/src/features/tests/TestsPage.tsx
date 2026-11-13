@@ -9,11 +9,13 @@ import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { ORIGIN_LABEL, VERDICT_LABEL, formatBytes, plural } from '../../lib/format';
 import { byteLength } from '../../lib/itemForm';
 import { languageLabel } from '../../lib/languages';
+import { textFilename } from '../../lib/largeText';
 import { moveIndex } from '../../lib/tree';
 import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { DiffView } from '../../ui/DiffView';
-import { Checkbox, Field, TextField } from '../../ui/Field';
+import { Checkbox, TextField } from '../../ui/Field';
+import { TestDataField } from '../../ui/LargeText';
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { ItemBar } from '../item/ItemBar';
@@ -61,6 +63,10 @@ const draftOf = (c: TestCase): CaseDraft => ({ name: c.name, stdin: c.stdin, exp
 const sameDraft = (a: CaseDraft, b: CaseDraft): boolean =>
   a.name === b.name && a.stdin === b.stdin && a.expectedStdout === b.expectedStdout && a.isSample === b.isSample && a.verified === b.verified;
 
+/** Why a test case's input or output cannot be saved, or `null`. */
+const sizeProblem = (text: string | undefined, limit: number | undefined): string | null =>
+  text !== undefined && limit !== undefined && byteLength(text) > limit ? `Larger than ${formatBytes(limit)}.` : null;
+
 /** How a solution is referred to in the results of a verification run with it. */
 const solutionPhrase = (s: Pick<Solution, 'name' | 'isReference'>): string => (s.isReference ? 'the reference solution' : `“${s.name}”`);
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
@@ -91,7 +97,8 @@ function TestsManager({ item }: { item: Item }) {
   const [verify, setVerify] = useState<Map<string, VerifyResult> | null>(null);
   // The solution the results in `verify` came from.
   const [verifiedBy, setVerifiedBy] = useState<Solution | null>(null);
-  const [verifying, setVerifying] = useState(false);
+  // The solution being run on every case, while it runs.
+  const [verifying, setVerifying] = useState<Solution | null>(null);
   const [verifyError, setVerifyError] = useState<unknown>(null);
 
   const selected = selectedId && selectedId !== NEW ? (cases.find((c) => c.id === selectedId) ?? null) : null;
@@ -158,9 +165,11 @@ function TestsManager({ item }: { item: Item }) {
   };
 
   const dataLimit = meta?.limits.maxTestDataBytes;
-  const tooBig = (text: string) => (dataLimit !== undefined && byteLength(text) > dataLimit ? `Larger than ${formatBytes(dataLimit)}.` : null);
-  const stdinError = draft ? tooBig(draft.stdin) : null;
-  const expectedError = draft ? tooBig(draft.expectedStdout) : null;
+  // Measured once per change, not on every render: test data can run to megabytes.
+  const stdin = draft?.stdin;
+  const expected = draft?.expectedStdout;
+  const stdinError = useMemo(() => sizeProblem(stdin, dataLimit), [stdin, dataLimit]);
+  const expectedError = useMemo(() => sizeProblem(expected, dataLimit), [expected, dataLimit]);
   const maxCases = meta?.limits.maxTestCasesPerItem;
   const atCaseLimit = maxCases !== undefined && cases.length >= maxCases;
 
@@ -242,18 +251,11 @@ function TestsManager({ item }: { item: Item }) {
   const solutionsQuery = useSolutions(item.id);
   const solutions = useMemo(() => solutionsQuery.data ?? [], [solutionsQuery.data]);
   const reference = solutions.find((s) => s.isReference) ?? null;
-  // The solution chosen under "Verify against". Until one is chosen it is the reference.
+  // Any other solution can be run on the cases as a check. Until one is chosen it is the first.
+  const others = useMemo(() => solutions.filter((s) => !s.isReference), [solutions]);
   const [pickedId, setPickedId] = useState<string | null>(null);
-  const target = solutions.find((s) => s.id === pickedId) ?? reference ?? solutions[0] ?? null;
+  const other = others.find((s) => s.id === pickedId) ?? others[0] ?? null;
   const referenceWrite = useSolutionWrite(item);
-
-  const pickTarget = (id: string) => {
-    setPickedId(id);
-    // Results belong to the solution that produced them.
-    setVerify(null);
-    setVerifiedBy(null);
-    setVerifyError(null);
-  };
 
   // Which solution is the reference is part of the problem's content, so the
   // change is checked against the item's revision.
@@ -275,11 +277,10 @@ function TestsManager({ item }: { item: Item }) {
   // it reproduces as verified, clears the mark on those it does not, and can
   // replace differing expected outputs. A run of any other solution is a
   // check that reports results and leaves the cases as they are.
-  const runVerify = async (updateExpected: boolean) => {
-    if (!target) return;
-    const by = target;
+  const runVerify = async (by: Solution | null, updateExpected = false) => {
+    if (!by || verifying) return;
     if (updateExpected && !by.isReference) return;
-    setVerifying(true);
+    setVerifying(by);
     setVerifyError(null);
     try {
       // The reference solution is asked for as such (no id), so the run is a
@@ -293,9 +294,11 @@ function TestsManager({ item }: { item: Item }) {
         if (updateExpected) toast.success('Expected outputs updated from the reference solution');
       }
     } catch (e) {
+      setVerify(null);
+      setVerifiedBy(by);
       setVerifyError(e);
     } finally {
-      setVerifying(false);
+      setVerifying(null);
     }
   };
 
@@ -322,12 +325,102 @@ function TestsManager({ item }: { item: Item }) {
   const failed = results.filter((r) => !r.ok).length;
   const matched = results.filter((r) => r.ok && r.matches).length;
   const selectedVerify = selected && verify ? verify.get(selected.id) : undefined;
-  const canVerify = judgeOn && target !== null && cases.length > 0;
+  // Why "Verify all" cannot run, or `null` when it can.
+  const verifyBlocked = !judgeOn ? 'Needs a judge engine' : !reference ? 'Needs a reference solution' : cases.length === 0 ? 'No test cases yet' : null;
+  const canCheck = judgeOn && cases.length > 0;
   // The solution the shown results came from, as it was when it ran: only a
   // run of the reference solution marks cases and may replace their outputs.
   const ranWith = verifiedBy;
   const who = ranWith ? solutionPhrase(ranWith) : 'the solution';
   const referenceRun = ranWith?.isReference ?? false;
+
+  const replaceable = mismatched > 0 && referenceRun && reference !== null && reference.id === ranWith?.id;
+  // After a run of the reference solution, the cases it did not reproduce or
+  // failed on can go in one step — unless none matched, which points at the
+  // solution rather than the cases. A case the engine could not run is left.
+  const discardable =
+    referenceRun && reference !== null && reference.id === ranWith?.id && matched > 0
+      ? results.filter((r) => (r.ok && !r.matches) || (!r.ok && r.verdict !== 'internal_error')).map((r) => r.testCaseId)
+      : [];
+  const [discarding, setDiscarding] = useState(false);
+  const discardFailed = async () => {
+    const n = discardable.length;
+    const ok = await confirm({
+      title: `Delete ${plural(n, 'test case')}?`,
+      body: `${n === 1 ? 'It does' : 'They do'} not match the reference solution, or it fails on ${n === 1 ? 'it' : 'them'}.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    setDiscarding(true);
+    try {
+      for (const id of discardable) await api.testCases.remove(id);
+      toast.success(`Deleted ${plural(n, 'test case')}`);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setVerify((v) => {
+        if (!v) return v;
+        const next = new Map(v);
+        for (const id of discardable) next.delete(id);
+        return next;
+      });
+      await refresh();
+      setDiscarding(false);
+    }
+  };
+
+  // What the last run found, shown by the button that started it.
+  const outcome = (
+    <>
+      {verifyError != null && <ErrorCallout error={verifyError} title="Verification could not run" onRetry={() => void runVerify(ranWith?.isReference ? reference : ranWith)} />}
+      {verify && results.length > 0 && (
+        <Callout
+          tone={mismatched + failed === 0 ? 'ok' : 'warn'}
+          role="status"
+          title={
+            mismatched + failed === 0
+              ? referenceRun
+                ? `All ${plural(matched, 'case')} match the reference solution and are marked verified`
+                : `${capitalize(who)} reproduces the expected output of all ${plural(matched, 'case')}`
+              : `${matched} of ${results.length} match · ${mismatched} differ · ${failed} failed to run`
+          }
+          actions={
+            replaceable || discardable.length > 0 ? (
+              <>
+                {/* Only the reference solution's output can become the expected output. */}
+                {replaceable && (
+                  <Button
+                    size="sm"
+                    disabled={verifying !== null}
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: `Replace the expected output of ${plural(mismatched, 'case')}?`,
+                        body: 'The stored expected output is replaced by what the reference solution prints, and those cases are marked verified. Do this only if you trust the solution.',
+                        confirmLabel: 'Use the solution’s output',
+                      });
+                      if (ok) void runVerify(reference, true);
+                    }}
+                  >
+                    Use the solution’s output for the {plural(mismatched, 'differing case')}
+                  </Button>
+                )}
+                {discardable.length > 0 && (
+                  <Button size="sm" icon={<Trash2 size={13} />} onClick={() => void discardFailed()} busy={discarding} disabled={verifying !== null}>
+                    Discard {discardable.length} failed
+                  </Button>
+                )}
+              </>
+            ) : undefined
+          }
+        >
+          {!referenceRun && ranWith && 'A check only: marks and expected outputs are unchanged. '}
+          {referenceRun && mismatched + failed > 0 && 'Cases that differ or failed are no longer marked verified. '}
+          {mismatched + failed > 0 && 'Open a marked case to see why.'}
+        </Callout>
+      )}
+    </>
+  );
 
   return (
     <div className="workspace">
@@ -346,6 +439,15 @@ function TestsManager({ item }: { item: Item }) {
               </Button>
             )}
             <Button
+              icon={<ShieldCheck size={14} />}
+              onClick={() => void runVerify(reference)}
+              busy={verifying?.isReference === true}
+              disabled={verifyBlocked !== null || verifying !== null}
+              title={verifyBlocked ?? 'Run the reference solution on every case'}
+            >
+              Verify all
+            </Button>
+            <Button
               icon={<Plus size={14} />}
               onClick={() => void select(NEW)}
               disabled={atCaseLimit}
@@ -357,6 +459,8 @@ function TestsManager({ item }: { item: Item }) {
               Generate with AI
             </LinkButton>
           </div>
+
+          {(ranWith === null || ranWith.isReference) && (verifyError != null || results.length > 0) && <div className="tests-outcome">{outcome}</div>}
 
           {casesQuery.isPending ? (
             <PageLoading />
@@ -465,14 +569,22 @@ function TestsManager({ item }: { item: Item }) {
                       <Checkbox className="case-flag" checked={draft.verified} onChange={(v) => setDraft({ ...draft, verified: v })} label="Verified" hint="Output confirmed" />
                     </div>
                     <div className="case-io">
-                      <Field label="Input (stdin)" error={stdinError}>
-                        {(a) => <textarea {...a} className="input textarea mono" rows={8} spellCheck={false} value={draft.stdin} onChange={(e) => setIo({ stdin: e.target.value })} />}
-                      </Field>
-                      <Field label="Expected output (stdout)" error={expectedError}>
-                        {(a) => (
-                          <textarea {...a} className="input textarea mono" rows={8} spellCheck={false} value={draft.expectedStdout} onChange={(e) => setIo({ expectedStdout: e.target.value })} />
-                        )}
-                      </Field>
+                      <TestDataField
+                        label="Input (stdin)"
+                        rows={8}
+                        value={draft.stdin}
+                        onChange={(stdin) => setIo({ stdin })}
+                        error={stdinError}
+                        filename={textFilename(item.title, draft.name || 'case', 'input')}
+                      />
+                      <TestDataField
+                        label="Expected output (stdout)"
+                        rows={8}
+                        value={draft.expectedStdout}
+                        onChange={(expectedStdout) => setIo({ expectedStdout })}
+                        error={expectedError}
+                        filename={textFilename(item.title, draft.name || 'case', 'output')}
+                      />
                     </div>
                     {base && (draft.stdin !== base.stdin || draft.expectedStdout !== base.expectedStdout) && base.verified && !draft.verified && (
                       <p className="field-hint">
@@ -489,7 +601,7 @@ function TestsManager({ item }: { item: Item }) {
                             <Callout tone="danger" title={`${capitalize(who)} produces a different output`}>
                               Either the stored expected output is wrong, or the solution is. Decide which before trusting this case.
                             </Callout>
-                            <DiffView expected={draft.expectedStdout} actual={selectedVerify.actualStdout} mode={item.problem?.compare} leftLabel="Stored expected output" rightLabel={ranWith && !ranWith.isReference ? `Output of “${ranWith.name}”` : 'Reference solution output'} variant="before-after" />
+                            <DiffView expected={draft.expectedStdout} actual={selectedVerify.actualStdout} mode={item.problem?.compare} downloadName={`${item.title} ${draft.name}`} leftLabel="Stored expected output" rightLabel={ranWith && !ranWith.isReference ? `Output of “${ranWith.name}”` : 'Reference solution output'} variant="before-after" />
                           </>
                         )}
                         {!selectedVerify.ok && (
@@ -527,13 +639,12 @@ function TestsManager({ item }: { item: Item }) {
               <h2 id="solution-title" className="section-title">
                 Verification
               </h2>
-              <span className="muted">Running a saved solution on every case is how expected outputs are verified.</span>
             </div>
             {solutionsQuery.isPending ? (
               <PageLoading />
             ) : solutionsQuery.isError ? (
               <ErrorState compact error={solutionsQuery.error} onRetry={() => void solutionsQuery.refetch()} />
-            ) : target === null ? (
+            ) : solutions.length === 0 ? (
               <div className="card">
                 <EmptyState
                   compact
@@ -545,7 +656,7 @@ function TestsManager({ item }: { item: Item }) {
                     </LinkButton>
                   }
                 >
-                  Verifying needs a known-correct program to run. Save one on the Solutions page, or from the Solve page once your code is accepted, and mark it as the reference solution.
+                  Verifying runs a reference solution on every case. Save one on the Solutions page and mark it as the reference.
                 </EmptyState>
               </div>
             ) : (
@@ -557,88 +668,63 @@ function TestsManager({ item }: { item: Item }) {
                       <strong>{reference.name}</strong> <span className="muted">{languageLabel(reference.language, meta?.judge.languages)}</span>
                     </span>
                   ) : (
-                    <span className="verify-panel-value muted">None chosen. Pick a solution below and use it as the reference.</span>
+                    <span className="verify-panel-value muted">None chosen</span>
                   )}
                   <Link to={`/items/${item.id}/solutions`} className="nowrap">
                     {reference ? 'Edit on the Solutions page' : 'Open the Solutions page'}
                   </Link>
                 </div>
-                <div className="verify-panel-row">
-                  <label htmlFor="verify-solution" className="verify-panel-label">
-                    Verify against
-                  </label>
-                  <select id="verify-solution" className="input select verify-select" value={target.id} onChange={(e) => pickTarget(e.target.value)} disabled={verifying}>
-                    {solutions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} · {languageLabel(s.language, meta?.judge.languages)}
-                        {s.isReference ? ' — reference' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <Button icon={<ShieldCheck size={14} />} onClick={() => void runVerify(false)} busy={verifying} disabled={!canVerify}>
-                    {target.isReference ? 'Verify expected outputs' : 'Check against this solution'}
-                  </Button>
-                  {!target.isReference && (
-                    <Button onClick={() => void makeReference(target)} busy={referenceWrite.busy} disabled={verifying}>
+                {other && (
+                  <div className="verify-panel-row">
+                    <label htmlFor="verify-solution" className="verify-panel-label">
+                      Check another
+                    </label>
+                    <select
+                      id="verify-solution"
+                      className="input select verify-select"
+                      value={other.id}
+                      onChange={(e) => {
+                        setPickedId(e.target.value);
+                        // Results belong to the solution that produced them.
+                        if (!referenceRun) {
+                          setVerify(null);
+                          setVerifiedBy(null);
+                          setVerifyError(null);
+                        }
+                      }}
+                      disabled={verifying !== null}
+                    >
+                      {others.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} · {languageLabel(s.language, meta?.judge.languages)}
+                        </option>
+                      ))}
+                    </select>
+                    <Button onClick={() => void runVerify(other)} busy={verifying?.id === other.id} disabled={!canCheck || verifying !== null} title={!judgeOn ? 'Needs a judge engine' : undefined}>
+                      Check
+                    </Button>
+                    <Button onClick={() => void makeReference(other)} busy={referenceWrite.busy} disabled={verifying !== null}>
                       Use as reference
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
                 <p className="verify-panel-note muted">
                   {!judgeOn ? (
                     <>
-                      Needs a judge engine to run the solution. <Link to="/settings/judge">Judge status</Link>
+                      Needs a judge engine. <Link to="/settings/judge">Judge status</Link>
                     </>
-                  ) : cases.length === 0 ? (
-                    'Add test cases first.'
                   ) : verifying ? (
-                    `Running ${solutionPhrase(target)} on every case…`
-                  ) : target.isReference ? (
-                    'Runs the reference solution on every case and compares its output with the stored expected output. Cases that match are marked verified; cases that differ or fail lose the mark.'
+                    `Running ${solutionPhrase(verifying)} on every case…`
+                  ) : other ? (
+                    'A check runs another solution on every case and changes nothing.'
                   ) : (
-                    `“${target.name}” is not the reference solution, so this is only a check: it runs on every case and the results are shown, but “Verified” marks and expected outputs stay as they are. To verify with it, use it as the reference.`
+                    '“Verify all” runs the reference solution on every case and marks those it reproduces.'
                   )}
                 </p>
               </div>
             )}
             <WriteProblems write={referenceWrite} limits={limits} title="Could not change the reference solution" consequence="Saving anyway makes the chosen solution the reference." />
-            {verifyError != null && <ErrorCallout error={verifyError} title="Verification could not run" onRetry={() => void runVerify(false)} />}
-            {verify && results.length > 0 && (
-              <Callout
-                tone={mismatched + failed === 0 ? 'ok' : 'warn'}
-                role="status"
-                title={
-                  mismatched + failed === 0
-                    ? referenceRun
-                      ? `All ${plural(matched, 'case')} match the reference solution and are marked verified`
-                      : `${capitalize(who)} reproduces the expected output of all ${plural(matched, 'case')}`
-                    : `${matched} of ${results.length} match · ${mismatched} differ · ${failed} failed to run`
-                }
-                actions={
-                  // Only the reference solution's output can become the expected output.
-                  mismatched > 0 && referenceRun && reference !== null && reference.id === ranWith?.id ? (
-                    <Button
-                      size="sm"
-                      disabled={verifying}
-                      onClick={async () => {
-                        const ok = await confirm({
-                          title: `Replace the expected output of ${plural(mismatched, 'case')}?`,
-                          body: 'The stored expected output is replaced by what the reference solution prints, and those cases are marked verified. Do this only if you trust the solution.',
-                          confirmLabel: 'Use the solution’s output',
-                        });
-                        if (ok) void runVerify(true);
-                      }}
-                    >
-                      Use the solution’s output for the {plural(mismatched, 'differing case')}
-                    </Button>
-                  ) : undefined
-                }
-              >
-                {!referenceRun && ranWith && `This was a check against “${ranWith.name}”, which is not the reference solution: “Verified” marks and expected outputs were not changed. `}
-                {referenceRun && mismatched + failed > 0 && 'Cases that differ or failed are no longer marked verified. '}
-                {mismatched + failed > 0 && 'Open a marked case in the list above to compare the two outputs or see the error.'}
-              </Callout>
-            )}
+            {ranWith !== null && !ranWith.isReference && outcome}
           </section>
         </div>
       </div>

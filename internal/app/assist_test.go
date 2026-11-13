@@ -259,7 +259,7 @@ func TestGenerateTestCasesVerification(t *testing.T) {
 	if !c0.Verified || c0.ExpectedStdout != "2\n" || !*c0.PredictionMatched {
 		t.Errorf("case 0: %+v", c0)
 	}
-	if !c1.Verified || c1.ExpectedStdout != "4\n" || *c1.PredictionMatched || c1.PredictedStdout != "5" {
+	if !c1.Verified || c1.ExpectedStdout != "4\n" || *c1.PredictionMatched || *c1.PredictedStdout != "5" {
 		t.Errorf("case 1 disagreement must be surfaced: %+v", c1)
 	}
 	if u := e.ai.Last().User; !strings.Contains(u, "EXISTING-SOLUTION") {
@@ -270,7 +270,7 @@ func TestGenerateTestCasesVerification(t *testing.T) {
 		return judge.ExecResult{Status: judge.StatusRuntimeError, Stderr: "Traceback"}, nil
 	}
 	res = must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{}`)))
-	if c := res.Cases[0]; c.Verified || c.PredictionMatched != nil || c.Error == nil || c.ExpectedStdout != c.PredictedStdout {
+	if c := res.Cases[0]; c.Verified || c.PredictionMatched != nil || c.Error == nil || c.ExpectedStdout != *c.PredictedStdout {
 		t.Errorf("failed run: %+v", c)
 	}
 	// The engine being unreachable is a verification-level error.

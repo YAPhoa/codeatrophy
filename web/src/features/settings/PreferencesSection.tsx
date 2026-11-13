@@ -180,6 +180,13 @@ export function PreferencesSection() {
           decreaseLabel="Fewer test cases"
           increaseLabel="More test cases"
         />
+        <Checkbox
+          className="prefs-check-row"
+          checked={shown.largeTestCase}
+          onChange={(largeTestCase) => save({ largeTestCase })}
+          label="Generate a large test case by default"
+          hint="One case at the size limits, so a slow solution fails."
+        />
       </div>
 
       <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-editor-title">

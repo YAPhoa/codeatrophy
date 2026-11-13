@@ -54,6 +54,7 @@ type MetaLimits struct {
 	MaxInstructionChars        int   `json:"maxInstructionChars"`
 	MaxPreviousDraftBytes      int   `json:"maxPreviousDraftBytes"`
 	MaxGeneratedTestCases      int   `json:"maxGeneratedTestCases"`
+	MaxLargeInputBytes         int   `json:"maxLargeInputBytes"`
 	MaxStylePresets            int   `json:"maxStylePresets"`
 	MaxStyleNameChars          int   `json:"maxStyleNameChars"`
 	MaxStyleInstructionsChars  int   `json:"maxStyleInstructionsChars"`
@@ -114,6 +115,7 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 			MaxInstructionChars:        domain.MaxGenerationInstructionChars,
 			MaxPreviousDraftBytes:      domain.MaxPreviousDraftBytes,
 			MaxGeneratedTestCases:      MaxGeneratedCases,
+			MaxLargeInputBytes:         MaxLargeInputBytes,
 			MaxStylePresets:            domain.MaxStylePresets,
 			MaxStyleNameChars:          domain.MaxStyleNameChars,
 			MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,

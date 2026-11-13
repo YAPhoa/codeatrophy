@@ -302,11 +302,12 @@ func TestGeneratedCasesAddToTheExistingOnes(t *testing.T) {
 	if d := must(newDraft(t, e, `{"text":"x"}`, dj)).Draft; len(d.TestCases) != 1 {
 		t.Errorf("draft dedupe: %+v", d.TestCases)
 	}
-	// Large existing inputs are cut for the prompt.
-	must(e.app.AddTestCase(e.ctx, it.ID, decodeInto[domain.TestCaseInput](t, `{"name":"big","stdin":"`+strings.Repeat("9 ", 2000)+`","expectedStdout":"x"}`)))
+	// A large existing case is described by name and size only.
+	must(e.app.AddTestCase(e.ctx, it.ID, decodeInto[domain.TestCaseInput](t, `{"name":"big","stdin":"`+strings.Repeat("9 ", 2500)+`","expectedStdout":"x"}`)))
 	e.ai.Respond = onlyDuplicates
 	must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{}`)))
-	if u := e.ai.Last().User; !strings.Contains(u, "(cut; 4000 bytes in all)") {
-		t.Error("a large input is not cut")
+	if u := e.ai.Last().User; !strings.Contains(u, "--- big (hidden)\n(input of 5000 bytes and expected output of 1 bytes, too large to show)") ||
+		strings.Contains(u, "9 9 9") {
+		t.Errorf("a large input is shown: %s", u)
 	}
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
-import { useCollections, useMeta, useStyles, useTags } from '../../api/queries';
+import { useCollections, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
 import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
@@ -17,6 +17,7 @@ import { GeneratingPanel, Steps } from './parts';
 import { ReviewScreen } from './ReviewScreen';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
 import { useGeneration } from './useGeneration';
+import { useDraftCheck } from './draftChecks';
 import { useSaveDraft } from './useSaveDraft';
 
 interface CaptureSession {
@@ -41,6 +42,9 @@ const fresh = (): CaptureSession => ({ stage: 'input', text: '', typeHint: 'auto
 
 const STEPS = ['Capture', 'Review', 'Save'] as const;
 
+/** Where the capture flow keeps its work in progress. */
+const SESSION_KEY = 'capture:new';
+
 /**
  * The capture flow: paste or type anything → the AI drafts a complete item →
  * review and edit → save. Works as a plain authoring form when AI is off.
@@ -58,10 +62,13 @@ export default function CapturePage() {
   const styles = stylesQuery.data ?? [];
   const collectionActions = useCollectionActions();
   const confirm = useConfirm();
-  const [session, setSession, clearSession] = useStoredState<CaptureSession>('capture:new', fresh);
+  const [session, setSession, clearSession] = useStoredState<CaptureSession>(SESSION_KEY, fresh);
+  const verify = useDraftCheck(SESSION_KEY, session, setSession);
   const generation = useGeneration();
   const saver = useSaveDraft(clearSession);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // Whether to ask for a large test case is the user's standing choice; a revision asks again.
+  const largeTestCase = usePreferences().largeTestCase;
 
   const presetCollection = searchParams.get('collection');
   const defaults = (): Partial<ItemFormState> => ({ collectionIds: presetCollection ? [presetCollection] : [] });
@@ -102,11 +109,12 @@ export default function CapturePage() {
 
   const draft = async () => {
     if (!canDraft) return;
+    verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice }, signal),
+      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCase }, signal),
     );
     if (!res) return;
-    const drafted = formFromDraft(res.draft, defaults());
+    const drafted = formFromDraft(res.draft, defaults(), res.check?.largeCase);
     patch({
       stage: 'review',
       form: drafted,
@@ -124,16 +132,17 @@ export default function CapturePage() {
     if (!form) return;
     const current = form;
     const previousDraft = draftFromForm(current, session.assumptions);
+    verify.cancel();
     const res = await generation.run((signal) => {
       const problem = revisionProblem(previousDraft, meta.data?.limits);
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice }, signal);
+      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCase }, signal);
     });
     if (!res) return;
     // Keep what the model does not produce: where the item is filed and where it came from.
-    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
+    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCase), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
     patch({
       form: revised,
       assumptions: res.draft.assumptions,
@@ -146,6 +155,7 @@ export default function CapturePage() {
   };
 
   const writeByHand = () => {
+    verify.cancel();
     const type: ItemType = session.typeHint === 'reading' ? 'reading' : 'problem';
     patch({
       stage: 'review',
@@ -167,6 +177,7 @@ export default function CapturePage() {
     });
     if (ok) {
       generation.cancel();
+      verify.cancel();
       clearSession();
     }
   };
@@ -209,6 +220,7 @@ export default function CapturePage() {
           appliedStyle={session.appliedStyle}
           check={session.check ?? null}
           usage={session.usage ?? null}
+          verify={verify}
           checkStale={session.checked !== undefined && session.checked !== checkedState(form)}
           originalText={session.aiDrafted ? text : undefined}
           aiEnabled={aiEnabled}

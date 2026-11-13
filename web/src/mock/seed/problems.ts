@@ -41,6 +41,8 @@ export interface SeedProblem {
   variantOf?: string;
   /** Languages that get starter code. */
   languages: string[];
+  /** Starter code written for this problem, in place of the stock skeleton for those languages. */
+  starter?: Record<string, string>;
   /**
    * Set for a "solution only" problem: the stub and the hidden runner per
    * language, in place of the stock starter code. Its `reference` and other
@@ -489,6 +491,50 @@ main()
     created: 76,
     updated: 70,
     languages: COMMON,
+    starter: {
+      python: String.raw`import sys
+
+
+def count_islands(grid) -> int:
+    # TODO: count the groups of "1" cells that touch side by side
+    return 0
+
+
+def main() -> None:
+    # region input
+    data = sys.stdin.read().split()
+    rows = int(data[0])
+    grid = [list(row) for row in data[2:2 + rows]]
+    # endregion
+    print(count_islands(grid))
+
+
+if __name__ == "__main__":
+    main()
+`,
+      cpp: String.raw`#include <bits/stdc++.h>
+using namespace std;
+
+int countIslands(vector<string> &grid) {
+    // TODO: count the groups of '1' cells that touch side by side
+    return 0;
+}
+
+int main() {
+    // region input
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    int rows, cols;
+    cin >> rows >> cols;
+    vector<string> grid(rows);
+    for (auto &row : grid) cin >> row;
+    // endregion
+
+    cout << countIslands(grid) << "\n";
+    return 0;
+}
+`,
+    },
     reference: String.raw`import sys
 from collections import deque
 

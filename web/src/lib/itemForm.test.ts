@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Item, ItemDraft, Limits } from '../api/types';
+import type { Item, ItemDraft, LargeCaseReport, Limits } from '../api/types';
 import {
   addFormLanguage,
   changedFields,
   checkedState,
+  checkRequestFromForm,
+  discardableCases,
   draftFromForm,
   effectiveHarness,
   emptyForm,
@@ -23,6 +25,9 @@ import {
   revisionProblem,
   tagProblem,
   validateForm,
+  withCheck,
+  withoutCases,
+  type CheckedDraft,
 } from './itemForm';
 
 const draft: ItemDraft = {
@@ -108,6 +113,14 @@ describe('formFromDraft', () => {
     expect(formFromDraft(functionDraft)).toMatchObject({ interface: 'function', harness: { python: runner } });
   });
 
+  it('marks the large test case the generation added', () => {
+    const big: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true }] };
+    const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 2, timeMs: 5, generator: null };
+    expect(formFromDraft(big, {}, report).testCases.map((t) => t.large === true)).toEqual([false, true]);
+    expect(formFromDraft(big, {}, { ...report, status: 'failed', index: null }).testCases.some((t) => t.large)).toBe(false);
+    expect(formFromDraft(big).testCases.some((t) => t.large)).toBe(false);
+  });
+
   it('uses the problem defaults for a reading draft', () => {
     const form = formFromDraft({ ...draft, type: 'reading', problem: null, testCases: [] });
     expect(form).toMatchObject({ type: 'reading', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', interface: 'program', starterCode: {}, harness: {}, testCases: [], referenceSolution: null });
@@ -129,6 +142,17 @@ describe('draftFromForm', () => {
     expect(back.problem).toMatchObject({ interface: 'function', harness: { python: runner }, referenceSolution: { language: 'python', source: 'print(2)' } });
     // Switched to a full program in the form, the runner is not part of the draft any more.
     expect(draftFromForm({ ...formFromDraft(functionDraft), interface: 'program' }, []).problem).toMatchObject({ interface: 'program', harness: {} });
+  });
+
+  it('leaves the large test case, and any test data too large to show a model, out of a revision', () => {
+    const form = formFromDraft(draft);
+    const cases = [
+      ...form.testCases,
+      { ...form.testCases[0]!, key: 'big', name: 'Generated', stdin: '7\n', large: true },
+      { ...form.testCases[0]!, key: 'pasted', name: 'Pasted', stdin: '1 '.repeat(40_000) },
+      { ...form.testCases[0]!, key: 'output', name: 'Long output', expectedStdout: '0\n'.repeat(20_000) },
+    ];
+    expect(draftFromForm({ ...form, testCases: cases }, []).testCases.map((t) => t.name)).toEqual(['Example 1']);
   });
 
   it('has no problem part or test cases for a reading', () => {
@@ -276,6 +300,7 @@ const limits: Limits = {
   maxInstructionChars: 2000,
   maxPreviousDraftBytes: 2097152,
   maxGeneratedTestCases: 30,
+  maxLargeInputBytes: 1048576,
   maxStylePresets: 20,
   maxStyleNameChars: 60,
   maxStyleInstructionsChars: 2000,
@@ -434,5 +459,67 @@ describe('upgradeForm', () => {
   it('leaves a current form as it is', () => {
     const form = formFromDraft(functionDraft);
     expect(upgradeForm(form)).toEqual(form);
+  });
+});
+
+describe('checking a draft again', () => {
+  const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 9, timeMs: 5, generator: null };
+  const twoCases: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true }] };
+  const form = formFromDraft(twoCases, {}, report);
+  const answer = {
+    check: { attempted: true, engine: 'judge0', passed: 1, total: 2, error: 'Example 1: expected 2', runners: [], largeCase: null },
+    cases: [
+      { outcome: 'wrong' as const, error: null },
+      { outcome: 'passed' as const, error: null },
+    ],
+  };
+
+  it('sends the problem and the test cases as they would be saved', () => {
+    const body = checkRequestFromForm(form);
+    expect(body.problem).toMatchObject({ interface: 'program', compare: 'exact', referenceSolution: { language: 'python', source: 'print(2)' } });
+    expect(body.testCases.map((t) => t.stdin)).toEqual(['1\n', '9\n']);
+    expect(body.testCases[1]).not.toHaveProperty('large');
+  });
+
+  it('marks each case from the answer and keeps the report of the large case', () => {
+    const session = { form, check: { ...answer.check, passed: 2, error: null, largeCase: report }, checked: checkedState(form), other: 'kept' };
+    const next = withCheck(session, checkedState(form), answer)!;
+    expect(next.form!.testCases.map((t) => t.verified)).toEqual([false, true]);
+    expect(next.form!.testCases.map((t) => t.outcome?.outcome)).toEqual(['wrong', 'passed']);
+    expect(next.check).toEqual({ ...answer.check, largeCase: report });
+    expect(next.checked).toBe(checkedState(next.form!));
+    expect(next.other).toBe('kept');
+  });
+
+  it('drops an answer for a form that has changed since', () => {
+    const sent = checkedState(form);
+    const edited = { ...form, testCases: form.testCases.map((t, i) => (i === 0 ? { ...t, expectedStdout: '3\n' } : t)) };
+    expect(withCheck({ form: edited }, sent, answer)).toBeNull();
+    expect(withCheck({ form: null }, sent, answer)).toBeNull();
+    // A change the check does not depend on is fine.
+    expect(withCheck({ form: { ...form, title: 'Renamed' } }, sent, answer)).not.toBeNull();
+  });
+
+  it('offers to discard the cases that ran and were wrong or failed, but only when some passed', () => {
+    const outcomes = (...list: ('passed' | 'wrong' | 'failed' | 'not_run')[]) => ({
+      testCases: list.map((outcome, i) => ({ ...form.testCases[0]!, key: `k${i}`, outcome: { outcome, error: null } })),
+    });
+    expect(discardableCases(outcomes('passed', 'wrong', 'failed', 'not_run'))).toEqual(['k1', 'k2']);
+    expect(discardableCases(outcomes('wrong', 'failed'))).toEqual([]);
+    expect(discardableCases(outcomes('wrong', 'not_run'))).toEqual([]);
+    expect(discardableCases(outcomes('passed', 'passed'))).toEqual([]);
+    expect(discardableCases(form)).toEqual([]);
+  });
+
+  it('drops cases and brings a check that still holds along', () => {
+    const checked = withCheck<CheckedDraft>({ form, check: null }, checkedState(form), answer)!;
+    const wrong = checked.form!.testCases[0]!.key;
+    const next = withoutCases(checked, [wrong]);
+    expect(next.form!.testCases).toHaveLength(1);
+    expect(next.check).toMatchObject({ passed: 1, total: 1, error: null });
+    expect(next.checked).toBe(checkedState(next.form!));
+    // A check the form has moved on from is left as it is.
+    const edited = { ...checked, form: { ...checked.form!, compare: 'tokens' as const } };
+    expect(withoutCases(edited, [wrong]).check).toEqual(checked.check);
   });
 });

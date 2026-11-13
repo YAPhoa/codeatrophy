@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
-import { useCollections, useItem, useMeta, useStyles, useTags } from '../../api/queries';
+import { useCollections, useItem, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
 import type { AppliedStyle, DraftCheck, GenerationUsage, Item, VariantMode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { useHotkeys } from '../../lib/hotkeys';
@@ -17,6 +17,7 @@ import { GeneratingPanel, Steps } from './parts';
 import { ReviewScreen } from './ReviewScreen';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
 import { useGeneration } from './useGeneration';
+import { useDraftCheck } from './draftChecks';
 import { useSaveDraft } from './useSaveDraft';
 import { VARIANT_MODES, isVariantMode } from './variantModes';
 
@@ -70,6 +71,7 @@ function VariantFlow({ original }: { original: Item }) {
   const collectionActions = useCollectionActions();
   const confirm = useConfirm();
   const generation = useGeneration();
+  const largeTestCase = usePreferences().largeTestCase;
 
   const requested = searchParams.get('mode');
   const [session, setSession, clearSession] = useStoredState<VariantSession>(`capture:variant:${original.id}`, () => ({
@@ -82,6 +84,7 @@ function VariantFlow({ original }: { original: Item }) {
     appliedStyle: null,
   }));
   const saver = useSaveDraft(clearSession);
+  const verify = useDraftCheck(`capture:variant:${original.id}`, session, setSession);
   const patch = (change: Partial<VariantSession>) => setSession((s) => ({ ...s, ...change }));
   const form = useMemo(() => (session.form ? upgradeForm(session.form) : null), [session.form]);
 
@@ -96,11 +99,12 @@ function VariantFlow({ original }: { original: Item }) {
   const inherited: Partial<ItemFormState> = { tags: original.tags, collectionIds: original.collectionIds };
 
   const generate = async () => {
+    verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice }, signal),
+      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice, largeTestCase }, signal),
     );
     if (!res) return;
-    const drafted = formFromDraft(res.draft, inherited);
+    const drafted = formFromDraft(res.draft, inherited, res.check?.largeCase);
     patch({
       stage: 'review',
       form: drafted,
@@ -119,15 +123,16 @@ function VariantFlow({ original }: { original: Item }) {
     if (!current) return;
     // The draft as edited goes back as `previousDraft`, so the user's own changes are revised, not discarded.
     const previousDraft = draftFromForm(current, session.assumptions);
+    verify.cancel();
     const res = await generation.run((signal) => {
       const problem = revisionProblem(previousDraft, limits);
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint }, signal);
+      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint, largeTestCase }, signal);
     });
     if (!res) return;
-    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
+    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCase), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
     patch({
       form: revised,
       assumptions: res.draft.assumptions,
@@ -139,7 +144,8 @@ function VariantFlow({ original }: { original: Item }) {
     });
   };
 
-  const writeByHand = () =>
+  const writeByHand = () => {
+    verify.cancel();
     patch({
       stage: 'review',
       // A variant written by hand starts with the original's interface, as a drafted one does.
@@ -150,6 +156,7 @@ function VariantFlow({ original }: { original: Item }) {
       check: null,
       usage: null,
     });
+  };
 
   const save = () => {
     if (form) void saver.save(form, { variantOf: original.id, rawInput: null });
@@ -159,6 +166,7 @@ function VariantFlow({ original }: { original: Item }) {
     const ok = await confirm({ title: 'Discard this variant?', body: 'The draft is thrown away. The original item is not affected.', confirmLabel: 'Discard', danger: true });
     if (ok) {
       generation.cancel();
+      verify.cancel();
       clearSession();
     }
   };
@@ -204,6 +212,7 @@ function VariantFlow({ original }: { original: Item }) {
           appliedStyle={session.appliedStyle}
           check={session.check ?? null}
           usage={session.usage ?? null}
+          verify={verify}
           checkStale={session.checked !== undefined && session.checked !== checkedState(form)}
           originalText={original.body}
           originalLabel={`The original: ${original.title}`}

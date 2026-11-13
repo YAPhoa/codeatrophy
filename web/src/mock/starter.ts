@@ -1,5 +1,7 @@
 // Language-agnostic starter code: skeletons that read stdin and leave the
-// solving to the user. Used by the seed library and by drafted problems.
+// solving to the user. Used by the seed library and by drafted problems. The
+// lines that only read the input are marked as a folded region
+// (`# region input` … `# endregion`), as the server asks AI providers to do.
 //
 // Everything here has to compile and run on the judge's toolchains, which are
 // old (see JUDGE_LANGUAGES in db.ts): Python 3.8, GCC 9.2, Java 13, Go 1.13,
@@ -10,7 +12,9 @@ const TEMPLATES: Record<string, string> = {
 
 
 def solve() -> None:
+    # region input
     data = sys.stdin.read().split()
+    # endregion
     # TODO: parse the input and print the answer
 
 
@@ -21,8 +25,10 @@ if __name__ == "__main__":
 using namespace std;
 
 int main() {
+    // region input
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
+    // endregion
 
     // TODO: read the input and print the answer
 
@@ -43,18 +49,24 @@ import java.util.*;
 
 public class Main {
     public static void main(String[] args) throws IOException {
+        // region input
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+        // endregion
         // TODO: read the input and print the answer
     }
 }
 `,
-  javascript: String.raw`const lines = require("fs").readFileSync(0, "utf8").split("\n");
+  javascript: String.raw`// region input
+const lines = require("fs").readFileSync(0, "utf8").split("\n");
+// endregion
 
 // TODO: parse the lines and print the answer with console.log
 `,
   typescript: String.raw`import { readFileSync } from "fs";
 
+// region input
 const lines: string[] = readFileSync(0, "utf8").split("\n");
+// endregion
 
 // TODO: parse the lines and print the answer with console.log
 `,
@@ -67,9 +79,11 @@ import (
 )
 
 func main() {
+	// region input
 	in := bufio.NewReader(os.Stdin)
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
+	// endregion
 
 	// TODO: read the input with fmt.Fscan(in, &x) and print the answer
 	_ = in
@@ -79,9 +93,11 @@ func main() {
   rust: String.raw`use std::io::{self, Read};
 
 fn main() {
+    // region input
     let mut input = String::new();
     io::stdin().read_to_string(&mut input).unwrap();
     let mut tokens = input.split_ascii_whitespace();
+    // endregion
 
     // TODO: parse the tokens and print the answer
     let _ = tokens.next();

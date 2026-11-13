@@ -4,6 +4,7 @@
 
 import type {
   AiTestCasesResponse,
+  CheckedCase,
   Difficulty,
   DraftCheck,
   DraftProblemSpec,
@@ -747,11 +748,11 @@ export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): Draf
   const reference = draft.problem.referenceSolution;
   const judge = db.options.judge;
   if (judge === 'none' || !reference || cases.length === 0) {
-    return { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total: cases.length, error: null, runners: [] };
+    return { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total: cases.length, error: null, runners: [], largeCase: null };
   }
   // Every harness is tried, whatever becomes of the reference solution.
   const runners = checkRunners(draft, judge === 'down');
-  const unchecked = (attempted: boolean, error: string | null): DraftCheck => ({ attempted, engine: 'judge0', passed: 0, total: cases.length, error, runners });
+  const unchecked = (attempted: boolean, error: string | null): DraftCheck => ({ attempted, engine: 'judge0', passed: 0, total: cases.length, error, runners, largeCase: null });
   if (judge === 'down') return unchecked(true, 'judge engine unreachable: dial tcp: connection refused');
   const runner = draft.problem.harness[reference.language];
   if (draft.problem.interface === 'function' && !runner) {
@@ -772,9 +773,10 @@ export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): Draf
     passed: cases.filter((c) => c.verified).length,
     total: cases.length,
     error: failed
-      ? `${failed.name || `case ${last + 1}`}: expected ${failed.expectedStdout.trim()}, but the reference solution printed ${perturbOutput(failed.expectedStdout).trim() || 'nothing'}`
+      ? wrongOutput(failed, last)
       : null,
     runners,
+    largeCase: null,
   };
 }
 
@@ -1121,6 +1123,74 @@ export function proposeTestCases(
       error: judge === 'down' ? 'judge engine unreachable: dial tcp: connection refused' : null,
     },
     duplicatesDropped: dropped,
+    largeCase: null,
     cases: cases.slice(0, cases.length - dropped),
   };
+}
+
+// ---- Checking a problem that is not saved yet -------------------------------------
+
+/** Why a case's expected output was not printed, in the words of a check; a long output is not quoted. */
+function wrongOutput(c: { name: string; expectedStdout: string }, index: number): string {
+  const name = c.name || `case ${index + 1}`;
+  if (c.expectedStdout.length > 200) return `${name}: the reference solution printed a different output`;
+  return `${name}: expected ${c.expectedStdout.trim()}, but the reference solution printed ${perturbOutput(c.expectedStdout).trim() || 'nothing'}`;
+}
+
+/** In a test case's input or expected output: the reference solution prints something else for it. */
+export const CHECK_WRONG_MARKER = 'MOCK:WA';
+/** In a test case's input or expected output: the reference solution crashes on it. */
+export const CHECK_CRASH_MARKER = 'MOCK:RE';
+/** In the reference solution: the check runs out of time halfway through. */
+export const CHECK_TIMEOUT_MARKER = 'MOCK:TIMEOUT';
+
+/**
+ * `POST /items/check`: the draft check, for a problem as edited, with an
+ * outcome for every case. A case is `wrong` when its data carries `MOCK:WA`
+ * and `failed` when it carries `MOCK:RE`; `MOCK:CE` in the reference solution
+ * fails them all, and `MOCK:TIMEOUT` leaves the second half `not_run`.
+ */
+export function checkProblem(
+  db: MockDb,
+  problem: DraftProblemSpec,
+  cases: readonly { name: string; stdin: string; expectedStdout: string }[],
+): { check: DraftCheck; cases: CheckedCase[] } {
+  const judge = db.options.judge;
+  const reference = problem.referenceSolution;
+  const total = cases.length;
+  const all = (outcome: CheckedCase): CheckedCase[] => cases.map(() => ({ ...outcome }));
+  if (judge === 'none' || !reference || total === 0) {
+    const error = judge === 'none' ? 'there is no judge engine' : 'there is no reference solution';
+    return { check: { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total, error: null, runners: [], largeCase: null }, cases: all({ outcome: 'not_run', error }) };
+  }
+  const draft = { problem, testCases: [], type: 'problem', title: '', summary: '', body: '', difficulty: null, tags: [], assumptions: [] } satisfies ItemDraft;
+  const runners = checkRunners(draft, judge === 'down');
+  const stopped = (error: string, outcome: CheckedCase) => ({ check: { attempted: true, engine: 'judge0', passed: 0, total, error, runners, largeCase: null }, cases: all(outcome) });
+  if (judge === 'down') return stopped('judge engine unreachable: dial tcp: connection refused', { outcome: 'not_run', error: 'the judge engine could not be reached' });
+  const runner = problem.harness[reference.language];
+  if (problem.interface === 'function' && !runner) {
+    const error = `the reference solution is in ${reference.language}, which has no harness`;
+    return stopped(error, { outcome: 'not_run', error });
+  }
+  if (detectBehaviour(reference.source, undefined, assemble(runner, reference.source).program) === 'ce') {
+    return stopped('the reference solution did not compile', { outcome: 'failed', error: 'the reference solution did not compile' });
+  }
+  const reached = reference.source.includes(CHECK_TIMEOUT_MARKER) ? Math.ceil(total / 2) : total;
+  const outcomes = cases.map((c, i): CheckedCase => {
+    if (i >= reached) return { outcome: 'not_run', error: 'the check ran out of time' };
+    const data = c.stdin + c.expectedStdout;
+    if (data.includes(CHECK_CRASH_MARKER)) return { outcome: 'failed', error: 'the reference solution crashed (runtime error): IndexError: list index out of range' };
+    if (data.includes(CHECK_WRONG_MARKER)) return { outcome: 'wrong', error: null };
+    return { outcome: 'passed', error: null };
+  });
+  const first = outcomes.findIndex((o) => o.outcome !== 'passed');
+  const error =
+    first === -1
+      ? null
+      : outcomes[first]!.outcome === 'wrong'
+        ? wrongOutput(cases[first]!, first)
+        : outcomes[first]!.outcome === 'failed'
+          ? `${cases[first]!.name || `case ${first + 1}`}: ${outcomes[first]!.error}`
+          : `the check ran out of time after ${first} of ${total} test cases`;
+  return { check: { attempted: true, engine: 'judge0', passed: outcomes.filter((o) => o.outcome === 'passed').length, total, error, runners, largeCase: null }, cases: outcomes };
 }

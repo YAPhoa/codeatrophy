@@ -4,8 +4,10 @@ import { BookmarkCheck, BookmarkPlus, Check, Clock, Cpu, Eye, EyeOff, History, L
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
 import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
+import { isLargeText, textFilename } from '../../lib/largeText';
 import { Button, cx } from '../../ui/Button';
 import { DiffView } from '../../ui/DiffView';
+import { LargeText } from '../../ui/LargeText';
 import { Callout } from '../../ui/misc';
 import type { Reveal } from './useReveal';
 
@@ -15,14 +17,29 @@ function CaseIcon({ verdict }: { verdict: Verdict }) {
   return <X size={12} aria-hidden="true" />;
 }
 
-export function Output({ label, note, text, tone, wrap }: { label: string; note?: string | null; text: string; tone?: 'danger'; wrap?: boolean }) {
+interface OutputProps {
+  label: string;
+  note?: string | null;
+  text: string;
+  tone?: 'danger';
+  wrap?: boolean;
+  /** Name of the file a large text downloads as; derived from the label otherwise. */
+  filename?: string;
+}
+
+/** A stream or a test case's data, labelled; a large one kept out of sight, as a download. */
+export function Output({ label, note, text, tone, wrap, filename }: OutputProps) {
   return (
     <div className="io-block">
       <div className="io-label">
         {label}
         {note && <span className="io-note"> · {note}</span>}
       </div>
-      <pre className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
+      {isLargeText(text) ? (
+        <LargeText text={text} filename={filename ?? textFilename(label)} label={label} />
+      ) : (
+        <pre className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
+      )}
     </div>
   );
 }
@@ -88,7 +105,7 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
           </Button>
         </div>
       ) : (
-        <CaseIo result={result} compare={compare} failedCompare={failedCompare} />
+        <CaseIo result={result} number={number} compare={compare} failedCompare={failedCompare} />
       )}
       {!crashed && stderr}
       {!concealed && cut && <p className="case-help">Long input and output are cut off at 64 KiB here; the judge compared the complete output.</p>}
@@ -96,19 +113,20 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
   );
 }
 
-function CaseIo({ result, compare, failedCompare }: { result: SubmissionResult; compare: CompareMode; failedCompare: boolean }) {
+function CaseIo({ result, number, compare, failedCompare }: { result: SubmissionResult; number: number; compare: CompareMode; failedCompare: boolean }) {
+  const file = (what: string) => textFilename(result.name || `case ${number}`, what);
   return (
     <>
-      <Output label="Input" text={result.stdin} />
+      <Output label="Input" text={result.stdin} filename={file('input')} />
       {failedCompare ? (
         <div className="io-block">
           <div className="io-label">Expected vs. your output</div>
-          <DiffView expected={result.expectedStdout ?? ''} actual={result.stdout} mode={compare} />
+          <DiffView expected={result.expectedStdout ?? ''} actual={result.stdout} mode={compare} downloadName={result.name || `case ${number}`} />
         </div>
       ) : (
         <div className="io-pair">
-          {result.expectedStdout !== null && <Output label="Expected output" text={result.expectedStdout} />}
-          <Output label={result.expectedStdout === null ? 'Output' : 'Your output'} text={result.stdout} />
+          {result.expectedStdout !== null && <Output label="Expected output" text={result.expectedStdout} filename={file('expected-output')} />}
+          <Output label={result.expectedStdout === null ? 'Output' : 'Your output'} text={result.stdout} filename={file('output')} />
         </div>
       )}
     </>
