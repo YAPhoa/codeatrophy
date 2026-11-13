@@ -24,3 +24,14 @@ test('confirm: a destructive dialog opens on Cancel, so Enter does not delete', 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Longest Substring Without Repeating Characters' })).toBeVisible();
 });
+
+test('live regions: the elapsed-time counter of a generation is not announced', async ({ page }) => {
+  // Normal mock delays, so the panel stays up long enough to look at.
+  await page.goto('/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+
+  const status = page.getByRole('status').filter({ hasText: 'Drafting…' });
+  await expect(status).toHaveText('Drafting…');
+  await expect(page.locator('.generating-time')).toHaveText(/^\d+\u00a0s$/);
+});

@@ -67,11 +67,11 @@ function CheckProgress({ total, startedAt, onCancel }: { total: number; startedA
   }, []);
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
-    <div className="check-progress" role="status">
+    <div className="check-progress">
       <Spinner size={13} />
-      <span>
-        Verifying {plural(total, 'test case')}… {seconds} s
-      </span>
+      {/* The counter stays outside the live region, or it would be read out every second. */}
+      <span role="status">Verifying {plural(total, 'test case')}…</span>
+      <span className="check-progress-time">{seconds}&nbsp;s</span>
       <span className="muted">You can leave this page.</span>
       <span className="spacer" />
       <Button size="sm" variant="ghost" icon={<Square size={12} />} onClick={onCancel}>

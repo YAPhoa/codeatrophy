@@ -15,13 +15,14 @@ export function GeneratingPanel({ title, startedAt, onCancel, children }: { titl
   }, []);
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
-    <div className="generating" role="status" aria-live="polite">
+    <div className="generating">
       <div className="generating-pulse" aria-hidden="true">
         <Sparkles size={18} />
       </div>
       <div className="grow">
+        {/* Only the title is a live region: the counter beside it changes every second and would be read out each time. */}
         <div className="generating-title">
-          {title} <span className="generating-time">{seconds}s</span>
+          <span role="status">{title}</span> <span className="generating-time">{seconds}&nbsp;s</span>
         </div>
         <div className="generating-text">{children ?? 'This usually takes a few seconds, occasionally up to a couple of minutes.'}</div>
       </div>

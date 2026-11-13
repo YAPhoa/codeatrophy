@@ -2323,6 +2323,10 @@ fieldset.stack legend {
   font-size: var(--text-sm);
 }
 
+.check-progress-time {
+  font-variant-numeric: tabular-nums;
+}
+
 /* The large test case of a generation: what became of it, and its generator on request. */
 .large-case {
   display: flex;
