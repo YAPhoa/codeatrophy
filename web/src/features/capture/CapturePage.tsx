@@ -5,6 +5,7 @@ import { ApiError, api } from '../../api/client';
 import { useCollections, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
 import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { finePointer } from '../../lib/pointer';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { charCount, checkedState, draftFromForm, emptyForm, formFromDraft, revisionProblem, upgradeForm, type ItemFormState } from '../../lib/itemForm';
 import { useUrlMirror } from '../../lib/urlState';
@@ -101,7 +102,7 @@ export default function CapturePage() {
   }, [presetType, setSession, setSearchParams]);
 
   useEffect(() => {
-    if (session.stage === 'input') textRef.current?.focus();
+    if (session.stage === 'input' && finePointer()) textRef.current?.focus();
   }, [session.stage]);
 
   const text = session.text;

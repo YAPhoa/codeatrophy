@@ -3,6 +3,7 @@ import { Save } from 'lucide-react';
 import { api } from '../../api/client';
 import { useLimits, useMeta } from '../../api/queries';
 import type { Item, Solution, SolutionPatch } from '../../api/types';
+import { finePointer } from '../../lib/pointer';
 import { pickLanguage } from '../../lib/codeStore';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatBytes, plural } from '../../lib/format';
@@ -141,7 +142,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
           autoComplete="off"
           placeholder="e.g. Hash map, one pass…"
           fieldClassName="grow"
-          autoFocus
+          autoFocus={finePointer()}
         />
         <SelectField label="Language" value={language} onChange={setLanguage} options={languageOptions} error={shown.language} fieldClassName="solution-form-language" />
       </div>
