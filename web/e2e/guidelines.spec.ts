@@ -35,3 +35,37 @@ test('live regions: the elapsed-time counter of a generation is not announced', 
   await expect(status).toHaveText('Drafting…');
   await expect(page.locator('.generating-time')).toHaveText(/^\d+\u00a0s$/);
 });
+
+test('unsaved work: leaving an edited test case or an unsaved proposal asks first', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  const sections = page.getByRole('navigation', { name: 'Problem sections' });
+  await sections.getByRole('link', { name: /^Test cases/ }).click();
+
+  // An edited case: staying keeps the edit, leaving discards it.
+  const name = page.getByLabel('Name', { exact: true });
+  await name.fill('Renamed and not saved');
+  await sections.getByRole('link', { name: 'Solve' }).click();
+  const guard = page.getByRole('dialog', { name: 'Leave without saving?' });
+  await expect(guard.getByRole('button', { name: 'Stay' })).toBeFocused();
+  await guard.getByRole('button', { name: 'Stay' }).click();
+  await expect(page).toHaveURL(/\/tests$/);
+  await expect(name).toHaveValue('Renamed and not saved');
+
+  // Saved work is not guarded.
+  await page.getByRole('button', { name: 'Save case' }).click();
+  await expect(page.getByText('Test case saved')).toBeVisible();
+
+  // A proposal: "Discard" and every other way out go through the same question.
+  await page.getByRole('link', { name: /Generate/ }).first().click();
+  await page.getByLabel('How many').fill('2');
+  await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.getByText('2 of 2 selected')).toBeVisible();
+  await page.getByRole('link', { name: 'Discard' }).click();
+  const discard = page.getByRole('dialog', { name: 'Discard the proposed test cases?' });
+  await discard.getByRole('button', { name: 'Stay' }).click();
+  await expect(page.getByText('2 of 2 selected')).toBeVisible();
+  await page.getByRole('link', { name: 'Discard' }).click();
+  await discard.getByRole('button', { name: 'Discard' }).click();
+  await expect(page).toHaveURL(/\/tests$/);
+});

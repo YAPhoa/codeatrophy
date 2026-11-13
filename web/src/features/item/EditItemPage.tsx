@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useBlocker, useNavigate, useParams } from 'react-router';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { GitMerge, Save } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
@@ -24,6 +24,7 @@ import {
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { DiffView } from '../../ui/DiffView';
+import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { useCollectionActions } from '../collections/CollectionActions';
@@ -95,25 +96,22 @@ function EditForm({ initial }: { initial: Item }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [done, setDone] = useState(false);
 
   const baseForm = useMemo(() => formFromItem(base), [base]);
   const dirty = useMemo(() => changedFields(baseForm, form).length > 0, [baseForm, form]);
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !done && currentLocation.pathname !== nextLocation.pathname);
-  useEffect(() => {
-    if (!dirty || done) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty, done]);
+  const leaveGuard = useLeaveGuard({
+    when: dirty,
+    body: <>Your edits to “{base.title}” have not been saved.</>,
+    stayLabel: 'Keep editing',
+    leaveLabel: 'Discard changes',
+  });
 
   const finish = (item: Item) => {
     storeItem(qc, item);
-    setDone(true);
     toast.success('Saved');
-    // Navigate after the state update so the unsaved-changes guard stands down first.
-    window.setTimeout(() => navigate(`/items/${item.id}`), 0);
+    leaveGuard.allow();
+    navigate(`/items/${item.id}`);
   };
 
   const save = async (against: Item = base, current: ItemFormState = form) => {
@@ -202,24 +200,7 @@ function EditForm({ initial }: { initial: Item }) {
         disabled={saving}
       />
 
-      <Dialog
-        open={blocker.state === 'blocked'}
-        onClose={() => blocker.reset?.()}
-        title="Leave without saving?"
-        size="sm"
-        footer={
-          <>
-            <Button onClick={() => blocker.reset?.()} data-autofocus>
-              Keep editing
-            </Button>
-            <Button variant="danger" onClick={() => blocker.proceed?.()}>
-              Discard changes
-            </Button>
-          </>
-        }
-      >
-        <p className="dialog-text">Your edits to “{base.title}” have not been saved.</p>
-      </Dialog>
+      {leaveGuard.dialog}
 
       {conflict && merge && (
         <Dialog

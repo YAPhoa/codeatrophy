@@ -13,6 +13,7 @@ import { textFilename } from '../../lib/largeText';
 import { moveIndex } from '../../lib/tree';
 import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
+import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { DiffView } from '../../ui/DiffView';
 import { Checkbox, TextField } from '../../ui/Field';
 import { TestDataField } from '../../ui/LargeText';
@@ -145,6 +146,7 @@ function TestsManager({ item }: { item: Item }) {
   };
 
   const dirty = draft !== null && (selectedId === NEW || (base !== null && !sameDraft(draft, base)));
+  const leaveGuard = useLeaveGuard({ when: dirty, body: selectedId === NEW ? 'The new test case has not been saved.' : 'Your changes to this test case have not been saved.' });
 
   /** Test-case writes change the item's case count and `updatedAt` (not its revision); refresh what shows them. */
   const refresh = async () => {
@@ -728,6 +730,7 @@ function TestsManager({ item }: { item: Item }) {
           </section>
         </div>
       </div>
+      {leaveGuard.dialog}
     </div>
   );
 }

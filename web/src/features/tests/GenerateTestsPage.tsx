@@ -15,6 +15,7 @@ import { CodeEditor } from '../../ui/CodeEditor';
 import { DiffView } from '../../ui/DiffView';
 import { Checkbox, Field, NumberStepper, SelectField, TextAreaField } from '../../ui/Field';
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
+import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { useToast } from '../../ui/Toast';
 import { GeneratingPanel, UsageLine } from '../capture/parts';
 import { useGeneration } from '../capture/useGeneration';
@@ -147,6 +148,14 @@ function Generator({ item }: { item: Item }) {
   // Every proposal repeated an input the problem has: there is nothing to review.
   const allRepeats = proposal !== null && proposal.cases.length === 0 && proposal.duplicatesDropped > 0;
 
+  // A proposal exists only on this page until it is saved, and cost a generation to get.
+  const leaveGuard = useLeaveGuard({
+    when: proposal !== null && !allRepeats,
+    title: 'Discard the proposed test cases?',
+    body: 'They have not been saved, and leaving this page discards them.',
+    leaveLabel: 'Discard',
+  });
+
   const generate = async () => {
     if (noRunner) return;
     const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCase: large }, signal));
@@ -188,6 +197,7 @@ function Generator({ item }: { item: Item }) {
         qc.invalidateQueries({ queryKey: qk.solutions(item.id) }),
       ]);
       toast.success(cases.length > 0 ? `Saved ${plural(cases.length, 'test case')}` : 'Saved the reference solution');
+      leaveGuard.allow();
       navigate(`/items/${item.id}/tests`);
     } catch (e) {
       if (isApiError(e) && e.isRevisionConflict) {
@@ -532,6 +542,7 @@ function Generator({ item }: { item: Item }) {
           )}
         </div>
       </div>
+      {leaveGuard.dialog}
     </div>
   );
 }

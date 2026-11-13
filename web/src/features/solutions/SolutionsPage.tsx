@@ -12,6 +12,7 @@ import { languageLabel } from '../../lib/languages';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { Dialog, useConfirm } from '../../ui/Dialog';
+import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { TextField } from '../../ui/Field';
 import { Markdown } from '../../ui/Markdown';
 import { CopyButton, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
@@ -82,6 +83,7 @@ function SolutionsManager({ item }: { item: Item }) {
   const [deleting, setDeleting] = useState<string | null>(null);
   // Whether the open form holds changes that closing it would lose.
   const [formDirty, setFormDirty] = useState(false);
+  const leaveGuard = useLeaveGuard({ when: editing !== null && formDirty, body: 'A solution is open for editing, and its changes have not been saved.' });
 
   const maxSolutions = limits?.maxSolutionsPerItem;
   const atLimit = maxSolutions !== undefined && solutions.length >= maxSolutions;
@@ -246,6 +248,7 @@ function SolutionsManager({ item }: { item: Item }) {
         </div>
       </div>
       {renaming && <RenameDialog key={renaming.id} item={item} solution={renaming} onClose={() => setRenaming(null)} />}
+      {leaveGuard.dialog}
     </div>
   );
 }
