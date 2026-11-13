@@ -491,6 +491,7 @@ button.chip:hover {
   position: fixed;
   z-index: 300;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface);
@@ -578,6 +579,7 @@ button.chip:hover {
   flex-direction: column;
   max-height: 300px;
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0 -4px;
 }
 
@@ -619,6 +621,8 @@ button.chip:hover {
   padding: 9vh 16px 16px;
   background: var(--overlay);
   overflow: auto;
+  /* Scrolling past either end stays in the dialog instead of moving the page behind it. */
+  overscroll-behavior: contain;
 }
 
 .dialog {
@@ -626,6 +630,8 @@ button.chip:hover {
   flex-direction: column;
   width: 100%;
   max-height: calc(100vh - 12vh);
+  /* The visible height on mobile, where the browser's bars come and go. */
+  max-height: calc(100dvh - 12vh);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -661,6 +667,7 @@ button.chip:hover {
 .dialog-body {
   padding: 16px 18px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .dialog-text {

@@ -21,6 +21,33 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+html {
+  /* Touch feedback comes from the app's own hover, active and focus styles. */
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* No double-tap zoom on controls, so a tap acts without the wait for a second one. */
+a,
+button,
+input,
+select,
+textarea,
+label,
+summary,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+[role='option'] {
+  touch-action: manipulation;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+
 h1,
 h2,
 h3,

@@ -239,6 +239,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 2px 8px 12px;
 }
 
@@ -539,9 +540,15 @@ button.nav-twisty:hover {
   outline: none;
 }
 
+/* The input's own outline is off; the row carries the focus mark instead. */
+.palette-input:focus-within {
+  box-shadow: inset 0 -2px 0 var(--focus);
+}
+
 .palette-list {
   max-height: min(420px, 56vh);
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 6px;
 }
 
@@ -640,6 +647,7 @@ button.nav-twisty:hover {
     transition: transform 0.18s ease;
     box-shadow: var(--shadow-dialog);
     visibility: hidden;
+    overscroll-behavior: contain;
   }
 
   .sidebar.is-open {
