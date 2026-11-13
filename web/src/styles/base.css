@@ -159,11 +159,15 @@ textarea.mono {
   flex: 1 1 auto;
 }
 
+/* Reduced motion: transitions and one-shot animations jump to their end
+   state, and looping ones (spinners, the generating pulse) stop after a
+   single pass instead of running forever at full speed. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
 }

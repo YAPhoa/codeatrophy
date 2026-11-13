@@ -82,3 +82,12 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await expect(state).not.toHaveText('Unsaved', { timeout: 300 });
   await expect(state).toHaveText('Saved');
 });
+
+test('reduced motion: looping animations stop', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  // Normal mock delays, so the generating panel stays up long enough to look at.
+  await page.goto('/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.locator('.generating-pulse')).toHaveCSS('animation-iteration-count', '1');
+});
