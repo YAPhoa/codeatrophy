@@ -215,3 +215,73 @@ test('forms: drafting from nothing asks for some text', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveText('Type or paste something to draft from.');
   await expect(page.getByLabel('What you have')).toBeFocused();
 });
+
+test('dialogs: Escape asks before dropping what was typed, and Cancel does not', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('button', { name: 'New collection' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New collection' });
+
+  // Nothing entered yet: Escape just closes.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  await page.getByRole('button', { name: 'New collection' }).click();
+  await dialog.getByLabel('Name').fill('Graphs');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('dialog', { name: 'Discard what you entered?' });
+  await expect(ask.getByRole('button', { name: 'Keep editing' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(ask).toBeHidden();
+  await expect(dialog.getByLabel('Name')).toHaveValue('Graphs');
+  await expect(dialog.getByLabel('Name')).toBeFocused();
+
+  // A click on the backdrop asks as well.
+  await page.mouse.click(5, 5);
+  await ask.getByRole('button', { name: 'Discard' }).click();
+  await expect(dialog).toBeHidden();
+
+  // Cancel is the user's own answer already.
+  await page.getByRole('button', { name: 'New collection' }).click();
+  await dialog.getByLabel('Name').fill('Graphs');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(ask).toBeHidden();
+});
+
+test('toasts: the container is a live region before a toast arrives', async ({ page }) => {
+  await open(page, '/');
+  await expect(page.getByRole('region', { name: 'Notifications' })).toHaveAttribute('aria-live', 'polite');
+});
+
+test('drawer: on a narrow screen it takes focus, keeps it, and closes on Escape', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 800 });
+  await open(page, '/');
+  const opener = page.getByRole('button', { name: 'Open navigation' });
+  await opener.click();
+  await expect(page.getByRole('button', { name: 'Close navigation' })).toBeFocused();
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.sidebar')).not.toHaveClass(/is-open/);
+  await expect(page.locator('main')).not.toHaveAttribute('inert', '');
+  await expect(opener).toBeFocused();
+});
+
+test('links: menu items and palette results that go somewhere are links', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  const edit = page.getByRole('menuitem', { name: 'Edit details…' });
+  await expect(edit).toHaveAttribute('href', /\/items\/[^/]+\/edit$/);
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('ControlOrMeta+k');
+  const option = page.getByRole('option', { name: 'Manage tags' });
+  await expect(option.locator('a')).toHaveAttribute('href', '/tags');
+  await option.click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tags' })).toBeVisible();
+});
+
+test('headings: a page that only has a message to show still has an h1', async ({ page }) => {
+  await open(page, '/no/such/page');
+  await expect(page.getByRole('heading', { level: 1, name: 'There is nothing at this address' })).toBeVisible();
+});
