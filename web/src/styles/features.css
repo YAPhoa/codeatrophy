@@ -1595,6 +1595,13 @@ fieldset.stack legend {
   min-height: 0;
 }
 
+/* CodeMirror's own outline is removed (CodeEditorImpl), and this editor has
+   no frame around it to carry the ring, so it is drawn inside the pane. */
+.editor-host:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 /* Shown only when a problem cannot be run at all. */
 .editor-notice {
   display: flex;
