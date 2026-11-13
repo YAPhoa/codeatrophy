@@ -5,6 +5,8 @@
 // Every source has to build on the judge's toolchains: Python 3.8, GCC 9,
 // Go 1.13, OpenJDK 13 and Node.js 12.
 
+import { MERGE_K_LISTS_JAVA } from './mergeKLists';
+
 export interface SeedSolution {
   name: string;
   language: string;
@@ -22,6 +24,21 @@ export interface SeedSolutionSet {
 
 /** By problem `key`. A problem with a reference solution and no entry here gets a plainly named one. */
 export const SEED_SOLUTIONS: Record<string, SeedSolutionSet> = {
+  // A "solution only" problem: what is saved is the solution part, without the runner.
+  'merge-k-lists': {
+    reference: {
+      name: 'Min-heap of list heads',
+      notes: '**O(N log k)** time, **O(k)** space. The heap holds `(value, list index)`, so equal values never compare two nodes.',
+    },
+    others: [
+      {
+        name: 'Divide and conquer (Java)',
+        language: 'java',
+        notes: 'Merge the lists pairwise, halving their number each round: **O(N log k)** time without a heap.',
+        source: MERGE_K_LISTS_JAVA,
+      },
+    ],
+  },
   'two-sum': {
     reference: {
       name: 'Hash map, one pass',

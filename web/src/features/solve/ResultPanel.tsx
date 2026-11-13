@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { BookmarkCheck, BookmarkPlus, Check, Clock, Cpu, Eye, EyeOff, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
 import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
@@ -14,10 +15,13 @@ function CaseIcon({ verdict }: { verdict: Verdict }) {
   return <X size={12} aria-hidden="true" />;
 }
 
-export function Output({ label, text, tone, wrap }: { label: string; text: string; tone?: 'danger'; wrap?: boolean }) {
+export function Output({ label, note, text, tone, wrap }: { label: string; note?: string | null; text: string; tone?: 'danger'; wrap?: boolean }) {
   return (
     <div className="io-block">
-      <div className="io-label">{label}</div>
+      <div className="io-label">
+        {label}
+        {note && <span className="io-note"> · {note}</span>}
+      </div>
       <pre className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
     </div>
   );
@@ -25,6 +29,15 @@ export function Output({ label, text, tone, wrap }: { label: string; text: strin
 
 /** The server returns at most this much of each input and output stream. */
 const SHOWN_BYTES = 64 * 1024;
+
+/**
+ * For a "Solution only" problem the program that ran has runner code around
+ * the solver's. The server rewrites line numbers to the solver's own lines
+ * and labels locations inside the runner; this says how to read them.
+ */
+export function lineOffsetNote(lineOffset: number | undefined): string | null {
+  return lineOffset != null && lineOffset > 0 ? 'line numbers are your code’s; <runner …> is the hidden runner' : null;
+}
 
 const VERDICT_HELP: Partial<Record<Verdict, string>> = {
   wrong_answer: 'The program ran, but its output differs from the expected output.',
@@ -41,15 +54,16 @@ interface CaseDetailProps {
   compare: CompareMode;
   timeLimitMs: number;
   reveal: Reveal;
+  lineOffset: number;
 }
 
-function CaseDetail({ result, number, compare, timeLimitMs, reveal }: CaseDetailProps) {
+function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }: CaseDetailProps) {
   const concealed = reveal.conceals({ id: result.testCaseId, isSample: result.isSample });
   const failedCompare = result.verdict === 'wrong_answer' && result.expectedStdout !== null;
   // After a crash the error output is the first thing to read; otherwise it is a footnote.
   const crashed = result.verdict === 'runtime_error';
   const cut = [result.stdin, result.expectedStdout ?? '', result.stdout, result.stderr].some((text) => text.length >= SHOWN_BYTES / 4 && new Blob([text]).size >= SHOWN_BYTES);
-  const stderr = result.stderr !== '' ? <Output label="Error output (stderr)" text={result.stderr} tone="danger" wrap /> : null;
+  const stderr = result.stderr !== '' ? <Output label="Error output (stderr)" note={lineOffsetNote(lineOffset)} text={result.stderr} tone="danger" wrap /> : null;
   return (
     <div className="case-detail">
       <div className="row-wrap case-detail-head">
@@ -115,10 +129,12 @@ interface ResultPanelProps {
   onSaveSolution?: () => void;
   /** The code of this submission has been saved as a solution during this visit. */
   savedAsSolution?: boolean;
+  /** A saved solution that already holds this very code, and where the saved solutions are. */
+  alreadySaved?: { name: string; to: string } | null;
 }
 
 /** Live progress and the final outcome of one submission, case by case. */
-export function ResultPanel({ submission: s, compare, historic, timeLimitMs, reveal, onLoadCode, onClose, onSaveSolution, savedAsSolution }: ResultPanelProps) {
+export function ResultPanel({ submission: s, compare, historic, timeLimitMs, reveal, onLoadCode, onClose, onSaveSolution, savedAsSolution, alreadySaved }: ResultPanelProps) {
   const done = s.status === 'completed';
   const firstFailed = s.results.findIndex((r) => r.verdict !== 'accepted' && r.verdict !== 'executed');
   const [picked, setPicked] = useState<number | null>(null);
@@ -134,6 +150,11 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
       <BookmarkCheck size={14} aria-hidden="true" />
       Saved as a solution
     </span>
+  ) : alreadySaved ? (
+    <Link to={alreadySaved.to} className="result-saved" title="Open the saved solutions">
+      <BookmarkCheck size={14} aria-hidden="true" />
+      <span className="truncate">Already saved as “{alreadySaved.name}”</span>
+    </Link>
   ) : onSaveSolution ? (
     <Button size="sm" icon={<BookmarkPlus size={13} />} onClick={onSaveSolution}>
       Save as solution
@@ -214,7 +235,10 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
 
       {done && s.verdict === 'compile_error' && (
         <div className="io-block">
-          <div className="io-label">Compiler output</div>
+          <div className="io-label">
+            Compiler output
+            {lineOffsetNote(s.lineOffset) && <span className="io-note"> · {lineOffsetNote(s.lineOffset)}</span>}
+          </div>
           <pre className="code-block code-block-danger compile-output">{s.compileOutput || 'The compiler reported an error but produced no output.'}</pre>
         </div>
       )}
@@ -260,7 +284,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
         </ol>
       )}
 
-      {current && selected != null && <CaseDetail result={current} number={selected + 1} compare={compare} timeLimitMs={timeLimitMs} reveal={reveal} />}
+      {current && selected != null && <CaseDetail result={current} number={selected + 1} compare={compare} timeLimitMs={timeLimitMs} reveal={reveal} lineOffset={s.lineOffset} />}
     </div>
   );
 }

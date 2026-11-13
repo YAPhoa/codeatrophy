@@ -1,13 +1,38 @@
 import { Link, useParams } from 'react-router';
-import { ArrowRight, CheckCircle2, FlaskConical, GitBranch, Plus } from 'lucide-react';
+import { ArrowRight, CheckCircle2, EyeOff, FlaskConical, GitBranch, Plus } from 'lucide-react';
 import { useItem, useMeta } from '../../api/queries';
+import type { Item, SourceCode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { plural } from '../../lib/format';
+import { languageName } from '../../lib/languages';
 import { readString } from '../../lib/storage';
 import { LinkButton } from '../../ui/Button';
 import { ErrorState, PageLoading } from '../../ui/misc';
 import { DifficultyBadge, TagChips } from '../item/controls';
+import { TestButton, TestOutcome, useSolutionTest } from '../solutions/SolutionTest';
 import { VARIANT_MODES } from './variantModes';
+
+/**
+ * The reference solution that was saved with the problem — the AI's own, for
+ * a draft. It can be tried on the test cases from here; its code is only
+ * shown on the Solutions page, on request.
+ */
+function SavedSolution({ item, solution }: { item: Item; solution: SourceCode }) {
+  const test = useSolutionTest(item, { language: solution.language, isReference: true });
+  return (
+    <section className="saved-solution" aria-labelledby="saved-solution-title">
+      <div className="row">
+        <EyeOff size={15} aria-hidden="true" />
+        <h2 id="saved-solution-title">Reference solution</h2>
+        <span className="muted">{languageName(solution.language)}, kept hidden</span>
+        <span className="spacer" />
+        <TestButton test={test} label="Test it" />
+        <Link to={`/items/${item.id}/solutions`}>Solutions</Link>
+      </div>
+      <TestOutcome item={item} test={test} />
+    </section>
+  );
+}
 
 /**
  * Shown right after a problem is saved: confirms the save and offers the
@@ -51,6 +76,8 @@ export default function SavedPage() {
         </LinkButton>
       </div>
 
+      {it.problem?.referenceSolution && <SavedSolution item={it} solution={it.problem.referenceSolution} />}
+
       {isProblem && (
         <>
           <h2 className="saved-next">Next, if you like</h2>
@@ -78,7 +105,7 @@ export default function SavedPage() {
                 ) : (
                   <>
                     <LinkButton to={`/items/${it.id}/tests`}>Add test cases</LinkButton>
-                    <Link to="/settings#ai">Set up AI</Link>
+                    <Link to="/settings/ai">Set up AI</Link>
                   </>
                 )}
               </div>
@@ -106,7 +133,7 @@ export default function SavedPage() {
                   <p>A variant is a related problem — the same technique in a new setting, easier, harder, or with a twist — saved alongside this one. With AI set up, one is drafted for you.</p>
                   <div className="next-card-actions">
                     <LinkButton to={`/items/${it.id}/variant`}>Write a variant by hand</LinkButton>
-                    <Link to="/settings#ai">Set up AI</Link>
+                    <Link to="/settings/ai">Set up AI</Link>
                   </div>
                 </>
               )}

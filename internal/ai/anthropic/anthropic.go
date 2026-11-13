@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,8 +37,33 @@ const (
 	fallbackOutputTokens = 32000
 )
 
-// modelCaps caches output caps per base URL and model id.
-var modelCaps sync.Map // key "baseURL\x00model" -> int
+// modelFacts is what a request depends on about the configured model. It is
+// read from the Models API, so a new model works without a change here.
+type modelFacts struct {
+	maxTokens  int  // output cap; fallbackOutputTokens when unknown
+	effortHigh bool // output_config.effort accepts "high"
+	effortLow  bool // output_config.effort accepts "low"
+}
+
+type cachedFacts struct {
+	facts   modelFacts
+	expires time.Time
+}
+
+const (
+	// factsTTL is how long an answer from the Models API is trusted.
+	factsTTL = 24 * time.Hour
+	// factsRetry is how long a failed lookup is remembered, so that a proxy
+	// without the Models API is not asked again on every generation.
+	factsRetry = 5 * time.Minute
+)
+
+var (
+	// factsCache holds modelFacts per base URL and model id.
+	factsCache sync.Map // key "baseURL\x00model" -> cachedFacts
+	// noFallback records models that refused the server-side fallback.
+	noFallback sync.Map // key "baseURL\x00model" -> struct{}
+)
 
 // Provider calls the Anthropic Messages API.
 type Provider struct {
@@ -46,9 +72,15 @@ type Provider struct {
 	model   string
 	baseURL string
 	apiKey  string
+	// firstParty is whether requests go to Anthropic's own endpoint, the only
+	// place the server-side refusal fallback exists.
+	firstParty bool
 }
 
-var _ ai.Provider = (*Provider)(nil)
+var (
+	_ ai.Provider    = (*Provider)(nil)
+	_ ai.ModelLister = (*Provider)(nil)
+)
 
 // New is an ai.Factory for the Anthropic provider.
 func New(cfg ai.Config) (ai.Provider, error) {
@@ -80,7 +112,7 @@ func New(cfg ai.Config) (ai.Provider, error) {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	return &Provider{client: sdk.NewClient(opts...), model: model, baseURL: cfg.BaseURL, apiKey: cfg.APIKey,
-		timeout: timeout}, nil
+		timeout: timeout, firstParty: cfg.BaseURL == "" || strings.TrimRight(cfg.BaseURL, "/") == DefaultBaseURL}, nil
 }
 
 // Name implements ai.Provider.
@@ -89,29 +121,9 @@ func (p *Provider) Name() string { return ai.ProviderAnthropic }
 // Model implements ai.Provider.
 func (p *Provider) Model() string { return p.model }
 
-// effortModels are model id prefixes that accept output_config.effort.
-var effortModels = []string{
-	"claude-fable-", "claude-mythos-", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
-	"claude-opus-4-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5",
-}
-
-// fallbackModels accept the server-side refusal fallback in its "default"
-// form.
-var fallbackModels = map[string]bool{
-	"claude-fable-5-1": true, "claude-opus-5-5": true, "claude-opus-5": true, "claude-sonnet-5-5": true,
-}
-
-func hasPrefix(s string, prefixes []string) bool {
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// params builds the Messages API request.
-func (p *Provider) params(req ai.GenerateRequest, modelCap int) sdk.BetaMessageNewParams {
+// params builds the Messages API request for a model with the given facts.
+// fallback asks for the server-side refusal fallback.
+func (p *Provider) params(req ai.GenerateRequest, facts modelFacts, fallback bool) sdk.BetaMessageNewParams {
 	maxTokens := maxOutputTokens
 	if req.Light {
 		maxTokens = maxLightOutputTokens
@@ -119,8 +131,8 @@ func (p *Provider) params(req ai.GenerateRequest, modelCap int) sdk.BetaMessageN
 	if req.MaxOutputTokens > 0 {
 		maxTokens = req.MaxOutputTokens
 	}
-	if modelCap > 0 && maxTokens > modelCap {
-		maxTokens = modelCap
+	if facts.maxTokens > 0 && maxTokens > facts.maxTokens {
+		maxTokens = facts.maxTokens
 	}
 	params := sdk.BetaMessageNewParams{
 		Model:     sdk.Model(p.model),
@@ -131,18 +143,16 @@ func (p *Provider) params(req ai.GenerateRequest, modelCap int) sdk.BetaMessageN
 			Format: sdk.BetaJSONOutputFormatParam{Schema: req.Schema},
 		},
 	}
-	if hasPrefix(p.model, effortModels) {
-		// Thinking is left at the model's default (adaptive where supported);
-		// effort controls depth. Claude Opus 5.5 defaults to medium, so the
-		// level is always set explicitly.
+	// Thinking is left at the model's default (adaptive where supported);
+	// effort controls depth. The default level differs between models, so it
+	// is set explicitly wherever the model accepts it.
+	switch {
+	case req.Light && facts.effortLow:
+		params.OutputConfig.Effort = sdk.BetaOutputConfigEffortLow
+	case !req.Light && facts.effortHigh:
 		params.OutputConfig.Effort = sdk.BetaOutputConfigEffortHigh
-		if req.Light {
-			params.OutputConfig.Effort = sdk.BetaOutputConfigEffortLow
-		}
 	}
-	// Server-side refusal fallback: only on the first-party API, where it is
-	// available, and only for models that accept it.
-	if fallbackModels[p.model] && (p.baseURL == "" || strings.TrimRight(p.baseURL, "/") == DefaultBaseURL) {
+	if fallback {
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
 		params.Betas = []sdk.AnthropicBeta{sdk.AnthropicBetaServerSideFallback2026_07_01}
 	}
@@ -157,51 +167,101 @@ func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.Gen
 	// per attempt and retries would otherwise multiply it.
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
-	params := p.params(req, p.outputCap(ctx))
-	stream := p.client.Beta.Messages.NewStreaming(ctx, params)
-	msg := sdk.BetaMessage{}
-	for stream.Next() {
-		if err := msg.Accumulate(stream.Current()); err != nil {
-			return ai.GenerateResponse{}, ai.Errorf(0, "the Anthropic response stream could not be read")
+	facts := p.facts(ctx)
+	_, refused := noFallback.Load(p.key())
+	fallback := p.firstParty && !refused
+	msg, err := p.stream(ctx, p.params(req, facts, fallback))
+	if fallback && isBadRequest(err) {
+		// Nothing reports which models take the server-side fallback, so it
+		// is offered, and a request rejected as invalid is tried once more
+		// without it. If that works the model is remembered as not taking it.
+		if plain, perr := p.stream(ctx, p.params(req, facts, false)); perr == nil {
+			noFallback.Store(p.key(), struct{}{})
+			msg, err = plain, nil
 		}
 	}
-	if err := stream.Err(); err != nil {
+	if err != nil {
 		return ai.GenerateResponse{}, p.mapError(err)
 	}
+	out := answer(msg, p.model)
 	switch msg.StopReason {
 	case sdk.BetaStopReasonRefusal:
 		reason := "the model declined to produce this content"
 		if c := string(msg.StopDetails.Category); c != "" {
 			reason += " (" + c + ")"
 		}
-		return ai.GenerateResponse{}, ai.Errorf(0, reason)
+		return out, ai.Errorf(0, reason)
 	case sdk.BetaStopReasonMaxTokens:
-		return ai.GenerateResponse{}, ai.Errorf(0, "the model's output was cut off at the token limit")
+		return out, ai.Errorf(0, "the model's output was cut off at the token limit")
 	}
+	raw, err := ai.ExtractJSON(out.Text)
+	if err != nil {
+		return out, err
+	}
+	out.JSON = raw
+	return out, nil
+}
+
+// answer is what a finished message says: its text, model and token
+// counts. The counts are the cumulative figures of the final message_delta.
+// The API reports input tokens without the cache's, cache reads and writes,
+// and output tokens including thinking, with the thinking part in
+// output_tokens_details where the model reports it. A request retried
+// without the fallback reports the call that answered (the rejected one
+// carries no counts).
+func answer(msg sdk.BetaMessage, model string) ai.GenerateResponse {
 	var text strings.Builder
 	for _, block := range msg.Content {
 		if tb, ok := block.AsAny().(sdk.BetaTextBlock); ok {
 			text.WriteString(tb.Text)
 		}
 	}
-	raw, err := ai.ExtractJSON(text.String())
-	if err != nil {
-		return ai.GenerateResponse{}, err
+	if m := string(msg.Model); m != "" {
+		model = m
 	}
-	model := string(msg.Model)
-	if model == "" {
-		model = p.model
+	out := ai.GenerateResponse{Model: model, Text: text.String()}
+	u := msg.Usage
+	count := func(valid bool, n int64) *int {
+		if !valid {
+			return nil
+		}
+		return ai.IntPtr(int(n))
 	}
-	return ai.GenerateResponse{
-		JSON:         raw,
-		Model:        model,
-		InputTokens:  int(msg.Usage.InputTokens),
-		OutputTokens: int(msg.Usage.OutputTokens),
-	}, nil
+	out.InputTokens = count(u.JSON.InputTokens.Valid(), u.InputTokens)
+	out.OutputTokens = count(u.JSON.OutputTokens.Valid(), u.OutputTokens)
+	out.CacheReadTokens = count(u.JSON.CacheReadInputTokens.Valid(), u.CacheReadInputTokens)
+	out.CacheWriteTokens = count(u.JSON.CacheCreationInputTokens.Valid(), u.CacheCreationInputTokens)
+	out.ReasoningTokens = count(u.OutputTokensDetails.JSON.ThinkingTokens.Valid(),
+		u.OutputTokensDetails.ThinkingTokens)
+	return out
+}
+
+// errUnreadableStream is reported when the response stream cannot be decoded.
+var errUnreadableStream = errors.New("the Anthropic response stream could not be read")
+
+// stream sends one request and collects the streamed message.
+func (p *Provider) stream(ctx context.Context, params sdk.BetaMessageNewParams) (sdk.BetaMessage, error) {
+	stream := p.client.Beta.Messages.NewStreaming(ctx, params)
+	msg := sdk.BetaMessage{}
+	for stream.Next() {
+		if err := msg.Accumulate(stream.Current()); err != nil {
+			return msg, errUnreadableStream
+		}
+	}
+	return msg, stream.Err()
+}
+
+// isBadRequest reports whether the API rejected the request itself.
+func isBadRequest(err error) bool {
+	var apierr *sdk.Error
+	return errors.As(err, &apierr) && apierr.StatusCode == http.StatusBadRequest
 }
 
 // mapError converts SDK errors into safe provider errors.
 func (p *Provider) mapError(err error) error {
+	if errors.Is(err, errUnreadableStream) {
+		return ai.Errorf(0, errUnreadableStream.Error())
+	}
 	var apierr *sdk.Error
 	if errors.As(err, &apierr) {
 		detail := strings.TrimSpace(apierr.Message)
@@ -242,21 +302,124 @@ func rootCause(err error) string {
 	return err.Error()
 }
 
-// outputCap returns the configured model's maximum output tokens from the
-// Models API, cached; on failure it returns a value every current model
-// accepts.
-func (p *Provider) outputCap(ctx context.Context) int {
-	key := p.baseURL + "\x00" + p.model
-	if v, ok := modelCaps.Load(key); ok {
-		return v.(int)
+func (p *Provider) key() string { return p.baseURL + "\x00" + p.model }
+
+// facts returns what the Models API says about the configured model, cached.
+// When it cannot be asked (a proxy without the Models API, say) the request
+// is limited to what every model accepts: a conservative output cap and no
+// effort level.
+func (p *Provider) facts(ctx context.Context) modelFacts {
+	if v, ok := factsCache.Load(p.key()); ok {
+		if c := v.(cachedFacts); time.Now().Before(c.expires) {
+			return c.facts
+		}
 	}
 	lookup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	info, err := p.client.Models.Get(lookup, p.model, sdk.ModelGetParams{}, option.WithMaxRetries(0))
 	if err != nil || info.MaxTokens <= 0 {
-		return fallbackOutputTokens
+		unknown := modelFacts{maxTokens: fallbackOutputTokens}
+		if ctx.Err() == nil {
+			factsCache.Store(p.key(), cachedFacts{facts: unknown, expires: time.Now().Add(factsRetry)})
+		}
+		return unknown
 	}
-	cap := int(info.MaxTokens)
-	modelCaps.Store(key, cap)
-	return cap
+	effort := info.Capabilities.Effort
+	facts := modelFacts{
+		maxTokens:  int(info.MaxTokens),
+		effortHigh: effort.Supported && effort.High.Supported,
+		effortLow:  effort.Supported && effort.Low.Supported,
+	}
+	factsCache.Store(p.key(), cachedFacts{facts: facts, expires: time.Now().Add(factsTTL)})
+	return facts
 }
+
+// maxModelListPages bounds how many pages of the Models API are read.
+const maxModelListPages = 5
+
+// errListTooLarge is reported by capBody when a response exceeds its bound.
+var errListTooLarge = errors.New("the model list is too large")
+
+// ListModels implements ai.ModelLister with the Models API.
+func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, ai.ModelListTimeout)
+	defer cancel()
+	var ids []string
+	page, err := p.client.Models.List(ctx, sdk.ModelListParams{Limit: sdk.Int(1000)},
+		option.WithMaxRetries(1), option.WithMiddleware(capBody(ai.MaxModelListBytes)))
+	for n := 1; err == nil && page != nil; n++ {
+		for _, m := range page.Data {
+			if len(ids) < ai.MaxModelListEntries {
+				ids = append(ids, m.ID)
+			}
+		}
+		if n >= maxModelListPages || len(ids) >= ai.MaxModelListEntries {
+			break
+		}
+		page, err = page.GetNextPage()
+	}
+	if err != nil {
+		return nil, p.mapListError(err)
+	}
+	return ids, nil
+}
+
+// mapListError converts an error from the Models API into a safe provider
+// error.
+func (p *Provider) mapListError(err error) error {
+	var apierr *sdk.Error
+	switch {
+	case errors.Is(err, errListTooLarge):
+		return ai.Errorf(0, "the Anthropic API's model list is too large")
+	case errors.As(err, &apierr):
+		switch apierr.StatusCode {
+		case http.StatusUnauthorized:
+			return ai.Errorf(apierr.StatusCode, "the Anthropic API rejected the API key")
+		case http.StatusNotFound:
+			return ai.Errorf(apierr.StatusCode, "the service does not list its models")
+		}
+		return ai.Errorf(apierr.StatusCode, fmt.Sprintf("the Anthropic API returned HTTP %d for its model list", apierr.StatusCode))
+	case errors.Is(err, context.DeadlineExceeded):
+		return ai.Errorf(0, "the Anthropic API did not list its models in time")
+	case errors.Is(err, context.Canceled):
+		return ai.Errorf(0, "the request was cancelled")
+	}
+	return ai.Errorf(0, ai.Redact("could not list the Anthropic API's models: "+rootCause(err), p.apiKey))
+}
+
+// capBody is SDK middleware that fails reading a response body beyond n
+// bytes instead of buffering it.
+func capBody(n int64) option.Middleware {
+	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		resp, err := next(req)
+		if err == nil && resp != nil && resp.Body != nil {
+			resp.Body = &cappedBody{rc: resp.Body, left: n}
+		}
+		return resp, err
+	}
+}
+
+type cappedBody struct {
+	rc   io.ReadCloser
+	left int64
+}
+
+func (b *cappedBody) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		// One more byte tells a body of exactly n bytes from a longer one.
+		var one [1]byte
+		k, err := b.rc.Read(one[:])
+		if k > 0 {
+			return 0, errListTooLarge
+		}
+		return 0, err
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left]
+	}
+	k, err := b.rc.Read(p)
+	b.left -= int64(k)
+	return k, err
+}
+
+func (b *cappedBody) Close() error { return b.rc.Close() }

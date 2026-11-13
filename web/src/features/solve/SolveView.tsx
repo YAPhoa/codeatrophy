@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { BookmarkPlus, ChevronDown, ChevronUp, ExternalLink, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Play, RotateCcw, Send, ServerOff } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, ChevronDown, ChevronUp, ExternalLink, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Play, RotateCcw, Send, ServerOff } from 'lucide-react';
 import { api } from '../../api/client';
-import { useMeta, useTestCases } from '../../api/queries';
+import { useMeta, useSolutions, useTestCases } from '../../api/queries';
 import type { Item, SubmissionSummary } from '../../api/types';
 import { useShellLayout } from '../../app/shellLayout';
 import { clearCode, initialCode, pickLanguage, rememberLanguage, saveCode } from '../../lib/codeStore';
@@ -24,13 +24,15 @@ import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
 import { Related } from '../item/Related';
 import { SaveSolutionDialog } from '../solutions/SaveSolutionDialog';
+import { savedWithCode } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
 import { HistoryList } from './HistoryList';
 import { ResultPanel } from './ResultPanel';
+import { RunnerView } from './RunnerView';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
 
-type LeftTab = 'description' | 'notes' | 'submissions';
+type LeftTab = 'description' | 'notes' | 'submissions' | 'runner';
 type DrawerTab = 'tests' | 'result' | 'custom';
 
 /** What is remembered about the workspace's panes, per browser. Their sizes are kept by the split panes themselves. */
@@ -73,13 +75,28 @@ export function SolveView({ item }: { item: Item }) {
   const cases = useTestCases(item.id);
   const sampleCount = cases.data?.filter((c) => c.isSample).length ?? 0;
 
-  // With a judge, offer what it can run. Without one the editor is only a
-  // scratchpad, so offer the languages that have starter code (or all).
+  // A "Solution only" problem is run through a runner, which exists per language.
+  const solutionOnly = problem?.interface === 'function';
+  const runners = useMemo(() => (solutionOnly ? (problem?.harness ?? {}) : {}), [solutionOnly, problem]);
+
+  // With a judge, offer what it can run: for a "Solution only" problem, the
+  // languages that have a runner. Without a judge, or without any runner, the
+  // editor is only a scratchpad, so offer the languages that have starter
+  // code (or all).
+  const runnable = useMemo(() => {
+    const offered = (judge?.languages ?? []).map((l) => l.id);
+    return solutionOnly ? offered.filter((l) => l in runners) : offered;
+  }, [judge, solutionOnly, runners]);
+  const hasRunner = Object.keys(runners).length > 0;
+  /** Saved as "Solution only", yet nothing here can run it. */
+  const cannotRun = solutionOnly && judgeOn && runnable.length === 0;
+  const canRun = judgeOn && !cannotRun;
   const languages = useMemo(() => {
-    if (judgeOn) return (judge?.languages ?? []).map((l) => l.id);
+    if (canRun) return runnable;
+    if (solutionOnly && hasRunner) return sortLanguages(Object.keys(runners));
     const withStarter = sortLanguages(Object.keys(starter));
     return withStarter.length > 0 ? withStarter : LANGUAGES.map((l) => l.id);
-  }, [judgeOn, judge, starter]);
+  }, [canRun, runnable, solutionOnly, hasRunner, runners, starter]);
   const versionOf = (id: string) => judge?.languages.find((l) => l.id === id)?.version;
 
   const [language, setLanguageState] = useState<string | null>(() => pickLanguage(item.id, languages, starter));
@@ -92,7 +109,7 @@ export function SolveView({ item }: { item: Item }) {
   const statementMin = panes.statement && !narrow;
   const reveal = useReveal();
   const shell = useShellLayout();
-  const [saving, setSaving] = useState<{ language: string; source: string; name?: string; submissionId?: string } | null>(null);
+  const [saving, setSaving] = useState<{ language: string; source: string; name?: string; submissionId?: string; accepted?: boolean } | null>(null);
   const [savedFrom, setSavedFrom] = useState<ReadonlySet<string>>(() => new Set());
   const [customInput, setCustomInput] = useState('');
   const [historic, setHistoric] = useState(false);
@@ -227,7 +244,7 @@ export function SolveView({ item }: { item: Item }) {
   };
 
   const begin = (mode: 'run' | 'submit', stdin: string | null) => {
-    if (!judgeOn || runner.judging || !language || !checkSource()) return;
+    if (!canRun || runner.judging || !language || !checkSource()) return;
     const maxInput = meta?.limits.maxTestDataBytes ?? Infinity;
     if (stdin !== null && new Blob([stdin]).size > maxInput) {
       toast.error(`The input is ${formatBytes(new Blob([stdin]).size)}; the limit is ${formatBytes(maxInput)}.`);
@@ -238,7 +255,12 @@ export function SolveView({ item }: { item: Item }) {
     if (narrow) setNarrowPane('code');
     void runner.start(language, code, mode, stdin);
   };
+  const noRunner = hasRunner ? 'No runner for a language the judge offers.' : 'No runner yet.';
   const runSamples = () => {
+    if (cannotRun) {
+      toast.info(`Cannot be run. ${noRunner}`);
+      return;
+    }
     if (sampleCount === 0 && cases.isSuccess) {
       toast.info('There are no sample cases to run. Use a custom input, or add samples under Test cases.');
       showInDrawer('custom');
@@ -247,6 +269,10 @@ export function SolveView({ item }: { item: Item }) {
     begin('run', null);
   };
   const submit = () => {
+    if (cannotRun) {
+      toast.info(`Cannot be run. ${noRunner}`);
+      return;
+    }
     if (item.testCaseCount === 0) {
       toast.info('This problem has no test cases yet, so there is nothing to submit against.');
       return;
@@ -301,6 +327,20 @@ export function SolveView({ item }: { item: Item }) {
     );
   };
 
+  // An accepted submission made here is offered for keeping, once, unless
+  // the same code is already among the saved solutions.
+  const solutions = useSolutions(item.id).data;
+  const offered = useRef<Set<string>>(new Set());
+  const justJudged = runner.submission;
+  useEffect(() => {
+    const s = justJudged;
+    if (!s || historic || s.status !== 'completed' || s.mode !== 'submit' || s.verdict !== 'accepted') return;
+    if (solutions === undefined || offered.current.has(s.id)) return;
+    offered.current.add(s.id);
+    if (savedWithCode(solutions, s)) return;
+    setSaving((open) => open ?? { language: s.language, source: s.source, submissionId: s.id, accepted: true });
+  }, [justJudged, historic, solutions]);
+
   const loadSubmissionCode = () => {
     const s = runner.submission;
     if (!s) return;
@@ -321,6 +361,10 @@ export function SolveView({ item }: { item: Item }) {
   };
 
   if (!problem) return <PageLoading />;
+
+  const activeRunner = language ? runners[language] : undefined;
+  // The tab goes away with the runner it shows, when the language changes.
+  const shownTab: LeftTab = leftTab === 'runner' && !activeRunner ? 'description' : leftTab;
 
   const description = (
     <div className="statement">
@@ -354,12 +398,14 @@ export function SolveView({ item }: { item: Item }) {
         <Tabs
           idBase="left"
           label="Problem information"
-          value={leftTab}
+          value={shownTab}
           onChange={setLeftTab}
           tabs={[
             { value: 'description', label: 'Description' },
             { value: 'notes', label: 'Notes', count: item.notes.trim() ? 1 : null },
             { value: 'submissions', label: 'Submissions' },
+            // Hidden code, one deliberate click away; here it takes nothing from the editor.
+            ...(activeRunner ? [{ value: 'runner' as const, label: 'Runner' }] : []),
           ]}
         />
         <span className="spacer" />
@@ -373,10 +419,11 @@ export function SolveView({ item }: { item: Item }) {
           />
         )}
       </div>
-      <div className="pane-body" {...tabPanelProps('left', leftTab)} tabIndex={0}>
-        {leftTab === 'description' && description}
-        {leftTab === 'notes' && <Notes item={item} />}
-        {leftTab === 'submissions' && (
+      <div className="pane-body" {...tabPanelProps('left', shownTab)} tabIndex={0}>
+        {shownTab === 'description' && description}
+        {shownTab === 'notes' && <Notes item={item} />}
+        {shownTab === 'runner' && activeRunner && language && <RunnerView runner={activeRunner} language={language} />}
+        {shownTab === 'submissions' && (
           <HistoryList
             itemId={item.id}
             activeId={runner.submission?.id ?? null}
@@ -425,7 +472,7 @@ export function SolveView({ item }: { item: Item }) {
             onClick={toggleMaximise}
           />
         )}
-        {judgeOn && (
+        {canRun && (
           <>
             <Button size="sm" icon={<Play size={13} />} onClick={runSamples} busy={runner.starting === 'run'} disabled={runner.judging} title={`Run against the sample cases (${MOD}+Enter)`}>
               Run
@@ -444,6 +491,13 @@ export function SolveView({ item }: { item: Item }) {
           </>
         )}
       </div>
+      {cannotRun && (
+        <div className="editor-notice" role="note">
+          <AlertTriangle size={14} aria-hidden="true" />
+          <span>Cannot be run. {noRunner}</span>
+          <Link to={`/items/${item.id}/edit`}>Edit the problem</Link>
+        </div>
+      )}
       <div className="editor-host">
         <CodeEditor
           key={language ?? 'none'}
@@ -467,11 +521,15 @@ export function SolveView({ item }: { item: Item }) {
   // ---- Tests and results drawer ----
 
   const sub = runner.submission;
+  // Code that is already among the saved solutions is not offered for saving again.
+  const kept = sub && sub.status === 'completed' ? savedWithCode(solutions, sub) : undefined;
   const customRun = sub != null && sub.mode === 'run' && sub.results.length > 0 && sub.results.every((r) => r.testCaseId === null);
   // One line for the minimised drawer: what is happening, or how the last attempt went.
   const status: { text: string; tone: string; busy?: boolean } = !judgeOn
     ? { text: 'Running code is not available here', tone: 'neutral' }
-    : runner.starting
+    : cannotRun
+      ? { text: 'No runner to run this with', tone: 'neutral' }
+      : runner.starting
       ? { text: 'Sending…', tone: 'neutral', busy: true }
       : sub && sub.status !== 'completed'
         ? { text: sub.status === 'queued' ? 'Queued…' : `Running… ${sub.results.length} of ${sub.totalCount} done`, tone: 'neutral', busy: true }
@@ -492,7 +550,7 @@ export function SolveView({ item }: { item: Item }) {
   const drawerTabs: { value: DrawerTab; label: string; count?: number }[] = [
     { value: 'tests', label: 'Tests', count: item.testCaseCount },
     { value: 'result', label: 'Result' },
-    ...(judgeOn ? [{ value: 'custom' as const, label: 'Custom input' }] : []),
+    ...(canRun ? [{ value: 'custom' as const, label: 'Custom input' }] : []),
   ];
 
   const drawerBar = (
@@ -532,7 +590,7 @@ export function SolveView({ item }: { item: Item }) {
           This server has no judge engine configured, so code cannot be run or submitted. Everything else works: read the problem, keep notes, and draft a solution — the editor keeps it in this
           browser.
         </p>
-        <Link to="/settings#judge">Judge status</Link>
+        <Link to="/settings/judge">Judge status</Link>
       </div>
     </div>
   ) : (
@@ -553,6 +611,7 @@ export function SolveView({ item }: { item: Item }) {
           }}
           onSaveSolution={sub.status === 'completed' && sub.source.trim() !== '' ? () => saveSubmission(sub) : undefined}
           savedAsSolution={savedFrom.has(sub.id)}
+          alreadySaved={kept ? { name: kept.name, to: `/items/${item.id}/solutions` } : null}
         />
       ) : runner.loading ? (
         <PageLoading />
@@ -560,7 +619,11 @@ export function SolveView({ item }: { item: Item }) {
         <PageLoading label="Sending…" />
       ) : (
         runner.startError == null &&
-        (item.testCaseCount === 0 ? (
+        (cannotRun ? (
+          <Callout tone="warn" title="This problem cannot be run yet" actions={<Link to={`/items/${item.id}/edit`}>Edit the problem</Link>}>
+            {noRunner}
+          </Callout>
+        ) : item.testCaseCount === 0 ? (
           <Callout tone="info" title="No test cases yet" actions={<Link to={`/items/${item.id}/tests`}>Add test cases</Link>}>
             Without test cases this problem cannot be judged. You can still run your code against a custom input.
           </Callout>
@@ -595,7 +658,7 @@ export function SolveView({ item }: { item: Item }) {
             reveal={reveal}
             aiEnabled={meta?.ai.enabled ?? false}
             onUseInput={
-              judgeOn
+              canRun
                 ? (stdin) => {
                     setCustomInput(stdin);
                     setDrawerTab('custom');
@@ -617,7 +680,7 @@ export function SolveView({ item }: { item: Item }) {
               spellCheck={false}
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
-              placeholder="Type or paste the input your program should read."
+              placeholder={solutionOnly ? 'One JSON value per line, one per argument.' : 'Type or paste the input your program should read.'}
             />
             <div className="row">
               <Button size="sm" icon={<Play size={13} />} onClick={() => begin('run', customInput)} disabled={runner.judging}>
@@ -701,6 +764,7 @@ export function SolveView({ item }: { item: Item }) {
         open={saving !== null}
         onClose={() => setSaving(null)}
         initial={saving ?? { language: language ?? '', source: '' }}
+        accepted={saving?.accepted}
         onSaved={() => {
           const from = saving?.submissionId;
           if (from) setSavedFrom((prev) => new Set(prev).add(from));

@@ -33,7 +33,8 @@ func TestGenerateWithJSONSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(resp.JSON) != `{"ok": true}` || resp.Model != "llama3" || resp.OutputTokens != 4 {
+	if string(resp.JSON) != `{"ok": true}` || resp.Model != "llama3" ||
+		resp.OutputTokens == nil || *resp.OutputTokens != 4 || resp.InputTokens == nil || *resp.InputTokens != 3 {
 		t.Errorf("response: %+v", resp)
 	}
 	if auth != "" {
@@ -98,8 +99,15 @@ func TestErrorsNeverContainTheKey(t *testing.T) {
 			t.Errorf("%d: %v", s, err)
 		}
 	}
-	if _, err := New(ai.Config{}); err == nil {
-		t.Error("a model is required")
+	// A provider without a model can be constructed (to list models) but
+	// cannot generate.
+	np, err := New(ai.Config{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := np.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()}); err == nil ||
+		!strings.Contains(err.Error(), "no model") {
+		t.Errorf("generate without a model: %v", err)
 	}
 	if _, err := New(ai.Config{Model: "m", BaseURL: "ftp://x"}); err == nil {
 		t.Error("the base URL must be http(s)")
@@ -122,5 +130,85 @@ func TestRefusalAndTruncation(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v", body, err)
 		}
+	}
+}
+
+func TestListModels(t *testing.T) {
+	const key = "sk-proj-listsecret"
+	var auth string
+	status, body := 200, `{"object":"list","data":[{"id":"gpt-b"},{"id":"gpt-a"},{"id":7},{"object":"model"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		auth = r.Header.Get("Authorization")
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	p, err := New(ai.Config{BaseURL: srv.URL + "/v1/", APIKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lister := p.(ai.ModelLister)
+	ids, err := lister.ListModels(context.Background())
+	if err != nil || strings.Join(ids, ",") != "gpt-b,gpt-a" || auth != "Bearer "+key {
+		t.Errorf("ids %v, err %v, auth %q", ids, err, auth)
+	}
+	for _, c := range []struct {
+		status int
+		body   string
+		want   string
+	}{
+		{404, `not found`, "does not list"},
+		{401, `{"error":{"message":"bad key ` + key + `"}}`, "rejected the API key"},
+		{500, `{"error":{"message":"` + key + `"}}`, "HTTP 500"},
+		{200, `<html>hello</html>`, "not in the expected format"},
+		{200, `{"models":[]}`, "not in the expected format"},
+		{200, `{"data":[{"id":"` + strings.Repeat("x", ai.MaxModelListBytes) + `"}]}`, "too large"},
+	} {
+		status, body = c.status, c.body
+		_, err := lister.ListModels(context.Background())
+		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), key) {
+			t.Errorf("%d %.40s: %v", c.status, c.body, err)
+		}
+	}
+	// Ids beyond the entry bound are not collected.
+	status = 200
+	var sb strings.Builder
+	sb.WriteString(`{"data":[`)
+	for i := range ai.MaxModelListEntries + 10 {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"id":"m%d"}`, i)
+	}
+	sb.WriteString(`]}`)
+	body = sb.String()
+	if ids, err := lister.ListModels(context.Background()); err != nil || len(ids) != ai.MaxModelListEntries {
+		t.Errorf("bounded: %d ids, %v", len(ids), err)
+	}
+}
+
+// prompt_tokens includes the cached part, which is reported apart; the
+// reasoning part of the completion comes from its details; a server that
+// reports no usage leaves every count nil.
+func TestGenerateReportsTheTokenBreakdown(t *testing.T) {
+	usage := `,"usage":{"prompt_tokens":100,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":30},"completion_tokens_details":{"reasoning_tokens":25}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"{\"ok\": true}"}}]`+usage+`}`)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{Model: "m", BaseURL: srv.URL})
+	resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema()})
+	if err != nil || *resp.InputTokens != 70 || *resp.CacheReadTokens != 30 || *resp.OutputTokens != 40 ||
+		*resp.ReasoningTokens != 25 || resp.CacheWriteTokens != nil {
+		t.Errorf("usage: %+v %v", resp, err)
+	}
+	usage = ""
+	resp, err = p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema()})
+	if err != nil || resp.InputTokens != nil || resp.OutputTokens != nil || resp.ReasoningTokens != nil || resp.CacheReadTokens != nil {
+		t.Errorf("no usage: %+v %v", resp, err)
 	}
 }

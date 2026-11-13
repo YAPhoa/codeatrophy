@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -25,10 +28,21 @@ const (
 
 // DraftProblem is the problem part of a draft.
 type DraftProblem struct {
-	TimeLimitMs   int                `json:"timeLimitMs"`
-	MemoryLimitKb int                `json:"memoryLimitKb"`
-	Compare       domain.CompareMode `json:"compare"`
-	StarterCode   map[string]string  `json:"starterCode"`
+	Interface     domain.ProblemInterface       `json:"interface"`
+	TimeLimitMs   int                           `json:"timeLimitMs"`
+	MemoryLimitKb int                           `json:"memoryLimitKb"`
+	Compare       domain.CompareMode            `json:"compare"`
+	StarterCode   map[string]string             `json:"starterCode"`
+	Harness       map[string]domain.HarnessCode `json:"harness"`
+	// ReferenceSolution is the model's own solution (for a function problem
+	// the solution part only), or nil.
+	ReferenceSolution *domain.Solution `json:"referenceSolution"`
+}
+
+// spec is the problem as it would be saved, for running code against it.
+func (p *DraftProblem) spec() *domain.ProblemSpec {
+	return &domain.ProblemSpec{Interface: p.Interface, TimeLimitMs: p.TimeLimitMs, MemoryLimitKb: p.MemoryLimitKb,
+		Compare: p.Compare, StarterCode: p.StarterCode, Harness: p.Harness}
 }
 
 // DraftTestCase is a test case of a draft.
@@ -37,6 +51,20 @@ type DraftTestCase struct {
 	Stdin          string `json:"stdin"`
 	ExpectedStdout string `json:"expectedStdout"`
 	IsSample       bool   `json:"isSample"`
+	// Verified is true when the draft's reference solution printed the
+	// expected output.
+	Verified bool `json:"verified"`
+}
+
+// DraftCheck summarises running a draft's reference solution on its test
+// cases, and its starter code in each harness.
+type DraftCheck struct {
+	Attempted bool          `json:"attempted"`
+	Engine    *string       `json:"engine"`
+	Passed    int           `json:"passed"`
+	Total     int           `json:"total"`
+	Error     *string       `json:"error"`
+	Runners   []RunnerCheck `json:"runners"`
 }
 
 // ItemDraft is a proposed item, mapping onto ItemInput.
@@ -56,12 +84,16 @@ type ItemDraft struct {
 type DraftResponse struct {
 	Draft ItemDraft        `json:"draft"`
 	Style *domain.StyleRef `json:"style"`
+	// Check is nil for a reading.
+	Check *DraftCheck `json:"check"`
+	Usage Usage       `json:"usage"`
 }
 
 // DraftInput is the body of POST /ai/draft.
 type DraftInput struct {
 	Text          string             `json:"text"`
 	TypeHint      string             `json:"typeHint"`
+	InterfaceHint string             `json:"interfaceHint"`
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
@@ -102,6 +134,15 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if hint != "auto" && hint != "problem" && hint != "reading" {
 		fe.Add("typeHint", "must be auto, problem or reading")
 	}
+	iface := in.InterfaceHint
+	if iface == "" {
+		iface = "auto"
+	}
+	if iface != "auto" && !domain.ProblemInterface(iface).Valid() {
+		fe.Add("interfaceHint", "must be auto, program or function")
+	} else if iface != "auto" && hint == "reading" {
+		fe.Add("interfaceHint", "does not apply to a reading")
+	}
 	instruction, err := checkInstruction(in.Instruction)
 	if err != nil {
 		return DraftResponse{}, err
@@ -117,26 +158,30 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	provider, secret, err := a.activeAI(ctx)
+	provider, err := a.activeAI(ctx)
 	if err != nil {
 		return DraftResponse{}, err
 	}
 	style, ref := styleOf(preset)
-	system, user := ai.DraftPrompt{Style: style, Text: text, TypeHint: hint, Instruction: instruction, PreviousDraft: prev}.Build()
-	resp, err := provider.Generate(ctx, ai.GenerateRequest{
+	system, user := ai.DraftPrompt{Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
+		PreviousDraft: prev, Toolchains: a.toolchains(ctx)}.Build()
+	var draft ItemDraft
+	subject := &logSubject{}
+	usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
 		System:     system,
 		User:       user,
 		Schema:     ai.DraftSchema(),
 		SchemaName: "item_draft",
+	}, func(raw json.RawMessage) (err error) {
+		if draft, err = a.parseDraft(raw, hint, iface); err == nil {
+			subject.Title = &draft.Title
+		}
+		return err
 	})
-	if err != nil {
-		return DraftResponse{}, errUpstream(err, secret)
-	}
-	draft, err := a.parseDraft(resp.JSON, hint)
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft), Usage: usage}, nil
 }
 
 // previousDraft re-encodes an optional previous ItemDraft compactly for the
@@ -162,8 +207,9 @@ func previousDraft(raw json.RawMessage) (string, string) {
 
 // parseDraft decodes and normalizes a model draft. Recoverable problems are
 // repaired (the draft is reviewed by the user before saving); structural
-// problems are upstream errors.
-func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
+// problems are upstream errors. iface, unless "auto", is the interface a
+// problem gets whatever the model chose.
+func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, error) {
 	var m ai.ModelDraft
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return ItemDraft{}, &Error{Code: CodeUpstream, Message: "the AI provider returned a draft that does not match the schema"}
@@ -193,7 +239,11 @@ func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
 			d.Difficulty = &diff
 		}
 	}
-	for _, t := range domain.NormalizeTags(m.Tags) {
+	suggested := make([]string, len(m.Tags))
+	for i, t := range m.Tags {
+		suggested[i] = hyphenateTag(t)
+	}
+	for _, t := range domain.NormalizeTags(suggested) {
 		if domain.ValidateTag(t) == "" && len(d.Tags) < domain.MaxTags {
 			d.Tags = append(d.Tags, t)
 		}
@@ -204,9 +254,13 @@ func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
 		}
 	}
 	if d.Type == domain.TypeProblem {
-		p := &DraftProblem{TimeLimitMs: domain.DefaultTimeLimitMs, MemoryLimitKb: domain.DefaultMemoryLimitKb,
-			Compare: domain.CompareTokens, StarterCode: map[string]string{}}
+		p := &DraftProblem{Interface: domain.InterfaceProgram, TimeLimitMs: domain.DefaultTimeLimitMs,
+			MemoryLimitKb: domain.DefaultMemoryLimitKb, Compare: domain.CompareTokens, StarterCode: map[string]string{},
+			Harness: map[string]domain.HarnessCode{}}
 		if mp := m.Problem; mp != nil {
+			if f := domain.ProblemInterface(mp.Interface); f.Valid() {
+				p.Interface = f
+			}
 			if mp.TimeLimitMs != 0 {
 				p.TimeLimitMs = clamp(mp.TimeLimitMs, domain.MinTimeLimitMs, domain.MaxTimeLimitMs)
 			}
@@ -221,14 +275,42 @@ func (a *App) parseDraft(raw json.RawMessage, hint string) (ItemDraft, error) {
 					p.StarterCode[sc.Language] = sc.Source
 				}
 			}
+			for _, h := range mp.Harness {
+				code := domain.HarnessCode{Prefix: domain.NormalizeText(h.Prefix), Suffix: domain.NormalizeText(h.Suffix)}
+				if h.Language == "python" {
+					code.Prefix = withFutureAnnotations(code.Prefix)
+				}
+				if domain.KnownLanguage(h.Language) && len(code.Prefix) <= a.limits.MaxSourceBytes &&
+					len(code.Suffix) <= a.limits.MaxSourceBytes {
+					p.Harness[h.Language] = code
+				}
+			}
+			if rs := mp.ReferenceSolution; rs != nil {
+				sol := domain.Solution{Language: rs.Language, Source: domain.NormalizeText(rs.Source)}
+				if len(domain.ValidateSolution(sol, a.limits)) == 0 {
+					p.ReferenceSolution = &sol
+				}
+			}
+		}
+		if iface != "auto" {
+			p.Interface = domain.ProblemInterface(iface)
+		}
+		if p.Interface == domain.InterfaceProgram {
+			p.Harness = map[string]domain.HarnessCode{}
 		}
 		d.Problem = p
+		seen := map[string]bool{}
 		for _, tc := range m.TestCases {
 			if len(d.TestCases) >= MaxGeneratedCases {
 				break
 			}
 			if len(tc.Stdin) > domain.MaxTestCaseBytes || len(tc.ExpectedStdout) > domain.MaxTestCaseBytes {
 				continue
+			}
+			if key := sameInput(tc.Stdin); seen[key] {
+				continue // the same input twice tests nothing new
+			} else {
+				seen[key] = true
 			}
 			d.TestCases = append(d.TestCases, DraftTestCase{Name: truncateRunes(tc.Name, domain.MaxTestCaseNameChars),
 				Stdin: tc.Stdin, ExpectedStdout: tc.ExpectedStdout, IsSample: tc.IsSample})
@@ -253,9 +335,28 @@ func truncateRunes(s string, n int) string {
 	return string([]rune(s)[:n])
 }
 
+// futureAnnotations must be the first statement of a Python program whose
+// solver code uses annotations such as list[int] on Python 3.8.
+const futureAnnotations = "from __future__ import annotations"
+
+// withFutureAnnotations puts the future import at the top of a Python
+// harness prefix that lacks it. Models forget it, and then every annotated
+// stub fails at import on the judge's Python 3.8. Placing it first is always
+// valid: only a docstring, comments and other future imports may precede
+// it, and all of them may follow it too.
+func withFutureAnnotations(prefix string) string {
+	for _, l := range strings.Split(prefix, "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "from __future__ import") && strings.Contains(l, "annotations") {
+			return prefix
+		}
+	}
+	return futureAnnotations + "\n" + prefix
+}
+
 // VariantInput is the body of POST /items/{id}/ai/variant.
 type VariantInput struct {
 	Mode          string             `json:"mode"`
+	InterfaceHint string             `json:"interfaceHint"`
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
@@ -285,6 +386,20 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	if it.Type == domain.TypeReading && mode != "similar" {
 		return DraftResponse{}, errField("mode", "readings only support the similar mode")
 	}
+	// A variant keeps the original's interface unless asked for the other.
+	iface := ""
+	switch {
+	case in.InterfaceHint != "" && it.Type == domain.TypeReading:
+		return DraftResponse{}, errField("interfaceHint", "does not apply to a reading")
+	case in.InterfaceHint == "" || in.InterfaceHint == "auto":
+		if it.Problem != nil {
+			iface = string(it.Problem.Interface)
+		}
+	case !domain.ProblemInterface(in.InterfaceHint).Valid():
+		return DraftResponse{}, errField("interfaceHint", "must be auto, program or function")
+	default:
+		iface = in.InterfaceHint
+	}
 	var samples []map[string]any
 	if it.Type == domain.TypeProblem {
 		cases, err := a.ListTestCases(ctx, itemID)
@@ -302,7 +417,7 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	provider, secret, err := a.activeAI(ctx)
+	provider, err := a.activeAI(ctx)
 	if err != nil {
 		return DraftResponse{}, err
 	}
@@ -316,30 +431,39 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 			langs = append(langs, l)
 		}
 		slices.Sort(langs)
-		orig["problem"] = map[string]any{
-			"timeLimitMs": it.Problem.TimeLimitMs, "memoryLimitKb": it.Problem.MemoryLimitKb,
-			"compare": it.Problem.Compare, "starterLanguages": langs,
+		op := map[string]any{
+			"interface": it.Problem.Interface, "timeLimitMs": it.Problem.TimeLimitMs,
+			"memoryLimitKb": it.Problem.MemoryLimitKb, "compare": it.Problem.Compare, "starterLanguages": langs,
 		}
+		if it.Problem.Interface == domain.InterfaceFunction {
+			// The stubs and runners show the conventions the original uses.
+			op["starterCode"], op["harness"] = it.Problem.StarterCode, it.Problem.Harness
+		}
+		orig["problem"] = op
 		orig["sampleTestCases"] = samples
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
 	style, ref := styleOf(preset)
-	system, user := ai.VariantPrompt{Style: style, Original: string(origJSON), Mode: mode, Instruction: instruction,
-		PreviousDraft: prev}.Build()
-	resp, err := provider.Generate(ctx, ai.GenerateRequest{
+	system, user := ai.VariantPrompt{Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
+		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx)}.Build()
+	forced := iface
+	if forced == "" {
+		forced = "auto"
+	}
+	var draft ItemDraft
+	usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
 		Schema:     ai.DraftSchema(),
 		SchemaName: "item_draft",
+	}, func(raw json.RawMessage) (err error) {
+		draft, err = a.parseDraft(raw, string(it.Type), forced)
+		return err
 	})
-	if err != nil {
-		return DraftResponse{}, errUpstream(err, secret)
-	}
-	draft, err := a.parseDraft(resp.JSON, string(it.Type))
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft), Usage: usage}, nil
 }
 
 // GenerateTestCasesInput is the body of POST /items/{id}/ai/testcases.
@@ -373,6 +497,10 @@ type Verification struct {
 type GenerateTestCasesResponse struct {
 	ReferenceSolution domain.Solution `json:"referenceSolution"`
 	Verification      Verification    `json:"verification"`
+	// DuplicatesDropped counts proposed cases whose stdin the problem, or
+	// an earlier proposal, already had.
+	DuplicatesDropped int             `json:"duplicatesDropped"`
+	Usage             Usage           `json:"usage"`
 	Cases             []GeneratedCase `json:"cases"`
 }
 
@@ -405,43 +533,68 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	if it.Type != domain.TypeProblem {
 		return GenerateTestCasesResponse{}, errField("type", "readings have no test cases")
 	}
-	provider, secret, err := a.activeAI(ctx)
+	h, err := harnessFor(it.Problem, lang, "language")
 	if err != nil {
 		return GenerateTestCasesResponse{}, err
 	}
-	problemJSON, _ := json.MarshalIndent(map[string]any{
-		"title": it.Title, "body": it.Body,
+	existingCases, err := a.ListTestCases(ctx, itemID)
+	if err != nil {
+		return GenerateTestCasesResponse{}, err
+	}
+	provider, err := a.activeAI(ctx)
+	if err != nil {
+		return GenerateTestCasesResponse{}, err
+	}
+	function := it.Problem.Interface == domain.InterfaceFunction
+	problem := map[string]any{
+		"title": it.Title, "body": it.Body, "interface": it.Problem.Interface,
 		"timeLimitMs": it.Problem.TimeLimitMs, "memoryLimitKb": it.Problem.MemoryLimitKb, "compare": it.Problem.Compare,
-	}, "", "  ")
+	}
+	if function {
+		problem["stub"], problem["harness"] = it.Problem.StarterCode[lang], h
+	}
+	problemJSON, _ := json.MarshalIndent(problem, "", "  ")
 	existing := ""
 	if rs := it.Problem.ReferenceSolution; rs != nil {
 		existing = "language: " + rs.Language + "\n" + rs.Source
 	}
-	system, user := ai.TestCasesPrompt{Problem: string(problemJSON), Count: count, Language: lang,
-		ExistingSolution: existing, Instruction: instruction}.Build()
-	resp, err := provider.Generate(ctx, ai.GenerateRequest{
+	system, user := ai.TestCasesPrompt{Problem: string(problemJSON), Function: function, Count: count, Language: lang,
+		ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
+		Toolchains: a.toolchains(ctx)}.Build()
+	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}}
+	out.Usage, err = a.generate(ctx, "testcases", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.TestCasesSchema(lang),
+		Schema:     ai.TestCasesSchema(lang, function),
 		SchemaName: "test_cases",
-	})
+	}, func(raw json.RawMessage) error { return a.parseTestCases(raw, lang, count, existingCases.Items, &out) })
 	if err != nil {
-		return GenerateTestCasesResponse{}, errUpstream(err, secret)
+		return GenerateTestCasesResponse{}, err
 	}
+	if len(out.Cases) > 0 {
+		a.verifyGenerated(ctx, it, h, &out)
+	}
+	return out, nil
+}
+
+// parseTestCases decodes the model's test cases into out, leaving out those
+// whose stdin repeats an existing case or an earlier proposal.
+func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existing []domain.TestCase, out *GenerateTestCasesResponse) error {
 	var m ai.ModelTestCases
-	if err := json.Unmarshal(resp.JSON, &m); err != nil {
-		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
 	}
 	if m.ReferenceSolution.Language != lang {
-		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: fmt.Sprintf(
+		return &Error{Code: CodeUpstream, Message: fmt.Sprintf(
 			"the AI provider wrote the reference solution in %q instead of the requested %q", m.ReferenceSolution.Language, lang)}
 	}
-	out := GenerateTestCasesResponse{
-		ReferenceSolution: domain.Solution{Language: lang, Source: m.ReferenceSolution.Source},
-		Cases:             []GeneratedCase{},
-	}
+	out.ReferenceSolution = domain.Solution{Language: lang, Source: m.ReferenceSolution.Source}
 	if fe := domain.ValidateSolution(out.ReferenceSolution, a.limits); len(fe) > 0 {
-		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: "the AI provider returned an unusable reference solution: " + fe.First()}
+		return &Error{Code: CodeUpstream, Message: "the AI provider returned an unusable reference solution: " + fe.First()}
+	}
+	seen := map[string]bool{}
+	for _, c := range existing {
+		seen[sameInput(c.Stdin)] = true
 	}
 	for _, c := range m.Cases {
 		if len(out.Cases) >= count {
@@ -450,19 +603,62 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 		if len(c.Stdin) > domain.MaxTestCaseBytes || len(c.PredictedStdout) > domain.MaxTestCaseBytes {
 			continue
 		}
+		if key := sameInput(c.Stdin); seen[key] {
+			out.DuplicatesDropped++
+			continue
+		} else {
+			seen[key] = true
+		}
 		out.Cases = append(out.Cases, GeneratedCase{
 			Name: truncateRunes(strings.TrimSpace(c.Name), domain.MaxTestCaseNameChars), Rationale: strings.TrimSpace(c.Rationale),
 			Stdin: c.Stdin, PredictedStdout: c.PredictedStdout, ExpectedStdout: c.PredictedStdout, IsSample: c.IsSample,
 		})
 	}
-	if len(out.Cases) == 0 {
-		return GenerateTestCasesResponse{}, &Error{Code: CodeUpstream, Message: "the AI provider proposed no usable test cases"}
+	if len(out.Cases) == 0 && out.DuplicatesDropped == 0 {
+		return &Error{Code: CodeUpstream, Message: "the AI provider proposed no usable test cases"}
 	}
-	a.verifyGenerated(ctx, it, &out)
-	return out, nil
+	return nil
 }
 
-func (a *App) verifyGenerated(ctx context.Context, it domain.Item, out *GenerateTestCasesResponse) {
+// sameInput is what two test inputs are compared by: trailing whitespace
+// does not make an input new.
+func sameInput(stdin string) string { return strings.TrimRight(stdin, " \t\r\n") }
+
+// Bounds on the existing cases shown to the model when it proposes more.
+const (
+	maxShownCases      = 40
+	maxShownStdinBytes = 1500
+	maxShownCasesBytes = 32 << 10
+)
+
+// existingCasesText lists a problem's test inputs for the model, so that
+// it adds to them rather than repeating them: names and stdin, in order,
+// long inputs cut and the list bounded.
+func existingCasesText(cases []domain.TestCase) string {
+	var b strings.Builder
+	for i, c := range cases {
+		if i >= maxShownCases || b.Len() >= maxShownCasesBytes {
+			fmt.Fprintf(&b, "(%d more test cases not shown)\n", len(cases)-i)
+			break
+		}
+		stdin := c.Stdin
+		if len(stdin) > maxShownStdinBytes {
+			stdin = domain.Truncate(stdin, maxShownStdinBytes) + fmt.Sprintf("\n… (cut; %d bytes in all)", len(c.Stdin))
+		}
+		name := oneLine(c.Name)
+		if name == "" {
+			name = fmt.Sprintf("test case %d", i+1)
+		}
+		kind := "hidden"
+		if c.IsSample {
+			kind = "sample"
+		}
+		fmt.Fprintf(&b, "--- %s (%s)\n%s\n", name, kind, strings.TrimRight(stdin, "\n"))
+	}
+	return b.String()
+}
+
+func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.HarnessCode, out *GenerateTestCasesResponse) {
 	if a.engine == nil {
 		return
 	}
@@ -479,12 +675,15 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, out *Generate
 		setErr(AsError(err).Message)
 		return
 	}
+	prog, _, err := a.runnable(ctx, it.Problem, out.ReferenceSolution.Language, h, out.ReferenceSolution.Source, "referenceSolution")
+	if err != nil {
+		setErr("the reference solution cannot run: " + validationText(err))
+		return
+	}
 	stdins := make([]string, len(out.Cases))
 	for i, c := range out.Cases {
 		stdins[i] = c.Stdin
 	}
-	prog := grader.Program{Language: out.ReferenceSolution.Language, Source: out.ReferenceSolution.Source,
-		TimeLimitMs: it.Problem.TimeLimitMs, MemoryLimitKb: it.Problem.MemoryLimitKb}
 	execs := a.grader.RunAll(ctx, prog, stdins, nil)
 	if execs[0].CompileFailed() {
 		setErr("the reference solution does not compile: " + domain.Truncate(strings.TrimSpace(execs[0].Result.CompileOutput), 2000))
@@ -525,4 +724,202 @@ func describeFailure(v domain.Verdict, e grader.Execution) string {
 		msg += " (" + e.Result.Message + ")"
 	}
 	return msg
+}
+
+// hyphenateTag replaces each run of whitespace inside a tag the model
+// suggested with "-", so "shortest path" becomes "shortest-path" like a tag
+// typed in the UI.
+func hyphenateTag(t string) string { return strings.Join(strings.Fields(domain.NormalizeText(t)), "-") }
+
+// validationText is a validation error's message without its field name,
+// for reporting inside a response rather than as an error.
+func validationText(err error) string {
+	ae := AsError(err)
+	if len(ae.Fields) == 1 {
+		for _, v := range ae.Fields {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+	}
+	return ae.Message
+}
+
+// Bounds on the draft check. A draft carries its sample cases only, but a
+// model can return up to MaxGeneratedCases of them. The time bound keeps a
+// draft that took the provider's whole timeout (5 minutes by default)
+// within the HTTP API's 6-minute deadline for AI requests.
+const (
+	maxDraftCheckCases = 10
+	draftCheckTimeout  = 50 * time.Second
+)
+
+// checkDraft runs a problem draft's reference solution on its test cases
+// (through the harness for a function problem) and marks each case that
+// printed its expected output as verified; then, for a function problem,
+// it runs each language's unchanged starter code on the first case to
+// prove that language's harness (see checkRunners). It never fails the
+// draft: an absent or unreachable engine, a compile error or a timeout are
+// reported in the check. Nothing in the draft other than the flags is
+// changed. Both parts share one time bound, the reference solution first.
+func (a *App) checkDraft(ctx context.Context, d *ItemDraft) *DraftCheck {
+	if d.Type != domain.TypeProblem || d.Problem == nil {
+		return nil
+	}
+	c := &DraftCheck{Total: len(d.TestCases), Runners: []RunnerCheck{}}
+	ref := d.Problem.ReferenceSolution
+	if a.engine == nil || ref == nil || len(d.TestCases) == 0 {
+		return c
+	}
+	name := a.engine.Name()
+	c.Attempted, c.Engine = true, &name
+	ctx, cancel := context.WithTimeout(ctx, draftCheckTimeout)
+	defer cancel()
+	if msg := a.checkReference(ctx, d, c); msg != "" {
+		c.Error = &msg
+	}
+	if d.Problem.Interface == domain.InterfaceFunction {
+		c.Runners = a.checkRunners(ctx, d)
+	}
+	return c
+}
+
+// checkReference runs the reference solution on the cases and returns the
+// first failure in plain words, or "".
+func (a *App) checkReference(ctx context.Context, d *ItemDraft, c *DraftCheck) string {
+	ref := d.Problem.ReferenceSolution
+	spec := d.Problem.spec()
+	h, ok := spec.HarnessFor(ref.Language)
+	if !ok {
+		return "the reference solution cannot run: " + noHarnessMessage(spec, ref.Language)
+	}
+	if err := a.requireLanguage(ctx, ref.Language); err != nil {
+		return "the reference solution could not be run: " + validationText(err)
+	}
+	prog, _, err := a.runnable(ctx, spec, ref.Language, h, ref.Source, "referenceSolution")
+	if err != nil {
+		return "the reference solution cannot run: " + validationText(err)
+	}
+	cases := d.TestCases[:min(len(d.TestCases), maxDraftCheckCases)]
+	stdins := make([]string, len(cases))
+	for i, tc := range cases {
+		stdins[i] = tc.Stdin
+	}
+	execs := a.grader.RunAll(ctx, prog, stdins, nil)
+	if execs[0].CompileFailed() {
+		return "the reference solution does not compile: " +
+			domain.Truncate(strings.TrimSpace(execs[0].Result.CompileOutput), 2000)
+	}
+	first, reached := "", 0
+	for i, e := range execs {
+		if e.Err != nil && ctx.Err() != nil {
+			continue // not reached in time
+		}
+		reached++
+		tc := &d.TestCases[i]
+		exp := tc.ExpectedStdout
+		v := grader.Verdict(d.Problem.Compare, e, &exp)
+		if v == domain.VerdictAccepted {
+			tc.Verified = true
+			c.Passed++
+			continue
+		}
+		if first == "" {
+			first = caseLabel(tc.Name, i) + ": " + checkFailure(v, e, exp)
+		}
+	}
+	switch {
+	case first != "":
+		return first
+	case reached < len(cases):
+		return fmt.Sprintf("the check ran out of time after %d of %d test cases", reached, len(d.TestCases))
+	case len(cases) < len(d.TestCases):
+		return fmt.Sprintf("only the first %d test cases were checked", len(cases))
+	}
+	return ""
+}
+
+// RunnerCheck says whether one language's starter code ran in its harness.
+type RunnerCheck struct {
+	Language string  `json:"language"`
+	Status   string  `json:"status"` // ok, failed or skipped
+	Error    *string `json:"error"`
+}
+
+// checkRunners runs, for every harness language of a function draft, that
+// language's starter code unchanged on the first test case. A stub is
+// written to run as it stands, so any answer counts as ok; a compile error
+// or a crash is failed. A language the engine does not offer, one without
+// starter code, and every language not reached before the check's time
+// ran out are skipped. The languages run in parallel, in the time the
+// reference solution left.
+func (a *App) checkRunners(ctx context.Context, d *ItemDraft) []RunnerCheck {
+	langs := slices.Sorted(maps.Keys(d.Problem.Harness))
+	out := make([]RunnerCheck, len(langs))
+	spec := d.Problem.spec()
+	stdin := d.TestCases[0].Stdin
+	var wg sync.WaitGroup
+	for i, lang := range langs {
+		out[i] = RunnerCheck{Language: lang, Status: "skipped"}
+		set := func(status, msg string) {
+			out[i].Status = status
+			if msg != "" {
+				out[i].Error = &msg
+			}
+		}
+		stub, ok := spec.StarterCode[lang]
+		switch {
+		case ctx.Err() != nil:
+			set("skipped", "the check ran out of time")
+			continue
+		case !ok || strings.TrimSpace(stub) == "":
+			set("skipped", "there is no starter code for "+lang)
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := a.requireLanguage(ctx, lang); err != nil {
+				set("skipped", validationText(err))
+				return
+			}
+			h := spec.Harness[lang]
+			prog, _, err := a.runnable(ctx, spec, lang, &h, stub, "starterCode")
+			if err != nil {
+				set("failed", validationText(err))
+				return
+			}
+			e := a.grader.RunAll(ctx, prog, []string{stdin}, nil)[0]
+			switch {
+			case e.Err != nil && ctx.Err() != nil:
+				set("skipped", "the check ran out of time")
+			case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+				set("skipped", "the judge engine failed: "+grader.ErrorMessage(e))
+			case e.CompileFailed():
+				set("failed", "does not compile: "+domain.Truncate(strings.TrimSpace(e.Result.CompileOutput), 1000))
+			case e.Result.Status != judge.StatusOK:
+				set("failed", strings.TrimPrefix(describeFailure(grader.Verdict(spec.Compare, e, nil), e), "the reference solution failed: "))
+			default:
+				set("ok", "")
+			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+func caseLabel(name string, i int) string {
+	if name = strings.TrimSpace(name); name != "" {
+		return fmt.Sprintf("%q", name)
+	}
+	return fmt.Sprintf("test case %d", i+1)
+}
+
+// checkFailure says in plain words why a case failed the draft check.
+func checkFailure(v domain.Verdict, e grader.Execution, expected string) string {
+	if v != domain.VerdictWrongAnswer {
+		return describeFailure(v, e)
+	}
+	return fmt.Sprintf("the reference solution printed %q, but the expected output is %q",
+		domain.Truncate(strings.TrimSpace(e.Result.Stdout), 300), domain.Truncate(strings.TrimSpace(expected), 300))
 }

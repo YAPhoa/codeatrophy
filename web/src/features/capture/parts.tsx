@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Check, PenLine, Sparkles, Square } from 'lucide-react';
-import type { AppliedStyle } from '../../api/types';
-import { plural } from '../../lib/format';
+import type { AppliedStyle, GenerationUsage } from '../../api/types';
+import { aiLogPath } from '../../lib/aiLog';
+import { describeUsage, plural } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 
 /** In-progress state of a long AI call: what is happening, for how long, and a way out. */
@@ -31,6 +32,28 @@ export function GeneratingPanel({ title, startedAt, onCancel, children }: { titl
   );
 }
 
+/**
+ * What a generation cost, small and out of the way; it leads to the request
+ * in the AI activity log when there is one. `newTab` keeps a page whose
+ * state would be lost by leaving it.
+ */
+export function UsageLine({ usage, className, newTab }: { usage: GenerationUsage | null | undefined; className?: string; newTab?: boolean }) {
+  const text = usage ? describeUsage(usage) : '';
+  if (!usage || text === '') return null;
+  if (!usage.logId) {
+    return (
+      <span className={cx('usage-line', className)} title="What this generation used">
+        {text}
+      </span>
+    );
+  }
+  return (
+    <Link to={aiLogPath({ entryId: usage.logId })} className={cx('usage-line', className)} title="Open the request in AI activity" {...(newTab ? { target: '_blank', rel: 'noreferrer' } : {})}>
+      {text}
+    </Link>
+  );
+}
+
 interface AssumptionsPanelProps {
   assumptions: readonly string[];
   /** `draft`: gaps the model filled in. `variant`: how the new item differs from its origin. */
@@ -38,6 +61,8 @@ interface AssumptionsPanelProps {
   style: AppliedStyle | null;
   /** Whether a style could have been applied at all (hides the "built-in" note otherwise). */
   showStyle: boolean;
+  /** What the generation cost, when the draft came with it. */
+  usage?: GenerationUsage | null;
 }
 
 /**
@@ -45,7 +70,7 @@ interface AssumptionsPanelProps {
  * during review so the user can tell their input from the model's guesses;
  * each line can be ticked off once checked.
  */
-export function AssumptionsPanel({ assumptions, kind, style, showStyle }: AssumptionsPanelProps) {
+export function AssumptionsPanel({ assumptions, kind, style, showStyle, usage }: AssumptionsPanelProps) {
   const [checked, setChecked] = useState<Set<number>>(new Set());
   useEffect(() => setChecked(new Set()), [assumptions]);
   const toggle = (i: number) =>
@@ -93,18 +118,23 @@ export function AssumptionsPanel({ assumptions, kind, style, showStyle }: Assump
           ))}
         </ul>
       )}
-      {showStyle && (
-        <p className="assumptions-style">
-          <PenLine size={13} aria-hidden="true" />
-          {style ? (
-            <>
-              Written in your style <strong>{style.name}</strong>.
-            </>
-          ) : (
-            <>Written with the built-in conventions only (no style preset).</>
-          )}{' '}
-          <Link to="/settings#styles">Manage styles</Link>
-        </p>
+      {(showStyle || usage) && (
+        <div className="assumptions-foot">
+        {showStyle && (
+          <p className="assumptions-style">
+            <PenLine size={13} aria-hidden="true" />
+            {style ? (
+              <>
+                Written in your style <strong>{style.name}</strong>.
+              </>
+            ) : (
+              <>Written with the built-in conventions only (no style preset).</>
+            )}{' '}
+            <Link to="/settings/styles">Manage styles</Link>
+          </p>
+        )}
+          <UsageLine usage={usage} />
+        </div>
       )}
     </section>
   );

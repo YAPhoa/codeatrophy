@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EditorPreferences } from '../api/types';
-import { clampFontSize, isTabSize, lineHeightFor, normalizeTabSize, parseFontSize, resolveEditorOptions } from './editorOptions';
+import { clampFontSize, FONT_SIZE_MAX, FONT_SIZE_MIN, isTabSize, lineHeightFor, normalizeTabSize, resolveEditorOptions } from './editorOptions';
+import { parseWholeNumber } from './Field';
 
 const defaults: EditorPreferences = {
   autocomplete: true,
@@ -37,17 +38,22 @@ describe('clampFontSize', () => {
   });
 });
 
-describe('parseFontSize', () => {
+describe('parseWholeNumber', () => {
+  const parseFontSize = (text: string) => parseWholeNumber(text, FONT_SIZE_MIN, FONT_SIZE_MAX);
+
   it('accepts whole numbers in range', () => {
     expect(parseFontSize('10')).toBe(10);
     expect(parseFontSize(' 16 ')).toBe(16);
     expect(parseFontSize('24')).toBe(24);
+    expect(parseWholeNumber('1', 1, 30)).toBe(1);
   });
 
-  it('rejects everything else', () => {
+  it('rejects everything else, so a half-typed value is not acted on', () => {
     for (const text of ['', '1', '9', '25', '160', '14.5', '-14', '1e1', 'abc']) {
       expect(parseFontSize(text), text).toBeNull();
     }
+    expect(parseWholeNumber('0', 1, 30)).toBeNull();
+    expect(parseWholeNumber('31', 1, 30)).toBeNull();
   });
 });
 

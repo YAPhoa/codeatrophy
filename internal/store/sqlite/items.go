@@ -14,7 +14,7 @@ import (
 
 const itemColumns = `i.seq, i.id, i.type, i.title, i.summary, i.body, i.difficulty, i.status, i.favorite, i.notes,
 	i.raw_input, i.source_url, i.source_note, i.variant_of, i.revision, i.time_limit_ms, i.memory_limit_kb,
-	i.compare_mode, i.starter_code, i.created_at, i.updated_at`
+	i.compare_mode, i.starter_code, i.problem_interface, i.harness, i.created_at, i.updated_at`
 
 type itemRow struct {
 	seq  int64
@@ -27,13 +27,14 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 		it                                    = &r.item
 		difficulty, rawInput, srcURL, srcNote sql.NullString
 		variantOf, compareMode, starter       sql.NullString
+		iface, harness                        sql.NullString
 		timeLimit, memLimit                   sql.NullInt64
 		favorite                              int
 		created, updated                      int64
 	)
 	err := sc.Scan(&r.seq, &it.ID, &it.Type, &it.Title, &it.Summary, &it.Body, &difficulty, &it.Status, &favorite,
 		&it.Notes, &rawInput, &srcURL, &srcNote, &variantOf, &it.Revision, &timeLimit, &memLimit, &compareMode,
-		&starter, &created, &updated)
+		&starter, &iface, &harness, &created, &updated)
 	if err != nil {
 		return r, err
 	}
@@ -53,10 +54,17 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 			MemoryLimitKb: int(memLimit.Int64),
 			Compare:       domain.CompareMode(compareMode.String),
 			StarterCode:   map[string]string{},
+			Interface:     domain.ProblemInterface(iface.String),
+			Harness:       map[string]domain.HarnessCode{},
 		}
 		if starter.Valid && starter.String != "" {
 			if err := json.Unmarshal([]byte(starter.String), &p.StarterCode); err != nil {
 				return r, fmt.Errorf("item %s: starter code: %w", it.ID, err)
+			}
+		}
+		if harness.Valid && harness.String != "" {
+			if err := json.Unmarshal([]byte(harness.String), &p.Harness); err != nil {
+				return r, fmt.Errorf("item %s: harness: %w", it.ID, err)
 			}
 		}
 		it.Problem = p
@@ -127,7 +135,7 @@ func (t *tx) ExistingItemIDs(ids []string) (map[string]bool, error) {
 }
 
 func itemArgs(it *domain.Item) []any {
-	var difficulty, timeLimit, memLimit, compareMode, starter any
+	var difficulty, timeLimit, memLimit, compareMode, starter, iface, harness any
 	if it.Difficulty != nil {
 		difficulty = string(*it.Difficulty)
 	}
@@ -139,11 +147,21 @@ func itemArgs(it *domain.Item) []any {
 		}
 		b, _ := json.Marshal(sc)
 		starter = string(b)
+		iface = string(p.Interface)
+		if p.Interface == "" {
+			iface = string(domain.InterfaceProgram)
+		}
+		h := p.Harness
+		if h == nil {
+			h = map[string]domain.HarnessCode{}
+		}
+		b, _ = json.Marshal(h)
+		harness = string(b)
 	}
 	return []any{
 		it.Type, it.Title, it.Summary, it.Body, difficulty, it.Status, boolInt(it.Favorite), it.Notes,
 		nullStr(it.RawInput), nullStr(it.Source.URL), nullStr(it.Source.Note), nullStr(it.VariantOf), it.Revision,
-		timeLimit, memLimit, compareMode, starter, toUnix(it.CreatedAt), toUnix(it.UpdatedAt),
+		timeLimit, memLimit, compareMode, starter, toUnix(it.CreatedAt), toUnix(it.UpdatedAt), iface, harness,
 	}
 }
 
@@ -151,8 +169,8 @@ func (t *tx) InsertItem(it *domain.Item) error {
 	args := append([]any{it.ID}, itemArgs(it)...)
 	res, err := t.exec(`INSERT INTO items (id, type, title, summary, body, difficulty, status, favorite, notes,
 		raw_input, source_url, source_note, variant_of, revision, time_limit_ms, memory_limit_kb, compare_mode,
-		starter_code, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+		starter_code, created_at, updated_at, problem_interface, harness)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 	if err != nil {
 		return err
 	}
@@ -170,7 +188,8 @@ func (t *tx) UpdateItem(it *domain.Item) error {
 	args := append(itemArgs(it)[1:], it.ID) // type is immutable
 	res, err := t.exec(`UPDATE items SET title = ?, summary = ?, body = ?, difficulty = ?, status = ?, favorite = ?,
 		notes = ?, raw_input = ?, source_url = ?, source_note = ?, variant_of = ?, revision = ?, time_limit_ms = ?,
-		memory_limit_kb = ?, compare_mode = ?, starter_code = ?, created_at = ?, updated_at = ? WHERE id = ?`, args...)
+		memory_limit_kb = ?, compare_mode = ?, starter_code = ?, created_at = ?, updated_at = ?, problem_interface = ?,
+		harness = ? WHERE id = ?`, args...)
 	if err != nil {
 		return err
 	}

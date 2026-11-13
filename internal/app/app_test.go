@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,14 +15,15 @@ import (
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/judge/judgetest"
 	"codeatrophy/internal/secrets"
-	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/teststore"
 )
 
 type env struct {
 	app    *app.App
 	engine *judgetest.Engine
 	ai     *aitest.Provider
-	db     *sqlite.DB
+	db     store.Store
 	ctx    context.Context
 }
 
@@ -36,10 +36,7 @@ func withAIEnv(e app.AIEnv) option { return func(o *app.Options) { o.AIEnv = e }
 func newEnv(t *testing.T, opts ...option) *env {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "app.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := teststore.Open(t)
 	box, _ := secrets.NewBox(bytes.Repeat([]byte{3}, 32))
 	engine := judgetest.New("python", "cpp")
 	fake := &aitest.Provider{}
@@ -69,10 +66,16 @@ func newEnv(t *testing.T, opts ...option) *env {
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		a.Stop()
-		db.Close()
-	})
+	if o.Store == db {
+		// Tests start without the built-in style presets, which have tests of
+		// their own in the store.
+		for _, p := range must(a.ListStylePresets(ctx)).Items {
+			if err := a.DeleteStylePreset(ctx, p.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(a.Stop) // before the store closes
 	e := &env{app: a, ai: fake, db: db, ctx: ctx}
 	if o.Engine != nil {
 		e.engine = engine

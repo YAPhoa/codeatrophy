@@ -17,13 +17,21 @@ type Provider struct {
 	// request. When nil, Responses are returned in order.
 	Respond   func(req ai.GenerateRequest) (any, error)
 	Responses []any
+	// ListModelsFunc answers ListModels; when nil, the list holds Model().
+	ListModelsFunc func() ([]string, error)
+	// Token counts reported with every answer.
+	InputTokens, OutputTokens, ReasoningTokens, CacheReadTokens, CacheWriteTokens *int
 
-	mu       sync.Mutex
-	requests []ai.GenerateRequest
-	configs  []ai.Config
+	mu        sync.Mutex
+	requests  []ai.GenerateRequest
+	configs   []ai.Config
+	listCalls int
 }
 
-var _ ai.Provider = (*Provider)(nil)
+var (
+	_ ai.Provider    = (*Provider)(nil)
+	_ ai.ModelLister = (*Provider)(nil)
+)
 
 // Factory returns an ai.Factory that hands out p and records the config.
 func (p *Provider) Factory() ai.Factory {
@@ -74,7 +82,26 @@ func (p *Provider) Generate(_ context.Context, req ai.GenerateRequest) (ai.Gener
 	if err != nil {
 		return ai.GenerateResponse{}, err
 	}
-	return ai.GenerateResponse{JSON: b, Model: p.Model()}, nil
+	return ai.GenerateResponse{JSON: b, Text: string(b), Model: p.Model(), InputTokens: p.InputTokens, OutputTokens: p.OutputTokens,
+		ReasoningTokens: p.ReasoningTokens, CacheReadTokens: p.CacheReadTokens, CacheWriteTokens: p.CacheWriteTokens}, nil
+}
+
+// ListModels implements ai.ModelLister.
+func (p *Provider) ListModels(context.Context) ([]string, error) {
+	p.mu.Lock()
+	p.listCalls++
+	p.mu.Unlock()
+	if p.ListModelsFunc != nil {
+		return p.ListModelsFunc()
+	}
+	return []string{p.Model()}, nil
+}
+
+// ListCalls returns how many times ListModels was called.
+func (p *Provider) ListCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.listCalls
 }
 
 // Requests returns the recorded requests.

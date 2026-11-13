@@ -248,6 +248,35 @@ func TestJVMLanguagesRunAsMultiFilePrograms(t *testing.T) {
 	}
 }
 
+func TestSourceLimitOfMultiFilePrograms(t *testing.T) {
+	f, srv := newFake(t)
+	e := newEngine(t, srv.URL, Config{})
+	ctx := context.Background()
+	// Judge0 1.13.1 extracts files of at most MAX_EXTRACT_SIZE (10240 KB by
+	// default; a larger Main.java fails with exit status 127). The fake
+	// server does not report it, so the default applies.
+	for lang, want := range map[string]int{"java": 10240 * 1024, "kotlin": 10240 * 1024, "python": 0, "cpp": 0} {
+		if n, err := e.MaxSourceBytes(ctx, lang); err != nil || n != want {
+			t.Errorf("%s: limit %d (%v), want %d", lang, n, err, want)
+		}
+	}
+	before := len(f.received)
+	_, err := e.Execute(ctx, judge.ExecRequest{Language: "java", Source: strings.Repeat("x", 10240*1024+1), TimeLimitMs: 1000, MemoryLimitKb: 65536})
+	if err == nil || !strings.Contains(err.Error(), "at most 10485760 bytes") || len(f.received) != before {
+		t.Errorf("an oversized Java program: %v (%d requests)", err, len(f.received)-before)
+	}
+	if got := e.SourceNames("python"); len(got) != 1 || got[0] != "script.py" {
+		t.Errorf("source names: %v", got)
+	}
+
+	// With cgroups, Java runs as a single-file program.
+	_, srv2 := newFake(t)
+	e2 := newEngine(t, srv2.URL, Config{UseCgroups: true})
+	if n, _ := e2.MaxSourceBytes(ctx, "java"); n != 0 {
+		t.Errorf("cgroup mode: java limit %d", n)
+	}
+}
+
 func TestStatusMapping(t *testing.T) {
 	f, srv := newFake(t)
 	e := newEngine(t, srv.URL, Config{})

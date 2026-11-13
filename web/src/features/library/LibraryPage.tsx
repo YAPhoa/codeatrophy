@@ -11,6 +11,7 @@ import { DRAG_ITEMS } from '../../app/Sidebar';
 import { activeFilterCount, canReorder, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
 import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
+import { useNewItemHref } from '../../lib/newItem';
 import { writeString } from '../../lib/storage';
 import { moveIndex, pathTo, placeAfter, siblingsOf } from '../../lib/tree';
 import { Button, LinkButton, cx } from '../../ui/Button';
@@ -296,7 +297,7 @@ export function LibraryPage() {
   const filterCount = activeFilterCount(filters);
   const libraryEmpty = stats.data?.items.total === 0;
   const allSelected = items.length > 0 && items.every((i) => selection.has(i.id));
-  const newHref = collection ? `/new?collection=${collection.id}` : '/new';
+  const newHref = useNewItemHref();
 
   if (collectionId && collectionsQuery.isSuccess && !collection) {
     return (

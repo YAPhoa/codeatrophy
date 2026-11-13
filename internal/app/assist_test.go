@@ -16,8 +16,18 @@ import (
 
 func (e *env) enableAI(t *testing.T) {
 	t.Helper()
-	must(e.app.UpdateAISettings(e.ctx, decodeInto[app.AISettingsInput](t,
-		`{"activeProvider":"anthropic","providers":{"anthropic":{"apiKey":"sk-ant-test-1234"}}}`)))
+	p := e.addProvider(t, `{"name":"Test","kind":"anthropic","apiKey":"sk-ant-test-1234"}`)
+	e.setDefault(t, p.ID)
+}
+
+func (e *env) addProvider(t *testing.T, js string) app.AIProvider {
+	t.Helper()
+	return must(e.app.CreateAIProvider(e.ctx, decodeInto[app.AIProviderInput](t, js)))
+}
+
+func (e *env) setDefault(t *testing.T, id string) app.AISettings {
+	t.Helper()
+	return must(e.app.UpdateAISettings(e.ctx, app.AISettingsInput{DefaultProviderID: domain.Some(id)}))
 }
 
 func draftJSON() map[string]any {
@@ -73,6 +83,23 @@ func TestDraftNormalizesModelOutput(t *testing.T) {
 func newDraft(t *testing.T, e *env, js string, out any) (app.DraftResponse, error) {
 	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return out, nil }
 	return e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, js))
+}
+
+// Whitespace inside a tag the model suggests becomes "-", as for tags typed
+// in the UI; tags saved through the API are left as they are.
+func TestDraftTagsAreHyphenated(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	d := draftJSON()
+	d["tags"] = []string{"Shortest  Path", "graph\ttheory ", " dp ", "two pointers", "shortest-path", "a/b", "   "}
+	res := must(newDraft(t, e, `{"text":"x"}`, d))
+	if got := strings.Join(res.Draft.Tags, ","); got != "dp,graph-theory,shortest-path,two-pointers" {
+		t.Errorf("draft tags: %s", got)
+	}
+	it := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"T","tags":["Shortest Path"]}`)))
+	if strings.Join(it.Tags, ",") != "shortest path" {
+		t.Errorf("item tags: %v", it.Tags)
+	}
 }
 
 func TestDraftValidationAndUpstreamErrors(t *testing.T) {

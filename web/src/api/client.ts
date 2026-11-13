@@ -4,6 +4,12 @@
 // and turns any non-2xx response (or transport failure) into an `ApiError`.
 
 import type {
+  AiProvider,
+  AiProviderInput,
+  AiProviderPatch,
+  AiLogDetail,
+  AiLogPage,
+  AiLogParams,
   AiSettings,
   AiSettingsUpdate,
   AiTestCasesRequest,
@@ -307,8 +313,16 @@ export const api = {
   settings: {
     getAi: (signal?: AbortSignal) => request<AiSettings>('GET', '/settings/ai', { signal }),
     putAi: (body: AiSettingsUpdate) => request<AiSettings>('PUT', '/settings/ai', { body }),
+    createProvider: (body: AiProviderInput) => request<AiProvider>('POST', '/settings/ai/providers', { body }),
+    updateProvider: (id: string, body: AiProviderPatch) =>
+      request<AiProvider>('PATCH', `/settings/ai/providers/${enc(id)}`, { body }),
+    removeProvider: (id: string) => request<void>('DELETE', `/settings/ai/providers/${enc(id)}`),
     testAi: (body: AiTestRequest, signal?: AbortSignal) =>
       request<AiTestResponse>('POST', '/settings/ai/test', { body, signal }),
+    log: (params: AiLogParams = {}, signal?: AbortSignal) => request<AiLogPage>('GET', '/settings/ai/log', { query: { ...params }, signal }),
+    logEntry: (id: string, signal?: AbortSignal) => request<AiLogDetail>('GET', `/settings/ai/log/${enc(id)}`, { signal }),
+    /** Everything, or with `before` the entries created before that moment. */
+    clearLog: (before?: string) => request<void>('DELETE', '/settings/ai/log', { query: { before } }),
   },
 
   bundle: {

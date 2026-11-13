@@ -59,6 +59,8 @@ type MetaLimits struct {
 	MaxStyleInstructionsChars  int   `json:"maxStyleInstructionsChars"`
 	MaxModelIDChars            int   `json:"maxModelIdChars"`
 	MaxAPIKeyChars             int   `json:"maxApiKeyChars"`
+	MaxAIProviders             int   `json:"maxAiProviders"`
+	MaxAIProviderNameChars     int   `json:"maxAiProviderNameChars"`
 	MaxBundleNameChars         int   `json:"maxBundleNameChars"`
 	MaxBundleDescriptionChars  int   `json:"maxBundleDescriptionChars"`
 	MaxImportUncompressedBytes int64 `json:"maxImportUncompressedBytes"`
@@ -117,6 +119,8 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 			MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,
 			MaxModelIDChars:            domain.MaxModelIDChars,
 			MaxAPIKeyChars:             domain.MaxAPIKeyChars,
+			MaxAIProviders:             domain.MaxAIProviders,
+			MaxAIProviderNameChars:     domain.MaxAIProviderNameChars,
 			MaxBundleNameChars:         domain.MaxBundleNameChars,
 			MaxBundleDescriptionChars:  domain.MaxBundleDescriptionChars,
 			MaxImportUncompressedBytes: domain.BundleExpansionFactor * a.limits.MaxImportBytes,

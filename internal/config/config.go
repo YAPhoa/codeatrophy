@@ -17,9 +17,18 @@ import (
 
 // Config is the complete server configuration.
 type Config struct {
-	Addr           string
-	DataDir        string
-	DBPath         string
+	Addr    string
+	DataDir string
+	// DatabaseURL is the PostgreSQL URL; "" selects SQLite at DBPath.
+	DatabaseURL string
+	// DBPath is the SQLite database: the database itself without
+	// DatabaseURL, else the one imported into PostgreSQL once.
+	DBPath string
+	// SQLiteImport enables that import.
+	SQLiteImport bool
+	// DBAutoMigrate applies pending schema migrations at startup; without
+	// it the server only starts on a database at its schema version.
+	DBAutoMigrate  bool
 	SecretKey      string
 	LogLevel       slog.Level
 	LogFormat      string
@@ -50,10 +59,10 @@ type JudgeConfig struct {
 	Judge0Timeout           time.Duration
 }
 
-// AIConfig holds environment defaults for AI providers. Values saved in the
-// app's settings take precedence.
+// AIConfig holds the environment's AI providers: each kind whose values are
+// set is offered as a read-only provider next to those saved in the app.
 type AIConfig struct {
-	Provider string // default active provider, "" for none
+	Provider string // kind whose environment provider is the initial default, "" for none
 	Timeout  time.Duration
 
 	AnthropicAPIKey  string
@@ -143,6 +152,26 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		MaxSourceBytes: getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
 	}
 	c.DBPath = get("CODEATROPHY_DB_PATH", filepath.Join(c.DataDir, "codeatrophy.db"))
+	// The URL may hold a password: it is never repeated in a message.
+	c.DatabaseURL = get("CODEATROPHY_DATABASE_URL", "")
+	if c.DatabaseURL != "" {
+		if u, err := url.Parse(c.DatabaseURL); err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+			errs = append(errs, fmt.Errorf("CODEATROPHY_DATABASE_URL: must be a postgres:// or postgresql:// URL, "+
+				"or unset for SQLite"))
+		}
+	}
+	onOff := func(key string) bool {
+		switch strings.ToLower(get(key, "on")) {
+		case "on", "true", "1", "yes":
+			return true
+		case "off", "false", "0", "no":
+			return false
+		}
+		errs = append(errs, fmt.Errorf("%s: must be on or off", key))
+		return true
+	}
+	c.SQLiteImport = onOff("CODEATROPHY_SQLITE_IMPORT")
+	c.DBAutoMigrate = onOff("CODEATROPHY_DB_AUTO_MIGRATE")
 	switch strings.ToLower(get("CODEATROPHY_LOG_LEVEL", "info")) {
 	case "debug":
 		c.LogLevel = slog.LevelDebug

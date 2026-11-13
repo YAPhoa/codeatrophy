@@ -58,6 +58,18 @@ type Program struct {
 	Source        string
 	TimeLimitMs   int
 	MemoryLimitKb int
+	// MapOutput, if set, rewrites the compile output and stderr of every
+	// execution before anything else sees them (to map line numbers of an
+	// assembled program back to the solver's code).
+	MapOutput func(string) string
+}
+
+func (p Program) mapOutput(e Execution) Execution {
+	if p.MapOutput != nil && e.Err == nil {
+		e.Result.Stderr = p.MapOutput(e.Result.Stderr)
+		e.Result.CompileOutput = p.MapOutput(e.Result.CompileOutput)
+	}
+	return e
 }
 
 // Grader executes programs through an engine.
@@ -101,6 +113,7 @@ func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone 
 	var mu sync.Mutex
 	var failed atomic.Bool
 	done := func(i int, e Execution) {
+		e = p.mapOutput(e)
 		if e.Err != nil && !errors.Is(e.Err, judge.ErrNotRun) {
 			failed.Store(true)
 		}
@@ -115,6 +128,7 @@ func (g *Grader) RunAll(ctx context.Context, p Program, stdins []string, onDone 
 
 	first := g.exec(ctx, p, stdins[0])
 	if first.CompileFailed() {
+		first = p.mapOutput(first)
 		for i := range stdins {
 			out[i] = first
 		}

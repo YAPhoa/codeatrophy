@@ -195,6 +195,21 @@
   white-space: nowrap;
 }
 
+a.result-saved {
+  min-width: 0;
+  max-width: 360px;
+  text-decoration: none;
+}
+
+a.result-saved:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.result-saved > svg {
+  flex: none;
+}
+
 /* ---- History: keep the code of an entry ---- */
 
 .history-entry {

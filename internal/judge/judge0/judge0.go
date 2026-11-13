@@ -110,14 +110,22 @@ type catalog struct {
 	binDirs   map[string]string // java/kotlin -> directory of the compiler
 	runCmds   map[string]string // canonical id -> Judge0 run command
 	maxFileKb int               // server's MAX_MAX_FILE_SIZE, 0 if unknown
-	javaBin   string            // directory of the java launcher
+	// extractKb is the largest file Judge0 extracts from a multi-file
+	// program's archive (MAX_EXTRACT_SIZE); a larger Main.java is not
+	// extracted and the program fails with a confusing exit status 127.
+	extractKb int
+	javaBin   string // directory of the java launcher
 	maxMemKb  int
 	maxWall   float64
 	maxCPU    float64
 	maxBatch  int
 }
 
-var _ judge.BatchEngine = (*Engine)(nil)
+var (
+	_ judge.BatchEngine   = (*Engine)(nil)
+	_ judge.SourceLimiter = (*Engine)(nil)
+	_ judge.SourceNamer   = (*Engine)(nil)
+)
 
 // New returns a Judge0 engine.
 func New(cfg Config) (*Engine, error) {
@@ -211,7 +219,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		return nil, err
 	}
 	c := &catalog{ids: map[string]int{}, binDirs: map[string]string{}, runCmds: map[string]string{},
-		maxWall: 20, maxCPU: 15, maxBatch: 20}
+		maxWall: 20, maxCPU: 15, maxBatch: 20, extractKb: defaultExtractKb}
 	names := map[string]string{}
 	for _, l := range list {
 		if multiFileRe.MatchString(l.Name) {
@@ -241,6 +249,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		MaxCPUTimeLimit        float64 `json:"max_cpu_time_limit"`
 		MaxSubmissionBatchSize int     `json:"max_submission_batch_size"`
 		MaxMaxFileSize         int     `json:"max_max_file_size"`
+		MaxExtractSize         int     `json:"max_extract_size"`
 		EnableBatched          *bool   `json:"enable_batched_submissions"`
 	}
 	if err := e.do(ctx, http.MethodGet, "/config_info", nil, &conf); err == nil {
@@ -253,6 +262,9 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		}
 		c.maxBatch = conf.MaxSubmissionBatchSize
 		c.maxFileKb = conf.MaxMaxFileSize
+		if conf.MaxExtractSize > 0 {
+			c.extractKb = conf.MaxExtractSize
+		}
 		if conf.EnableBatched != nil && !*conf.EnableBatched {
 			c.maxBatch = 0
 		}
@@ -373,6 +385,10 @@ func (e *Engine) buildRequest(c *catalog, req judge.ExecRequest) (submissionRequ
 	out.MemoryLimit = req.MemoryLimitKb + e.cfg.MemoryAllowanceKb[req.Language]
 	if req.Language == "java" || req.Language == "kotlin" {
 		if e.usesMultiFile(c, req.Language) {
+			if len(req.Source) > c.extractKb*1024 {
+				return out, fmt.Errorf("judge0: the program is %d bytes; Judge0 runs %s programs of at most %d bytes",
+					len(req.Source), displayNames[req.Language], c.extractKb*1024)
+			}
 			files, err := jvmProject(c, req)
 			if err != nil {
 				return out, err
@@ -393,6 +409,38 @@ func (e *Engine) capMemory(c *catalog, r submissionRequest) submissionRequest {
 	}
 	return r
 }
+
+// defaultExtractKb is Judge0's default MAX_EXTRACT_SIZE, for servers that do
+// not report it.
+const defaultExtractKb = 10240
+
+// MaxSourceBytes implements judge.SourceLimiter. Judge0 takes a single-file
+// program of any size the request can carry (40 MB were accepted in
+// testing), but the source of a multi-file program (Java and Kotlin in
+// per-process mode) is a file in its archive, which Judge0 extracts only up
+// to MAX_EXTRACT_SIZE.
+func (e *Engine) MaxSourceBytes(ctx context.Context, language string) (int, error) {
+	c, err := e.catalog(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if e.usesMultiFile(c, language) {
+		return c.extractKb * 1024, nil
+	}
+	return 0, nil
+}
+
+// sourceNames are the names under which Judge0 1.13's toolchains report the
+// program's own file. TypeScript runtime errors refer to the compiled
+// script.js, whose lines are not the source's, so only script.ts is listed.
+var sourceNames = map[string][]string{
+	"c": {"main.c"}, "cpp": {"main.cpp"}, "csharp": {"Main.cs"}, "go": {"main.go", "./main.go", "/box/main.go"},
+	"java": {"Main.java"}, "javascript": {"script.js", "/box/script.js"}, "kotlin": {"Main.kt"},
+	"python": {"script.py"}, "ruby": {"script.rb"}, "rust": {"main.rs"}, "typescript": {"script.ts"},
+}
+
+// SourceNames implements judge.SourceNamer.
+func (e *Engine) SourceNames(language string) []string { return sourceNames[language] }
 
 // maxOutputKb is the largest output file a program may write, sized so that
 // an output as large as the largest expected output (plus headroom) fits,

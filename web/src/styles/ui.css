@@ -335,6 +335,41 @@ input[type='radio'] {
   outline: none;
 }
 
+/* A text input that also offers a list to pick from. */
+.combo {
+  position: relative;
+}
+
+.combo:has(.combo-toggle) .input {
+  padding-right: 28px;
+}
+
+.combo-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.combo-toggle:hover {
+  color: var(--text);
+}
+
+.combo-menu ul {
+  max-height: 182px;
+  overflow: auto;
+}
+
+.combo-menu .mono {
+  font-size: 12.5px;
+}
+
 /* ---- Chips and badges ---- */
 
 .chip {
@@ -628,6 +663,30 @@ button.chip:hover {
   gap: 8px;
   padding: 12px 18px;
   border-top: 1px solid var(--border);
+}
+
+/* A line about the state of the form, to the left of the buttons. */
+.dialog-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.dialog-note svg {
+  flex: none;
+}
+
+.dialog-note.is-ok {
+  color: var(--ok);
+}
+
+.dialog-note.is-warn {
+  color: var(--warn);
 }
 
 /* ---- Toasts ---- */
@@ -1191,4 +1250,25 @@ button.chip:hover {
 
 .diff-note {
   border-top: 1px solid var(--border);
+}
+
+/* ---- Number stepper ---- */
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.stepper-input {
+  width: 58px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepper-unit {
+  margin-right: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
 }

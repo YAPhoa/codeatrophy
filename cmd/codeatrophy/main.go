@@ -26,7 +26,7 @@ import (
 	"codeatrophy/internal/judge/judge0"
 	"codeatrophy/internal/mcpserver"
 	"codeatrophy/internal/secrets"
-	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store/dbopen"
 	"codeatrophy/internal/webui"
 )
 
@@ -37,6 +37,7 @@ const usage = `Usage: codeatrophy [command]
 
 Commands:
   serve        Run the server (default)
+  db           Inspect, migrate or copy a database; run "codeatrophy db help"
   healthcheck  Exit 0 if the server at CODEATROPHY_ADDR answers, 1 otherwise
   version      Print the version
 
@@ -54,6 +55,8 @@ func main() {
 		err = serve()
 	case "healthcheck":
 		err = healthcheck()
+	case "db":
+		err = dbCommand(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
@@ -99,7 +102,8 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := sqlite.Open(ctx, cfg.DBPath)
+	db, err := dbopen.Open(ctx, dbopen.Config{DatabaseURL: cfg.DatabaseURL, SQLitePath: cfg.DBPath,
+		SQLiteImport: cfg.SQLiteImport, ManualMigration: !cfg.DBAutoMigrate, Logger: log})
 	if err != nil {
 		return err
 	}
@@ -180,7 +184,8 @@ func serve() error {
 		return err
 	}
 	log.Info("codeatrophy started", "version", version, "addr", ln.Addr().String(), "data", cfg.DataDir,
-		"secretKey", keySource, "judge", cfg.Judge.Engine, "mcp", cfg.MCP.Enabled, "ui", webui.Built())
+		"secretKey", keySource, "database", db.Backend(), "judge", cfg.Judge.Engine, "mcp", cfg.MCP.Enabled,
+		"ui", webui.Built())
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()

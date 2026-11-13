@@ -8,7 +8,9 @@ can be exported as a portable bundle and imported into another instance. An
 MCP server lets AI assistants read and edit the library directly.
 
 It ships as a Docker Compose stack: one Go server (which serves the web UI,
-the HTTP API and the MCP endpoint) plus the judge engine's containers.
+the HTTP API and the MCP endpoint), a PostgreSQL database and the judge
+engine's containers. The server also runs on its own with an embedded SQLite
+database.
 
 ## Repository layout
 
@@ -18,6 +20,7 @@ the HTTP API and the MCP endpoint) plus the judge engine's containers.
 | `internal/` | Go packages: application services, HTTP API, MCP server, storage, AI providers, judge engines, grading, bundles |
 | `web/` | Web UI (TypeScript, React, Vite) |
 | `docs/` | Architecture, HTTP API reference, MCP server, bundle format |
+| `skills/` | Companion skill for AI assistants that work on a library over MCP |
 | `compose.yaml` | Deployment stack |
 
 ## Documentation
@@ -43,6 +46,8 @@ it in the same change.
   and keep `docs/mcp.md` in step with the tool definitions.
 - AI providers and judge engines sit behind small interfaces. Add a new one as
   a new implementation of the interface, not as a special case in callers.
+- Storage has a SQLite and a PostgreSQL implementation behind one interface.
+  A schema change needs a migration for each, at the same schema version.
 - The bundle format is versioned. Do not change the meaning of an existing
   field within a format version.
 - Add or update tests alongside behaviour changes.

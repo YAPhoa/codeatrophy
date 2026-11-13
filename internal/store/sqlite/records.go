@@ -219,18 +219,19 @@ func (t *tx) RemoveCollectionItem(id, itemID string) (bool, error) {
 // Submissions.
 
 const submissionColumns = `id, item_id, mode, language, source, stdin, case_ids, status, verdict, passed_count, total_count,
-	time_ms, memory_kb, compile_output, error, created_at, finished_at`
+	time_ms, memory_kb, compile_output, error, created_at, finished_at, line_offset, harness`
 
 func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, error) {
 	var (
 		s                       domain.Submission
 		stdin, verdict, errMsg  sql.NullString
+		harness                 sql.NullString
 		timeMs, memKb, finished sql.NullInt64
 		created                 int64
 		caseIDs                 string
 	)
 	err := sc.Scan(&s.ID, &s.ItemID, &s.Mode, &s.Language, &s.Source, &stdin, &caseIDs, &s.Status, &verdict, &s.PassedCount,
-		&s.TotalCount, &timeMs, &memKb, &s.CompileOutput, &errMsg, &created, &finished)
+		&s.TotalCount, &timeMs, &memKb, &s.CompileOutput, &errMsg, &created, &finished, &s.LineOffset, &harness)
 	s.Stdin = strPtr(stdin)
 	_ = json.Unmarshal([]byte(caseIDs), &s.CaseIDs)
 	if verdict.Valid {
@@ -244,8 +245,22 @@ func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, erro
 		f := fromUnix(finished.Int64)
 		s.FinishedAt = &f
 	}
+	if harness.Valid {
+		var h domain.HarnessCode
+		if json.Unmarshal([]byte(harness.String), &h) == nil {
+			s.Harness = &h
+		}
+	}
 	s.Results = []domain.SubmissionResult{}
 	return s, err
+}
+
+func harnessArg(h *domain.HarnessCode) any {
+	if h == nil {
+		return nil
+	}
+	b, _ := json.Marshal(h)
+	return string(b)
 }
 
 func (t *tx) InsertSubmission(s *domain.Submission) error {
@@ -254,10 +269,10 @@ func (t *tx) InsertSubmission(s *domain.Submission) error {
 		ids = []string{}
 	}
 	caseIDs, _ := json.Marshal(ids)
-	_, err := t.exec(`INSERT INTO submissions (`+submissionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := t.exec(`INSERT INTO submissions (`+submissionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.ItemID, s.Mode, s.Language, s.Source, nullStr(s.Stdin), string(caseIDs), s.Status, verdictArg(s.Verdict), s.PassedCount,
 		s.TotalCount, nullInt(s.TimeMs), nullInt(s.MemoryKb), s.CompileOutput, nullStr(s.Error), toUnix(s.CreatedAt),
-		nullUnix(s.FinishedAt))
+		nullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness))
 	return err
 }
 

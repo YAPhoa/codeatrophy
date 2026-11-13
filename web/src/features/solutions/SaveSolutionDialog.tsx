@@ -20,6 +20,8 @@ export interface SaveSolutionDialogProps {
   onClose: () => void;
   /** The code to save. `name` overrides the suggested name. */
   initial: { language: string; source: string; name?: string };
+  /** Opened unasked, after an accepted submission: says so, and "Cancel" reads "Not now". */
+  accepted?: boolean;
   onSaved?: (solution: Solution) => void;
 }
 
@@ -35,7 +37,7 @@ export function SaveSolutionDialog(props: SaveSolutionDialogProps) {
   return <SaveSolution {...props} />;
 }
 
-function SaveSolution({ item, onClose, initial, onSaved }: SaveSolutionDialogProps) {
+function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutionDialogProps) {
   const toast = useToast();
   const navigate = useNavigate();
   const meta = useMeta().data;
@@ -88,7 +90,7 @@ function SaveSolution({ item, onClose, initial, onSaved }: SaveSolutionDialogPro
       footer={
         <>
           <Button onClick={onClose} disabled={write.busy}>
-            Cancel
+            {accepted ? 'Not now' : 'Cancel'}
           </Button>
           <Button type="submit" form={formId} variant="primary" busy={write.busy} disabled={atLimit || !!sourceError}>
             Save solution
@@ -105,6 +107,7 @@ function SaveSolution({ item, onClose, initial, onSaved }: SaveSolutionDialogPro
           void save();
         }}
       >
+        {accepted && <p className="save-solution-accepted">Accepted. Keep this code with the problem?</p>}
         <p className="save-solution-code">
           <span className="save-solution-language">{languageLabel(initial.language, meta?.judge.languages)}</span>
           <span className="muted">{plural(lineCount(initial.source), 'line')} of code, saved as it is</span>

@@ -1,12 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
 import { useCollections, useItem, useMeta, useStyles, useTags } from '../../api/queries';
-import type { AppliedStyle, Item, VariantMode } from '../../api/types';
+import type { AppliedStyle, DraftCheck, GenerationUsage, Item, VariantMode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { useHotkeys } from '../../lib/hotkeys';
-import { draftFromForm, emptyForm, formFromDraft, revisionProblem, type ItemFormState } from '../../lib/itemForm';
+import { checkedState, draftFromForm, emptyForm, formFromDraft, revisionProblem, upgradeForm, type ItemFormState } from '../../lib/itemForm';
 import { useStoredState } from '../../lib/useStoredState';
 import { Button, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
@@ -29,6 +29,10 @@ interface VariantSession {
   assumptions: string[];
   aiDrafted: boolean;
   appliedStyle: AppliedStyle | null;
+  /** What running the draft's reference solution found, and the state of the form it was run on. */
+  check?: DraftCheck | null;
+  usage?: GenerationUsage | null;
+  checked?: string;
 }
 
 const STEPS = ['Choose', 'Review', 'Save'] as const;
@@ -79,6 +83,7 @@ function VariantFlow({ original }: { original: Item }) {
   }));
   const saver = useSaveDraft(clearSession);
   const patch = (change: Partial<VariantSession>) => setSession((s) => ({ ...s, ...change }));
+  const form = useMemo(() => (session.form ? upgradeForm(session.form) : null), [session.form]);
 
   // A link that names a mode ("Harder" on the saved screen) wins over a
   // remembered choice, as long as no draft is under review.
@@ -95,40 +100,59 @@ function VariantFlow({ original }: { original: Item }) {
       api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice }, signal),
     );
     if (!res) return;
+    const drafted = formFromDraft(res.draft, inherited);
     patch({
       stage: 'review',
-      form: formFromDraft(res.draft, inherited),
+      form: drafted,
       assumptions: res.draft.assumptions,
       aiDrafted: true,
       appliedStyle: res.style,
       styleChoice: res.style?.id ?? null,
+      check: res.check,
+      usage: res.usage,
+      checked: checkedState(drafted),
     });
   };
 
   const revise = async (instruction: string) => {
-    const current = session.form;
+    const current = form;
     if (!current) return;
     // The draft as edited goes back as `previousDraft`, so the user's own changes are revised, not discarded.
     const previousDraft = draftFromForm(current, session.assumptions);
     const res = await generation.run((signal) => {
       const problem = revisionProblem(previousDraft, limits);
       if (problem) throw new ApiError(413, 'too_large', problem);
-      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice }, signal);
+      // The form's own choice of interface is the one a revision keeps.
+      const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
+      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint }, signal);
     });
     if (!res) return;
+    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
     patch({
-      form: { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote },
+      form: revised,
       assumptions: res.draft.assumptions,
       appliedStyle: res.style,
       styleChoice: res.style?.id ?? null,
+      check: res.check,
+      usage: res.usage,
+      checked: checkedState(revised),
     });
   };
 
   const writeByHand = () =>
-    patch({ stage: 'review', form: { ...emptyForm(original.type), ...inherited, difficulty: original.difficulty }, assumptions: [], aiDrafted: false, appliedStyle: null });
+    patch({
+      stage: 'review',
+      // A variant written by hand starts with the original's interface, as a drafted one does.
+      form: { ...emptyForm(original.type), ...inherited, difficulty: original.difficulty, interface: original.problem?.interface ?? 'program' },
+      assumptions: [],
+      aiDrafted: false,
+      appliedStyle: null,
+      check: null,
+      usage: null,
+    });
 
   const save = () => {
-    if (session.form) void saver.save(session.form, { variantOf: original.id, rawInput: null });
+    if (form) void saver.save(form, { variantOf: original.id, rawInput: null });
   };
 
   const discard = async () => {
@@ -157,7 +181,7 @@ function VariantFlow({ original }: { original: Item }) {
     </nav>
   );
 
-  if (session.stage === 'review' && session.form) {
+  if (session.stage === 'review' && form) {
     return (
       <div className="page page-wide">
         <ReviewScreen
@@ -167,8 +191,8 @@ function VariantFlow({ original }: { original: Item }) {
               <h1 className="page-title">Review the variant</h1>
             </div>
           }
-          form={session.form}
-          onFormChange={(form) => patch({ form })}
+          form={form}
+          onFormChange={(next) => patch({ form: next })}
           errors={saver.errors}
           collections={collections}
           tagSuggestions={tags.map((t) => t.name)}
@@ -178,6 +202,9 @@ function VariantFlow({ original }: { original: Item }) {
           kind="variant"
           assumptions={session.assumptions}
           appliedStyle={session.appliedStyle}
+          check={session.check ?? null}
+          usage={session.usage ?? null}
+          checkStale={session.checked !== undefined && session.checked !== checkedState(form)}
           originalText={original.body}
           originalLabel={`The original: ${original.title}`}
           aiEnabled={aiEnabled}
@@ -223,7 +250,7 @@ function VariantFlow({ original }: { original: Item }) {
       </p>
 
       {!aiEnabled && (
-        <Callout tone="info" title="Variants are drafted by the AI" className="capture-callout" actions={<Link to="/settings#ai">Set up an AI provider</Link>}>
+        <Callout tone="info" title="Variants are drafted by the AI" className="capture-callout" actions={<Link to="/settings/ai">Set up an AI provider</Link>}>
           No AI provider is configured. You can still write a variant by hand; it will be linked to the original.
         </Callout>
       )}

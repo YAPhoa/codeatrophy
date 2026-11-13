@@ -53,12 +53,12 @@ browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
 
 | Flag | Effect |
 | --- | --- |
-| `no-ai` | No AI provider configured: AI endpoints answer `503 ai_unavailable` |
+| `no-ai` | No AI provider at all, so no default: AI endpoints answer `503 ai_unavailable` |
 | `no-judge` | No judge engine: no languages, execution endpoints answer `503 judge_unavailable` |
 | `judge-down` | Judge configured but unreachable: runs end in `internal_error`, verification answers `503`, generated test cases come back unverified |
 | `mcp-token` / `mcp-off` | MCP endpoint requires a token / is disabled |
 | `mcp-url` | The server reports a public MCP URL (`meta.mcp.url`) instead of leaving it to the page origin |
-| `ai-env` | The Anthropic model, base URL and key come from the server's environment rather than saved settings |
+| `ai-env` | The Anthropic provider is the read-only one the server's environment supplies (`env-anthropic`) rather than a saved one; with `no-ai` it is there but not the default |
 | `forbidden` | Every request, reads included, answers `403 forbidden`: the server does not recognise the host it is addressed by, so the app cannot even start |
 | `forbidden-writes` | Only state-changing requests answer `403 forbidden`, as when a reverse proxy hides the page's origin |
 | `show-tests` | The "Hide test cases by default" preference starts switched off |
@@ -83,9 +83,21 @@ verdicts from markers anywhere in the submitted source:
 | *unchanged starter code* | Wrong answer with empty output |
 | *anything else* | Accepted |
 
+For a "solution only" problem the markers are looked for in the whole program
+that runs, the runner included. The seed has one such problem, "Merge k Sorted
+Lists".
+
 For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
-`502 upstream_error`. In Settings, an API key containing `bad` or a base URL
-containing `unreachable` makes the connection test fail.
+`502 upstream_error`, `MOCK:MISMATCH` a draft whose reference solution
+disagrees with its last example, and `MOCK:RUNNER` a "solution only" draft
+with one runner that does not compile. `MOCK:REPEAT` in the instruction of a
+test generation leaves two proposals out as repeats, `MOCK:REPEAT-ALL` all of
+them. Every generation adds to
+the usage counts of the default provider. In Settings, an API key containing `bad` or a base URL
+containing `unreachable` makes the connection test of a provider fail, and a
+base URL containing `no-models` stands for a server that does not list its
+models (the test of a model typed by hand still succeeds). A model the
+pretend service does not list fails the test as unknown.
 
 The running mock is exposed as `window.__codeatrophyMock`. To exercise the
 "changed elsewhere" flow, open an item's edit page, run
@@ -103,7 +115,9 @@ connected over MCP would), then save.
 the flows the product stands on: capture → draft → revise → save; the coding
 workspace with a judged submission, a hidden failing case and its panes;
 keeping an accepted submission as a solution and making it the reference;
-preferences taking effect; and filing selected items into a collection.
+preferences taking effect; the pages of Settings; adding an AI provider
+(key → connection test → model → save → default); and filing selected items
+into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a
 third-party origin. It is separate from `npm test`.

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -27,32 +29,49 @@ var migrationFS embed.FS
 
 // DB is a SQLite-backed store.Store.
 type DB struct {
+	path   string
+	log    *slog.Logger
 	writer *sql.DB
 	reader *sql.DB
+	backed string // pre-migration backup written by Open, if any
 }
 
-var _ store.Store = (*DB)(nil)
+var (
+	_ store.Store = (*DB)(nil)
+	_ store.Bulk  = (*DB)(nil)
+)
+
+// Options configure Open.
+type Options struct {
+	// Logger receives one line per migration applied and per backup
+	// written. Nil discards them.
+	Logger *slog.Logger
+	// NoMigrate opens the database only if it is at this server's schema
+	// version, and otherwise fails with a *store.MigrationNeededError
+	// without changing anything (a missing file is not created).
+	NoMigrate bool
+}
 
 // Open opens (creating if needed) the database file at path and applies
 // pending migrations.
-func Open(ctx context.Context, path string) (*DB, error) {
+func Open(ctx context.Context, path string) (*DB, error) { return OpenWith(ctx, path, Options{}) }
+
+// OpenWith is Open with options.
+func OpenWith(ctx context.Context, path string, opts Options) (*DB, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	dsn := func(txlock string, readOnly bool) string {
-		q := url.Values{}
-		q.Add("_pragma", "busy_timeout(10000)")
-		q.Add("_pragma", "foreign_keys(1)")
-		q.Add("_pragma", "journal_mode(WAL)")
-		q.Add("_pragma", "synchronous(NORMAL)")
-		if readOnly {
-			q.Add("_pragma", "query_only(1)")
-		}
-		q.Set("_txlock", txlock)
-		return "file:" + abs + "?" + q.Encode()
+	log := opts.Logger
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
 	}
-	writer, err := sql.Open("sqlite", dsn("immediate", false))
+	if opts.NoMigrate {
+		if _, err := os.Stat(abs); errors.Is(err, os.ErrNotExist) {
+			return nil, migrationNeeded(0)
+		}
+	}
+	writer, err := sql.Open("sqlite", dsn(abs, "immediate", false))
 	if err != nil {
 		return nil, err
 	}
@@ -62,12 +81,16 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		writer.Close()
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	db := &DB{writer: writer}
-	if err := db.migrate(ctx); err != nil {
+	db := &DB{path: abs, log: log, writer: writer}
+	check := db.migrate
+	if opts.NoMigrate {
+		check = db.checkVersion
+	}
+	if err := check(ctx); err != nil {
 		writer.Close()
 		return nil, err
 	}
-	reader, err := sql.Open("sqlite", dsn("deferred", true))
+	reader, err := sql.Open("sqlite", dsn(abs, "deferred", true))
 	if err != nil {
 		writer.Close()
 		return nil, err
@@ -77,6 +100,25 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	return db, nil
 }
 
+func dsn(abs, txlock string, readOnly bool) string {
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(10000)")
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	if readOnly {
+		q.Add("_pragma", "query_only(1)")
+	}
+	q.Set("_txlock", txlock)
+	return "file:" + abs + "?" + q.Encode()
+}
+
+// Path is the absolute path of the database file.
+func (db *DB) Path() string { return db.path }
+
+// Backup is the path of the backup Open wrote before migrating, or "".
+func (db *DB) Backup() string { return db.backed }
+
 // Close closes the database.
 func (db *DB) Close() error {
 	return errors.Join(db.reader.Close(), db.writer.Close())
@@ -84,15 +126,15 @@ func (db *DB) Close() error {
 
 // Read implements store.Store.
 func (db *DB) Read(ctx context.Context, fn func(store.Tx) error) error {
-	return db.run(ctx, db.reader, true, fn)
+	return db.run(ctx, db.reader, true, func(t *tx) error { return fn(t) })
 }
 
 // Write implements store.Store.
 func (db *DB) Write(ctx context.Context, fn func(store.Tx) error) error {
-	return db.run(ctx, db.writer, false, fn)
+	return db.run(ctx, db.writer, false, func(t *tx) error { return fn(t) })
 }
 
-func (db *DB) run(ctx context.Context, conn *sql.DB, readOnly bool, fn func(store.Tx) error) (err error) {
+func (db *DB) run(ctx context.Context, conn *sql.DB, readOnly bool, fn func(*tx) error) (err error) {
 	sqlTx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -151,6 +193,64 @@ func loadMigrations() ([]migration, error) {
 	return out, nil
 }
 
+// MigrationVersions are the versions of the embedded migrations, in order.
+func MigrationVersions() []int {
+	migs, err := loadMigrations()
+	if err != nil {
+		panic(err)
+	}
+	out := make([]int, len(migs))
+	for i, m := range migs {
+		out[i] = m.version
+	}
+	return out
+}
+
+// newerError is the error for a database written by a newer server.
+func newerError(current, latest int) error {
+	return fmt.Errorf("database schema version %d is newer than this server supports (%d): %w", current, latest,
+		store.ErrNewerSchema)
+}
+
+// migrationNeeded describes a database at version current.
+func migrationNeeded(current int) error {
+	migs, err := loadMigrations()
+	if err != nil {
+		return err
+	}
+	e := &store.MigrationNeededError{Version: current, Expected: migs[len(migs)-1].version}
+	for _, m := range migs {
+		if m.version > current {
+			e.Pending = append(e.Pending, m.name)
+		}
+	}
+	return e
+}
+
+// checkVersion fails unless the database is at the latest version. It
+// writes nothing.
+func (db *DB) checkVersion(ctx context.Context) error {
+	var n, current int
+	if err := db.writer.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		var err error
+		if current, err = db.version(ctx, db.writer); err != nil {
+			return err
+		}
+	}
+	latest := MigrationVersions()
+	switch last := latest[len(latest)-1]; {
+	case current > last:
+		return newerError(current, last)
+	case current < last:
+		return migrationNeeded(current)
+	}
+	return nil
+}
+
 func (db *DB) migrate(ctx context.Context) error {
 	migs, err := loadMigrations()
 	if err != nil {
@@ -160,32 +260,121 @@ func (db *DB) migrate(ctx context.Context) error {
 		version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`); err != nil {
 		return fmt.Errorf("migrations table: %w", err)
 	}
-	var current int
-	if err := db.writer.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+	current, err := db.version(ctx, db.writer)
+	if err != nil {
 		return err
 	}
-	if latest := migs[len(migs)-1].version; current > latest {
-		return fmt.Errorf("database schema version %d is newer than this server supports (%d)", current, latest)
+	latest := migs[len(migs)-1].version
+	if current > latest {
+		return newerError(current, latest)
+	}
+	if current > 0 && current < latest {
+		if err := db.backup(ctx, current); err != nil {
+			return err
+		}
 	}
 	for _, m := range migs {
 		if m.version <= current {
 			continue
 		}
-		tx, err := db.writer.BeginTx(ctx, nil)
+		applied, err := db.apply(ctx, m)
 		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-			tx.Rollback()
 			return fmt.Errorf("migration %s: %w", m.name, err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
-			m.version, m.name, time.Now().Unix()); err != nil {
-			tx.Rollback()
-			return err
+		if applied {
+			db.log.Info("applied database migration", "backend", "SQLite", "migration", m.name, "version", m.version)
 		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("migration %s: %w", m.name, err)
+	}
+	return nil
+}
+
+// apply runs one migration in its own transaction. It reports false when
+// another process applied it first.
+func (db *DB) apply(ctx context.Context, m migration) (bool, error) {
+	tx, err := db.writer.BeginTx(ctx, nil) // BEGIN IMMEDIATE: one migrating process at a time
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var current int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+		return false, err
+	}
+	if current >= m.version {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+		m.version, m.name, time.Now().Unix()); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func (db *DB) version(ctx context.Context, conn interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (int, error) {
+	var v int
+	err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v)
+	return v, err
+}
+
+// SchemaVersion implements store.Bulk.
+func (db *DB) SchemaVersion(ctx context.Context) (int, error) { return db.version(ctx, db.writer) }
+
+// Backend implements store.Bulk.
+func (db *DB) Backend() string { return "SQLite" }
+
+// keepBackups is how many pre-migration backups are kept per database.
+const keepBackups = 3
+
+// BackupPrefix is the start of the file name of a pre-migration backup of
+// the database at path; the schema version and a UTC timestamp follow, as in
+// codeatrophy.db.backup-v4-20260301T100000Z.
+func BackupPrefix(path string) string { return filepath.Base(path) + ".backup-v" }
+
+// backup writes a consistent copy of the database, at schema version
+// current, next to it before migrations change it, and removes all but the
+// most recent backups.
+func (db *DB) backup(ctx context.Context, current int) error {
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	dst := filepath.Join(filepath.Dir(db.path), fmt.Sprintf("%s%d-%s", BackupPrefix(db.path), current, ts))
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("backup before migrating: %s already exists", dst)
+	}
+	if _, err := db.writer.ExecContext(ctx, `VACUUM INTO ?`, dst); err != nil {
+		return fmt.Errorf("backup before migrating: %w", err)
+	}
+	db.backed = dst
+	db.log.Info("backed up the database before migrating it", "backend", "SQLite", "version", current, "backup", dst)
+	return pruneBackups(db.path, keepBackups)
+}
+
+// pruneBackups removes all but the newest keep pre-migration backups of the
+// database at path.
+func pruneBackups(path string, keep int) error {
+	prefix := BackupPrefix(path)
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	type backup struct{ name, ts string }
+	var found []backup
+	for _, e := range entries {
+		rest, ok := strings.CutPrefix(e.Name(), prefix)
+		if !ok || e.IsDir() {
+			continue
+		}
+		if _, ts, ok := strings.Cut(rest, "-"); ok {
+			found = append(found, backup{e.Name(), ts})
+		}
+	}
+	slices.SortFunc(found, func(a, b backup) int { return strings.Compare(b.ts, a.ts) })
+	for _, b := range found[min(keep, len(found)):] {
+		if err := os.Remove(filepath.Join(filepath.Dir(path), b.name)); err != nil {
+			return err
 		}
 	}
 	return nil

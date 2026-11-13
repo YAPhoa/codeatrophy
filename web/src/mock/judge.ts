@@ -11,6 +11,10 @@
 //   - Source identical to the problem's starter code prints nothing, so every
 //     case is a wrong answer.
 //   - Anything else is accepted.
+//
+// For a "solution only" problem the program that runs is the submitted source
+// inside the problem's harness. A marker counts wherever it is in that
+// program; the comparison with the starter code is of the source alone.
 
 import type { SubmissionResult, Verdict } from '../api/types';
 
@@ -18,8 +22,8 @@ export type Behaviour = 'accepted' | 'starter' | 'wrong' | 'tle' | 'mle' | 're' 
 
 const MARKERS: Record<string, Behaviour> = { WA: 'wrong', TLE: 'tle', MLE: 'mle', RE: 're', CE: 'ce', IE: 'ie' };
 
-export function detectBehaviour(source: string, starter: string | undefined): Behaviour {
-  const marker = /MOCK:(WA|TLE|MLE|RE|CE|IE)\b/.exec(source);
+export function detectBehaviour(source: string, starter: string | undefined, program: string = source): Behaviour {
+  const marker = /MOCK:(WA|TLE|MLE|RE|CE|IE)\b/.exec(program);
   if (marker) return MARKERS[marker[1]!]!;
   if (starter !== undefined && source.trim() === starter.trim()) return 'starter';
   return 'accepted';

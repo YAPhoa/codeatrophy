@@ -24,17 +24,6 @@ export function clampFontSize(value: unknown): number {
   return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(value)));
 }
 
-/**
- * Read a font size typed into a field. Returns null unless the text is a
- * whole number inside the allowed range, so that a half-typed value ("1" on
- * the way to "16") is not acted on.
- */
-export function parseFontSize(text: string): number | null {
-  if (!/^\s*\d+\s*$/.test(text)) return null;
-  const n = Number(text);
-  return n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX ? n : null;
-}
-
 export function isTabSize(value: unknown): value is TabSize {
   return (TAB_SIZES as readonly unknown[]).includes(value);
 }
@@ -69,11 +58,12 @@ export interface EditorOptions {
 }
 
 /**
- * The options for one editor. Code editors follow the preferences. Prose
- * editors always wrap, keep their own type size, and leave out the aids that
- * only make sense for code.
+ * The options for one editor. Code editors follow the preferences, except
+ * that `wrap` wraps long lines whatever they say. Prose editors always wrap,
+ * keep their own type size, and leave out the aids that only make sense for
+ * code.
  */
-export function resolveEditorOptions(prefs: EditorPreferences, mode: { prose?: boolean } = {}): EditorOptions {
+export function resolveEditorOptions(prefs: EditorPreferences, mode: { prose?: boolean; wrap?: boolean } = {}): EditorOptions {
   if (mode.prose) {
     return {
       autocomplete: false,
@@ -92,7 +82,7 @@ export function resolveEditorOptions(prefs: EditorPreferences, mode: { prose?: b
     autocomplete: prefs.autocomplete !== false,
     closeBrackets: prefs.closeBrackets !== false,
     matchBrackets: prefs.matchBrackets !== false,
-    lineWrapping: prefs.lineWrapping === true,
+    lineWrapping: mode.wrap === true || prefs.lineWrapping === true,
     tabSize,
     indentUnit: ' '.repeat(tabSize),
     fontSize,

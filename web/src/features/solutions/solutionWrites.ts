@@ -171,6 +171,12 @@ export function solutionLanguageOptions(judgeLanguages: readonly { id: string; n
   return Array.from(new Set(current ? [...ids, current] : ids)).map((id) => ({ value: id, label: languageLabel(id, judgeLanguages) }));
 }
 
+/** The saved solution that already holds this very code, if there is one; the reference solution first. */
+export function savedWithCode(solutions: readonly Solution[] | undefined, code: { language: string; source: string }): Solution | undefined {
+  const same = (solutions ?? []).filter((kept) => kept.language === code.language && kept.source === code.source);
+  return same.find((kept) => kept.isReference) ?? same[0];
+}
+
 export function lineCount(source: string): number {
   return source === '' ? 0 : source.replace(/\n$/, '').split('\n').length;
 }

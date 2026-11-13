@@ -14,6 +14,9 @@ COMPOSE      ?= docker compose
 
 GO_IMAGE   := golang:$(GO_VERSION)-bookworm
 NODE_IMAGE := node:$(NODE_VERSION)-alpine
+# PostgreSQL server of test-postgres; keep it at the major version of the
+# db service in compose.yaml.
+PG_IMAGE   ?= postgres:18.7
 DOCKER_USER := --user $(shell id -u):$(shell id -g)
 CGO         ?= 0
 
@@ -21,7 +24,7 @@ ifneq ($(shell command -v go 2>/dev/null),)
 GO_RUN      :=
 GO_PREREQ   :=
 else
-GO_RUN      := docker run --rm -i $(DOCKER_USER) -v "$(CURDIR)":/src -w /src \
+GO_RUN      := docker run --rm -i $(DOCKER_USER) $(GO_DOCKER_FLAGS) -v "$(CURDIR)":/src -w /src \
                -v codeatrophy-gomod:/cache/mod -v codeatrophy-gocache:/cache/build \
                -e GOMODCACHE=/cache/mod -e GOCACHE=/cache/build -e HOME=/tmp -e GOFLAGS=-buildvcs=false \
                -e GOTOOLCHAIN=local -e CGO_ENABLED=$(CGO) $(GO_IMAGE)
@@ -76,8 +79,32 @@ run: build-server ## Run the server locally with data in ./data (judge engine: n
 	CODEATROPHY_DATA_DIR=./data ./$(BIN) serve
 
 .PHONY: test
-test: $(GO_PREREQ) ## Run the Go tests
+test: $(GO_PREREQ) ## Run the Go tests (on SQLite)
 	$(GO) test ./...
+
+.PHONY: test-postgres
+test-postgres: $(GO_PREREQ) ## Run the Go tests on PostgreSQL, against a throwaway server in Docker
+	@$(GO) mod download
+	@set -u; id=$$$$-$$RANDOM; name=codeatrophy-test-pg-$$id; net=codeatrophy-test-net-$$id; \
+	cleanup() { docker rm -f $$name >/dev/null 2>&1; docker network rm $$net >/dev/null 2>&1; }; \
+	trap cleanup EXIT INT TERM; \
+	if [ -n "$(GO_PREREQ)" ]; then internal=--internal; publish=; else internal=; publish="-p 127.0.0.1::5432"; fi; \
+	docker network create $$internal $$net >/dev/null || exit 1; \
+	docker run -d --name $$name --network $$net $$publish -e POSTGRES_PASSWORD=test --tmpfs /var/lib/postgresql \
+		$(PG_IMAGE) -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=400 >/dev/null || exit 1; \
+	for i in $$(seq 60); do docker exec $$name pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 && break; sleep 1; done; \
+	docker exec $$name pg_isready -U postgres -h 127.0.0.1 >/dev/null || { echo "PostgreSQL did not start"; docker logs $$name; exit 1; }; \
+	if [ -n "$(GO_PREREQ)" ]; then \
+		url="postgres://postgres:test@$$name:5432/postgres?sslmode=disable"; \
+		$(MAKE) --no-print-directory _test-postgres GO_DOCKER_FLAGS="--network $$net -e CODEATROPHY_TEST_POSTGRES_URL=$$url"; \
+	else \
+		url="postgres://postgres:test@$$(docker port $$name 5432/tcp | head -n1)/postgres?sslmode=disable"; \
+		CODEATROPHY_TEST_POSTGRES_URL=$$url $(MAKE) --no-print-directory _test-postgres; \
+	fi
+
+.PHONY: _test-postgres
+_test-postgres:
+	$(GO) test -count=1 ./...
 
 .PHONY: test-race
 test-race: ## Run the Go tests with the race detector (needs cgo; uses Docker if Go is not installed)
@@ -140,7 +167,7 @@ web-lint: ## Lint the UI
 lint: vet fmt-check web-lint web-typecheck ## Run all linters and type checks
 
 .PHONY: check
-check: lint test web-test ## Lint and test everything
+check: lint test test-postgres web-test ## Lint and test everything (the Go tests on SQLite and on PostgreSQL)
 
 ## ---- Docker ----------------------------------------------------------------
 

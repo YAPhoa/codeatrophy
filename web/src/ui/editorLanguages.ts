@@ -83,6 +83,11 @@ export async function loadLanguage(id: string | null | undefined): Promise<Exten
       return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).kotlin);
     case 'ruby':
       return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/ruby')).ruby);
+    case 'json': {
+      // The mode names keys "property", which the highlighter has to be told about.
+      const [{ json }, { tags }] = await Promise.all([import('@codemirror/legacy-modes/mode/javascript'), import('@lezer/highlight')]);
+      return StreamLanguage.define({ ...json, tokenTable: { property: tags.propertyName } });
+    }
     case 'markdown':
       return (await import('@codemirror/lang-markdown')).markdown();
     default:

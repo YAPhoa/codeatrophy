@@ -1,0 +1,188 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// ErrNewerSchema is returned when opening a database whose schema version is
+// newer than this server knows. The database is left unchanged.
+var ErrNewerSchema = errors.New("this database was last used by a newer Codeatrophy; upgrade the server")
+
+// SchemaVersion is the logical schema version this server expects. Every
+// backend keeps its own numbered migrations, and the latest migration of
+// each must bring its database to this version: a schema change adds one
+// migration per backend with the next number and bumps this constant (and
+// Tables, when tables or columns change).
+const SchemaVersion = 7
+
+// Table is a table of the logical schema: the tables and columns every
+// backend has, whatever their physical types. Backend-specific tables, such
+// as the search index and the migration record, are not part of it.
+type Table struct {
+	Name    string
+	Columns []string
+	// Key orders the rows when copying: the insertion sequence for tables
+	// that have one, otherwise the primary key.
+	Key []string
+}
+
+// Tables is the logical schema, ordered so that a table comes after the
+// tables it references.
+var Tables = []Table{
+	{Name: "settings", Columns: []string{"key", "value"}, Key: []string{"key"}},
+	{Name: "ai_providers", Columns: []string{"seq", "id", "name", "name_key", "kind", "model", "base_url", "api_key",
+		"api_key_origin", "created_at", "updated_at"}, Key: []string{"seq"}},
+	{Name: "ai_usage", Columns: []string{"provider_id", "day", "requests", "failed", "input_tokens", "output_tokens",
+		"last_used_at"}, Key: []string{"provider_id", "day"}},
+	{Name: "ai_log", Columns: []string{"id", "created_at", "operation", "item_id", "title", "provider_id",
+		"provider_name", "kind", "model", "status", "error", "duration_ms", "input_tokens", "output_tokens",
+		"reasoning_tokens", "cache_read_tokens", "cache_write_tokens"}, Key: []string{"created_at", "id"}},
+	{Name: "ai_log_texts", Columns: []string{"hash", "text"}, Key: []string{"hash"}},
+	{Name: "ai_log_bodies", Columns: []string{"entry_id", "system_hash", "request", "response", "truncated"},
+		Key: []string{"entry_id"}},
+	{Name: "style_presets", Columns: []string{"seq", "id", "name", "name_key", "instructions", "is_default",
+		"created_at", "updated_at"}, Key: []string{"seq"}},
+	{Name: "items", Columns: []string{"seq", "id", "type", "title", "summary", "body", "difficulty", "status",
+		"favorite", "notes", "raw_input", "source_url", "source_note", "variant_of", "revision", "time_limit_ms",
+		"memory_limit_kb", "compare_mode", "starter_code", "created_at", "updated_at", "problem_interface", "harness"},
+		Key: []string{"seq"}},
+	{Name: "item_tags", Columns: []string{"item_id", "tag"}, Key: []string{"item_id", "tag"}},
+	{Name: "collections", Columns: []string{"seq", "id", "name", "description", "parent_id", "position",
+		"created_at", "updated_at"}, Key: []string{"seq"}},
+	{Name: "collection_items", Columns: []string{"collection_id", "item_id", "position"},
+		Key: []string{"collection_id", "item_id"}},
+	{Name: "test_cases", Columns: []string{"seq", "id", "item_id", "position", "name", "stdin", "expected_stdout",
+		"is_sample", "origin", "verified", "created_at", "updated_at"}, Key: []string{"seq"}},
+	{Name: "solutions", Columns: []string{"seq", "id", "item_id", "name", "language", "source", "notes",
+		"is_reference", "created_at", "updated_at"}, Key: []string{"seq"}},
+	{Name: "submissions", Columns: []string{"seq", "id", "item_id", "mode", "language", "source", "stdin",
+		"case_ids", "status", "verdict", "passed_count", "total_count", "time_ms", "memory_kb", "compile_output",
+		"error", "created_at", "finished_at", "line_offset", "harness"}, Key: []string{"seq"}},
+	{Name: "submission_results", Columns: []string{"submission_id", "idx", "test_case_id", "name", "is_sample",
+		"verdict", "stdin", "expected_stdout", "stdout", "stderr", "time_ms", "memory_kb"},
+		Key: []string{"submission_id", "idx"}},
+}
+
+// TableByName returns the logical table with that name.
+func TableByName(name string) (Table, bool) {
+	for _, t := range Tables {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return Table{}, false
+}
+
+// ErrMigrationNeeded is returned when a database opened without migrating
+// is behind this server's schema, or has no schema yet.
+var ErrMigrationNeeded = errors.New("the database needs migrating")
+
+// MigrationNeededError describes a database that needs migrating. It
+// matches ErrMigrationNeeded.
+type MigrationNeededError struct {
+	// Version is the database's schema version, 0 when it has none yet.
+	Version int
+	// Expected is the version this server's migrations reach.
+	Expected int
+	// Pending are the names of the migrations not applied yet.
+	Pending []string
+}
+
+func (e *MigrationNeededError) Error() string {
+	at := fmt.Sprintf("the database is at schema version %d", e.Version)
+	if e.Version == 0 {
+		at = "the database has no schema yet (version 0)"
+	}
+	return fmt.Sprintf("%s and this server expects version %d (pending: %s)", at, e.Expected,
+		strings.Join(e.Pending, ", "))
+}
+
+func (e *MigrationNeededError) Unwrap() error { return ErrMigrationNeeded }
+
+// Status describes a database without changing it.
+type Status struct {
+	Backend string
+	// Location is the file path, or the URL without its password.
+	Location string
+	// Exists is false when there is no database there yet.
+	Exists bool
+	// Version is the schema version, 0 when there is no schema yet.
+	Version int
+	// Latest is the version this server's migrations reach.
+	Latest int
+	// Pending are the names of the migrations not applied yet.
+	Pending []string
+	// Counts are the row counts of the logical tables that exist.
+	Counts []TableCount
+}
+
+// TableCount is the number of rows of a table.
+type TableCount struct {
+	Table string
+	Rows  int64
+}
+
+// Bulk is implemented by stores whose complete contents can be copied to
+// another store, of the same backend or another one. Row values are
+// backend-neutral: nil, int64 (integers and flags, as 0 or 1) or string.
+type Bulk interface {
+	// Backend names the backend, such as "SQLite" or "PostgreSQL".
+	Backend() string
+	// SchemaVersion is the logical schema version of the open database.
+	SchemaVersion(ctx context.Context) (int, error)
+	// Export runs fn with read access to every row, in one consistent
+	// snapshot.
+	Export(ctx context.Context, fn func(Dump) error) error
+	// Import runs fn in one write transaction that may replace every row;
+	// it commits only if fn returns nil.
+	Import(ctx context.Context, fn func(Load) error) error
+}
+
+// Dump reads rows of the logical tables.
+type Dump interface {
+	// Rows calls fn for each row of t in key order, with the values in the
+	// order of t.Columns. The slice is only valid during the call.
+	Rows(t Table, fn func(row []any) error) error
+	// Count returns the number of rows of t.
+	Count(t Table) (int64, error)
+}
+
+// Load writes rows of the logical tables, inside an Import transaction.
+// Reads see the rows written so far.
+type Load interface {
+	Dump
+	// Clear deletes every row of every table, including derived data such
+	// as the search index.
+	Clear() error
+	// Insert adds a row to t, values in the order of t.Columns. Foreign
+	// keys are checked when Finish is called, so rows may refer to rows
+	// inserted later.
+	Insert(t Table, row []any) error
+	// Finish writes pending rows, rebuilds derived data (the search index,
+	// insertion sequences) and checks the foreign keys.
+	Finish() error
+}
+
+// BuiltinStylePreset is one of the style presets a new database is seeded
+// with by its schema migrations.
+type BuiltinStylePreset struct {
+	Name         string
+	Instructions string
+	IsDefault    bool
+}
+
+// BuiltinStylePresets are the presets the migrations of every backend seed
+// into a new database, in insertion order. The migrations hold their own
+// copy of the text (a migration never changes once released); tests check
+// that the two agree.
+var BuiltinStylePresets = []BuiltinStylePreset{
+	{Name: "Interview practice", IsDefault: true,
+		Instructions: `Write the statement the way an interviewer would pose it: two or three short paragraphs in plain language, with no back-story. Name the inputs and say exactly what to print. Give two or three small examples, each followed by one or two sentences explaining why that output is correct. Keep the constraints to a short list, chosen so that the intended time complexity matters. Under Notes, add a "Follow-up" line that asks for a better complexity or a harder twist without giving the approach away. Starter code in Python and Java.`},
+	{Name: "Contest style",
+		Instructions: `Write in the style of a programming-contest problem: a short, concrete scenario of at most one paragraph, then a precise formal statement. Use math notation for every bound. Choose the limits so that the intended complexity is implied but never named. Give at least two examples and explain only the non-obvious one, under Notes. No hints. Starter code in C++ and Python.`},
+	{Name: "Study notes",
+		Instructions: `Write for revision rather than for a test. For a reading: open with a two-sentence summary, then short sections with descriptive headings, each with a small worked example or code sample, and close with "Key takeaways" (three to five bullets) and "Check yourself" (three questions without answers). For a problem: keep the statement brief, and use Notes to name the underlying technique and point to related topics without giving the solution. Prefer plain words to jargon, and define each term the first time it appears.`},
+}

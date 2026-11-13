@@ -10,11 +10,19 @@ in the browser against your own test cases.
 - **A judge built in.** Problems carry stdin/stdout test cases; "Run" and
   "Submit" execute your code in a sandbox ([Judge0](https://github.com/judge0/judge0))
   in C, C++, C#, Go, Java, JavaScript, Kotlin, Python, Ruby, Rust and TypeScript.
+  A problem is either a full program or *solution only*, as on interview
+  sites: you write just the function or class, and hidden per-language
+  runner code turns it into a program; error messages point at your own
+  lines.
 - **AI drafting (optional).** Paste a half-remembered description and get a
-  complete, reviewable item with the assumptions listed; generate test cases
-  whose expected outputs come from actually running a reference solution;
-  derive easier, harder or twisted variants. Works with Anthropic or any
-  OpenAI-compatible endpoint, including local models.
+  complete, reviewable item with the assumptions listed — solution-only or a
+  full program, whichever fits — whose examples have already been checked by
+  running the model's own reference solution; generate test cases whose
+  expected outputs come from actually running a reference solution; derive
+  easier, harder or twisted variants. Works with Anthropic or any
+  OpenAI-compatible endpoint, including local models. Every request's
+  tokens are counted per provider, and an activity log keeps what was sent
+  and what came back.
 - **An MCP server** so an AI assistant (Claude Code, Claude Desktop, ...) can
   read, write and test items in your library directly.
 - **Portable bundles.** Export any part of the library as a zip of plain
@@ -22,7 +30,8 @@ in the browser against your own test cases.
   duplicates.
 
 It runs as a Docker Compose stack: one Go server (web UI, HTTP API and MCP
-endpoint, SQLite database) plus the Judge0 containers.
+endpoint), its PostgreSQL database, and the Judge0 containers. The server
+can keep the library in a single SQLite file instead.
 
 ## Quick start
 
@@ -39,8 +48,8 @@ docker compose up -d --build
 Open <http://localhost:8080>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
-To stop: `docker compose down` (your data stays in the `codeatrophy-data`
-volume).
+To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
+`codeatrophy-data` volumes).
 
 ### Without the judge
 
@@ -62,15 +71,21 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_ALLOWED_HOSTS` | unset | Extra host names or addresses the server answers to (see [Security](#security)) |
 | `CODEATROPHY_JUDGE_ENGINE` | `judge0` in `.env.example` | `judge0` or `none` |
 | `CODEATROPHY_SECRET_KEY` | generated | Key that encrypts stored API keys |
-| `CODEATROPHY_AI_PROVIDER` | unset | Default AI provider: `anthropic` or `openai_compatible` |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | unset | Provider keys for unattended setups |
+| `CODEATROPHY_DATABASE_URL` | the Compose `db` service | PostgreSQL URL; empty for SQLite (see [Storage](#storage)) |
+| `CODEATROPHY_POSTGRES_PASSWORD` | `codeatrophy-postgres` | Password of the Compose database; change it before the first start |
+| `CODEATROPHY_DB_AUTO_MIGRATE` | `on` | Apply schema migrations at startup; `off` leaves them to `db migrate` (see [Upgrading](#upgrading)) |
+| `CODEATROPHY_AI_PROVIDER` | unset | Initial default AI provider: the environment provider of `anthropic` or `openai_compatible` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
 | `CODEATROPHY_MCP_TOKEN` | unset | Require a bearer token on `/mcp` |
 
-AI providers are normally set up in the UI under Settings: choose a provider,
-enter the model and key, and test the connection. Keys entered there are
-stored encrypted (AES-256-GCM) and are never shown again, logged, exported or
-exposed over MCP. Environment variables supply defaults for anything not saved
-in the settings.
+AI providers are normally set up in the UI under Settings. You can keep
+several, such as a work key, a personal one and a local model server, and
+choose one as the default the AI features use. For each, enter the key, test
+the connection, pick a model from the list the service reports, and save.
+Keys entered there are stored encrypted (AES-256-GCM) and are never shown
+again, logged, exported or exposed over MCP. Environment variables (see
+`.env.example`) add a read-only provider per kind for unattended setups;
+they do not change the providers saved in the UI.
 
 With Anthropic, the default model is `claude-opus-5-5`. For models that
 support it, requests to the Anthropic API ask for the server-side refusal
@@ -79,7 +94,10 @@ by a fallback model instead of failing.
 
 Style presets (Settings → Styles) hold your own standing instructions for how
 drafted items should be written, such as statement layout, tone or starter
-languages. One preset can be the default.
+languages. One preset can be the default. A new instance starts with three
+built-in presets (Interview practice, the default; Contest style; Study
+notes), which you can edit or delete like your own; deleted ones do not come
+back.
 
 ## Connecting an MCP client
 
@@ -98,11 +116,146 @@ searches, and runs code to verify test cases. No AI provider needs to be
 configured for this. See [`docs/mcp.md`](docs/mcp.md) for the tools and
 prompts.
 
+## Storage
+
+The Compose stack keeps the library in PostgreSQL, in its own `db` service
+(`postgres:18`, volume `codeatrophy-db`), reachable only from the app and
+never published to the host. The `codeatrophy-data` volume is still needed:
+it holds `secret.key`, which encrypts stored API keys.
+
+**SQLite instead.** Set `CODEATROPHY_DATABASE_URL=` (empty) in `.env` and the
+app keeps the library in `/data/codeatrophy.db` in the `codeatrophy-data`
+volume. The `db` container then has nothing to do; start the stack with
+`docker compose up -d --scale db=0` to leave it out. A server binary run on
+its own uses SQLite unless `CODEATROPHY_DATABASE_URL` is set.
+
+Both backends behave the same, search included (same matching rules, same
+relevance order). Searching PostgreSQL reads every item's index entry, which
+is quick for a personal library of thousands of items.
+
+### Upgrading
+
+1. **Back up first** (see [Backup and restore](#backup-and-restore)):
+   `pg_dump` for PostgreSQL, or the `codeatrophy-data` volume for SQLite.
+2. Pull, then `docker compose up -d --build`. By default the server applies
+   pending schema migrations at startup and logs each one. Before migrating
+   a SQLite database it also writes a copy next to it, named after the
+   version it was at (`codeatrophy.db.backup-v5-<time>`), and keeps the
+   three newest; PostgreSQL gets no automatic backup.
+
+**Migrating by hand.** With `CODEATROPHY_DB_AUTO_MIGRATE=off` the server
+never changes the schema: on a database behind its version (or without a
+schema) it stops with a message naming both versions. Then run
+
+```sh
+docker compose build app
+docker compose stop app
+docker compose run --rm app db migrate   # lists what is pending, then applies it
+docker compose up -d
+```
+
+`db migrate` always migrates, whatever the setting, and says "nothing to do"
+when the database is current. In this mode the automatic SQLite import below
+does not run either: the server stops and says to run `db copy` instead.
+
+**Rehearsing.** Try the upgrade on a copy first. While the old version still
+runs, copy the library with the old binary, then migrate the copy with the
+new one. With SQLite the copy is a file next to the database:
+
+```sh
+docker compose exec app codeatrophy db copy --from configured --to /data/rehearsal.db
+docker compose build app
+docker compose run --rm app db migrate --db /data/rehearsal.db
+docker compose run --rm app db status --db /data/rehearsal.db
+```
+
+With PostgreSQL, rehearse on a scratch database in the same server
+(`createdb -U codeatrophy rehearsal` in the `db` service, then use
+`postgres://codeatrophy:<password>@db:5432/rehearsal?sslmode=disable` in place
+of `/data/rehearsal.db`, and `dropdb` it afterwards). The copy has to be made
+by the old version, because `db copy` first brings its source to its own
+binary's schema; the new version would migrate your real database. Remove
+the rehearsal copy when done.
+
+**Forward only.** The schema only moves forward. A server older than the
+database refuses to start ("this database was last used by a newer
+Codeatrophy; upgrade the server") and changes nothing. To roll back, restore
+the backup from step 1 and start the old version.
+
+**Coming from SQLite.** Installs from before PostgreSQL have their library
+in `codeatrophy.db` in the `codeatrophy-data` volume. On the first start
+after the upgrade, the server finds the new PostgreSQL database empty,
+copies the SQLite database into it, checks every table's row count, and
+renames the file to `codeatrophy.db.migrated-<UTC time>`, which stays as a
+backup. The log says what was imported. If the import fails, nothing is
+imported, the file stays where it is, and the server stops with the reason;
+set `CODEATROPHY_DATABASE_URL=` to keep running on SQLite meanwhile. Once
+PostgreSQL holds a library, a SQLite file is never imported over it (the log
+says so). `CODEATROPHY_SQLITE_IMPORT=off` turns the import off.
+
+### Database commands
+
+The server binary also inspects, migrates and copies databases, without the
+server having to run: `docker compose run --rm app db …` runs it in a one-off
+container with the app's configuration and volumes. A database is a SQLite
+file path or a `postgres://` URL; `configured` (in `copy`) and the default
+(in `status` and `migrate`) mean the configured one, which keeps its password
+off the command line.
+
+```sh
+docker compose run --rm app db status     # backend, schema version, pending migrations, row counts
+docker compose run --rm app db migrate    # list and apply pending migrations, then exit
+docker compose run --rm app db copy --from <database> --to <database> [--replace]
+```
+
+`db copy` copies everything (settings, AI providers, style presets, items,
+collections, test cases, solutions, submissions) with ids, timestamps and
+order unchanged, in one transaction, in either direction. It refuses a
+destination that already holds a library unless `--replace` is given, which
+deletes that library first, and it refuses to copy a database onto itself.
+Stop the app (`docker compose stop app`) before copying into the database
+it uses. Stored API keys are copied encrypted, so the destination needs the
+same `secret.key` (or `CODEATROPHY_SECRET_KEY`).
+
+### Switching backends
+
+- *SQLite to PostgreSQL:* point `CODEATROPHY_DATABASE_URL` at an empty
+  PostgreSQL database and start; the import above does the rest.
+- *PostgreSQL to SQLite:* copy the library into a file, then switch:
+
+  ```sh
+  docker compose run --rm app db copy --from configured --to /data/codeatrophy.db --replace
+  # then set CODEATROPHY_DATABASE_URL= in .env and
+  docker compose up -d
+  ```
+
+  (`--replace` overwrites a SQLite file that is already there. If the
+  PostgreSQL database still holds the library, a later switch back to it
+  ignores the file and keeps the PostgreSQL data.)
+
 ## Backup and restore
 
-All state lives in the `codeatrophy-data` volume: the SQLite database
-(`codeatrophy.db` with its `-wal`/`-shm` files) and, unless you set
-`CODEATROPHY_SECRET_KEY`, the generated `secret.key`.
+Back up the database and the secret key: `secret.key` in the
+`codeatrophy-data` volume, unless you set `CODEATROPHY_SECRET_KEY`. Without
+it, stored API keys cannot be decrypted and must be entered again;
+everything else is readable without it.
+
+**PostgreSQL** (the Compose default):
+
+```sh
+# Back up the database, and the data volume for secret.key
+docker compose exec -T db pg_dump -U codeatrophy -d codeatrophy --format=custom > codeatrophy.dump
+docker run --rm -v codeatrophy_codeatrophy-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/codeatrophy-data.tgz -C /data .
+
+# Restore the database (into the running db service; the app is stopped)
+docker compose stop app
+docker compose exec -T db pg_restore -U codeatrophy -d codeatrophy --clean --if-exists < codeatrophy.dump
+docker compose start app
+```
+
+**SQLite:** all state is in the `codeatrophy-data` volume (`codeatrophy.db`
+with its `-wal`/`-shm` files, and `secret.key`).
 
 ```sh
 # Back up (stop the app so the database files are consistent)
@@ -118,12 +271,11 @@ docker run --rm -v codeatrophy_codeatrophy-data:/data -v "$PWD":/backup alpine \
 docker compose start app
 ```
 
-Keep `secret.key` (or your `CODEATROPHY_SECRET_KEY`) with the backup: without
-it, stored API keys cannot be decrypted and must be entered again. Everything
-else is readable without it.
-
+`codeatrophy db copy` into a SQLite file is a backend-neutral backup too.
 For moving content between instances, use bundles (Export / Import in the UI)
-instead; they carry content only, not your progress, notes or settings.
+instead; they carry content only, not your progress, notes or settings. A
+bundle that holds a solution-only problem uses bundle format version 2,
+which an older Codeatrophy refuses to import; upgrade it first.
 
 ## Security
 
@@ -134,7 +286,7 @@ instead; they carry content only, not your progress, notes or settings.
   and set `CODEATROPHY_PUBLIC_URL` to the public URL (its origin is then
   allowed to make changes, and MCP clients are told the endpoint's URL).
   AI requests and verification runs can take minutes: raise the proxy's read
-  timeout to at least five minutes for `/api/v1/ai/` and `/api/v1/items/*/ai/`,
+  timeout to at least six minutes for `/api/v1/ai/` and `/api/v1/items/*/ai/`,
   and leave `/mcp` unbuffered with a long timeout, since it streams.
 - **Host names it answers to (DNS rebinding).** The API and `/mcp` answer
   only to requests whose `Host` is `localhost` or a loopback address, the host
@@ -176,6 +328,9 @@ instead; they carry content only, not your progress, notes or settings.
   - memory-limit verdicts are recognised from the runtime's allocation error
     (`MemoryError`, `std::bad_alloc`, `OutOfMemoryError`, ...) or from the
     peak memory, since Judge0 reports no memory-limit status.
+  - a Java or Kotlin program — the source, or for a solution-only problem the
+    runner code with the solution — may be at most 10 MiB (Judge0's
+    `MAX_EXTRACT_SIZE`); a larger one is refused with a validation error.
   On a cgroup v1 host you can set `CODEATROPHY_JUDGE0_CGROUPS=true` for
   Judge0's cgroup accounting instead.
 - **AI input.** Generated drafts are never saved without your review, model
@@ -191,7 +346,8 @@ Layout: `cmd/` and `internal/` hold the Go server, `web/` the React UI,
 
 ```sh
 make help          # all targets
-make test          # Go tests
+make test          # Go tests (SQLite)
+make test-postgres # Go tests on PostgreSQL, against a throwaway server in Docker
 make lint          # go vet, gofmt check, UI lint and type check
 make web-dev-mock  # UI dev server with an in-memory API mock
 make run           # server on :8080 with data in ./data

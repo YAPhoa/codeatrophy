@@ -36,6 +36,7 @@ export const routes = createRoutesFromElements(
     <Route path="import" element={<ImportPage />} />
     <Route path="share" element={<Navigate to="/export" replace />} />
     <Route path="settings" element={<SettingsPage />} />
+    <Route path="settings/:section" element={<SettingsPage />} />
     <Route path="*" element={<NotFoundPage />} />
   </Route>,
 );

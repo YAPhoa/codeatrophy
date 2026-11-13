@@ -42,7 +42,7 @@ export interface EditorShortcut {
 export interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
-  /** A language id from the API (`python`, `cpp`, …), `markdown`, or null for plain text. */
+  /** A language id from the API (`python`, `cpp`, …), `markdown`, `json`, or null for plain text. */
   language?: string | null;
   readOnly?: boolean;
   ariaLabel: string;
@@ -52,6 +52,8 @@ export interface CodeEditorProps {
    * gutters, and none of the user's code-editor preferences.
    */
   prose?: boolean;
+  /** Wrap long lines whatever the preference says: for text that is read, such as raw JSON. */
+  wrap?: boolean;
   placeholder?: string;
   shortcuts?: readonly EditorShortcut[];
   autoFocus?: boolean;
@@ -189,7 +191,7 @@ const OPTION_KEYS = Object.keys(optionExtensions) as (keyof typeof optionExtensi
  * Every editor reads the user's editor preferences itself and applies a
  * change at once, in place: the text, selection and undo history are kept.
  */
-export default function CodeEditorImpl({ value, onChange, language, readOnly = false, ariaLabel, className, prose = false, placeholder, shortcuts, autoFocus }: CodeEditorProps) {
+export default function CodeEditorImpl({ value, onChange, language, readOnly = false, ariaLabel, className, prose = false, wrap = false, placeholder, shortcuts, autoFocus }: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -197,7 +199,7 @@ export default function CodeEditorImpl({ value, onChange, language, readOnly = f
   const [compartments] = useState(createCompartments);
 
   const preferences = usePreferences().editor;
-  const options = useMemo(() => resolveEditorOptions(preferences, { prose }), [preferences, prose]);
+  const options = useMemo(() => resolveEditorOptions(preferences, { prose, wrap }), [preferences, prose, wrap]);
   const optionsRef = useRef(options);
   /** The options the live editor is configured with. */
   const appliedRef = useRef(options);

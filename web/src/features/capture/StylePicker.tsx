@@ -22,7 +22,7 @@ const NONE = '__none__';
 export function StylePicker({ styles, value, onChange, disabled, id = 'style-picker' }: StylePickerProps) {
   if (styles.length === 0) {
     return (
-      <Link to="/settings#styles" className="style-link" title="Save your own standing instructions for how drafts are written">
+      <Link to="/settings/styles" className="style-link" title="Save your own standing instructions for how drafts are written">
         <PenLine size={13} aria-hidden="true" />
         Add a writing style
       </Link>

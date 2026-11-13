@@ -127,9 +127,11 @@ export function StylesSection() {
   };
 
   return (
-    <section id="styles" className="settings-section" aria-labelledby="styles-title">
+    <section className="settings-section" aria-labelledby="styles-title">
       <div className="row">
-        <h2 id="styles-title">Writing styles</h2>
+        <h1 id="styles-title" className="page-title">
+          Writing styles
+        </h1>
         {list.length > 0 && (
           <span className="muted">
             {list.length} of {bounds.maxPresets}

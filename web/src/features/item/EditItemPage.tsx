@@ -10,6 +10,7 @@ import { MOD, useHotkeys } from '../../lib/hotkeys';
 import {
   FIELD_LABEL,
   changedFields,
+  effectiveHarness,
   formErrorsFromFields,
   formFromItem,
   mergeForms,
@@ -52,6 +53,10 @@ function describeValue(field: EditableField, form: ItemFormState, collectionName
       return form.collectionIds.map(collectionName).join(', ') || '(none)';
     case 'starterCode':
       return Object.keys(form.starterCode).join(', ') || '(none)';
+    case 'interface':
+      return form.interface === 'function' ? 'Solution only' : 'Full program';
+    case 'harness':
+      return Object.keys(effectiveHarness(form)).join(', ') || '(none)';
     case 'difficulty':
       return form.difficulty ?? '(not set)';
     case 'timeLimitMs':

@@ -1,0 +1,481 @@
+[
+ {
+  "name": "python/compile",
+  "language": "python",
+  "lineOffset": 6,
+  "sourceLines": 6,
+  "suffixLines": 5,
+  "files": [
+   "script.py"
+  ],
+  "output": "  File \"script.py\", line 9\n    s = = 0\n        ^\nSyntaxError: invalid syntax\n",
+  "want": "  File \"script.py\", line 3\n    s = = 0\n        ^\nSyntaxError: invalid syntax\n"
+ },
+ {
+  "name": "python/runtime",
+  "language": "python",
+  "lineOffset": 6,
+  "sourceLines": 6,
+  "suffixLines": 5,
+  "files": [
+   "script.py"
+  ],
+  "output": "Traceback (most recent call last):\n  File \"script.py\", line 17, in <module>\n    print(json.dumps(Solution().total(nums)))\n  File \"script.py\", line 11, in total\n    s += x // 0\nZeroDivisionError: integer division or modulo by zero\n",
+  "want": "Traceback (most recent call last):\n  File \"<runner suffix>\", line 5, in <module>\n    print(json.dumps(Solution().total(nums)))\n  File \"script.py\", line 5, in total\n    s += x // 0\nZeroDivisionError: integer division or modulo by zero\n"
+ },
+ {
+  "name": "python/stub",
+  "language": "python",
+  "lineOffset": 6,
+  "sourceLines": 3,
+  "suffixLines": 5,
+  "files": [
+   "script.py"
+  ],
+  "output": "  File \"script.py\", line 12\n    if __name__ == \"__main__\":\n    ^\nIndentationError: expected an indented block\n",
+  "want": "  File \"<runner suffix>\", line 3\n    if __name__ == \"__main__\":\n    ^\nIndentationError: expected an indented block\n"
+ },
+ {
+  "name": "python/runner",
+  "language": "python",
+  "lineOffset": 6,
+  "sourceLines": 6,
+  "suffixLines": 5,
+  "files": [
+   "script.py"
+  ],
+  "output": "Traceback (most recent call last):\n  File \"script.py\", line 16, in <module>\n    nums = json.loads(sys.stdin.readline())\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/__init__.py\", line 357, in loads\n    return _default_decoder.decode(s)\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n",
+  "want": "Traceback (most recent call last):\n  File \"<runner suffix>\", line 4, in <module>\n    nums = json.loads(sys.stdin.readline())\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/__init__.py\", line 357, in loads\n    return _default_decoder.decode(s)\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/usr/local/python-3.8.1/lib/python3.8/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n"
+ },
+ {
+  "name": "java/compile",
+  "language": "java",
+  "lineOffset": 3,
+  "sourceLines": 7,
+  "suffixLines": 9,
+  "files": [
+   "Main.java"
+  ],
+  "output": "Main.java:6: error: incompatible types: String cannot be converted to int\n        int s = \"a\";\n                ^\n1 error\n",
+  "want": "Main.java:3: error: incompatible types: String cannot be converted to int\n        int s = \"a\";\n                ^\n1 error\n"
+ },
+ {
+  "name": "java/runtime",
+  "language": "java",
+  "lineOffset": 3,
+  "sourceLines": 7,
+  "suffixLines": 9,
+  "files": [
+   "Main.java"
+  ],
+  "output": "Exception in thread \"main\" java.lang.ArithmeticException: / by zero\n\tat Solution.total(Main.java:7)\n\tat Main.main(Main.java:17)\n",
+  "want": "Exception in thread \"main\" java.lang.ArithmeticException: / by zero\n\tat Solution.total(Main.java:4)\n\tat Main.main(<runner suffix>:7)\n"
+ },
+ {
+  "name": "java/stub",
+  "language": "java",
+  "lineOffset": 3,
+  "sourceLines": 5,
+  "suffixLines": 9,
+  "files": [
+   "Main.java"
+  ],
+  "output": "Main.java:7: error: missing return statement\n    }\n    ^\n1 error\n",
+  "want": "Main.java:4: error: missing return statement\n    }\n    ^\n1 error\n"
+ },
+ {
+  "name": "java/runner",
+  "language": "java",
+  "lineOffset": 3,
+  "sourceLines": 7,
+  "suffixLines": 9,
+  "files": [
+   "Main.java"
+  ],
+  "output": "Exception in thread \"main\" java.lang.NumberFormatException: For input string: \"ot jso\"\n\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:68)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:658)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:776)\n\tat java.base/java.util.stream.ReferencePipeline$4$1.accept(ReferencePipeline.java:212)\n\tat java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:195)\n\tat java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:948)\n\tat java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:484)\n\tat java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:474)\n\tat java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:550)\n\tat java.base/java.util.stream.AbstractPipeline.evaluateToArrayNode(AbstractPipeline.java:260)\n\tat java.base/java.util.stream.IntPipeline.toArray(IntPipeline.java:538)\n\tat Main.main(Main.java:16)\n",
+  "want": "Exception in thread \"main\" java.lang.NumberFormatException: For input string: \"ot jso\"\n\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:68)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:658)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:776)\n\tat java.base/java.util.stream.ReferencePipeline$4$1.accept(ReferencePipeline.java:212)\n\tat java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:195)\n\tat java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:948)\n\tat java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:484)\n\tat java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:474)\n\tat java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:550)\n\tat java.base/java.util.stream.AbstractPipeline.evaluateToArrayNode(AbstractPipeline.java:260)\n\tat java.base/java.util.stream.IntPipeline.toArray(IntPipeline.java:538)\n\tat Main.main(<runner suffix>:6)\n"
+ },
+ {
+  "name": "cpp/compile",
+  "language": "cpp",
+  "lineOffset": 3,
+  "sourceLines": 8,
+  "suffixLines": 12,
+  "files": [
+   "main.cpp"
+  ],
+  "output": "main.cpp: In member function ‘int Solution::total(std::vector<int>&)’:\nmain.cpp:7:17: error: invalid conversion from ‘const char*’ to ‘int’ [-fpermissive]\n    7 |         int s = \"a\";\n      |                 ^~~\n      |                 |\n      |                 const char*\n",
+  "want": "main.cpp: In member function ‘int Solution::total(std::vector<int>&)’:\nmain.cpp:4:17: error: invalid conversion from ‘const char*’ to ‘int’ [-fpermissive]\n    4 |         int s = \"a\";\n      |                 ^~~\n      |                 |\n      |                 const char*\n"
+ },
+ {
+  "name": "cpp/runtime",
+  "language": "cpp",
+  "lineOffset": 3,
+  "sourceLines": 9,
+  "suffixLines": 12,
+  "files": [
+   "main.cpp"
+  ],
+  "output": "a.out: main.cpp:7: int Solution::total(std::vector<int>&): Assertion `nums.size() > 100' failed.\n",
+  "want": "a.out: main.cpp:4: int Solution::total(std::vector<int>&): Assertion `nums.size() > 100' failed.\n"
+ },
+ {
+  "name": "cpp/stub",
+  "language": "cpp",
+  "lineOffset": 3,
+  "sourceLines": 6,
+  "suffixLines": 12,
+  "files": [
+   "main.cpp"
+  ],
+  "output": "main.cpp: In member function ‘int Solution::total(std::vector<int>&)’:\nmain.cpp:8:5: warning: no return statement in function returning non-void [-Wreturn-type]\n    8 |     }\n      |     ^\n",
+  "want": "main.cpp: In member function ‘int Solution::total(std::vector<int>&)’:\nmain.cpp:5:5: warning: no return statement in function returning non-void [-Wreturn-type]\n    5 |     }\n      |     ^\n"
+ },
+ {
+  "name": "cpp/runner",
+  "language": "cpp",
+  "lineOffset": 3,
+  "sourceLines": 8,
+  "suffixLines": 12,
+  "files": [
+   "main.cpp"
+  ],
+  "output": "terminate called after throwing an instance of 'std::runtime_error'\n  what():  bad input\n",
+  "want": "terminate called after throwing an instance of 'std::runtime_error'\n  what():  bad input\n"
+ },
+ {
+  "name": "c/compile",
+  "language": "c",
+  "lineOffset": 4,
+  "sourceLines": 5,
+  "suffixLines": 8,
+  "files": [
+   "main.c"
+  ],
+  "output": "main.c: In function ‘total’:\nmain.c:6:13: error: expected expression before ‘;’ token\n    6 |     int s = ;\n      |             ^\n",
+  "want": "main.c: In function ‘total’:\nmain.c:2:13: error: expected expression before ‘;’ token\n    2 |     int s = ;\n      |             ^\n"
+ },
+ {
+  "name": "c/runtime",
+  "language": "c",
+  "lineOffset": 4,
+  "sourceLines": 6,
+  "suffixLines": 8,
+  "files": [
+   "main.c"
+  ],
+  "output": "a.out: main.c:7: total: Assertion `n > 100' failed.\n",
+  "want": "a.out: main.c:3: total: Assertion `n > 100' failed.\n"
+ },
+ {
+  "name": "c/runner",
+  "language": "c",
+  "lineOffset": 4,
+  "sourceLines": 5,
+  "suffixLines": 8,
+  "files": [
+   "main.c"
+  ],
+  "output": "bad input\na.out: main.c:13: main: Assertion `0' failed.\n",
+  "want": "bad input\na.out: <runner suffix>:4: main: Assertion `0' failed.\n"
+ },
+ {
+  "name": "go/compile",
+  "language": "go",
+  "lineOffset": 8,
+  "sourceLines": 7,
+  "suffixLines": 8,
+  "files": [
+   "main.go",
+   "./main.go",
+   "/box/main.go"
+  ],
+  "output": "# command-line-arguments\n./main.go:12:10: cannot convert \"a\" (type untyped string) to type int\n./main.go:12:10: invalid operation: x + \"a\" (mismatched types int and string)\n",
+  "want": "# command-line-arguments\n./main.go:4:10: cannot convert \"a\" (type untyped string) to type int\n./main.go:4:10: invalid operation: x + \"a\" (mismatched types int and string)\n"
+ },
+ {
+  "name": "go/runtime",
+  "language": "go",
+  "lineOffset": 8,
+  "sourceLines": 7,
+  "suffixLines": 8,
+  "files": [
+   "main.go",
+   "./main.go",
+   "/box/main.go"
+  ],
+  "output": "panic: runtime error: index out of range [3] with length 3\n\ngoroutine 1 [running]:\nmain.total(0xc0000140a0, 0x3, 0x4, 0x0)\n\t/box/main.go:12 +0x20\nmain.main()\n\t/box/main.go:22 +0xd1\n",
+  "want": "panic: runtime error: index out of range [3] with length 3\n\ngoroutine 1 [running]:\nmain.total(0xc0000140a0, 0x3, 0x4, 0x0)\n\t/box/main.go:4 +0x20\nmain.main()\n\t<runner suffix>:7 +0xd1\n"
+ },
+ {
+  "name": "go/stub",
+  "language": "go",
+  "lineOffset": 8,
+  "sourceLines": 3,
+  "suffixLines": 8,
+  "files": [
+   "main.go",
+   "./main.go",
+   "/box/main.go"
+  ],
+  "output": "# command-line-arguments\n./main.go:11:1: missing return at end of function\n",
+  "want": "# command-line-arguments\n./main.go:3:1: missing return at end of function\n"
+ },
+ {
+  "name": "go/runner",
+  "language": "go",
+  "lineOffset": 8,
+  "sourceLines": 7,
+  "suffixLines": 8,
+  "files": [
+   "main.go",
+   "./main.go",
+   "/box/main.go"
+  ],
+  "output": "panic: invalid character 'o' in literal null (expecting 'u')\n\ngoroutine 1 [running]:\nmain.main()\n\t/box/main.go:20 +0x16e\n",
+  "want": "panic: invalid character 'o' in literal null (expecting 'u')\n\ngoroutine 1 [running]:\nmain.main()\n\t<runner suffix>:5 +0x16e\n"
+ },
+ {
+  "name": "javascript/compile",
+  "language": "javascript",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 3,
+  "files": [
+   "script.js",
+   "/box/script.js"
+  ],
+  "output": "/box/script.js:9\n    for (const x of nums s += x;\n                         ^\n\nSyntaxError: Unexpected identifier\n    at Module._compile (internal/modules/cjs/loader.js:895:18)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n",
+  "want": "/box/script.js:7\n    for (const x of nums s += x;\n                         ^\n\nSyntaxError: Unexpected identifier\n    at Module._compile (internal/modules/cjs/loader.js:895:18)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n"
+ },
+ {
+  "name": "javascript/runtime",
+  "language": "javascript",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 3,
+  "files": [
+   "script.js",
+   "/box/script.js"
+  ],
+  "output": "/box/script.js:9\n    for (const x of nums) s += null.x;\n                                    ^\n\nTypeError: Cannot read property 'x' of null\n    at total (/box/script.js:9:37)\n    at Object.<anonymous> (/box/script.js:14:28)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n",
+  "want": "/box/script.js:7\n    for (const x of nums) s += null.x;\n                                    ^\n\nTypeError: Cannot read property 'x' of null\n    at total (/box/script.js:7:37)\n    at Object.<anonymous> (<runner suffix>:3:28)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n"
+ },
+ {
+  "name": "javascript/runner",
+  "language": "javascript",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 3,
+  "files": [
+   "script.js",
+   "/box/script.js"
+  ],
+  "output": "undefined:1\nnot json\n ^\n\nSyntaxError: Unexpected token o in JSON at position 1\n    at JSON.parse (<anonymous>)\n    at Object.<anonymous> (/box/script.js:13:19)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n",
+  "want": "undefined:1\nnot json\n ^\n\nSyntaxError: Unexpected token o in JSON at position 1\n    at JSON.parse (<anonymous>)\n    at Object.<anonymous> (<runner suffix>:2:19)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n"
+ },
+ {
+  "name": "typescript/compile",
+  "language": "typescript",
+  "lineOffset": 2,
+  "sourceLines": 5,
+  "suffixLines": 3,
+  "files": [
+   "script.ts"
+  ],
+  "output": "script.ts(4,9): error TS2322: Type '\"a\"' is not assignable to type 'number'.\n",
+  "want": "script.ts(2,9): error TS2322: Type '\"a\"' is not assignable to type 'number'.\n"
+ },
+ {
+  "name": "typescript/stub",
+  "language": "typescript",
+  "lineOffset": 2,
+  "sourceLines": 3,
+  "suffixLines": 3,
+  "files": [
+   "script.ts"
+  ],
+  "output": "script.ts(3,33): error TS2355: A function whose declared type is neither 'void' nor 'any' must return a value.\n",
+  "want": "script.ts(1,33): error TS2355: A function whose declared type is neither 'void' nor 'any' must return a value.\n"
+ },
+ {
+  "name": "typescript/runtime",
+  "language": "typescript",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 3,
+  "files": [
+   "script.ts"
+  ],
+  "output": "/box/script.js:5\n        s += null.x;\n                  ^\n\nTypeError: Cannot read property 'x' of null\n    at total (/box/script.js:5:19)\n    at Object.<anonymous> (/box/script.js:10:28)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n",
+  "want": "/box/script.js:5\n        s += null.x;\n                  ^\n\nTypeError: Cannot read property 'x' of null\n    at total (/box/script.js:5:19)\n    at Object.<anonymous> (/box/script.js:10:28)\n    at Module._compile (internal/modules/cjs/loader.js:959:30)\n    at Object.Module._extensions..js (internal/modules/cjs/loader.js:995:10)\n    at Module.load (internal/modules/cjs/loader.js:815:32)\n    at Function.Module._load (internal/modules/cjs/loader.js:727:14)\n    at Function.Module.runMain (internal/modules/cjs/loader.js:1047:10)\n    at internal/main/run_main_module.js:17:11\n"
+ },
+ {
+  "name": "kotlin/compile",
+  "language": "kotlin",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 6,
+  "files": [
+   "Main.kt"
+  ],
+  "output": "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release.\nMain.kt:5:22: error: type mismatch: inferred type is String but Int was expected\n        var s: Int = \"a\"\n                     ^\n",
+  "want": "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release.\nMain.kt:3:22: error: type mismatch: inferred type is String but Int was expected\n        var s: Int = \"a\"\n                     ^\n"
+ },
+ {
+  "name": "kotlin/runtime",
+  "language": "kotlin",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 6,
+  "files": [
+   "Main.kt"
+  ],
+  "output": "Exception in thread \"main\" java.lang.ArithmeticException: / by zero\n\tat Solution.total(Main.kt:6)\n\tat MainKt.main(Main.kt:14)\n\tat MainKt.main(Main.kt)\n",
+  "want": "Exception in thread \"main\" java.lang.ArithmeticException: / by zero\n\tat Solution.total(Main.kt:4)\n\tat MainKt.main(<runner suffix>:5)\n\tat MainKt.main(Main.kt)\n"
+ },
+ {
+  "name": "kotlin/stub",
+  "language": "kotlin",
+  "lineOffset": 2,
+  "sourceLines": 5,
+  "suffixLines": 6,
+  "files": [
+   "Main.kt"
+  ],
+  "output": "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release.\nMain.kt:6:5: error: a 'return' expression required in a function with a block body ('{...}')\n    }\n    ^\n",
+  "want": "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release.\nMain.kt:4:5: error: a 'return' expression required in a function with a block body ('{...}')\n    }\n    ^\n"
+ },
+ {
+  "name": "kotlin/runner",
+  "language": "kotlin",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 6,
+  "files": [
+   "Main.kt"
+  ],
+  "output": "Exception in thread \"main\" java.lang.NumberFormatException: For input string: \"not json\"\n\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:68)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:658)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:776)\n\tat MainKt.main(Main.kt:13)\n\tat MainKt.main(Main.kt)\n",
+  "want": "Exception in thread \"main\" java.lang.NumberFormatException: For input string: \"not json\"\n\tat java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:68)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:658)\n\tat java.base/java.lang.Integer.parseInt(Integer.java:776)\n\tat MainKt.main(<runner suffix>:4)\n\tat MainKt.main(Main.kt)\n"
+ },
+ {
+  "name": "ruby/compile",
+  "language": "ruby",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 3,
+  "files": [
+   "script.rb"
+  ],
+  "output": "script.rb:6: syntax error, unexpected '='\n  s = = 0\n      ^\n",
+  "want": "script.rb:4: syntax error, unexpected '='\n  s = = 0\n      ^\n"
+ },
+ {
+  "name": "ruby/runtime",
+  "language": "ruby",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 3,
+  "files": [
+   "script.rb"
+  ],
+  "output": "script.rb:7:in `/': divided by 0 (ZeroDivisionError)\n\tfrom script.rb:7:in `block in total'\n\tfrom script.rb:7:in `each'\n\tfrom script.rb:7:in `total'\n\tfrom script.rb:12:in `<main>'\n",
+  "want": "script.rb:5:in `/': divided by 0 (ZeroDivisionError)\n\tfrom script.rb:5:in `block in total'\n\tfrom script.rb:5:in `each'\n\tfrom script.rb:5:in `total'\n\tfrom <runner suffix>:3:in `<main>'\n"
+ },
+ {
+  "name": "ruby/runner",
+  "language": "ruby",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 3,
+  "files": [
+   "script.rb"
+  ],
+  "output": "/usr/local/ruby-2.7.0/lib/ruby/2.7.0/json/common.rb:156:in `parse': 783: unexpected token at 'not json (JSON::ParserError)\n'\n\tfrom /usr/local/ruby-2.7.0/lib/ruby/2.7.0/json/common.rb:156:in `parse'\n\tfrom script.rb:11:in `<main>'\n",
+  "want": "/usr/local/ruby-2.7.0/lib/ruby/2.7.0/json/common.rb:156:in `parse': 783: unexpected token at 'not json (JSON::ParserError)\n'\n\tfrom /usr/local/ruby-2.7.0/lib/ruby/2.7.0/json/common.rb:156:in `parse'\n\tfrom <runner suffix>:2:in `<main>'\n"
+ },
+ {
+  "name": "rust/compile",
+  "language": "rust",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 13,
+  "files": [
+   "main.rs"
+  ],
+  "output": "error[E0308]: mismatched types\n --> main.rs:7:26\n  |\n7 |         let mut s: i32 = \"a\";\n  |                          ^^^ expected i32, found reference\n  |\n  = note: expected type `i32`\n             found type `&'static str`\n\nerror: aborting due to previous error\n\nFor more information about this error, try `rustc --explain E0308`.\n",
+  "want": "error[E0308]: mismatched types\n --> main.rs:5:26\n  |\n5 |         let mut s: i32 = \"a\";\n  |                          ^^^ expected i32, found reference\n  |\n  = note: expected type `i32`\n             found type `&'static str`\n\nerror: aborting due to previous error\n\nFor more information about this error, try `rustc --explain E0308`.\n"
+ },
+ {
+  "name": "rust/stub",
+  "language": "rust",
+  "lineOffset": 2,
+  "sourceLines": 7,
+  "suffixLines": 13,
+  "files": [
+   "main.rs"
+  ],
+  "output": "error[E0308]: mismatched types\n --> main.rs:6:37\n  |\n6 |     pub fn total(nums: Vec<i32>) -> i32 {\n  |            -----                    ^^^ expected i32, found ()\n  |            |\n  |            implicitly returns `()` as its body has no tail or `return` expression\n  |\n  = note: expected type `i32`\n             found type `()`\n\nerror: aborting due to previous error\n\nFor more information about this error, try `rustc --explain E0308`.\n",
+  "want": "error[E0308]: mismatched types\n --> main.rs:4:37\n  |\n4 |     pub fn total(nums: Vec<i32>) -> i32 {\n  |            -----                    ^^^ expected i32, found ()\n  |            |\n  |            implicitly returns `()` as its body has no tail or `return` expression\n  |\n  = note: expected type `i32`\n             found type `()`\n\nerror: aborting due to previous error\n\nFor more information about this error, try `rustc --explain E0308`.\n"
+ },
+ {
+  "name": "rust/runtime",
+  "language": "rust",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 13,
+  "files": [
+   "main.rs"
+  ],
+  "output": "thread 'main' panicked at 'index out of bounds: the len is 3 but the index is 3', /rustc/73528e339aae0f17a15ffa49a8ac608f50c6cf14/src/libcore/slice/mod.rs:2796:10\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace.\n",
+  "want": "thread 'main' panicked at 'index out of bounds: the len is 3 but the index is 3', /rustc/73528e339aae0f17a15ffa49a8ac608f50c6cf14/src/libcore/slice/mod.rs:2796:10\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace.\n"
+ },
+ {
+  "name": "rust/runner",
+  "language": "rust",
+  "lineOffset": 2,
+  "sourceLines": 9,
+  "suffixLines": 13,
+  "files": [
+   "main.rs"
+  ],
+  "output": "thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }', src/libcore/result.rs:1165:5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace.\n",
+  "want": "thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }', src/libcore/result.rs:1165:5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace.\n"
+ },
+ {
+  "name": "csharp/compile",
+  "language": "csharp",
+  "lineOffset": 3,
+  "sourceLines": 7,
+  "suffixLines": 8,
+  "files": [
+   "Main.cs"
+  ],
+  "output": "Main.cs(6,17): error CS0029: Cannot implicitly convert type `string' to `int'\nCompilation failed: 1 error(s), 0 warnings\n",
+  "want": "Main.cs(3,17): error CS0029: Cannot implicitly convert type `string' to `int'\nCompilation failed: 1 error(s), 0 warnings\n"
+ },
+ {
+  "name": "csharp/stub",
+  "language": "csharp",
+  "lineOffset": 3,
+  "sourceLines": 5,
+  "suffixLines": 8,
+  "files": [
+   "Main.cs"
+  ],
+  "output": "Main.cs(5,16): error CS0161: `Solution.Total(int[])': not all code paths return a value\nCompilation failed: 1 error(s), 0 warnings\n",
+  "want": "Main.cs(2,16): error CS0161: `Solution.Total(int[])': not all code paths return a value\nCompilation failed: 1 error(s), 0 warnings\n"
+ },
+ {
+  "name": "csharp/runtime",
+  "language": "csharp",
+  "lineOffset": 3,
+  "sourceLines": 7,
+  "suffixLines": 8,
+  "files": [
+   "Main.cs"
+  ],
+  "output": "\nUnhandled Exception:\nSystem.DivideByZeroException: Attempted to divide by zero.\n  at Solution.Total (System.Int32[] nums) [0x0000f] in <0d070fc1618941e4a7c3979376a537d9>:0 \n  at Program.Main () [0x0006a] in <0d070fc1618941e4a7c3979376a537d9>:0 \n[ERROR] FATAL UNHANDLED EXCEPTION: System.DivideByZeroException: Attempted to divide by zero.\n  at Solution.Total (System.Int32[] nums) [0x0000f] in <0d070fc1618941e4a7c3979376a537d9>:0 \n  at Program.Main () [0x0006a] in <0d070fc1618941e4a7c3979376a537d9>:0 \n",
+  "want": "\nUnhandled Exception:\nSystem.DivideByZeroException: Attempted to divide by zero.\n  at Solution.Total (System.Int32[] nums) [0x0000f] in <0d070fc1618941e4a7c3979376a537d9>:0 \n  at Program.Main () [0x0006a] in <0d070fc1618941e4a7c3979376a537d9>:0 \n[ERROR] FATAL UNHANDLED EXCEPTION: System.DivideByZeroException: Attempted to divide by zero.\n  at Solution.Total (System.Int32[] nums) [0x0000f] in <0d070fc1618941e4a7c3979376a537d9>:0 \n  at Program.Main () [0x0006a] in <0d070fc1618941e4a7c3979376a537d9>:0 \n"
+ }
+]

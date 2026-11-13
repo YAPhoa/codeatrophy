@@ -4,7 +4,9 @@ A bundle is a portable snapshot of part of a library: items, their test
 cases, and the collections that organise them. It is the unit of import,
 export and sharing.
 
-Format name `codeatrophy.bundle`, **format version 1**.
+Format name `codeatrophy.bundle`, **format versions 1 and 2**. Version 2
+adds solution-only problems (see [Versions](#versions)); everything else is
+the same in both.
 
 ## Goals
 
@@ -38,6 +40,9 @@ items/
     starter/
       python.py
       cpp.cpp
+    harness/                  (version 2, solution-only problems)
+      python-prefix.py
+      python-suffix.py
     solutions/
       solutions.json
       01-hash-map-one-pass.py
@@ -86,7 +91,9 @@ them and locate items through `bundle.json`.
 ```
 
 - `format` and `formatVersion` are required. A reader rejects a bundle whose
-  `formatVersion` is greater than it supports.
+  `formatVersion` is greater than it supports. Writers use the lowest
+  version that can carry the bundle's content: 2 when it holds a
+  solution-only problem, otherwise 1.
 - `items[].path` is the item's directory. `type` and `title` duplicate
   `item.json` so a bundle can be listed without opening every item.
 - `collections[].itemIds` is ordered and refers only to items in this bundle.
@@ -130,6 +137,26 @@ them and locate items through `bundle.json`.
 - The Markdown body is always in `body.md` next to `item.json`.
 - `problem` is present only when `type` is `problem`. Paths inside it are
   relative to the item directory.
+- Version 2 only: `problem.interface` and `problem.harness` describe a
+  solution-only problem (see the HTTP API's "Problem interface"):
+
+  ```json
+  "problem": {
+    "timeLimitMs": 2000, "memoryLimitKb": 262144, "compare": "tokens",
+    "starter": { "python": "starter/python.py" },
+    "interface": "function",
+    "harness": { "python": { "prefix": "harness/python-prefix.py", "suffix": "harness/python-suffix.py" } }
+  }
+  ```
+
+  `interface` is `program` (the default when absent) or `function`. For a
+  `function` problem `starter` holds the stubs the solver starts from, and
+  `harness` names, per language, the files holding the runner code that
+  goes before and after the solver's code (an empty or absent path is an
+  empty part). Writers include both fields only for `function` problems.
+  In a version 1 bundle neither field has a meaning: a reader ignores them
+  (with a warning when `interface` is not `program`), and the problem is a
+  full program.
 - `variantOf` may name an item that is not in the bundle. On import the link
   is kept if that item exists in the target library and dropped otherwise;
   a dropped link is set to `null` before the content hash is compared, so
@@ -206,6 +233,12 @@ solutions: [ { name, language, source, notes, isReference } ]   (in order)
 testCases: [ { name, stdin, expectedStdout, isSample } ]       (in order)
 ```
 
+For a solution-only problem (version 2), `problem` also contains
+`interface: "function"` and `harness: { <language>: { prefix, suffix } }`
+with the runner code itself. A full-program problem has neither, so its
+hash is the same in both versions and the hashes of version 1 bundles stay
+valid.
+
 Ids, timestamps, `origin`, `verified` and everything personal are excluded.
 `problem`, `solutions` and `testCases` are omitted for readings. The hash
 always describes what is *in the bundle*: if solutions or hidden tests were
@@ -227,7 +260,9 @@ For each item in the bundle, compared with the target library by `id`:
 | `changed` | id present, hash differs | Decided by the chosen strategy |
 
 To decide `unchanged` vs `changed`, the importer computes the local item's
-hash over the same fields the bundle contains. If the bundle carries no
+hash over the same fields the bundle contains. A local solution-only problem
+therefore differs from a version 1 bundle's copy of it, which is a full
+program. If the bundle carries no
 solutions or only sample tests, the local solutions and hidden tests are
 ignored for the comparison — and preserved by an overwrite.
 
@@ -253,7 +288,8 @@ import points at the new copy.
 An `overwrite` increases the local item's revision only when its content
 other than test cases changes; replacing only test cases moves its
 `updatedAt` and leaves the revision alone. For a `changed` item, an importer
-reports which content fields differ, `type` first when the type differs.
+reports which content fields differ, `type` first when the type differs;
+`interface` and `harness` follow `starterCode`.
 
 Collection parents that form a cycle are reported and broken by cutting the
 edge that closes the cycle (the collection reached last on the walk keeps
@@ -289,6 +325,9 @@ and say what is wrong, and skip as little as possible:
 | `body.md` missing, not valid UTF-8 or larger than `maxTextBytes` | The body is empty |
 | Invalid optional field (`summary`, `difficulty`, a limit, `compare`, a tag, `source`, `variantOf`) | That field takes its default; extra tags beyond the limit are dropped |
 | Unknown language, or missing/too large/non-UTF-8 source file, in `starter` | That language's starter code is skipped |
+| Version 2: unknown `interface`, or `harness` that is not an object of `{prefix, suffix}` paths | The item is skipped (imported without its runner, it could not be solved) |
+| Version 2: unknown language, or a missing/too large/non-UTF-8 file, in `harness` | That language's harness is skipped, so the problem cannot be run in it |
+| Version 2: `harness` on a `program` problem | Ignored |
 | A solution with an unknown language, invalid name, or missing/too large/non-UTF-8 file | That solution is skipped |
 | `solutions.json` or `tests.json` not JSON or with a wrongly typed field | The item is skipped (importing it without them could replace the local ones with none) |
 | A test case file missing, too large or non-UTF-8 | That case is skipped |
@@ -300,6 +339,19 @@ and say what is wrong, and skip as little as possible:
 misinterpret. Adding optional fields or files does not change the version;
 readers ignore what they do not understand. The meaning of an existing field
 never changes within a version.
+
+### Versions
+
+| Version | Adds |
+| --- | --- |
+| 1 | Items, test cases, solutions, collections |
+| 2 | Solution-only problems: `problem.interface`, `problem.harness` and the `harness/` directory, and the interface and harness in the content hash |
+
+Version 2 is a version of its own rather than optional fields because a
+version 1 reader, which ignores unknown fields, would import a
+solution-only problem as a full program whose starter code is a stub that
+cannot run on its own. Such a reader refuses a version 2 bundle instead
+("bundle format version 2 is newer than this server supports (1)").
 
 Reserved for future versions: an `assets/` directory inside an item directory
 for attachments referenced from `body.md`.

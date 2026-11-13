@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, formatRunTime } from './format';
+import { describeCases, describeChanges, describeRun, describeTotals, describeUsage, formatDuration, formatRunTime, formatTokens } from './format';
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
@@ -55,5 +55,64 @@ describe('describeRun', () => {
 describe('describeChanges', () => {
   it('names saved solutions', () => {
     expect(describeChanges(['starterCode', 'solutions', 'testCases'], 'problem')).toBe('starter code, solutions and test cases');
+  });
+});
+
+describe('formatTokens', () => {
+  it('keeps small counts whole and shortens the rest', () => {
+    expect(formatTokens(0)).toBe('0');
+    expect(formatTokens(850)).toBe('850');
+    expect(formatTokens(1000)).toBe('1k');
+    expect(formatTokens(4380)).toBe('4.4k');
+    expect(formatTokens(5210)).toBe('5.2k');
+    expect(formatTokens(9960)).toBe('10k');
+    expect(formatTokens(61200)).toBe('61k');
+    expect(formatTokens(171500)).toBe('172k');
+    expect(formatTokens(999_700)).toBe('1M');
+    expect(formatTokens(1_240_000)).toBe('1.2M');
+  });
+});
+
+describe('formatDuration', () => {
+  it('rounds to whole seconds from ten up, and counts minutes from sixty', () => {
+    expect(formatDuration(380)).toBe('380 ms');
+    expect(formatDuration(5200)).toBe('5.2 s');
+    expect(formatDuration(48200)).toBe('48 s');
+    expect(formatDuration(59600)).toBe('1 min');
+    expect(formatDuration(72400)).toBe('1 min 12 s');
+  });
+});
+
+describe('describeUsage', () => {
+  const usage = { logId: null, model: 'claude-haiku-5-5', inputTokens: 5210, outputTokens: 4380, reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0, durationMs: 48200 };
+
+  it('gives the model, the tokens each way and the time', () => {
+    expect(describeUsage(usage)).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 48 s');
+  });
+
+  it('leaves out what the provider did not report', () => {
+    expect(describeUsage({ ...usage, inputTokens: null, outputTokens: null })).toBe('claude-haiku-5-5 · 48 s');
+    expect(describeUsage({ ...usage, outputTokens: null })).toBe('claude-haiku-5-5 · 5.2k in · 48 s');
+    expect(describeUsage({ ...usage, model: '', inputTokens: null, outputTokens: null, durationMs: 0 })).toBe('');
+  });
+
+  it('adds reasoning and cache figures only when there were any', () => {
+    expect(describeUsage({ ...usage, reasoningTokens: 1100, cacheReadTokens: 3100 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 1.1k reasoning · 3.1k cache read · 48 s');
+    expect(describeUsage({ ...usage, reasoningTokens: 0, cacheWriteTokens: 5210 })).toBe('claude-haiku-5-5 · 5.2k in · 4.4k out · 5.2k cache write · 48 s');
+  });
+});
+
+describe('describeTotals', () => {
+  const totals = { requests: 14, failed: 1, inputTokens: 61200, outputTokens: 48100 };
+
+  it('counts requests and tokens, and failures only when there are any', () => {
+    expect(describeTotals(totals)).toBe('14 requests · 1 failed · 61k in · 48k out');
+    expect(describeTotals({ ...totals, failed: 0 })).toBe('14 requests · 61k in · 48k out');
+    expect(describeTotals({ requests: 1, failed: 0, inputTokens: 900, outputTokens: 120 })).toBe('1 request · 900 in · 120 out');
+  });
+
+  it('says nothing about tokens no request reported, and so when there were no requests', () => {
+    expect(describeTotals({ requests: 2, failed: 2, inputTokens: 0, outputTokens: 0 })).toBe('2 requests · 2 failed');
+    expect(describeTotals({ requests: 0, failed: 0, inputTokens: 0, outputTokens: 0 })).toBe('No requests');
   });
 });

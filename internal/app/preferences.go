@@ -38,6 +38,7 @@ type prefDef struct {
 
 var preferenceSchema = []prefDef{
 	{path: "hideTestCases", kind: prefBool, def: true},
+	{path: "generatedTestCases", kind: prefInt, def: DefaultGeneratedCases, min: 1, max: MaxGeneratedCases},
 	{path: "editor.autocomplete", kind: prefBool, def: true},
 	{path: "editor.closeBrackets", kind: prefBool, def: true},
 	{path: "editor.matchBrackets", kind: prefBool, def: true},

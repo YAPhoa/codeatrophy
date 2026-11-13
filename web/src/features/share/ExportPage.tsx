@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { useCollections, useItemQuery, useLimits, useStats } from '../../api/queries';
 import type { ExportScope } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { saveBlob } from '../../lib/download';
 import { formatBytes, plural } from '../../lib/format';
 import { buildTree, descendantIds, flattenTree } from '../../lib/tree';
 import { Button, cx } from '../../ui/Button';
@@ -13,17 +14,6 @@ import { Callout, ErrorCallout } from '../../ui/misc';
 import { ShareTabs } from './ShareTabs';
 
 const SHOWN_TITLES = 8;
-
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
 
 /** Export the whole library, one collection subtree, or a selection of items as a bundle. */
 export default function ExportPage() {

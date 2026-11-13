@@ -17,7 +17,8 @@ import { submissionRoutes } from './handlers/submissions';
 import { testCaseRoutes } from './handlers/testcases';
 import type { Handler, Reply, Req } from './http';
 import { badRequest, forbidden, forbiddenHost, HttpError, methodNotAllowed, notFound } from './http';
-import { seedDatabase, seedStyles } from './seed';
+import { seedDatabase, seedIds, seedStyles } from './seed';
+import { seedAiLog } from './seed/aiLog';
 import { abortError, sleep } from './util';
 
 export type { MockOptions } from './db';
@@ -80,6 +81,10 @@ export function createMockServer(options: MockOptions = {}): MockServer {
   if (db.options.library === 'seed') {
     seedDatabase(db);
     if (db.options.styles === 'seed') seedStyles(db);
+    seedAiLog(
+      db,
+      [seedIds.items.twoSum, seedIds.items.coinChange, seedIds.items.mergeIntervals, seedIds.items.lruCache, seedIds.items.editDistance].map((id) => ({ id, title: db.getItem(id).title })),
+    );
   }
 
   const routes = [

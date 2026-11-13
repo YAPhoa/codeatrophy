@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Item, ItemDraft, Limits } from '../api/types';
 import {
+  addFormLanguage,
   changedFields,
+  checkedState,
   draftFromForm,
+  effectiveHarness,
   emptyForm,
+  formLanguages,
   formFromDraft,
   formFromItem,
   inputFromForm,
@@ -11,6 +15,8 @@ import {
   normalizeTags,
   patchFromForm,
   patchTouchesContent,
+  removeFormLanguage,
+  upgradeForm,
   byteLength,
   charCount,
   formErrorsFromFields,
@@ -26,9 +32,25 @@ const draft: ItemDraft = {
   body: '## Problem',
   difficulty: 'easy',
   tags: ['Hash-Map', 'array'],
-  problem: { timeLimitMs: 1000, memoryLimitKb: 131072, compare: 'exact', starterCode: { python: 'pass', go: '   ' } },
-  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true }],
+  problem: {
+    interface: 'program',
+    timeLimitMs: 1000,
+    memoryLimitKb: 131072,
+    compare: 'exact',
+    starterCode: { python: 'pass', go: '   ' },
+    harness: {},
+    referenceSolution: { language: 'python', source: 'print(2)' },
+  },
+  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, verified: true }],
   assumptions: ['Assumed 0-based indices.'],
+};
+
+const runner = { prefix: 'import json\n', suffix: 'print(Solution().solve())\n' };
+
+/** The same draft as a "solution only" problem: a stub and a runner for Python, and a stub alone for Go. */
+const functionDraft: ItemDraft = {
+  ...draft,
+  problem: { ...draft.problem!, interface: 'function', starterCode: { python: 'class Solution:\n    pass', go: 'func solve() {}' }, harness: { python: runner } },
 };
 
 const item: Item = {
@@ -53,8 +75,18 @@ const item: Item = {
   notes: 'private',
   rawInput: null,
   source: { url: null, note: 'interview' },
-  problem: { timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', starterCode: { python: 'pass' }, referenceSolution: { language: 'python', source: 'print(1)' } },
+  problem: {
+    interface: 'program',
+    timeLimitMs: 2000,
+    memoryLimitKb: 262144,
+    compare: 'tokens',
+    starterCode: { python: 'pass' },
+    harness: {},
+    referenceSolution: { language: 'python', source: 'print(1)' },
+  },
 };
+
+const functionItem: Item = { ...item, problem: { ...item.problem!, interface: 'function', starterCode: { python: 'class Solution:\n    pass' }, harness: { python: runner } } };
 
 describe('normalizeTags', () => {
   it('lower-cases, trims, de-duplicates and sorts, as the server does', () => {
@@ -68,12 +100,17 @@ describe('formFromDraft', () => {
     expect(form).toMatchObject({ type: 'problem', title: 'Two Sum', difficulty: 'easy', timeLimitMs: 1000, memoryLimitKb: 131072, compare: 'exact', collectionIds: ['c9'] });
     expect(form.tags).toEqual(['array', 'hash-map', 'practice']);
     expect(form.testCases).toHaveLength(1);
-    expect(form.testCases[0]).toMatchObject({ name: 'Example 1', origin: 'ai', isSample: true });
+    expect(form.testCases[0]).toMatchObject({ name: 'Example 1', origin: 'ai', isSample: true, verified: true });
+  });
+
+  it('takes the interface, the runner and the reference solution of the draft', () => {
+    expect(formFromDraft(draft)).toMatchObject({ interface: 'program', harness: {}, referenceSolution: { language: 'python', source: 'print(2)' } });
+    expect(formFromDraft(functionDraft)).toMatchObject({ interface: 'function', harness: { python: runner } });
   });
 
   it('uses the problem defaults for a reading draft', () => {
     const form = formFromDraft({ ...draft, type: 'reading', problem: null, testCases: [] });
-    expect(form).toMatchObject({ type: 'reading', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', starterCode: {}, testCases: [] });
+    expect(form).toMatchObject({ type: 'reading', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', interface: 'program', starterCode: {}, harness: {}, testCases: [], referenceSolution: null });
   });
 });
 
@@ -84,7 +121,14 @@ describe('draftFromForm', () => {
     expect(back.title).toBe('Two Sum (edited)');
     expect(back.testCases).toEqual(draft.testCases);
     expect(back.assumptions).toEqual(draft.assumptions);
-    expect(back.problem).toEqual({ timeLimitMs: 1000, memoryLimitKb: 131072, compare: 'exact', starterCode: { python: 'pass', go: '   ' } });
+    expect(back.problem).toEqual(draft.problem);
+  });
+
+  it('sends the interface, the runner and the reference solution back for a revision', () => {
+    const back = draftFromForm(formFromDraft(functionDraft), []);
+    expect(back.problem).toMatchObject({ interface: 'function', harness: { python: runner }, referenceSolution: { language: 'python', source: 'print(2)' } });
+    // Switched to a full program in the form, the runner is not part of the draft any more.
+    expect(draftFromForm({ ...formFromDraft(functionDraft), interface: 'program' }, []).problem).toMatchObject({ interface: 'program', harness: {} });
   });
 
   it('has no problem part or test cases for a reading', () => {
@@ -99,7 +143,22 @@ describe('inputFromForm', () => {
     const input = inputFromForm({ ...formFromDraft(draft), sourceUrl: ' https://example.com ', title: '  Two Sum ' }, { rawInput: 'two sum thing' });
     expect(input).toMatchObject({ type: 'problem', title: 'Two Sum', rawInput: 'two sum thing', variantOf: null, source: { url: 'https://example.com', note: null } });
     expect(input.problem?.starterCode).toEqual({ python: 'pass' });
-    expect(input.testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai' }]);
+    expect(input.testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
+  });
+
+  it('saves the reference solution of a draft with the item', () => {
+    expect(inputFromForm(formFromDraft(draft)).problem).toMatchObject({ interface: 'program', harness: {}, referenceSolution: { language: 'python', source: 'print(2)' } });
+    expect(inputFromForm({ ...formFromDraft(draft), referenceSolution: null }).problem?.referenceSolution).toBeNull();
+  });
+
+  it('saves a runner only for a "solution only" problem', () => {
+    const form = formFromDraft(functionDraft);
+    expect(inputFromForm(form).problem).toMatchObject({ interface: 'function', harness: { python: runner } });
+    // Switching to a full program keeps the runner in the form, and saves none.
+    const switched = { ...form, interface: 'program' as const };
+    expect(switched.harness).toEqual({ python: runner });
+    expect(inputFromForm(switched).problem).toMatchObject({ interface: 'program', harness: {} });
+    expect(inputFromForm({ ...switched, interface: 'function' }).problem?.harness).toEqual({ python: runner });
   });
 
   it('sends no problem part or test cases for a reading', () => {
@@ -128,6 +187,14 @@ describe('patchFromForm', () => {
   it('never includes the reference solution, which is edited elsewhere', () => {
     const patch = patchFromForm(item, { ...formFromItem(item), compare: 'exact' });
     expect(patch.problem).toEqual({ compare: 'exact' });
+  });
+
+  it('sends a changed runner, and an empty one with a switch to a full program', () => {
+    expect(patchFromForm(functionItem, formFromItem(functionItem))).toEqual({});
+    const edited = { ...formFromItem(functionItem), harness: { python: { ...runner, suffix: 'print(1)\n' } } };
+    expect(patchFromForm(functionItem, edited)).toEqual({ problem: { harness: { python: { prefix: runner.prefix, suffix: 'print(1)\n' } } } });
+    expect(patchFromForm(functionItem, { ...formFromItem(functionItem), interface: 'program' })).toEqual({ problem: { interface: 'program', harness: {} } });
+    expect(patchFromForm(item, { ...formFromItem(item), interface: 'function' })).toEqual({ problem: { interface: 'function' } });
   });
 
   it('treats collection order as irrelevant but membership as a change', () => {
@@ -172,6 +239,12 @@ describe('mergeForms', () => {
     expect(res.merged.difficulty).toBe('hard');
   });
 
+  it('compares the runner as it would be saved', () => {
+    const form = formFromItem(functionItem);
+    expect(changedFields(form, { ...form, harness: { ...form.harness, go: { prefix: ' ', suffix: '' } } })).toEqual([]);
+    expect(changedFields(form, { ...form, interface: 'program' }).sort()).toEqual(['harness', 'interface']);
+  });
+
   it('reports no differences for cosmetic variations', () => {
     expect(changedFields(base, { ...base, title: ' Two Sum ', tags: ['HASH-MAP', 'array'], collectionIds: ['c2', 'c1'] })).toEqual([]);
   });
@@ -208,6 +281,8 @@ const limits: Limits = {
   maxStyleInstructionsChars: 2000,
   maxModelIdChars: 200,
   maxApiKeyChars: 1000,
+  maxAiProviders: 20,
+  maxAiProviderNameChars: 60,
   maxBundleNameChars: 200,
   maxBundleDescriptionChars: 5000,
   maxSolutionsPerItem: 50,
@@ -256,14 +331,22 @@ describe('validateForm', () => {
   });
 
   it('checks the size of initial test cases', () => {
-    const big = { key: 'k', name: 'big', stdin: 'x'.repeat(8388609), expectedStdout: '', isSample: false, origin: 'manual' as const };
+    const big = { key: 'k', name: 'big', stdin: 'x'.repeat(8388609), expectedStdout: '', isSample: false, origin: 'manual' as const, verified: false };
     expect(validateForm({ ...emptyForm('problem'), title: 'ok', testCases: [big] }, limits).testCases).toBeDefined();
   });
 
   it('checks the source note and test-case names', () => {
     expect(validateForm({ ...ok, sourceNote: 'n'.repeat(2001) }, limits).sourceNote).toBeDefined();
-    const named = { key: 'k', name: 'n'.repeat(201), stdin: '', expectedStdout: '', isSample: false, origin: 'manual' as const };
+    const named = { key: 'k', name: 'n'.repeat(201), stdin: '', expectedStdout: '', isSample: false, origin: 'manual' as const, verified: false };
     expect(validateForm({ ...emptyForm('problem'), title: 'ok', testCases: [named] }, limits).testCases).toMatch(/name/);
+  });
+
+  it('checks the size of starter and runner code', () => {
+    const form = { ...emptyForm('problem'), title: 'ok', interface: 'function' as const, harness: { python: { prefix: 'x'.repeat(65537), suffix: '' } } };
+    expect(validateForm(form, limits).code).toBeDefined();
+    // A runner that will not be saved is not checked.
+    expect(validateForm({ ...form, interface: 'program' }, limits)).toEqual({});
+    expect(validateForm({ ...emptyForm('problem'), title: 'ok', starterCode: { go: 'x'.repeat(65537) } }, limits).code).toBeDefined();
   });
 
   it('refuses to send an oversized draft for revision', () => {
@@ -287,12 +370,69 @@ describe('formErrorsFromFields', () => {
       'testCases.0.expectedStdout': 'is required',
       tags: 'tag "a/b" must not contain / or control characters',
       notes: 'must be at most 1048576 bytes',
+      'problem.harness': 'must be empty for a program problem',
     });
+    expect(errors.code).toBe('harness: must be empty for a program problem.');
     expect(errors.title).toBe('This is required.');
     expect(errors.timeLimitMs).toBe('This must be between 100 and 30000.');
     expect(errors.sourceUrl).toMatch(/absolute http/);
     expect(errors.testCases).toBe('Case 1, expectedStdout: is required.');
     expect(errors.tags).toMatch(/^tag "a\/b"/);
     expect(rest).toEqual(['notes: must be at most 1048576 bytes']);
+  });
+});
+
+describe('languages of a form', () => {
+  const form = formFromDraft(functionDraft);
+
+  it('lists the languages with a stub or a runner, and only those with starter code for a full program', () => {
+    const withRunnerOnly = { ...form, harness: { ...form.harness, java: runner } };
+    expect(formLanguages(withRunnerOnly).sort()).toEqual(['go', 'java', 'python']);
+    expect(formLanguages({ ...withRunnerOnly, interface: 'program' }).sort()).toEqual(['go', 'python']);
+  });
+
+  it('adds a language with its runner, and removes the two together', () => {
+    const added = addFormLanguage(form, 'java');
+    expect(added.starterCode.java).toBe('');
+    expect(added.harness.java).toEqual({ prefix: '', suffix: '' });
+    // A full program has no runner to add.
+    expect(addFormLanguage({ ...form, interface: 'program' as const }, 'java').harness).toEqual({ python: runner });
+    const removed = removeFormLanguage(form, 'python');
+    expect(removed.starterCode).toEqual({ go: 'func solve() {}' });
+    expect(removed.harness).toEqual({});
+  });
+
+  it('saves a runner only for the languages that have any code in theirs', () => {
+    expect(effectiveHarness(addFormLanguage(form, 'java'))).toEqual({ python: runner });
+    expect(effectiveHarness({ interface: 'program', harness: { python: runner } })).toEqual({});
+  });
+});
+
+describe('checkedState', () => {
+  const form = formFromDraft(functionDraft);
+
+  it('changes with what the check was run on, and with nothing else', () => {
+    const state = checkedState(form);
+    expect(checkedState({ ...form, title: 'Another title', body: 'Another statement', tags: ['x'] })).toBe(state);
+    expect(checkedState({ ...form, testCases: form.testCases.map((t) => ({ ...t, name: 'Renamed', isSample: false })) })).toBe(state);
+    expect(checkedState({ ...form, testCases: form.testCases.map((t) => ({ ...t, expectedStdout: '3\n' })) })).not.toBe(state);
+    expect(checkedState({ ...form, harness: { python: { ...runner, suffix: '' } } })).not.toBe(state);
+    expect(checkedState({ ...form, interface: 'program' })).not.toBe(state);
+    expect(checkedState({ ...form, referenceSolution: null })).not.toBe(state);
+  });
+});
+
+describe('upgradeForm', () => {
+  it('fills in what a form stored by an earlier version lacks', () => {
+    const { interface: _interface, harness: _harness, referenceSolution: _reference, ...old } = formFromDraft(draft);
+    const stored = { ...old, testCases: old.testCases.map(({ verified: _verified, ...t }) => t) } as unknown as Parameters<typeof upgradeForm>[0];
+    const form = upgradeForm(stored);
+    expect(form).toMatchObject({ interface: 'program', harness: {}, referenceSolution: null, title: 'Two Sum' });
+    expect(form.testCases[0]).toMatchObject({ name: 'Example 1', verified: false });
+  });
+
+  it('leaves a current form as it is', () => {
+    const form = formFromDraft(functionDraft);
+    expect(upgradeForm(form)).toEqual(form);
   });
 });

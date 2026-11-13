@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
-import type { AppliedStyle, Collection, StylePreset } from '../../api/types';
+import type { AppliedStyle, Collection, DraftCheck, GenerationUsage, StylePreset } from '../../api/types';
 import { useLimits } from '../../api/queries';
 import { MOD } from '../../lib/hotkeys';
 import type { FormErrors, ItemFormState } from '../../lib/itemForm';
@@ -24,6 +24,11 @@ interface ReviewScreenProps {
   kind: 'draft' | 'variant';
   assumptions: readonly string[];
   appliedStyle: AppliedStyle | null;
+  /** What running the draft's reference solution found, and whether the form was edited since. */
+  check: DraftCheck | null;
+  checkStale: boolean;
+  /** What the last generation of this draft cost. */
+  usage: GenerationUsage | null;
   /** The user's original text, shown for comparison. */
   originalText?: string;
   originalLabel?: string;
@@ -73,7 +78,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
       {props.saveError != null && <ErrorCallout error={props.saveError} title="Could not save" onRetry={props.onSave} />}
 
       {props.aiDrafted && (
-        <AssumptionsPanel assumptions={props.assumptions} kind={props.kind} style={props.appliedStyle} showStyle={props.styles.length > 0 || props.appliedStyle !== null} />
+        <AssumptionsPanel assumptions={props.assumptions} kind={props.kind} style={props.appliedStyle} showStyle={props.styles.length > 0 || props.appliedStyle !== null} usage={props.usage} />
       )}
 
       {props.aiDrafted && props.aiEnabled && (
@@ -132,6 +137,8 @@ export function ReviewScreen(props: ReviewScreenProps) {
         judgeLanguages={props.judgeLanguages}
         onCreateCollection={props.onCreateCollection}
         disabled={busy}
+        check={props.check}
+        checkStale={props.checkStale}
       />
 
       <div className="review-foot">

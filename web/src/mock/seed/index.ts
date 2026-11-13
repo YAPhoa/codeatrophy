@@ -40,6 +40,8 @@ export const seedIds = {
     kthLargestStream: itemId(14),
     trappingRainWater: itemId(15),
     rateLimiter: itemId(16),
+    /** The "solution only" problem, with a stub and a runner for Python and Java. */
+    mergeKLists: itemId(25),
     consistentHashing: itemId(17),
     bTrees: itemId(18),
     capTheorem: itemId(19),
@@ -553,10 +555,9 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
     notes: p.notes ?? '',
     rawInput: p.rawInput ?? null,
     source: { url: p.sourceUrl ?? null, note: p.sourceNote ?? null },
-    problem: {
-      ...structuredClone(DEFAULT_PROBLEM),
-      starterCode: starterCode(p.languages),
-    },
+    problem: p.solutionOnly
+      ? { ...structuredClone(DEFAULT_PROBLEM), interface: 'function', ...structuredClone(p.solutionOnly) }
+      : { ...structuredClone(DEFAULT_PROBLEM), starterCode: starterCode(p.languages) },
     variantOf: variantOf ? itemId(variantOf.n) : null,
     revision: p.revision ?? 1,
     createdAt: at(p.created),
@@ -607,6 +608,7 @@ function addSubmission(db: MockDb, s: SeedSubmission, at: (days: number) => stri
     mode: s.mode,
     language: s.language,
     source: s.source,
+    lineOffset: 0,
     status: 'running',
     verdict: null,
     passedCount: 0,

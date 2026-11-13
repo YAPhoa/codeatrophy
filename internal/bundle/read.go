@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -153,6 +154,7 @@ type reader struct {
 	root     string
 	lim      Limits
 	warnings []string
+	version  int // the bundle's format version
 }
 
 func (r *reader) warn(format string, args ...any) {
@@ -224,6 +226,7 @@ func (r *reader) parse() (*Bundle, error) {
 	if len(m.Collections) > domain.MaxBundleCollections {
 		return nil, &LimitError{Msg: fmt.Sprintf("bundle has more than %d collections", domain.MaxBundleCollections)}
 	}
+	r.version = *m.FormatVersion
 	b := &Bundle{Meta: Meta{
 		Name: m.Name, Description: m.Description, Author: m.Author, FormatVersion: *m.FormatVersion,
 		GeneratorName: m.Generator.Name, GeneratorVersion: m.Generator.Version,
@@ -410,6 +413,10 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 			MemoryLimitKb *int              `json:"memoryLimitKb"`
 			Compare       *string           `json:"compare"`
 			Starter       map[string]string `json:"starter"`
+			// Format version 2. Decoded only for such bundles: in version 1
+			// they are unknown fields, which readers ignore.
+			Interface json.RawMessage `json:"interface"`
+			Harness   json.RawMessage `json:"harness"`
 		} `json:"problem"`
 	}
 	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &j); err != nil {
@@ -512,6 +519,7 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 		p := &Problem{
 			TimeLimitMs: domain.DefaultTimeLimitMs, MemoryLimitKb: domain.DefaultMemoryLimitKb,
 			Compare: domain.CompareTokens, StarterCode: map[string]string{},
+			Interface: domain.InterfaceProgram, Harness: map[string]domain.HarnessCode{},
 		}
 		if jp := j.Problem; jp != nil {
 			if jp.TimeLimitMs != nil {
@@ -551,6 +559,9 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 				}
 				p.StarterCode[lang] = src
 			}
+			if !r.readInterface(dir, p, jp.Interface, jp.Harness) {
+				return Item{}, false
+			}
 		}
 		it.Problem = p
 		if it.TestCases, ok = r.readTests(dir); !ok {
@@ -561,6 +572,82 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 		}
 	}
 	return it, true
+}
+
+// readInterface reads problem.interface and problem.harness into p. In a
+// version 1 bundle they mean nothing and are ignored. It returns false when
+// the item cannot be imported faithfully: an unknown interface or a
+// malformed harness would turn it into a problem that cannot be solved.
+func (r *reader) readInterface(dir string, p *Problem, rawIface, rawHarness json.RawMessage) bool {
+	present := func(raw json.RawMessage) bool {
+		t := bytes.TrimSpace(raw)
+		return len(t) > 0 && !bytes.Equal(t, []byte("null"))
+	}
+	if r.version < Version2 {
+		if present(rawIface) && !bytes.Equal(bytes.TrimSpace(rawIface), []byte(`"program"`)) {
+			r.warn("%s/item.json: problem.interface is not part of bundle format version 1; ignored, the problem is a full program", dir)
+		}
+		return true
+	}
+	if present(rawIface) {
+		var iface string
+		if err := json.Unmarshal(rawIface, &iface); err != nil {
+			r.warn("%s/item.json: problem.interface must be a string; item skipped", dir)
+			return false
+		}
+		switch f := domain.ProblemInterface(iface); f {
+		case domain.InterfaceProgram, domain.InterfaceFunction:
+			p.Interface = f
+		default:
+			r.warn("%s/item.json: unknown problem.interface %q; item skipped", dir, iface)
+			return false
+		}
+	}
+	if !present(rawHarness) {
+		return true
+	}
+	var hj map[string]struct {
+		Prefix *string `json:"prefix"`
+		Suffix *string `json:"suffix"`
+	}
+	if err := domain.DecodeJSON(rawHarness, &hj); err != nil {
+		r.warn("%s/item.json: problem.harness: %s; item skipped", dir, jsonProblem(err))
+		return false
+	}
+	if p.Interface != domain.InterfaceFunction {
+		if len(hj) > 0 {
+			r.warn("%s/item.json: problem.harness given for a full-program problem; ignored", dir)
+		}
+		return true
+	}
+	for _, lang := range slices.Sorted(maps.Keys(hj)) {
+		if !domain.KnownLanguage(lang) {
+			r.warn("%s/item.json: unknown language %q in harness; ignored", dir, lang)
+			continue
+		}
+		var code domain.HarnessCode
+		ok := true
+		for _, part := range []struct {
+			rel *string
+			dst *string
+		}{{hj[lang].Prefix, &code.Prefix}, {hj[lang].Suffix, &code.Suffix}} {
+			if part.rel == nil || *part.rel == "" {
+				continue // an empty part
+			}
+			src, found := r.source(dir, *part.rel)
+			if !found {
+				ok = false
+				break
+			}
+			*part.dst = src
+		}
+		if !ok {
+			r.warn("%s/item.json: the %s harness is incomplete; %s cannot be used for this problem", dir, lang, lang)
+			continue
+		}
+		p.Harness[lang] = code
+	}
+	return true
 }
 
 func (r *reader) source(dir, rel string) (string, bool) {

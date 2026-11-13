@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ChevronRight, CircleSlash, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
-import { qk, useItem, useLimits, useMeta, useSolutions, useTestCases } from '../../api/queries';
+import { qk, useItem, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
 import type { AiTestCasesResponse, Item, ProposedTestCase } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
@@ -12,10 +12,10 @@ import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { DiffView } from '../../ui/DiffView';
-import { Checkbox, Field, SelectField, TextAreaField } from '../../ui/Field';
+import { Checkbox, Field, NumberStepper, SelectField, TextAreaField } from '../../ui/Field';
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
-import { GeneratingPanel } from '../capture/parts';
+import { GeneratingPanel, UsageLine } from '../capture/parts';
 import { useGeneration } from '../capture/useGeneration';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
@@ -45,10 +45,11 @@ export default function GenerateTestsPage() {
   return <Generator key={item.data.id} item={item.data} />;
 }
 
-function CaseStatus({ c, attempted }: { c: ProposedTestCase; attempted: boolean }) {
+/** `revealed`: the solution is on screen, so its error output (which can quote the code) may be too. */
+function CaseStatus({ c, attempted, revealed }: { c: ProposedTestCase; attempted: boolean; revealed: boolean }) {
   if (c.error) {
     return (
-      <Badge tone="danger" title={c.error}>
+      <Badge tone="danger" title={revealed ? c.error : 'The solution failed on this input'}>
         <XCircle size={11} /> run failed
       </Badge>
     );
@@ -75,10 +76,11 @@ function CaseStatus({ c, attempted }: { c: ProposedTestCase; attempted: boolean 
 }
 
 /**
- * AI test-case generation: ask for a proposal, review it — reference
- * solution, the reason for each case, which outputs were verified by
- * execution, and where the model's prediction disagreed — choose what to
- * keep, then save. Nothing is written until "Save".
+ * AI test-case generation: ask for a proposal, review it — the reason for
+ * each case, which outputs were verified by execution, and where the model's
+ * prediction disagreed — choose what to keep, then save. The proposed
+ * reference solution stays out of sight until it is asked for. Nothing is
+ * written until "Save".
  */
 function Generator({ item }: { item: Item }) {
   const qc = useQueryClient();
@@ -91,10 +93,16 @@ function Generator({ item }: { item: Item }) {
   const existingCount = existing.data?.length ?? item.testCaseCount;
   const generation = useGeneration();
 
+  // A "Solution only" problem takes a reference solution only in a language it has a runner for.
+  const solutionOnly = item.problem?.interface === 'function';
   const languageOptions = useMemo(() => {
     const judge = meta?.judge.languages.map((l) => l.id) ?? [];
-    return (judge.length > 0 ? judge : LANGUAGES.map((l) => l.id)).map((l) => ({ value: l, label: languageLabel(l, meta?.judge.languages) }));
-  }, [meta]);
+    const runners = item.problem?.harness ?? {};
+    return (judge.length > 0 ? judge : LANGUAGES.map((l) => l.id))
+      .filter((l) => !solutionOnly || l in runners)
+      .map((l) => ({ value: l, label: languageLabel(l, meta?.judge.languages) }));
+  }, [meta, solutionOnly, item.problem]);
+  const noRunner = solutionOnly && languageOptions.length === 0;
   // The reference solution is one of the problem's saved solutions. Saving
   // the proposed one updates it in place, or adds a solution named "Reference
   // solution" when the problem has none.
@@ -105,7 +113,11 @@ function Generator({ item }: { item: Item }) {
   // Without a reference to update, saving the solution adds one — which a full list does not allow.
   const noRoom = storedSolution === null && limits !== undefined && item.solutionCount >= limits.maxSolutionsPerItem;
 
-  const [count, setCount] = useState(8);
+  // The count starts from the user's preference and can be changed for this run.
+  const maxCount = meta?.limits.maxGeneratedTestCases ?? 30;
+  const preferredCount = usePreferences().generatedTestCases;
+  const [chosenCount, setCount] = useState<number | null>(null);
+  const count = Math.min(maxCount, Math.max(1, chosenCount ?? preferredCount));
   const [language, setLanguage] = useState(() => {
     const preferred = storedSolution?.language ?? 'python';
     return languageOptions.some((o) => o.value === preferred) ? preferred : (languageOptions[0]?.value ?? 'python');
@@ -124,11 +136,11 @@ function Generator({ item }: { item: Item }) {
   const [saveError, setSaveError] = useState<unknown>(null);
   const [conflict, setConflict] = useState<Item | null>(null);
 
-  const maxCount = meta?.limits.maxGeneratedTestCases ?? 30;
-  const countValid = Number.isInteger(count) && count >= 1 && count <= maxCount;
+  // Every proposal repeated an input the problem has: there is nothing to review.
+  const allRepeats = proposal !== null && proposal.cases.length === 0 && proposal.duplicatesDropped > 0;
 
   const generate = async () => {
-    if (!countValid) return;
+    if (noRunner) return;
     const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null }, signal));
     if (!res) return;
     setProposal(res);
@@ -199,6 +211,16 @@ function Generator({ item }: { item: Item }) {
   const mismatches = proposal?.cases.filter((c) => c.predictionMatched === false).length ?? 0;
   const failures = proposal?.cases.filter((c) => c.error).length ?? 0;
   const verifiedCount = proposal?.cases.filter((c) => c.verified).length ?? 0;
+  // What running the proposed solution found, shown in place of its code.
+  const found: { tone: 'ok' | 'warn' | 'danger' | 'neutral'; text: string } = !proposal
+    ? { tone: 'neutral', text: '' }
+    : proposal.verification.error
+      ? { tone: 'warn', text: `Not run. ${sentence(proposal.verification.error)}` }
+      : !proposal.verification.attempted
+        ? { tone: 'neutral', text: 'Not run' }
+        : failures > 0
+          ? { tone: 'danger', text: `Failed on ${failures} of ${plural(proposal.cases.length, 'input')}` }
+          : { tone: 'ok', text: `Ran on all ${plural(proposal.cases.length, 'input')}` };
 
   return (
     <div className="workspace">
@@ -226,7 +248,7 @@ function Generator({ item }: { item: Item }) {
               className="capture-callout"
               actions={
                 <>
-                  <Link to="/settings#ai">Set up an AI provider</Link>
+                  <Link to="/settings/ai">Set up an AI provider</Link>
                   <Link to={`/items/${item.id}/tests`}>Add test cases by hand</Link>
                 </>
               }
@@ -242,21 +264,22 @@ function Generator({ item }: { item: Item }) {
               }}
             >
               <div className="generate-fields">
-                <Field label="How many" error={countValid ? null : `Between 1 and ${maxCount}.`}>
+                <Field label="How many">
                   {(a) => (
-                    <input
-                      {...a}
-                      className="input"
-                      type="number"
+                    <NumberStepper
+                      id={a.id}
+                      aria-describedby={a['aria-describedby']}
+                      value={count}
+                      onChange={setCount}
                       min={1}
                       max={maxCount}
-                      value={Number.isNaN(count) ? '' : count}
-                      onChange={(e) => setCount(e.target.value === '' ? NaN : Number(e.target.value))}
+                      decreaseLabel="Fewer test cases"
+                      increaseLabel="More test cases"
                       disabled={generation.running}
                     />
                   )}
                 </Field>
-                <SelectField label="Reference solution in" value={language} onChange={setLanguage} options={languageOptions} disabled={generation.running} />
+                <SelectField label="Reference solution in" value={language} onChange={setLanguage} options={languageOptions} disabled={generation.running || noRunner} />
               </div>
               <TextAreaField
                 label="Anything to focus on? (optional)"
@@ -268,9 +291,14 @@ function Generator({ item }: { item: Item }) {
                 disabled={generation.running}
               />
               {storedSolution && <p className="field-hint">The problem’s current reference solution ({languageName(storedSolution.language)}) is given to the model as context.</p>}
+              {noRunner && (
+                <Callout tone="warn" title="This problem has no runner yet" actions={<Link to={`/items/${item.id}/edit`}>Edit the problem</Link>}>
+                  A solution cannot be run without one.
+                </Callout>
+              )}
               {!generation.running && (
                 <div className="form-actions">
-                  <Button type="submit" variant={proposal ? 'default' : 'primary'} icon={proposal ? <RefreshCw size={14} /> : <FlaskConical size={14} />} disabled={!countValid}>
+                  <Button type="submit" variant={proposal ? 'default' : 'primary'} icon={proposal ? <RefreshCw size={14} /> : <FlaskConical size={14} />} disabled={noRunner}>
                     {proposal ? 'Generate again' : 'Generate'}
                   </Button>
                   {proposal && <span className="muted">Generating again replaces the proposal below.</span>}
@@ -286,7 +314,14 @@ function Generator({ item }: { item: Item }) {
           )}
           {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed — nothing was changed" onRetry={() => void generate()} />}
 
-          {proposal && !generation.running && (
+          {allRepeats && proposal && !generation.running && (
+            <p className="editor-empty row proposal-none" role="status">
+              {proposal.duplicatesDropped === 1 ? 'The one proposal repeated an existing case.' : `All ${proposal.duplicatesDropped} proposals repeated existing cases.`}
+              <UsageLine usage={proposal.usage} newTab />
+            </p>
+          )}
+
+          {proposal && !allRepeats && !generation.running && (
             <section className="proposal" aria-label="Proposed test cases">
               {proposal.verification.error ? (
                 <Callout tone="warn" title="The outputs could not be verified">
@@ -316,13 +351,17 @@ function Generator({ item }: { item: Item }) {
               )}
 
               <div className="card solution-preview">
-                <button type="button" className="solution-toggle" aria-expanded={showSolution} onClick={() => setShowSolution((v) => !v)}>
-                  {showSolution ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <div className="solution-toggle">
                   <strong>Reference solution</strong>
-                  <span className="muted">
-                    {languageName(proposal.referenceSolution.language)} · {plural(proposal.referenceSolution.source.split('\n').length, 'line')}
-                  </span>
-                </button>
+                  <span className="muted">{languageName(proposal.referenceSolution.language)}, written by the AI</span>
+                  <span className="spacer" />
+                  <Button size="sm" icon={showSolution ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={showSolution} onClick={() => setShowSolution((v) => !v)}>
+                    {showSolution ? 'Hide solution' : 'Show solution'}
+                  </Button>
+                </div>
+                <p className={`check-line solution-found tone-${found.tone}`} role="status">
+                  {found.text}
+                </p>
                 {showSolution && (
                   <div className="solution-editor solution-editor-ro">
                     <CodeEditor value={proposal.referenceSolution.source} language={proposal.referenceSolution.language} readOnly ariaLabel="Proposed reference solution (read-only)" />
@@ -357,8 +396,10 @@ function Generator({ item }: { item: Item }) {
                 <h3 className="section-title">Proposed cases</h3>
                 <span className="muted">
                   {kept} of {proposal.cases.length} selected
+                  {proposal.duplicatesDropped > 0 && ` · ${plural(proposal.duplicatesDropped, 'repeated input')} left out`}
                 </span>
                 <span className="spacer" />
+                <UsageLine usage={proposal.usage} newTab />
                 <Button size="sm" variant="ghost" onClick={() => setKeep(proposal.cases.map(() => true))}>
                   Select all
                 </Button>
@@ -386,7 +427,7 @@ function Generator({ item }: { item: Item }) {
                             <span className="proposal-rationale">{c.rationale}</span>
                           </span>
                         </button>
-                        <CaseStatus c={c} attempted={proposal.verification.attempted} />
+                        <CaseStatus c={c} attempted={proposal.verification.attempted} revealed={showSolution} />
                         <label className="proposal-sample">
                           <input type="checkbox" checked={samples[i] ?? false} onChange={(e) => setSamples((s) => s.map((v, j) => (j === i ? e.target.checked : v)))} />
                           Sample
@@ -396,7 +437,7 @@ function Generator({ item }: { item: Item }) {
                         <div className="proposal-detail">
                           {c.error && (
                             <Callout tone="danger" title="The solution did not produce an output for this input">
-                              {c.error}
+                              {showSolution ? c.error : 'The error is shown with the solution.'}
                             </Callout>
                           )}
                           <div className="io-pair">
