@@ -285,3 +285,19 @@ test('headings: a page that only has a message to show still has an h1', async (
   await open(page, '/no/such/page');
   await expect(page.getByRole('heading', { level: 1, name: 'There is nothing at this address' })).toBeVisible();
 });
+
+test('undo: a test case removed from a draft can be put back where it was', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Test cases' })).toBeVisible();
+
+  const inputs = page.locator('section[aria-labelledby="cases-heading"]').getByLabel('Input (stdin)');
+  await expect(inputs).toHaveCount(2);
+  const first = await inputs.first().inputValue();
+  await page.getByRole('button', { name: 'Remove case 1' }).click();
+  await expect(inputs).toHaveCount(1);
+  await page.getByRole('region', { name: 'Notifications' }).getByRole('button', { name: 'Undo' }).click();
+  await expect(inputs).toHaveCount(2);
+  await expect(inputs.first()).toHaveValue(first);
+});

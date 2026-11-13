@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { api, isAbort } from '../../api/client';
 import type { ItemCheckResponse } from '../../api/types';
-import { checkedState, checkRequestFromForm, withCheck, withoutCases, type CheckedDraft, type ItemFormState } from '../../lib/itemForm';
+import { checkedState, checkRequestFromForm, restoreCases, withCheck, withoutCases, type CheckedDraft, type ItemFormState } from '../../lib/itemForm';
 import { readJson, writeJson } from '../../lib/storage';
 
 // "Verify all" on a draft under review: its reference solution is run on
@@ -105,8 +105,18 @@ export function useDraftCheck<S extends CheckedDraft>(key: string, draft: S, set
   const state = useSyncExternalStore(subscribe, () => getDraftCheck(key));
   const start = useCallback((form: ItemFormState) => startDraftCheck(key, form), [key]);
   const cancel = useCallback(() => cancelDraftCheck(key), [key]);
-  /** Drop test cases from the draft, keeping its check up to date. */
-  const discard = useCallback((keys: readonly string[]) => latest.current.setDraft(withoutCases(latest.current.draft, keys)), []);
+  /** Drop test cases from the draft, keeping its check up to date. Returns the way back. */
+  const discard = useCallback((keys: readonly string[]) => {
+    const before = latest.current.draft;
+    const after = withoutCases(before, keys);
+    latest.current.setDraft(after);
+    return () => {
+      const now = latest.current.draft;
+      // Untouched since: the draft is as it was, check included. Otherwise only the cases come back.
+      if (now === after) latest.current.setDraft(before);
+      else if (now.form && before.form) latest.current.setDraft({ ...now, form: restoreCases(now.form, before.form.testCases, keys) });
+    };
+  }, []);
   return { ...state, start, cancel, discard };
 }
 

@@ -8,6 +8,7 @@ import { MOD } from '../../lib/hotkeys';
 import { discardableCases, type FormErrors, type ItemFormState } from '../../lib/itemForm';
 import { Button } from '../../ui/Button';
 import { ErrorCallout, Kbd, Spinner } from '../../ui/misc';
+import { useToast } from '../../ui/Toast';
 import { ItemEditor } from '../item/ItemEditor';
 import type { DraftCheckControl } from './draftChecks';
 import { AssumptionsPanel, GeneratingPanel } from './parts';
@@ -86,6 +87,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
   const [instruction, setInstruction] = useState('');
   const busy = props.revising || props.saving;
   const limits = useLimits();
+  const toast = useToast();
   const judgeOn = useMeta().data?.judge.enabled ?? false;
   const { verify, form } = props;
   const blocked = !judgeOn
@@ -122,7 +124,11 @@ export function ReviewScreen(props: ReviewScreenProps) {
       </p>
       <span className="spacer" />
       {discardable.length > 0 && (
-        <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => verify.discard(discardable)}>
+        <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => {
+            const undo = verify.discard(discardable);
+            toast.info(`Discarded ${plural(discardable.length, 'failed case')}`, { label: 'Undo', onClick: undo });
+          }}
+        >
           Discard {discardable.length} failed
         </Button>
       )}

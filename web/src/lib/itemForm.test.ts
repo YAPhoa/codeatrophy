@@ -26,7 +26,9 @@ import {
   tagProblem,
   validateForm,
   withCheck,
+  restoreCases,
   withoutCases,
+  type FormTestCase,
   type CheckedDraft,
 } from './itemForm';
 
@@ -521,5 +523,20 @@ describe('checking a draft again', () => {
     // A check the form has moved on from is left as it is.
     const edited = { ...checked, form: { ...checked.form!, compare: 'tokens' as const } };
     expect(withoutCases(edited, [wrong]).check).toEqual(checked.check);
+  });
+});
+
+describe('restoreCases', () => {
+  const tc = (key: string): FormTestCase => ({ key, name: key, stdin: '', expectedStdout: '', isSample: false, origin: 'manual', verified: false });
+  const before = [tc('a'), tc('b'), tc('c'), tc('d')];
+
+  it('puts removed cases back where they were', () => {
+    const form = { testCases: [before[0]!, before[2]!] };
+    expect(restoreCases(form, before, ['b', 'd']).testCases.map((t) => t.key)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('copes with a list that changed since: nothing twice, and a lost position means the end', () => {
+    expect(restoreCases({ testCases: [before[1]!] }, before, ['b', 'd']).testCases.map((t) => t.key)).toEqual(['b', 'd']);
+    expect(restoreCases({ testCases: [] }, before, ['c']).testCases.map((t) => t.key)).toEqual(['c']);
   });
 });

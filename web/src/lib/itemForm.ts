@@ -502,6 +502,21 @@ export function withoutCases<S extends CheckedDraft>(draft: S, keys: readonly st
 }
 
 /**
+ * Put removed test cases back where they were, for an undo. `before` is the
+ * list as it stood when they were removed; the form may have been edited
+ * since, so a case that is there again is left alone and a position past the
+ * end means the end.
+ */
+export function restoreCases<T extends Pick<ItemFormState, 'testCases'>>(form: T, before: readonly FormTestCase[], keys: readonly string[]): T {
+  const testCases = [...form.testCases];
+  before.forEach((t, index) => {
+    if (!keys.includes(t.key) || testCases.some((c) => c.key === t.key)) return;
+    testCases.splice(Math.min(index, testCases.length), 0, t);
+  });
+  return { ...form, testCases };
+}
+
+/**
  * Why a draft cannot be sent back for revision, or `null` if it can: the
  * server bounds the size of `previousDraft`.
  */

@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Eye, EyeOff, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useLimits, useMeta } from '../../api/queries';
 import type { CheckOutcome, Collection, CompareMode, Difficulty, DraftCheck, HarnessCode, ItemType, ProblemInterface, RunnerCheck } from '../../api/types';
 import { describeDraftCheck, runnerChecks } from '../../lib/checks';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
-import { addFormLanguage, formLanguages, newKey, removeFormLanguage, type FormErrors, type FormTestCase, type ItemFormState } from '../../lib/itemForm';
+import { addFormLanguage, formLanguages, newKey, removeFormLanguage, restoreCases, type FormErrors, type FormTestCase, type ItemFormState } from '../../lib/itemForm';
 import { textFilename } from '../../lib/largeText';
 import { LANGUAGES, languageLabel, languageName, sortLanguages } from '../../lib/languages';
 import { readString, writeString } from '../../lib/storage';
@@ -17,6 +17,7 @@ import { Markdown } from '../../ui/Markdown';
 import { MenuButton } from '../../ui/Popover';
 import { Badge, Tabs, tabPanelProps } from '../../ui/misc';
 import { TagInput } from '../../ui/TagInput';
+import { useToast } from '../../ui/Toast';
 import { lineCount } from '../solutions/solutionWrites';
 import { LargeCaseOutcome } from '../tests/LargeCaseOutcome';
 import { CollectionPicker } from './controls';
@@ -97,6 +98,30 @@ export function ItemEditor({
   caseNotice,
 }: ItemEditorProps) {
   const set = <K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => onChange({ ...form, [key]: value });
+  const toast = useToast();
+  // The form as it is when an "Undo" is pressed, which may be a few edits after what it undoes.
+  const latest = useRef({ form, onChange });
+  useEffect(() => {
+    latest.current = { form, onChange };
+  });
+  /** Announce a removal with a way back. `restore` puts the removed part into the form as it then is. */
+  const removed = (what: string, restore: (now: ItemFormState) => ItemFormState) =>
+    toast.info(`Removed ${what}`, { label: 'Undo', onClick: () => latest.current.onChange(restore(latest.current.form)) });
+  const removeLanguage = (language: string) => {
+    const starter = form.starterCode[language];
+    const harness = form.harness[language];
+    onChange(removeFormLanguage(form, language));
+    removed(languageName(language), (now) => ({
+      ...now,
+      starterCode: starter === undefined || language in now.starterCode ? now.starterCode : { ...now.starterCode, [language]: starter },
+      harness: harness === undefined || language in now.harness ? now.harness : { ...now.harness, [language]: harness },
+    }));
+  };
+  const removeCase = (key: string, position: number) => {
+    const before = form.testCases;
+    set('testCases', before.filter((c) => c.key !== key));
+    removed(`case ${position}`, (now) => restoreCases(now, before, [key]));
+  };
   const limits = useLimits();
   const judged = useMeta().data?.judge.languages;
   const [bodyView, setBodyViewState] = useState<BodyView>(() => {
@@ -247,7 +272,7 @@ export function ItemEditor({
                   />
                   {judged?.find((l) => l.id === activeStarter)?.version && <span className="muted">Runs on {languageLabel(activeStarter, judged)}</span>}
                   <span className="spacer" />
-                  <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => onChange(removeFormLanguage(form, activeStarter))}>
+                  <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => removeLanguage(activeStarter)}>
                     Remove {languageName(activeStarter)}
                   </Button>
                 </div>
@@ -374,7 +399,7 @@ export function ItemEditor({
                       )}
                       {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
                       <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
-                      <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={13} />} onClick={() => set('testCases', form.testCases.filter((c) => c.key !== t.key))} />
+                      <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={13} />} onClick={() => removeCase(t.key, i + 1)} />
                     </div>
                     {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
                     <div className="case-io">
@@ -413,8 +438,10 @@ export function ItemEditor({
                 label="Remove the reference solution"
                 icon={<Trash2 size={13} />}
                 onClick={() => {
+                  const solution = form.referenceSolution;
                   setSolutionShown(false);
                   set('referenceSolution', null);
+                  removed('the reference solution', (now) => ({ ...now, referenceSolution: now.referenceSolution ?? solution }));
                 }}
               />
             </div>
