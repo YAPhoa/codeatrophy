@@ -219,7 +219,7 @@
 }
 
 .textarea.mono {
-  font-size: 12.5px;
+  font-size: var(--text-code);
   white-space: pre;
   overflow: auto;
   tab-size: 4;
@@ -415,7 +415,7 @@ input[type='radio'] {
 }
 
 .combo-menu .mono {
-  font-size: 12.5px;
+  font-size: var(--text-code);
 }
 
 /* ---- Chips and badges ---- */
@@ -1264,7 +1264,7 @@ button.chip:hover {
   margin: 0;
   padding: 8px 12px;
   overflow: auto;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--text-2);
 }
@@ -1296,7 +1296,7 @@ button.chip:hover {
   border-radius: var(--radius);
   background: var(--surface-2);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-code);
   line-height: 1.5;
   white-space: pre;
   overflow: auto;
@@ -1352,7 +1352,7 @@ button.chip:hover {
   border-collapse: collapse;
   table-layout: fixed;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-code);
   line-height: 1.5;
 }
 

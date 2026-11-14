@@ -97,7 +97,7 @@ kbd,
 pre,
 samp {
   font-family: var(--font-mono);
-  font-size: 0.94em;
+  font-size: 0.9em;
 }
 
 /* Code is shown character for character: no programming ligatures. */

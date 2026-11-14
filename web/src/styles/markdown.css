@@ -100,7 +100,7 @@
   padding: 0.1em 0.35em;
   border-radius: 4px;
   background: var(--surface-3);
-  font-size: 0.88em;
+  font-size: 0.9em;
 }
 
 .md pre {
@@ -116,7 +116,7 @@
 .md pre code {
   padding: 0;
   background: none;
-  font-size: 12.5px;
+  font-size: var(--text-code);
 }
 
 .md blockquote {
@@ -250,7 +250,7 @@
 }
 
 .md-longform pre code {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .md-longform blockquote {
