@@ -195,7 +195,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
           )}
         </Field>
         {dialog?.kind === 'removeTags' && (
-          <div className="row-wrap" style={{ marginTop: 10 }}>
+          <div className="row-wrap dialog-follow">
             {selectedTags
               .filter((t) => !tags.includes(t))
               .map((t) => (
@@ -258,7 +258,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
             ))}
           </div>
         )}
-        <p className="field-hint" style={{ marginTop: 8 }}>
+        <p className="field-hint dialog-follow">
           Items stay in the collections they are already in.
         </p>
       </Dialog>

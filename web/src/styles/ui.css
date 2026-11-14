@@ -644,6 +644,24 @@ button.chip:hover {
   margin: 0 -4px;
 }
 
+/* The filter field above a picklist, the line under it when it is empty, and a note or action below it. */
+.picklist-filter {
+  margin-bottom: var(--space-2);
+}
+
+.picklist-empty {
+  padding: var(--space-2);
+}
+
+.picklist-note {
+  margin-top: var(--space-2);
+}
+
+/* Something that follows a field inside a dialog. */
+.dialog-follow {
+  margin-top: var(--space-3);
+}
+
 .picklist-item {
   display: flex;
   align-items: center;

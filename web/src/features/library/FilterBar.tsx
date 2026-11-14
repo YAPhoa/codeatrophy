@@ -165,13 +165,12 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
               <input
                 name="tag-filter"
                 autoComplete="off"
-                className="input input-sm"
+                className="input input-sm picklist-filter"
                 placeholder="Filter tags…"
                 aria-label="Filter tags"
                 value={tagFilter}
                 onChange={(e) => setTagFilter(e.target.value)}
                 data-autofocus
-                style={{ marginBottom: 6 }}
               />
             )}
             {tags.length === 0 ? (
@@ -185,10 +184,10 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
                     <span className="picklist-count">{t.count}</span>
                   </label>
                 ))}
-                {visibleTags.length === 0 && <p className="muted" style={{ padding: 8 }}>No match.</p>}
+                {visibleTags.length === 0 && <p className="muted picklist-empty">No match.</p>}
               </div>
             )}
-            {filters.tags.length > 1 && <p className="field-hint" style={{ marginTop: 6 }}>Showing items that have all selected tags.</p>}
+            {filters.tags.length > 1 && <p className="field-hint picklist-note">Showing items that have all selected tags.</p>}
           </>
         )}
       </FilterButton>

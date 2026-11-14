@@ -158,17 +158,16 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
           <input
             name="collection-filter"
             autoComplete="off"
-            className="input input-sm"
+            className="input input-sm picklist-filter"
             placeholder="Filter collections…"
             aria-label="Filter collections"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             data-autofocus
-            style={{ marginBottom: 6 }}
           />
         )}
         {nodes.length === 0 ? (
-          <p className="muted" style={{ padding: '4px 4px 8px' }}>
+          <p className="muted picklist-empty">
             No collections yet. Collections are ordered lists — a study plan, a topic.
           </p>
         ) : (
@@ -184,7 +183,7 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
                 <span className="picklist-count">{n.collection.itemCount}</span>
               </label>
             ))}
-            {visible.length === 0 && <p className="muted" style={{ padding: 8 }}>No match.</p>}
+            {visible.length === 0 && <p className="muted picklist-empty">No match.</p>}
           </div>
         )}
         {onCreate && (
@@ -192,7 +191,7 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
             size="sm"
             variant="ghost"
             icon={<FolderPlus size={14} />}
-            style={{ marginTop: 6 }}
+            className="picklist-note"
             onClick={() => {
               setOpen(false);
               onCreate();

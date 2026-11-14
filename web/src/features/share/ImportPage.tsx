@@ -272,7 +272,7 @@ export default function ImportPage() {
                       {visibleItems.map((it) => (
                         <tr key={it.id}>
                           <td className="cell-main">
-                            <span className="row" style={{ gap: 6 }}>
+                            <span className="row row-tight">
                               <TypeIcon type={it.type} size={14} />
                               <span className="truncate">{it.title}</span>
                             </span>

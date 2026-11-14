@@ -317,7 +317,7 @@ export function LibraryPage() {
             <nav className="crumbs" aria-label="Collection path">
               <Link to="/">Library</Link>
               {path.slice(0, -1).map((c) => (
-                <span key={c.id} className="row" style={{ gap: 4 }}>
+                <span key={c.id} className="row row-tight">
                   <ChevronRight size={12} aria-hidden="true" />
                   <Link to={`/collections/${c.id}`}>{c.name}</Link>
                 </span>
