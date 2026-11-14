@@ -639,29 +639,6 @@ button.nav-twisty:hover {
 /* ---- Narrow screens: the sidebar becomes a drawer ---- */
 
 @media (max-width: 900px) {
-  /* Touch targets: controls and rows grow on phones and tablets. */
-  :root {
-    --control-h: 40px;
-    --control-h-sm: 32px;
-  }
-
-  .nav-item,
-  .menu-item,
-  .picklist-item {
-    min-height: 40px;
-  }
-
-  .tab {
-    height: 40px;
-  }
-
-  /* iOS Safari zooms the page when an input under 16px takes focus. */
-  .input,
-  .textarea,
-  .taginput-input {
-    font-size: 16px;
-  }
-
   .shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -734,7 +711,7 @@ button.nav-twisty:hover {
   }
 
   .page {
-    padding: var(--space-4) var(--space-4) var(--space-12);
+    padding: 16px 16px 48px;
   }
 
   .shortcuts {

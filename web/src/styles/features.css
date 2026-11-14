@@ -458,7 +458,7 @@
 @media (max-width: 700px) {
   .item-row,
   .item-list.is-reorderable .item-row {
-    grid-template-columns: 36px 34px 34px minmax(0, 1fr) auto;
+    grid-template-columns: 32px 28px 28px minmax(0, 1fr) auto;
   }
 
   .item-type,
@@ -3140,34 +3140,15 @@ button.log-row:hover {
 }
 
 @media (max-width: 900px) {
-  .item-row {
-    min-height: 48px;
-    contain-intrinsic-size: auto 48px;
-  }
-
-  .capture-text,
-  .notes-text,
-  .filter-search input {
-    font-size: 16px;
-  }
-
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
   }
 
-  /* The links' own padding would otherwise set the first one in from the page edge. */
   .settings-nav {
     position: static;
     flex-direction: row;
     flex-wrap: wrap;
-    margin-inline: -9px;
-  }
-
-  .settings-nav a {
-    display: flex;
-    align-items: center;
-    min-height: 40px;
   }
 
   .settings-nav-title {
