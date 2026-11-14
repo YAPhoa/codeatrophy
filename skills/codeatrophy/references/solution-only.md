@@ -25,7 +25,7 @@ A language without a `harness` entry cannot be used for that problem, so give ev
 Give exactly what is needed to start, and no logic:
 
 - the class and method (or function) with a precise signature and type hints;
-- helper types the signature mentions (list nodes, tree nodes) **described in a comment**, because their real definition lives in the prefix — defining them again in the stub would be a duplicate;
+- helper types the signature mentions (list nodes, tree nodes) **described in a comment**, because their real definition lives in the prefix — defining them again in the stub would be a duplicate. The comment is the first thing in the stub, above the class, never inside it. Every language's stub carries it: it is the only place the solver sees the type's fields;
 - a placeholder body with no logic, so that the stub compiles and runs as it stands and an untouched stub ends in a plain wrong answer: `pass` in Python, a typed zero value elsewhere (`return 0;`, `return {};`, `return nullptr;`, `return null;` …).
 
 ```python
@@ -50,7 +50,8 @@ Write for the judge's actual versions (see `get_overview`), not the newest langu
 Reads one test case from stdin, builds the arguments, calls the solution once, prints the result.
 
 - **Input format:** one JSON value per line, one line per argument, in signature order. A linked list or a tree is written as the array a person would write (`[1,4,5]`, `[3,9,20,null,null,15,7]`), and the suffix converts it.
-- **Output format:** one compact JSON value on one line (no spaces: `[1,2,3]`, because output is compared token by token). Convert structures back to arrays; print booleans as `true`/`false` and `null` for nothing, so the output is the same in every language.
+- **Output format:** the return value, as one compact JSON value on one line (no spaces: `[1,2,3]`, because output is compared token by token). Convert structures back to arrays; print booleans as `true`/`false` and `null` for nothing, so the output is the same in every language.
+- **When the function changes an argument in place:** if it returns nothing, print that argument after the call. If it also returns a value, print two lines, the return value and then the argument, each as `name = value` with the names the statement uses (`k = 2`, then `nums = [1,2]`), showing only the part of the argument that counts. Do not pack the two into one array: the output should read like the signature.
 - **When several answers are valid,** the statement must fix which one counts, or the suffix must normalise the result (sort it) before printing — otherwise a correct solution fails.
 - **Keep it boring.** No output besides the answer, no assumptions about the solver's helper names, and it must not crash on the smallest input.
 

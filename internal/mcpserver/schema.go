@@ -75,7 +75,7 @@ func harnessSchema() map[string]any {
 			"that runs is prefix, the solution and suffix, each on a new line. Must be {} for a program problem",
 		"additionalProperties": object(props{
 			"prefix": str("Code before the solution: imports and helper types (Python: start with `from __future__ import annotations`)"),
-			"suffix": str("Code after the solution: reads one JSON value per line per argument, calls the solution, prints one compact JSON value"),
+			"suffix": str("Code after the solution: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON"),
 		}, "prefix", "suffix"),
 	}
 }

@@ -302,7 +302,7 @@ where ⏎ is a newline added only when the part before it does not already
 end with one; nothing else is added or removed. The prefix defines what the
 solution relies on (imports, helper types such as a list node), the suffix
 reads one test case (one JSON value per line, one line per argument),
-calls the solution and prints one JSON value. The test cases themselves are
+calls the solution and prints the result as JSON. The test cases themselves are
 plain stdin/stdout, so the grader, the comparison and the engines are
 unchanged.
 

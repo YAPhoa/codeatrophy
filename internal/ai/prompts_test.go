@@ -10,13 +10,19 @@ func TestConventionsAndRules(t *testing.T) {
 		"It must compile and run\n  as it stands",
 		"`pass` in\n  Python",
 		"mergeKLists(self, lists: list[ListNode | None]) -> ListNode | None:\n          pass\n",
-		"say in one sentence what a test's output line\n     contains",
-		"the output line exactly as the runner prints it",
+		"say in one sentence what a test's output shows",
+		"the output exactly as the runner prints it",
+		"(`k = 2`, then `nums = [1,2]`)",
+		"Never pack the two into one array",
 		"must begin with\n  `from __future__ import annotations`",
+		"Never use an em dash in anything you write",
 	} {
 		if !strings.Contains(AuthoringConventions, want) {
 			t.Errorf("conventions lack %q", want)
 		}
+	}
+	if strings.Contains(AuthoringConventions, "\u2014") {
+		t.Error("conventions use an em dash, which the model would copy")
 	}
 	system, _ := DraftPrompt{Text: "x", InterfaceHint: "auto"}.Build()
 	for _, want := range []string{

@@ -82,7 +82,7 @@ func DraftSchema(large bool) map[string]any {
 	harness := obj(map[string]any{
 		"language": enum("Language id", languageIDs()...),
 		"prefix":   str("Code before the solver's code: imports, helper type definitions (Python: first line `from __future__ import annotations`)"),
-		"suffix":   str("Code after the solver's code: reads one JSON value per line per argument, calls the solution, prints one compact JSON value"),
+		"suffix":   str("Code after the solver's code: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON"),
 	})
 	reference := obj(map[string]any{
 		"language": enum("Language id; for a function problem one that has a harness", languageIDs()...),

@@ -359,7 +359,9 @@ Rules:
   discarded by accident.
 - Test cases stay plain stdin/stdout. By convention (not enforced) the stdin
   of a `function` problem carries one JSON value per line, one line per
-  argument in signature order, and the expected output is one JSON value.
+  argument in signature order, and the expected output is the return value
+  as one JSON value. For a function that returns a value and also changes
+  an argument in place, it is two lines, `k = 2` and `nums = [1,2]`.
 
 #### Folded regions
 

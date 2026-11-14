@@ -18,8 +18,8 @@ a **reading** (a technical note or article).
   case from standard input and its standard output is compared with the
   expected output. Never ask for interactive I/O.
 - The **interface** says what the solver writes:
-  - ` + "`program`" + ` — the whole program: it reads the input and prints the answer.
-  - ` + "`function`" + ` — only the solution, a function or a class, as on interview
+  - ` + "`program`" + `: the whole program, which reads the input and prints the answer.
+  - ` + "`function`" + `: only the solution, a function or a class, as on interview
     sites. Hidden per-language runner code (the **harness**) turns it into a
     program.
 - Choose ` + "`function`" + ` for an algorithmic problem whose heart is one routine
@@ -29,24 +29,24 @@ a **reading** (a technical note or article).
   settles it.
 - The body is GitHub-flavoured Markdown (math with $...$ and $$...$$) with
   these sections, in this order:
-  1. ` + "`## Problem`" + ` — the statement: the task, written so that it can be solved
+  1. ` + "`## Problem`" + `: the statement of the task, written so that it can be solved
      from the statement alone.
-  2. ` + "`## Input`" + ` — for a program, the exact input format, line by line,
+  2. ` + "`## Input`" + `: for a program, the exact input format, line by line,
      naming every value; for a function, each parameter with its type.
-  3. ` + "`## Output`" + ` — for a program, the exact output format; for a function,
-     what it returns. When a function problem's runner prints anything other
-     than the plain return value (an in-place result, several outputs, a
-     normalised order), say in one sentence what a test's output line
-     contains.
-  4. ` + "`## Constraints`" + ` — bounds for every input value, e.g. $1 \le n \le 10^5$.
-  5. ` + "`## Examples`" + ` — at least one example as fenced code blocks (input, then
+  3. ` + "`## Output`" + `: for a program, the exact output format; for a function,
+     what it returns, giving the return value a name when the function also
+     changes an argument in place. When a function problem's runner prints
+     anything other than the plain return value (an in-place result, a
+     normalised order), say in one sentence what a test's output shows.
+  4. ` + "`## Examples`" + `: at least one example as fenced code blocks (input, then
      output; for a function, the arguments as the solver would write them and
-     the output line exactly as the runner prints it), each followed by a
+     the output exactly as the runner prints it), each followed by a
      short explanation when it helps.
-  6. ` + "`## Notes`" + ` (optional) — hints, edge cases, references.
+  5. ` + "`## Constraints`" + `: bounds for every input value, e.g. $1 \le n \le 10^5$.
+  6. ` + "`## Notes`" + ` (optional): hints, edge cases, references.
 - When several answers are valid, the statement must say which one counts
-  (for example "print the smallest index first") — or, for a function, the
-  runner must normalise the result (for example sort it) before printing —
+  (for example "print the smallest index first") or, for a function, the
+  runner must normalise the result (for example sort it) before printing,
   because output is compared automatically.
 - Output is compared token by token (whitespace-insensitive) unless the
   problem uses exact comparison, so do not rely on spacing.
@@ -75,12 +75,15 @@ prefix, the solver's code and the suffix, each starting on a new line:
 
 - **Starter code** (the stub) is what the solver sees: the class and method
   (or function) with a precise signature and types. It must compile and run
-  as it stands, so its body is a placeholder with no logic — ` + "`pass`" + ` in
-  Python, a typed zero value elsewhere (` + "`return 0;`" + `, ` + "`return {};`" + `,
-  ` + "`return nullptr;`" + `, ` + "`return null;`" + ` …) — and an untouched stub ends in a
+  as it stands, so its body is a placeholder with no logic (` + "`pass`" + ` in
+  Python, a typed zero value elsewhere: ` + "`return 0;`" + `, ` + "`return {};`" + `,
+  ` + "`return nullptr;`" + `, ` + "`return null;`" + ` …), and an untouched stub ends in a
   plain wrong answer. Helper types the signature uses (list nodes, tree
-  nodes) are **described in a comment** above it, never defined there,
-  because the real definition is in the prefix. For example:
+  nodes) are **described in a comment**, never defined there, because the
+  real definition is in the prefix. The comment is the first thing in the
+  stub, above the class, never inside it. Every language's stub carries
+  it, in its own comment syntax: it is the only place the solver sees the
+  type's fields. For example:
 
   ` + "```" + `python
   # Definition for singly-linked list.
@@ -106,25 +109,32 @@ prefix, the solver's code and the suffix, each starting on a new line:
   - input: one JSON value per line, one line per argument, in signature
     order; a linked list or tree is written as the array a person would
     write (` + "`[1,4,5]`" + `, ` + "`[3,9,20,null,null,15,7]`" + `) and the suffix converts it;
-  - output: exactly one JSON value on one line, compact (no spaces:
-    ` + "`[1,2,3]`" + `), with ` + "`true`" + `/` + "`false`" + `/` + "`null`" + `, structures converted back to arrays,
-    so that every language prints the same text; normalise the result first
-    when several answers are valid;
+  - output: the return value, as exactly one JSON value on one line, compact
+    (no spaces: ` + "`[1,2,3]`" + `), with ` + "`true`" + `/` + "`false`" + `/` + "`null`" + `, structures converted
+    back to arrays, so that every language prints the same text; normalise
+    the result first when several answers are valid;
+  - a function that changes an argument in place: when it returns nothing,
+    print that argument after the call, the same way. When it also returns
+    a value, print two lines, the return value and then the argument, each
+    as ` + "`name = value`" + ` with the names the statement uses and one space on
+    each side of the ` + "`=`" + ` (` + "`k = 2`" + `, then ` + "`nums = [1,2]`" + `), showing only the part
+    of the argument that counts. Never pack the two into one array: the
+    output must read like the signature;
   - no other output, no assumptions about the solver's helper names, and no
     crash on the smallest valid input.
-- Language layout: Java — imports and helper classes in the prefix, the
+- Language layout. Java: imports and helper classes in the prefix, the
   solver's ` + "`class Solution`" + ` is not public, ` + "`public class Main`" + ` with ` + "`main`" + ` in the
   suffix (the file is Main.java; Java has no JSON parser, so parse the needed
-  shapes by hand). C++ — includes, ` + "`using namespace std;`" + ` and helper structs in
-  the prefix, ` + "`main`" + ` in the suffix. Kotlin — imports and helper classes in the
-  prefix, a top-level ` + "`fun main()`" + ` in the suffix. Go — ` + "`package main`" + ` and the
-  imports in the prefix. TypeScript — ` + "`declare const require: any;`" + ` in the
+  shapes by hand). C++: includes, ` + "`using namespace std;`" + ` and helper structs in
+  the prefix, ` + "`main`" + ` in the suffix. Kotlin: imports and helper classes in the
+  prefix, a top-level ` + "`fun main()`" + ` in the suffix. Go: ` + "`package main`" + ` and the
+  imports in the prefix. TypeScript: ` + "`declare const require: any;`" + ` in the
   prefix to read stdin. Others: declarations before, the driver after.
 - Every language with starter code needs a harness entry; a language without
   one cannot be used for the problem.
 - Test cases and reference solutions follow the same split: test-case
-  stdin is the JSON-per-line input, the expected output is the one JSON
-  value, and a reference solution is only the solution part, exactly as a
+  stdin is the JSON-per-line input, the expected output is what the suffix
+  prints, and a reference solution is only the solution part, exactly as a
   solver would write it.
 
 ## Test cases
@@ -155,6 +165,8 @@ prefix, the solver's code and the suffix, each starting on a new line:
   "hash-map", "concurrency" (at most 40 characters each). Prefer tags that
   already exist in the library.
 - Difficulty: easy, medium or hard (or null for readings without one).
+- Never use an em dash in anything you write (title, summary, body, notes):
+  use a comma, a colon, parentheses or a new sentence.
 `
 
 // Style is a style preset to apply to a generation.
