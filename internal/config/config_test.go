@@ -22,12 +22,13 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestConventionalKeyFallbacks(t *testing.T) {
-	c, _ := LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "OPENAI_API_KEY": "o"}))
-	if c.AI.AnthropicAPIKey != "a" || c.AI.OpenAIAPIKey != "o" {
+	c, _ := LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "OPENAI_API_KEY": "o", "GEMINI_API_KEY": "g"}))
+	if c.AI.AnthropicAPIKey != "a" || c.AI.OpenAIAPIKey != "o" || c.AI.GeminiAPIKey != "g" {
 		t.Errorf("fallbacks: %+v", c.AI)
 	}
-	c, _ = LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "CODEATROPHY_ANTHROPIC_API_KEY": "b"}))
-	if c.AI.AnthropicAPIKey != "b" {
+	c, _ = LoadFrom(env(map[string]string{"ANTHROPIC_API_KEY": "a", "CODEATROPHY_ANTHROPIC_API_KEY": "b",
+		"GEMINI_API_KEY": "g", "CODEATROPHY_GEMINI_API_KEY": "h"}))
+	if c.AI.AnthropicAPIKey != "b" || c.AI.GeminiAPIKey != "h" {
 		t.Error("the prefixed variable wins")
 	}
 }
@@ -48,12 +49,30 @@ func TestParsing(t *testing.T) {
 	}
 	for k, v := range map[string]string{
 		"CODEATROPHY_JUDGE_ENGINE": "docker", "CODEATROPHY_LOG_LEVEL": "loud", "CODEATROPHY_MCP_ENABLED": "maybe",
-		"CODEATROPHY_JUDGE0_TIMEOUT": "soon", "CODEATROPHY_AI_PROVIDER": "gemini", "CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java",
+		"CODEATROPHY_JUDGE0_TIMEOUT": "soon", "CODEATROPHY_AI_PROVIDER": "mistral", "CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java",
 		"CODEATROPHY_MAX_SOURCE_BYTES": "10",
 	} {
 		if _, err := LoadFrom(env(map[string]string{k: v})); err == nil {
 			t.Errorf("%s=%s should be rejected", k, v)
 		}
+	}
+}
+
+func TestGeminiEnvironmentProvider(t *testing.T) {
+	c, err := LoadFrom(env(map[string]string{
+		"CODEATROPHY_AI_PROVIDER": "Gemini", "CODEATROPHY_GEMINI_API_KEY": "AIza-key",
+		"CODEATROPHY_GEMINI_MODEL": "gemini-3.5-flash", "CODEATROPHY_GEMINI_BASE_URL": "https://gemini.example/v1beta",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := c.AI; a.Provider != "gemini" || a.GeminiAPIKey != "AIza-key" || a.GeminiModel != "gemini-3.5-flash" ||
+		a.GeminiBaseURL != "https://gemini.example/v1beta" {
+		t.Errorf("gemini: %+v", a)
+	}
+	_, err = LoadFrom(env(map[string]string{"CODEATROPHY_AI_PROVIDER": "mistral"}))
+	if err == nil || !strings.Contains(err.Error(), "anthropic, gemini, openai_compatible or none") {
+		t.Errorf("unknown provider: %v", err)
 	}
 }
 

@@ -10,6 +10,8 @@ import type {
   AiLogDetail,
   AiLogPage,
   AiLogParams,
+  AiModelsRequest,
+  AiModelsResponse,
   AiSettings,
   AiSettingsUpdate,
   AiTestCasesRequest,
@@ -329,6 +331,9 @@ export const api = {
     removeProvider: (id: string) => request<void>('DELETE', `/settings/ai/providers/${enc(id)}`),
     testAi: (body: AiTestRequest, signal?: AbortSignal) =>
       request<AiTestResponse>('POST', '/settings/ai/test', { body, signal }),
+    /** The models a configuration offers, without a generation request. */
+    listModels: (body: AiModelsRequest, signal?: AbortSignal) =>
+      request<AiModelsResponse>('POST', '/settings/ai/models', { body, signal }),
     log: (params: AiLogParams = {}, signal?: AbortSignal) => request<AiLogPage>('GET', '/settings/ai/log', { query: { ...params }, signal }),
     logEntry: (id: string, signal?: AbortSignal) => request<AiLogDetail>('GET', `/settings/ai/log/${enc(id)}`, { signal }),
     /** Everything, or with `before` the entries created before that moment. */

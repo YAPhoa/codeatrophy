@@ -1201,11 +1201,12 @@ and a local server — and one of them is the default the AI endpoints use.
 Providers are stored in the database; API keys are encrypted at rest and are
 never returned by any endpoint.
 
-A provider is of one of two kinds:
+A provider is of one of three kinds:
 
 | `kind` | Covers |
 | --- | --- |
 | `anthropic` | The Anthropic API |
+| `gemini` | The Google Gemini API |
 | `openai_compatible` | Any endpoint speaking the OpenAI chat-completions API: OpenAI, OpenRouter, Ollama, LM Studio, vLLM, … |
 
 `AiProvider`:
@@ -1254,7 +1255,8 @@ A provider is of one of two kinds:
   URL at the time it was saved, and `apiKeySet` / `apiKeyHint` describe the
   key that would actually be used with the current base URL.
 - `ready` — the provider has everything it needs, counting the kind's
-  defaults: a model, plus an API key for `anthropic`. A key is optional for
+  defaults: a model, plus an API key for `anthropic` and `gemini`. `gemini`
+  has no default model, so one has to be set. A key is optional for
   `openai_compatible` (local servers), which requires a model and a base URL
   — except that on the default OpenAI base URL (`https://api.openai.com`) a
   key is required too.
@@ -1262,7 +1264,8 @@ A provider is of one of two kinds:
   `environment` for one supplied by the server's environment variables (see
   `.env.example`), so an instance can also be configured without the UI. For
   each kind whose variables are set there is one such provider, with the
-  fixed id `env-anthropic` or `env-openai-compatible`. Environment providers
+  fixed id `env-anthropic`, `env-gemini` or `env-openai-compatible`.
+  Environment providers
   can be tested and chosen as the default, but not changed or deleted here
   (`409`); their `createdAt` and `updatedAt` are `null`.
 
@@ -1290,6 +1293,7 @@ bundles and are not available over MCP.
   "providers": [ AiProvider ],
   "kinds": {
     "anthropic": { "defaultModel": "claude-opus-5-5", "defaultBaseUrl": "https://api.anthropic.com", "keyRequired": true },
+    "gemini": { "defaultModel": null, "defaultBaseUrl": "https://generativelanguage.googleapis.com/v1beta", "keyRequired": true },
     "openai_compatible": { "defaultModel": null, "defaultBaseUrl": "https://api.openai.com/v1", "keyRequired": false }
   }
 }
@@ -1402,6 +1406,11 @@ The test does two things:
   echoing the key), else `null`.
 - `models` is the service's model ids, de-duplicated and sorted, at most 500;
   ids that are not a single line of at most `maxModelIdChars` are left out.
+  For `gemini` the list holds only the models that generate text (those the
+  service reports as supporting `generateContent`), so embedding, speech,
+  image and similar models are left out, and each id is given without its
+  `models/` prefix (`gemini-3.5-flash`). The other kinds list what the
+  service lists.
   It is `null` when the list could not be fetched, and `modelsError` then
   says why. A service that does not list its models does not fail the test
   of a configured model.
@@ -1411,6 +1420,36 @@ The test does two things:
 
 Always `200` when the request itself is valid; failures of the service are
 reported in the body.
+
+### `POST /settings/ai/models`
+
+Lists the models a provider configuration offers, without making a
+generation request: nothing is saved, counted in the provider's usage or
+written to the activity log.
+
+```json
+{ "providerId": "...", "kind": null, "baseUrl": null, "apiKey": null }
+```
+
+The provider is named as for [the test](#post-settingsaitest): `providerId`
+for a saved or environment provider, with `baseUrl` and `apiKey` as optional
+overrides, or `kind` for a configuration that has not been saved. Exactly
+one of the two is required, the same validation applies, and a saved key is
+likewise never sent to another origin. A `model` in the body is ignored.
+
+```json
+{ "models": ["claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"], "error": null }
+```
+
+- `models` is the list as in the test's `models`, or `null` when it could
+  not be fetched.
+- `error` is a safe, human-readable reason when `models` is `null` (never
+  echoing the key), else `null`. A missing required key is reported this
+  way too, without a request to the service.
+
+The request to the service is given up after 30 seconds, or after the
+[request timeout](#get-settingsai) when that is shorter. Always `200` when
+the request itself is valid.
 
 ### AI activity log
 

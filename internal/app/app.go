@@ -29,6 +29,9 @@ type AIEnv struct {
 	AnthropicAPIKey  string
 	AnthropicModel   string
 	AnthropicBaseURL string
+	GeminiAPIKey     string
+	GeminiModel      string
+	GeminiBaseURL    string
 	OpenAIAPIKey     string
 	OpenAIModel      string
 	OpenAIBaseURL    string

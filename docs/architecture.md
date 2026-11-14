@@ -500,8 +500,16 @@ A default preset, rather than "last used", decides what applies when a caller
 does not choose: it is predictable, and it gives MCP clients and scripts —
 which have no notion of a previous choice — the same behaviour as the UI.
 
-Provider kinds: Anthropic and any OpenAI-compatible endpoint, which covers
-most hosted services and locally run models. The user saves any number of
+Provider kinds: Anthropic, Google Gemini, and any OpenAI-compatible
+endpoint, which covers most hosted services and locally run models. The
+Gemini kind generates through Google's OpenAI-compatible endpoint
+(`{base}/openai`, by delegating to the OpenAI-compatible implementation) but
+lists models with Google's native Models API (`{base}/models`, the key in the
+`x-goog-api-key` header): that API reports each model's supported generation
+methods, so the list keeps only models that support `generateContent` and
+leaves out embedding, speech, image and similar models without a hand-kept
+list. Ids lose their `models/` prefix, which the OpenAI-compatible endpoint
+does not take. The user saves any number of
 named providers (up to 20), each with its own kind, key, base URL and model,
 and chooses one as the default that the AI endpoints use; a provider stands
 on its own values plus its kind's defaults. Environment variables add one
@@ -511,8 +519,9 @@ default is saved. Providers are local configuration: they are never part of
 a bundle and are not reachable over MCP.
 
 Implementations may also satisfy an optional `ModelLister` interface, which
-the connection test uses to show the service's models, so a model can be
-picked from a list instead of typed. The list is bounded (time, response
+the connection test and the model listing (which makes no generation
+request) use to show the service's models, so a model can be picked from a
+list instead of typed. The list is bounded (time, response
 size, entry count) and treated as untrusted text: ids that are not a short
 single line are dropped before they reach the UI.
 
@@ -529,8 +538,8 @@ time, and the provider kind and that origin are bound into the ciphertext as
 AEAD additional data, so a key cannot be decrypted for another origin even by
 editing the database. Changing a provider's base URL to another origin
 without entering a new key deletes its saved key; an environment key belongs
-to the environment's (or default) base URL; and a connection test against
-another origin sends only a key given in that request. Without this, anyone able to change the settings —
+to the environment's (or default) base URL; and a connection test or model listing
+against another origin sends only a key given in that request. Without this, anyone able to change the settings —
 including a page that got past the request checks — could redirect the
 stored key to a server of their choosing.
 

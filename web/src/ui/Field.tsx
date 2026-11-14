@@ -9,6 +9,10 @@ interface FieldProps {
   error?: string | null;
   /** Hide the label visually (it stays available to assistive technology). */
   hideLabel?: boolean;
+  /** Show an error at the end of the label's line, not under the control, so that it moves nothing as it comes and goes. */
+  inlineError?: boolean;
+  /** Keep one line under the control for the hint, so that one coming or going does not move what follows. */
+  reserve?: boolean;
   className?: string;
   /** The control's `name`. Defaults to one made from the label: "Time limit (ms)" is `time-limit-ms`. */
   name?: string;
@@ -26,27 +30,43 @@ export function fieldName(label: string): string {
 }
 
 /** Label, control, hint and error message wired together for accessibility. */
-export function Field({ label, hint, error, hideLabel, className, name, children }: FieldProps) {
+export function Field({ label, hint, error, hideLabel, inlineError, reserve, className, name, children }: FieldProps) {
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ') || undefined;
-  return (
-    <div className={cx('field', className)}>
-      <label htmlFor={id} className={cx('field-label', hideLabel && 'sr-only')}>
-        {label}
-      </label>
-      {children({ id, name: name ?? fieldName(label), 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
+  const labelEl = (
+    <label htmlFor={id} className={cx('field-label', hideLabel && 'sr-only')}>
+      {label}
+    </label>
+  );
+  const errorEl = error && (
+    <div id={errorId} className="field-error" role="alert">
+      {error}
+    </div>
+  );
+  const message = (
+    <>
       {hint && (
         <div id={hintId} className="field-hint">
           {hint}
         </div>
       )}
-      {error && (
-        <div id={errorId} className="field-error" role="alert">
-          {error}
+      {!inlineError && errorEl}
+    </>
+  );
+  return (
+    <div className={cx('field', className)}>
+      {inlineError ? (
+        <div className="field-head">
+          {labelEl}
+          {errorEl}
         </div>
+      ) : (
+        labelEl
       )}
+      {children({ id, name: name ?? fieldName(label), 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined })}
+      {reserve ? <div className="field-message">{message}</div> : message}
     </div>
   );
 }
@@ -58,12 +78,13 @@ type TextFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | '
   hint?: ReactNode;
   error?: string | null;
   hideLabel?: boolean;
+  inlineError?: boolean;
   fieldClassName?: string;
 };
 
-export function TextField({ label, value, onChange, hint, error, hideLabel, fieldClassName, className, ...rest }: TextFieldProps) {
+export function TextField({ label, value, onChange, hint, error, hideLabel, inlineError, fieldClassName, className, ...rest }: TextFieldProps) {
   return (
-    <Field label={label} hint={hint} error={error} hideLabel={hideLabel} className={fieldClassName}>
+    <Field label={label} hint={hint} error={error} hideLabel={hideLabel} inlineError={inlineError} className={fieldClassName}>
       {/* These fields hold titles, names and settings, never personal details: no autofill unless a caller asks for it. */}
       {(a) => <input autoComplete="off" {...rest} {...a} name={rest.name ?? a.name} className={cx('input', className)} value={value} onChange={(e) => onChange(e.target.value)} />}
     </Field>

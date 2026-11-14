@@ -69,6 +69,10 @@ type AIConfig struct {
 	AnthropicModel   string
 	AnthropicBaseURL string
 
+	GeminiAPIKey  string
+	GeminiModel   string
+	GeminiBaseURL string
+
 	OpenAIAPIKey  string
 	OpenAIModel   string
 	OpenAIBaseURL string
@@ -231,12 +235,17 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AnthropicAPIKey:  get("CODEATROPHY_ANTHROPIC_API_KEY", get("ANTHROPIC_API_KEY", "")),
 		AnthropicModel:   get("CODEATROPHY_ANTHROPIC_MODEL", ""),
 		AnthropicBaseURL: get("CODEATROPHY_ANTHROPIC_BASE_URL", ""),
+		GeminiAPIKey:     get("CODEATROPHY_GEMINI_API_KEY", get("GEMINI_API_KEY", "")),
+		GeminiModel:      get("CODEATROPHY_GEMINI_MODEL", ""),
+		GeminiBaseURL:    get("CODEATROPHY_GEMINI_BASE_URL", ""),
 		OpenAIAPIKey:     get("CODEATROPHY_OPENAI_API_KEY", get("OPENAI_API_KEY", "")),
 		OpenAIModel:      get("CODEATROPHY_OPENAI_MODEL", ""),
 		OpenAIBaseURL:    get("CODEATROPHY_OPENAI_BASE_URL", ""),
 	}
-	if p := c.AI.Provider; p != "" && p != "none" && p != "anthropic" && p != "openai_compatible" {
-		errs = append(errs, fmt.Errorf("CODEATROPHY_AI_PROVIDER: must be anthropic, openai_compatible or none"))
+	switch c.AI.Provider {
+	case "", "none", "anthropic", "gemini", "openai_compatible":
+	default:
+		errs = append(errs, fmt.Errorf("CODEATROPHY_AI_PROVIDER: must be anthropic, gemini, openai_compatible or none"))
 	}
 	if c.AI.Provider == "none" {
 		c.AI.Provider = ""

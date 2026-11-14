@@ -16,7 +16,7 @@ var ErrNewerSchema = errors.New("this database was last used by a newer Codeatro
 // each must bring its database to this version: a schema change adds one
 // migration per backend with the next number and bumps this constant (and
 // Tables, when tables or columns change).
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // Table is a table of the logical schema: the tables and columns every
 // backend has, whatever their physical types. Backend-specific tables, such

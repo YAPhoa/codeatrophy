@@ -23,11 +23,12 @@ type Provider struct {
 	// Token counts reported with every answer.
 	InputTokens, OutputTokens, ReasoningTokens, CacheReadTokens, CacheWriteTokens *int
 
-	mu        sync.Mutex
-	requests  []ai.GenerateRequest
-	deadlines []time.Time
-	configs   []ai.Config
-	listCalls int
+	mu            sync.Mutex
+	requests      []ai.GenerateRequest
+	deadlines     []time.Time
+	configs       []ai.Config
+	listCalls     int
+	listDeadlines []time.Time
 }
 
 var (
@@ -91,9 +92,11 @@ func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.Gen
 }
 
 // ListModels implements ai.ModelLister.
-func (p *Provider) ListModels(context.Context) ([]string, error) {
+func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
+	deadline, _ := ctx.Deadline()
 	p.mu.Lock()
 	p.listCalls++
+	p.listDeadlines = append(p.listDeadlines, deadline)
 	p.mu.Unlock()
 	if p.ListModelsFunc != nil {
 		return p.ListModelsFunc()
@@ -106,6 +109,17 @@ func (p *Provider) ListCalls() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.listCalls
+}
+
+// LastListDeadline returns the context deadline of the most recent
+// ListModels call, or the zero time when it had none.
+func (p *Provider) LastListDeadline() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.listDeadlines) == 0 {
+		return time.Time{}
+	}
+	return p.listDeadlines[len(p.listDeadlines)-1]
 }
 
 // Requests returns the recorded requests.

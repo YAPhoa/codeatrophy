@@ -65,7 +65,7 @@ export interface JudgeLanguage {
   version: string;
 }
 
-export type AiProviderKind = 'anthropic' | 'openai_compatible';
+export type AiProviderKind = 'anthropic' | 'gemini' | 'openai_compatible';
 
 export interface Meta {
   version: string;
@@ -832,6 +832,15 @@ export interface AiTestResponse {
   /** The service's model ids, or `null` when the list could not be fetched; `modelsError` then says why. */
   models: string[] | null;
   modelsError: string | null;
+}
+
+/** The provider is named as for a test; listing makes no generation request, so there is no model. */
+export type AiModelsRequest = Omit<AiTestRequest, 'model'>;
+
+export interface AiModelsResponse {
+  /** The service's model ids, or `null` when the list could not be fetched; `error` then says why. */
+  models: string[] | null;
+  error: string | null;
 }
 
 // ---- Preferences ------------------------------------------------------------

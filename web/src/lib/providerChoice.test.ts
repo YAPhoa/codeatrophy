@@ -24,6 +24,7 @@ const settings = (...providers: AiProvider[]): AiSettings => ({
   providers,
   kinds: {
     anthropic: { defaultModel: 'claude-opus-5-5', defaultBaseUrl: 'https://api.anthropic.com', keyRequired: true },
+    gemini: { defaultModel: null, defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true },
     openai_compatible: { defaultModel: null, defaultBaseUrl: 'https://api.openai.com/v1', keyRequired: false },
   },
 });
@@ -41,6 +42,9 @@ describe('providerLabel', () => {
   it('names the provider and its model, the kind’s default when none is saved', () => {
     expect(providerLabel(provider('b'), library)).toBe('B · b-model');
     expect(providerLabel(provider('e', { model: null }), library)).toBe('E · claude-opus-5-5');
+    expect(providerLabel(provider('g', { kind: 'gemini' }), library)).toBe('G · g-model');
+    // A kind without a default model has none to show.
+    expect(providerLabel(provider('h', { kind: 'gemini', model: null }), library)).toBe('H');
   });
 });
 

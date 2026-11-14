@@ -151,6 +151,7 @@ export function AiSection({ meta }: { meta: Meta }) {
             </p>
             <div className="form-actions">
               <Button onClick={() => setEditing({ provider: null, kind: 'anthropic' })}>Add Anthropic</Button>
+              <Button onClick={() => setEditing({ provider: null, kind: 'gemini' })}>Add Google Gemini</Button>
               <Button onClick={() => setEditing({ provider: null, kind: 'openai_compatible' })}>Add OpenAI-compatible</Button>
             </div>
           </div>
@@ -357,7 +358,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
               ) : test.result?.ok ? (
                 <>The connection works{test.result.models ? `, and the server offers ${plural(test.result.models.length, 'model')}` : ''}. No model is set to try.</>
               ) : (
-                <>The connection failed. {test.result?.error ? sentence(test.result.error) : 'The provider did not accept the request.'}</>
+                <>Connection failed. {test.result?.error ? sentence(test.result.error) : 'The provider did not accept the request.'}</>
               )}
             </span>
           </p>

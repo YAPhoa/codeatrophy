@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -44,9 +45,11 @@ func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	model := "claude-opus-5-5"
 	a := app.New(app.Options{
 		Store: db, Engine: judgetest.New("python"), Secrets: box,
-		Providers: map[string]ai.Factory{ai.ProviderAnthropic: fake.Factory(), ai.ProviderOpenAICompatible: fake.Factory()},
+		Providers: map[string]ai.Factory{ai.ProviderAnthropic: fake.Factory(), ai.ProviderGemini: fake.Factory(),
+			ai.ProviderOpenAICompatible: fake.Factory()},
 		ProviderDefaults: map[string]app.ProviderDefaults{
 			ai.ProviderAnthropic:        {Model: &model, BaseURL: "https://api.anthropic.com"},
+			ai.ProviderGemini:           {BaseURL: "https://generativelanguage.googleapis.com/v1beta"},
 			ai.ProviderOpenAICompatible: {BaseURL: "https://api.openai.com/v1"},
 		},
 		Limits:  domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 10},
@@ -340,7 +343,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	if v, ok := res["models"]; res["ok"] != false || !ok || v != nil {
 		t.Errorf("test without a key: %v", res)
 	}
-	c.expect("POST", api+"/settings/ai/test", `{"kind":"gemini"}`, 422)
+	c.expect("POST", api+"/settings/ai/test", `{"kind":"mistral"}`, 422)
 	c.expect("POST", api+"/settings/ai/test", `{}`, 422)
 	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != true ||
 		m["model"] != "claude-opus-5-5" || m["providerId"] != id || m["providerName"] != "Personal key" || m["kind"] != "anthropic" {
@@ -350,6 +353,84 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	c.expect("DELETE", api+"/settings/ai/providers/"+id, "", 404)
 	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != false {
 		t.Errorf("meta ai after deleting the default: %v", m)
+	}
+}
+
+// POST /settings/ai/models lists a provider's models without a generation
+// request: models is null on failure, [] for an empty list.
+func TestAIModelsEndpoint(t *testing.T) {
+	c := newServer(t)
+	const key = "sk-ant-SECRETVALUE-abcd"
+	id := c.expect("POST", api+"/settings/ai/providers", `{"name":"A","kind":"anthropic","apiKey":"`+key+`"}`, 201).json(t)["id"].(string)
+	c.ai.ListModelsFunc = func() ([]string, error) { return []string{"claude-b", "claude-a"}, nil }
+	r := c.expect("POST", api+"/settings/ai/models", `{"providerId":"`+id+`","model":7}`, 200)
+	if res := r.json(t); fmt.Sprint(res["models"]) != "[claude-a claude-b]" || res["error"] != nil || len(res) != 2 {
+		t.Errorf("saved provider: %s", r.body)
+	}
+	c.ai.ListModelsFunc = func() ([]string, error) { return nil, nil }
+	if r := c.expect("POST", api+"/settings/ai/models", `{"providerId":"`+id+`"}`, 200); !strings.Contains(string(r.body), `"models":[]`) {
+		t.Errorf("empty list: %s", r.body)
+	}
+	r = c.expect("POST", api+"/settings/ai/models", `{"kind":"anthropic"}`, 200)
+	if res := r.json(t); !strings.Contains(string(r.body), `"models":null`) || res["error"] == nil {
+		t.Errorf("without a key: %s", r.body)
+	}
+	c.ai.ListModelsFunc = func() ([]string, error) { return nil, fmt.Errorf("invalid x-api-key %s", key) }
+	r = c.expect("POST", api+"/settings/ai/models", `{"providerId":"`+id+`"}`, 200)
+	if res := r.json(t); !strings.Contains(string(r.body), `"models":null`) || res["error"] == nil || strings.Contains(string(r.body), "SECRETVALUE") {
+		t.Errorf("failing list: %s", r.body)
+	}
+	for _, js := range []string{`{}`, `{"kind":"mistral"}`, `{"providerId":"nope"}`, `{"providerId":"` + id + `","kind":"anthropic"}`} {
+		c.expect("POST", api+"/settings/ai/models", js, 422)
+	}
+	c.expect("GET", api+"/settings/ai/models", "", 405)
+	if n := len(c.ai.Requests()); n != 0 {
+		t.Errorf("listing made %d generation requests", n)
+	}
+	if items := c.expect("GET", api+"/settings/ai/log", "", 200).json(t)["items"].([]any); len(items) != 0 {
+		t.Errorf("listing was logged: %v", items)
+	}
+	p := c.expect("GET", api+"/settings/ai", "", 200).json(t)["providers"].([]any)[0].(map[string]any)
+	if n := p["usage"].(map[string]any)["allTime"].(map[string]any)["requests"]; n != float64(0) {
+		t.Errorf("listing was counted: %v", p["usage"])
+	}
+}
+
+// The gemini kind is listed with its defaults, and its providers are saved,
+// tested and listed like any other.
+func TestGeminiKindEndpoints(t *testing.T) {
+	c := newServer(t)
+	kinds := c.expect("GET", api+"/settings/ai", "", 200).json(t)["kinds"].(map[string]any)
+	if g, ok := kinds["gemini"].(map[string]any); !ok || g["defaultModel"] != nil || g["keyRequired"] != true ||
+		g["defaultBaseUrl"] != "https://generativelanguage.googleapis.com/v1beta" || len(kinds) != 3 {
+		t.Errorf("kinds: %v", kinds)
+	}
+	r := c.expect("POST", api+"/settings/ai/models", `{"kind":"gemini"}`, 200)
+	if !strings.Contains(string(r.body), `"models":null`) || r.json(t)["error"] == nil {
+		t.Errorf("without a key: %s", r.body)
+	}
+	const key = "AIza-SECRETVALUE-abcd"
+	p := c.expect("POST", api+"/settings/ai/providers", `{"name":"G","kind":"gemini","apiKey":"`+key+`"}`, 201).json(t)
+	if p["kind"] != "gemini" || p["ready"] != false || p["apiKeyHint"] != "…abcd" {
+		t.Errorf("created: %v", p)
+	}
+	id := p["id"].(string)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+id+`"}`, 422)
+	c.ai.ListModelsFunc = func() ([]string, error) { return []string{"gemini-3.5-flash"}, nil }
+	r = c.expect("POST", api+"/settings/ai/models", `{"providerId":"`+id+`"}`, 200)
+	if res := r.json(t); fmt.Sprint(res["models"]) != "[gemini-3.5-flash]" || strings.Contains(string(r.body), "SECRETVALUE") {
+		t.Errorf("models: %s", r.body)
+	}
+	p = c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"model":"gemini-3.5-flash"}`, 200).json(t)
+	if p["ready"] != true {
+		t.Errorf("with a model: %v", p)
+	}
+	if res := c.expect("POST", api+"/settings/ai/test", `{"providerId":"`+id+`"}`, 200).json(t); res["ok"] != true {
+		t.Errorf("test: %v", res)
+	}
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+id+`"}`, 200)
+	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["kind"] != "gemini" || m["model"] != "gemini-3.5-flash" {
+		t.Errorf("meta ai: %v", m)
 	}
 }
 

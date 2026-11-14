@@ -8,10 +8,14 @@ import {
   keyRequiredAt,
   matchModels,
   modelInEffect,
+  modelPlaceholder,
   modelProblem,
+  modelsBody,
   nameProblem,
   needsOf,
+  needsTest,
   outlookOf,
+  passedTestOf,
   patchBody,
   suggestName,
   testBody,
@@ -20,6 +24,7 @@ import {
 
 const kinds: AiSettings['kinds'] = {
   anthropic: { defaultModel: 'claude-opus-5-5', defaultBaseUrl: 'https://api.anthropic.com', keyRequired: true },
+  gemini: { defaultModel: null, defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true },
   openai_compatible: { defaultModel: null, defaultBaseUrl: 'https://api.openai.com/v1', keyRequired: false },
 };
 
@@ -49,16 +54,23 @@ describe('what a provider uses', () => {
     expect(modelInEffect(provider(), kinds)).toBe('claude-opus-5-5');
     expect(modelInEffect(provider({ model: 'claude-sonnet-5-5' }), kinds)).toBe('claude-sonnet-5-5');
     expect(modelInEffect(provider({ kind: 'openai_compatible' }), kinds)).toBeNull();
+    expect(modelInEffect(provider({ kind: 'gemini' }), kinds)).toBeNull();
+    expect(modelInEffect(provider({ kind: 'gemini', model: 'gemini-3.5-flash' }), kinds)).toBe('gemini-3.5-flash');
   });
 
   it('names the host only when it is not the default server', () => {
     expect(customHost(provider(), kinds)).toBeNull();
     expect(customHost(provider({ baseUrl: 'https://api.anthropic.com/v2' }), kinds)).toBeNull();
     expect(customHost(provider({ kind: 'openai_compatible', baseUrl: 'http://localhost:11434/v1' }), kinds)).toBe('localhost:11434');
+    expect(customHost(provider({ kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1' }), kinds)).toBeNull();
+    expect(customHost(provider({ kind: 'gemini', baseUrl: 'https://gateway.example.org/google' }), kinds)).toBe('gateway.example.org');
   });
 
-  it('requires a key for Anthropic anywhere, and for OpenAI-compatible only on the default server', () => {
+  it('requires a key for Anthropic and Gemini anywhere, and for OpenAI-compatible only on the default server', () => {
     expect(keyRequiredAt('anthropic', 'https://gateway.example.org', kinds)).toBe(true);
+    expect(keyRequiredAt('gemini', 'https://generativelanguage.googleapis.com/v1beta', kinds)).toBe(true);
+    expect(keyRequiredAt('gemini', 'https://gateway.example.org/google', kinds)).toBe(true);
+    expect(keyRequiredAt('gemini', null, kinds)).toBe(true);
     expect(keyRequiredAt('openai_compatible', 'https://api.openai.com/v1', kinds)).toBe(true);
     expect(keyRequiredAt('openai_compatible', 'http://localhost:11434/v1', kinds)).toBe(false);
     expect(keyRequiredAt('openai_compatible', 'not a url', kinds)).toBe(false);
@@ -69,17 +81,29 @@ describe('what a provider uses', () => {
     expect(needsOf(provider({ ready: false, apiKeySet: false, apiKeyHint: null }), kinds)).toEqual(['an API key']);
     expect(needsOf(provider({ kind: 'openai_compatible', ready: false, apiKeySet: false }), kinds)).toEqual(['a model', 'an API key']);
     expect(needsOf(provider({ kind: 'openai_compatible', ready: false, apiKeySet: false, baseUrl: 'http://localhost:11434/v1' }), kinds)).toEqual(['a model']);
+    // Gemini has no default model, and needs a key on any server.
+    expect(needsOf(provider({ kind: 'gemini', ready: false, apiKeySet: false, apiKeyHint: null }), kinds)).toEqual(['a model', 'an API key']);
+    expect(needsOf(provider({ kind: 'gemini', ready: false, apiKeySet: false, apiKeyHint: null, baseUrl: 'https://gateway.example.org/google' }), kinds)).toEqual(['a model', 'an API key']);
+    expect(needsOf(provider({ kind: 'gemini', ready: false }), kinds)).toEqual(['a model']);
+    expect(needsOf(provider({ kind: 'gemini', ready: false, model: 'gemini-3.5-flash', apiKeySet: false, apiKeyHint: null }), kinds)).toEqual(['an API key']);
   });
 });
 
 describe('suggestName', () => {
   it('names a new provider after where it connects', () => {
     expect(suggestName('anthropic', '', [], kinds)).toBe('Anthropic');
-    expect(suggestName('openai_compatible', '', [], kinds)).toBe('OpenAI');
+    expect(suggestName('openai_compatible', '', [], kinds)).toBe('OpenAI-compatible');
     expect(suggestName('openai_compatible', 'http://localhost:11434/v1', [], kinds)).toBe('localhost:11434');
     expect(suggestName('openai_compatible', 'https://api.openai.com/v2', [], kinds)).toBe('OpenAI');
     // A URL still being typed does not count yet.
-    expect(suggestName('openai_compatible', 'localhost', [], kinds)).toBe('OpenAI');
+    expect(suggestName('openai_compatible', 'localhost', [], kinds)).toBe('OpenAI-compatible');
+  });
+
+  it('names a Gemini provider by its kind on Google\'s server, and by the host of a gateway', () => {
+    expect(suggestName('gemini', '', [], kinds)).toBe('Google Gemini');
+    expect(suggestName('gemini', 'https://generativelanguage.googleapis.com/v1beta', [], kinds)).toBe('Google Gemini');
+    expect(suggestName('gemini', 'https://gateway.example.org/google', [], kinds)).toBe('gateway.example.org');
+    expect(suggestName('gemini', '', [provider({ kind: 'gemini', name: 'Google Gemini' })], kinds)).toBe('Google Gemini 2');
   });
 
   it('adds a number when the name is taken by a saved provider', () => {
@@ -107,9 +131,12 @@ describe('validation', () => {
     expect(modelProblem('', 200)).toBeNull();
     expect(modelProblem('m'.repeat(201), 200)).toMatch(/over the 200-character limit/);
     expect(modelProblem('a\tb', 200)).toMatch(/single line/);
-    expect(baseUrlProblem('')).toBeNull();
-    expect(baseUrlProblem('http://localhost:11434/v1')).toBeNull();
-    expect(baseUrlProblem('localhost:11434')).toMatch(/http/);
+    expect(baseUrlProblem('', 'anthropic')).toBeNull();
+    expect(baseUrlProblem('', 'gemini')).toBeNull();
+    expect(baseUrlProblem('gateway.example.org', 'gemini')).toMatch(/http/);
+    expect(baseUrlProblem(' ', 'openai_compatible')).toBe('Enter the base URL.');
+    expect(baseUrlProblem('http://localhost:11434/v1', 'openai_compatible')).toBeNull();
+    expect(baseUrlProblem('localhost:11434', 'openai_compatible')).toMatch(/http/);
   });
 });
 
@@ -120,16 +147,27 @@ describe('outlookOf', () => {
     expect(outlookOf(form({ kind: 'anthropic', apiKey: 'sk-ant-1' }), null, kinds).missing).toEqual([]);
   });
 
+  it('asks a new Gemini provider for a model and a key, on its own server or a gateway', () => {
+    expect(outlookOf(form({ kind: 'gemini' }), null, kinds)).toMatchObject({
+      nextBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      keyRequired: true,
+      keyWillBeSet: false,
+      missing: ['a model', 'an API key'],
+    });
+    expect(outlookOf(form({ kind: 'gemini', baseUrl: 'https://gateway.example.org/google', model: 'gemini-3.5-flash' }), null, kinds)).toMatchObject({ keyRequired: true, missing: ['an API key'] });
+    expect(outlookOf(form({ kind: 'gemini', apiKey: 'AIza-1', model: 'gemini-3.5-flash' }), null, kinds).missing).toEqual([]);
+  });
+
   it('keeps the saved key while the server stays the same', () => {
     const saved = provider();
-    expect(outlookOf(formOf(saved), saved, kinds)).toMatchObject({ keyWillBeSet: true, savedKeyDropped: false, missing: [] });
-    expect(outlookOf({ ...formOf(saved), baseUrl: 'https://api.anthropic.com/v2' }, saved, kinds)).toMatchObject({ serverChanges: false, keyWillBeSet: true });
-    expect(outlookOf({ ...formOf(saved), removeKey: true }, saved, kinds)).toMatchObject({ keyWillBeSet: false, missing: ['an API key'] });
+    expect(outlookOf(formOf(saved, kinds), saved, kinds)).toMatchObject({ keyWillBeSet: true, savedKeyDropped: false, missing: [] });
+    expect(outlookOf({ ...formOf(saved, kinds), baseUrl: 'https://api.anthropic.com/v2' }, saved, kinds)).toMatchObject({ serverChanges: false, keyWillBeSet: true });
+    expect(outlookOf({ ...formOf(saved, kinds), removeKey: true }, saved, kinds)).toMatchObject({ keyWillBeSet: false, missing: ['an API key'] });
   });
 
   it('drops the saved key when the base URL moves to another server', () => {
     const saved = provider();
-    const moved = { ...formOf(saved), baseUrl: 'https://gateway.example.org/anthropic' };
+    const moved = { ...formOf(saved, kinds), baseUrl: 'https://gateway.example.org/anthropic' };
     expect(outlookOf(moved, saved, kinds)).toMatchObject({
       currentBaseUrl: 'https://api.anthropic.com',
       nextBaseUrl: 'https://gateway.example.org/anthropic',
@@ -159,30 +197,89 @@ describe('request bodies', () => {
 
   it('patches only what changed, and never touches the key unasked', () => {
     const saved = provider({ model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org' });
-    expect(patchBody(formOf(saved), saved)).toEqual({});
-    expect(patchBody({ ...formOf(saved), name: 'Work key ' }, saved)).toEqual({ name: 'Work key' });
-    expect(patchBody({ ...formOf(saved), model: '', baseUrl: '' }, saved)).toEqual({ model: null, baseUrl: null });
-    expect(patchBody({ ...formOf(saved), apiKey: 'sk-new' }, saved)).toEqual({ apiKey: 'sk-new' });
-    expect(patchBody({ ...formOf(saved), removeKey: true }, saved)).toEqual({ apiKey: null });
+    expect(patchBody(formOf(saved, kinds), saved, kinds)).toEqual({});
+    expect(patchBody({ ...formOf(saved, kinds), name: 'Work key ' }, saved, kinds)).toEqual({ name: 'Work key' });
+    expect(patchBody({ ...formOf(saved, kinds), model: '', baseUrl: '' }, saved, kinds)).toEqual({ model: null, baseUrl: null });
+    expect(patchBody({ ...formOf(saved, kinds), apiKey: 'sk-new' }, saved, kinds)).toEqual({ apiKey: 'sk-new' });
+    expect(patchBody({ ...formOf(saved, kinds), removeKey: true }, saved, kinds)).toEqual({ apiKey: null });
     // A typed key wins over a pending deletion; there is nothing to delete without a saved key.
-    expect(patchBody({ ...formOf(saved), removeKey: true, apiKey: 'sk-new' }, saved)).toEqual({ apiKey: 'sk-new' });
-    expect(patchBody({ ...formOf(saved), removeKey: true }, { ...saved, apiKeySet: false })).toEqual({});
+    expect(patchBody({ ...formOf(saved, kinds), removeKey: true, apiKey: 'sk-new' }, saved, kinds)).toEqual({ apiKey: 'sk-new' });
+    expect(patchBody({ ...formOf(saved, kinds), removeKey: true }, { ...saved, apiKeySet: false }, kinds)).toEqual({});
+    // An OpenAI-compatible provider saved without a base URL shows the server it uses, and that is not a change.
+    const hosted = provider({ kind: 'openai_compatible', model: 'gpt-4.1', baseUrl: null });
+    expect(formOf(hosted, kinds).baseUrl).toBe('https://api.openai.com/v1');
+    expect(patchBody(formOf(hosted, kinds), hosted, kinds)).toEqual({});
+    expect(patchBody({ ...formOf(hosted, kinds), baseUrl: 'http://localhost:11434/v1' }, hosted, kinds)).toEqual({ baseUrl: 'http://localhost:11434/v1' });
+    // A Gemini provider has a server of its own: without a base URL the field stays empty, as Anthropic's does.
+    const gemini = provider({ kind: 'gemini', model: 'gemini-3.5-flash', baseUrl: null });
+    expect(formOf(gemini, kinds).baseUrl).toBe('');
+    expect(patchBody(formOf(gemini, kinds), gemini, kinds)).toEqual({});
   });
 
   it('tests an unsaved configuration by kind', () => {
     expect(testBody(form(), null, kinds)).toEqual({ kind: 'openai_compatible', model: null, baseUrl: null, apiKey: null });
+    expect(testBody(form({ kind: 'gemini', model: 'gemini-3.5-flash', apiKey: 'AIza-1' }), null, kinds)).toEqual({ kind: 'gemini', model: 'gemini-3.5-flash', baseUrl: null, apiKey: 'AIza-1' });
     expect(testBody(form({ model: 'gpt-4.1', apiKey: 'sk-1' }), null, kinds)).toEqual({ kind: 'openai_compatible', model: 'gpt-4.1', baseUrl: null, apiKey: 'sk-1' });
   });
 
   it('tests a saved provider with the form as overrides, an emptied field meaning the default', () => {
     const saved = provider({ model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org' });
-    expect(testBody(formOf(saved), saved, kinds)).toEqual({ providerId: 'p1', model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org', apiKey: null });
-    expect(testBody({ ...formOf(saved), model: '', baseUrl: '', apiKey: 'sk-typed' }, saved, kinds)).toEqual({
+    expect(testBody(formOf(saved, kinds), saved, kinds)).toEqual({ providerId: 'p1', model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org', apiKey: null });
+    expect(testBody({ ...formOf(saved, kinds), model: '', baseUrl: '', apiKey: 'sk-typed' }, saved, kinds)).toEqual({
       providerId: 'p1',
       model: 'claude-opus-5-5',
       baseUrl: 'https://api.anthropic.com',
       apiKey: 'sk-typed',
     });
+  });
+
+  it('lists the models of the same provider a test would use, without a model', () => {
+    expect(modelsBody(form({ model: 'gpt-4.1', apiKey: 'sk-1' }), null, kinds)).toEqual({ kind: 'openai_compatible', baseUrl: null, apiKey: 'sk-1' });
+    const saved = provider({ model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org' });
+    expect(modelsBody(formOf(saved, kinds), saved, kinds)).toEqual({ providerId: 'p1', baseUrl: 'https://gateway.example.org', apiKey: null });
+    expect(modelsBody({ ...formOf(saved, kinds), baseUrl: '', apiKey: 'sk-typed' }, saved, kinds)).toEqual({ providerId: 'p1', baseUrl: 'https://api.anthropic.com', apiKey: 'sk-typed' });
+  });
+});
+
+describe('needsTest', () => {
+  const passed = (f: ProviderForm) => passedTestOf(f, kinds);
+
+  it('holds back a new provider until its endpoint and key have passed a test, whatever the model since', () => {
+    const base = form({ model: 'gpt-4.1', apiKey: 'sk-1' });
+    expect(needsTest(base, null, kinds, null)).toBe(true);
+    expect(needsTest(base, null, kinds, passed(base))).toBe(false);
+    expect(needsTest({ ...base, model: 'gpt-4.1-mini', name: 'Renamed', apiKey: ' sk-1 ' }, null, kinds, passed(base))).toBe(false);
+    // The default base URL typed out, with a trailing slash, is the same endpoint.
+    expect(needsTest({ ...base, baseUrl: 'https://api.openai.com/v1/' }, null, kinds, passed(base))).toBe(false);
+    expect(needsTest({ ...base, apiKey: 'sk-2' }, null, kinds, passed(base))).toBe(true);
+    expect(needsTest({ ...base, baseUrl: 'http://localhost:11434/v1' }, null, kinds, passed(base))).toBe(true);
+    expect(needsTest({ ...base, kind: 'anthropic' }, null, kinds, passed(base))).toBe(true);
+    expect(needsTest({ ...base, kind: 'gemini' }, null, kinds, passed(base))).toBe(true);
+  });
+
+  it('lets a saved provider save untested while its connection is as saved, and asks for a test of a new one', () => {
+    const saved = provider({ kind: 'openai_compatible', model: 'llama3.1:8b', baseUrl: 'http://localhost:11434/v1' });
+    expect(needsTest({ ...formOf(saved, kinds), model: 'qwen2.5-coder:14b', name: 'Renamed' }, saved, kinds, null)).toBe(false);
+    expect(needsTest({ ...formOf(saved, kinds), removeKey: true }, saved, kinds, null)).toBe(false);
+    // Put back, with a trailing slash, it is the saved endpoint again.
+    expect(needsTest({ ...formOf(saved, kinds), baseUrl: 'http://localhost:11434/v1/' }, saved, kinds, null)).toBe(false);
+
+    const keyed = { ...formOf(saved, kinds), apiKey: 'sk-new' };
+    expect(needsTest(keyed, saved, kinds, null)).toBe(true);
+    expect(needsTest(keyed, saved, kinds, passed(keyed))).toBe(false);
+    const moved = { ...formOf(saved, kinds), baseUrl: 'http://gpu.lan:8000/v1' };
+    expect(needsTest(moved, saved, kinds, null)).toBe(true);
+    expect(needsTest({ ...moved, model: 'other' }, saved, kinds, passed(moved))).toBe(false);
+    expect(needsTest({ ...formOf(saved, kinds), baseUrl: 'not a url' }, saved, kinds, null)).toBe(true);
+  });
+});
+
+describe('modelPlaceholder', () => {
+  it('shows the kind\'s default, else asks for a pick from the list, else gives examples of the kind', () => {
+    expect(modelPlaceholder('anthropic', kinds, false)).toBe('claude-opus-5-5');
+    expect(modelPlaceholder('gemini', kinds, true)).toBe('Pick a model…');
+    expect(modelPlaceholder('gemini', kinds, false)).toBe('e.g. gemini-3.5-flash…');
+    expect(modelPlaceholder('openai_compatible', kinds, false)).toBe('e.g. gpt-4.1, llama3.1:70b…');
   });
 });
 

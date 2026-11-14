@@ -15,11 +15,12 @@ import (
 // Provider ids.
 const (
 	ProviderAnthropic        = "anthropic"
+	ProviderGemini           = "gemini"
 	ProviderOpenAICompatible = "openai_compatible"
 )
 
 // ProviderIDs lists every supported provider id.
-var ProviderIDs = []string{ProviderAnthropic, ProviderOpenAICompatible}
+var ProviderIDs = []string{ProviderAnthropic, ProviderGemini, ProviderOpenAICompatible}
 
 // GenerateRequest asks a model for JSON conforming to Schema.
 type GenerateRequest struct {
@@ -69,7 +70,8 @@ type Provider interface {
 // the service offers. It needs no model to be configured. Implementations
 // bound the call with ModelListTimeout and the response with
 // MaxModelListBytes, and return at most MaxModelListEntries ids as the
-// service sent them; callers treat the ids as untrusted text.
+// service sent them (in the form the provider's model setting takes);
+// callers treat the ids as untrusted text.
 type ModelLister interface {
 	ListModels(ctx context.Context) ([]string, error)
 }

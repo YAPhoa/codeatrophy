@@ -148,10 +148,11 @@ export function noUsage(): AiProviderUsage {
   return { last30Days: { ...none }, allTime: { ...none }, lastUsedAt: null };
 }
 
-export const AI_KIND_IDS: readonly AiProviderKind[] = ['anthropic', 'openai_compatible'];
+export const AI_KIND_IDS: readonly AiProviderKind[] = ['anthropic', 'gemini', 'openai_compatible'];
 
 export const AI_KINDS: AiSettings['kinds'] = {
   anthropic: { defaultModel: 'claude-opus-5-5', defaultBaseUrl: 'https://api.anthropic.com', keyRequired: true },
+  gemini: { defaultModel: null, defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true },
   openai_compatible: { defaultModel: null, defaultBaseUrl: 'https://api.openai.com/v1', keyRequired: false },
 };
 

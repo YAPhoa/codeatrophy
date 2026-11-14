@@ -25,6 +25,11 @@ func (e *env) testProvider(t *testing.T, js string) app.AITestResult {
 	return must(e.app.TestAIProvider(e.ctx, decodeInto[app.AITestInput](t, js)))
 }
 
+func (e *env) listModels(t *testing.T, js string) app.AIModelsResult {
+	t.Helper()
+	return must(e.app.ListAIModels(e.ctx, decodeInto[app.AIModelsInput](t, js)))
+}
+
 func (e *env) lastConfig() ai.Config {
 	cs := e.ai.Configs()
 	if len(cs) == 0 {
@@ -45,7 +50,7 @@ func providerByID(st app.AISettings, id string) *app.AIProvider {
 func TestAIProviderKeysAreWriteOnly(t *testing.T) {
 	e := newEnv(t)
 	st := must(e.app.GetAISettings(e.ctx))
-	if st.DefaultProviderID != nil || len(st.Providers) != 0 || len(st.Kinds) != 2 {
+	if st.DefaultProviderID != nil || len(st.Providers) != 0 || len(st.Kinds) != 3 {
 		t.Fatalf("initial: %+v", st)
 	}
 	if k := st.Kinds["anthropic"]; *k.DefaultModel != "default-model" || k.DefaultBaseURL != "https://api.anthropic.com" || !k.KeyRequired {
@@ -53,6 +58,9 @@ func TestAIProviderKeysAreWriteOnly(t *testing.T) {
 	}
 	if k := st.Kinds["openai_compatible"]; k.DefaultModel != nil || k.DefaultBaseURL != "https://api.openai.com/v1" || k.KeyRequired {
 		t.Errorf("openai_compatible kind: %+v", k)
+	}
+	if k := st.Kinds["gemini"]; k.DefaultModel != nil || k.DefaultBaseURL != "https://generativelanguage.googleapis.com/v1beta" || !k.KeyRequired {
+		t.Errorf("gemini kind: %+v", k)
 	}
 
 	const key = "sk-ant-api03-supersecret-x7Qa"
@@ -141,7 +149,7 @@ func TestAIProviderNamesKindsAndLimits(t *testing.T) {
 		`{"kind":"anthropic"}`,
 		`{"name":"","kind":"anthropic"}`,
 		`{"name":"x"}`,
-		`{"name":"x","kind":"gemini"}`,
+		`{"name":"x","kind":"mistral"}`,
 		`{"name":"WORK","kind":"openai_compatible"}`,
 		`{"name":"two\nlines","kind":"anthropic"}`,
 		`{"name":"` + strings.Repeat("名", domain.MaxAIProviderNameChars+1) + `","kind":"anthropic"}`,
@@ -460,7 +468,7 @@ func TestAIConnectionTest(t *testing.T) {
 		`{}`,
 		`{"providerId":"` + p.ID + `","kind":"anthropic"}`,
 		`{"providerId":"nope"}`,
-		`{"kind":"gemini"}`,
+		`{"kind":"mistral"}`,
 		`{"kind":"anthropic","baseUrl":"not a url"}`,
 		`{"kind":"anthropic","model":"two\nlines"}`,
 	} {
@@ -494,6 +502,120 @@ func TestConnectionTestDoesNotSendStoredKeysElsewhere(t *testing.T) {
 		t.Errorf("same-origin override: %q", cfg.APIKey)
 	}
 	e.testProvider(t, `{"providerId":"env-anthropic"}`)
+	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-env-4444" {
+		t.Errorf("environment provider: %q", cfg.APIKey)
+	}
+}
+
+// A model listing names its provider as a connection test does and returns
+// the same list, but makes no generation request: nothing is counted or
+// logged, and nothing is saved.
+func TestAIModelListing(t *testing.T) {
+	e := newEnv(t)
+	const key = "sk-ant-trial-9876"
+	// A missing required key is reported with no request made.
+	n, lists := len(e.ai.Configs()), e.ai.ListCalls()
+	for _, js := range []string{`{"kind":"anthropic"}`, `{"kind":"openai_compatible"}`} {
+		if res := e.listModels(t, js); res.Models != nil || res.Error == nil {
+			t.Errorf("%s without a key: %+v", js, res)
+		}
+	}
+	if len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
+		t.Error("a request was made without a required key")
+	}
+
+	// An unsaved kind with a typed key, cleaned as for the test. A model in
+	// the body is ignored, even one that is not valid.
+	e.ai.ListModelsFunc = func() ([]string, error) {
+		return []string{"claude-b", "claude-a", "claude-b", "two\nlines", "echo-" + key}, nil
+	}
+	res := e.listModels(t, `{"kind":"anthropic","apiKey":"`+key+`","model":"two\nlines"}`)
+	if res.Error != nil || strings.Join(res.Models, ",") != "claude-a,claude-b" {
+		t.Errorf("unsaved kind: %+v", res)
+	}
+	if cfg := e.lastConfig(); cfg.APIKey != key {
+		t.Errorf("unsaved kind config: %+v", cfg)
+	}
+
+	// A saved provider is listed with its own values.
+	p := e.addProvider(t, `{"name":"Saved","kind":"anthropic","model":"claude-saved","apiKey":"sk-ant-saved-5555"}`)
+	e.ai.ListModelsFunc = func() ([]string, error) { return []string{"claude-saved", "claude-other"}, nil }
+	lists = e.ai.ListCalls()
+	if res := e.listModels(t, `{"providerId":"`+p.ID+`"}`); res.Error != nil || strings.Join(res.Models, ",") != "claude-other,claude-saved" {
+		t.Errorf("saved provider: %+v", res)
+	}
+	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-saved-5555" || e.ai.ListCalls() != lists+1 {
+		t.Errorf("saved config: %+v", cfg)
+	}
+
+	// An empty list is an empty list, not a failure.
+	e.ai.ListModelsFunc = func() ([]string, error) { return nil, nil }
+	res = e.listModels(t, `{"providerId":"`+p.ID+`"}`)
+	if b, _ := json.Marshal(res); string(b) != `{"models":[],"error":null}` {
+		t.Errorf("empty list: %s", b)
+	}
+
+	// A failing list is null, with a reason that does not echo the key.
+	e.ai.ListModelsFunc = func() ([]string, error) { return nil, ai.Errorf(401, "invalid x-api-key "+key) }
+	res = e.listModels(t, `{"kind":"anthropic","apiKey":"`+key+`"}`)
+	if b, _ := json.Marshal(res); res.Models != nil || res.Error == nil || !strings.Contains(string(b), `"models":null`) ||
+		strings.Contains(string(b), key) {
+		t.Errorf("failing list: %s", b)
+	}
+	e.ai.ListModelsFunc = nil
+
+	// No generation request, no counts, no log entries, nothing saved.
+	if len(e.ai.Requests()) != 0 {
+		t.Errorf("a listing made %d generation requests", len(e.ai.Requests()))
+	}
+	if u := e.usageOf(t, p.ID); u.AllTime.Requests != 0 || u.LastUsedAt != nil {
+		t.Errorf("a listing was counted: %+v", u)
+	}
+	if page := e.logPage(t, app.AILogQuery{}); len(page.Items) != 0 {
+		t.Errorf("a listing was logged: %+v", page.Items)
+	}
+	if st := must(e.app.GetAISettings(e.ctx)); len(st.Providers) != 1 {
+		t.Errorf("a listing saved something: %+v", st.Providers)
+	}
+
+	for _, js := range []string{
+		`{}`,
+		`{"providerId":"` + p.ID + `","kind":"anthropic"}`,
+		`{"providerId":"nope"}`,
+		`{"kind":"mistral"}`,
+		`{"kind":"anthropic","baseUrl":"not a url"}`,
+	} {
+		_, err := e.app.ListAIModels(e.ctx, decodeInto[app.AIModelsInput](t, js))
+		wantCode(t, err, app.CodeValidation)
+	}
+	_, err := e.app.ListAIModels(e.ctx, decodeInto[app.AIModelsInput](t, `{"providerId":"nope"}`))
+	wantField(t, err, "providerId")
+}
+
+// A model listing against another origin uses only a key from the same
+// request, for saved and environment providers alike.
+func TestModelListingDoesNotSendStoredKeysElsewhere(t *testing.T) {
+	e := newEnv(t, withAIEnv(app.AIEnv{AnthropicAPIKey: "sk-ant-env-4444"}))
+	p := e.addProvider(t, `{"name":"Saved","kind":"anthropic","apiKey":"sk-ant-saved-5555"}`)
+	for _, id := range []string{p.ID, "env-anthropic"} {
+		n, lists := len(e.ai.Configs()), e.ai.ListCalls()
+		res := e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example"}`)
+		if res.Models != nil || res.Error == nil || len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
+			t.Errorf("%s: a request was made to the override without a key: %+v", id, res)
+		}
+		e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example","apiKey":"sk-own-6666"}`)
+		for _, cfg := range e.ai.Configs()[n:] {
+			if cfg.APIKey != "sk-own-6666" || cfg.BaseURL != "https://attacker.example" {
+				t.Errorf("%s: a stored key was sent to the override: %q", id, cfg.APIKey)
+			}
+		}
+	}
+	// The same origin as the stored key still uses it.
+	e.listModels(t, `{"providerId":"`+p.ID+`","baseUrl":"https://api.anthropic.com/"}`)
+	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-saved-5555" {
+		t.Errorf("same-origin override: %q", cfg.APIKey)
+	}
+	e.listModels(t, `{"providerId":"env-anthropic"}`)
 	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-env-4444" {
 		t.Errorf("environment provider: %q", cfg.APIKey)
 	}
@@ -648,6 +770,37 @@ func TestAIRequestTimeout(t *testing.T) {
 	if cfg := none.lastConfig(); cfg.Timeout != 0 {
 		t.Errorf("without an environment timeout the provider keeps its own: %v", cfg.Timeout)
 	}
+}
+
+// listBound runs a model listing on e and fails unless its request was
+// given want.
+func listBound(t *testing.T, e *env, js string, want time.Duration) {
+	t.Helper()
+	start := time.Now()
+	if res := e.listModels(t, js); res.Models == nil {
+		t.Fatalf("model listing: %+v", res)
+	}
+	end := time.Now()
+	if dl := e.ai.LastListDeadline(); dl.Before(start.Add(want)) || dl.After(end.Add(want)) {
+		t.Errorf("the listing was given %v, want %v", dl.Sub(start), want)
+	}
+}
+
+// A model listing is given 30 seconds, or the request timeout when that is
+// shorter, whether it is saved or the environment's.
+func TestModelListingTimeout(t *testing.T) {
+	const js = `{"kind":"anthropic","apiKey":"sk-ant-list-1234"}`
+	none := newEnv(t)
+	listBound(t, none, js, 30*time.Second)
+	long := newEnv(t, withAIEnv(app.AIEnv{Timeout: 7 * time.Minute}))
+	listBound(t, long, js, 30*time.Second)
+	if cfg := long.lastConfig(); cfg.Timeout != 7*time.Minute {
+		t.Errorf("listing provider timeout: %v", cfg.Timeout)
+	}
+	must(long.app.UpdateAISettings(long.ctx, decodeInto[app.AISettingsInput](t, `{"timeoutSeconds":10}`)))
+	listBound(t, long, js, 10*time.Second)
+	short := newEnv(t, withAIEnv(app.AIEnv{Timeout: 20 * time.Second}))
+	listBound(t, short, js, 20*time.Second)
 }
 
 // A draft, variant or test case generation can name the provider it uses;
@@ -948,5 +1101,113 @@ func TestLegacyKeyThatCannotBeDecryptedIsKept(t *testing.T) {
 	restored := newEnv(t, func(o *app.Options) { o.Store = e.db; o.Secrets = otherBox })
 	if p := must(restored.app.GetAISettings(restored.ctx)).Providers; !p[0].APIKeySet || *p[0].APIKeyHint != "…3333" {
 		t.Errorf("after restoring the secret key: %+v", p)
+	}
+}
+
+// A gemini provider always needs a key and, having no default model, a
+// saved one; it is tested, listed and used like the other kinds, and its
+// key is never sent to another origin.
+func TestGeminiProviders(t *testing.T) {
+	e := newEnv(t, withAIEnv(app.AIEnv{Provider: "gemini", GeminiAPIKey: "AIza-env-7777"}))
+	const key = "AIza-saved-5555"
+
+	// The environment provider of the kind.
+	st := must(e.app.GetAISettings(e.ctx))
+	if len(st.Providers) != 1 || st.DefaultProviderID == nil || *st.DefaultProviderID != "env-gemini" {
+		t.Fatalf("environment provider: %+v", st)
+	}
+	if g := st.Providers[0]; g.Kind != "gemini" || g.Name != "Google Gemini (environment)" || g.Source != "environment" ||
+		g.Ready || !g.APIKeySet || g.Model != nil {
+		t.Errorf("env gemini without a model: %+v", g)
+	}
+	e2 := newEnv(t, withAIEnv(app.AIEnv{GeminiModel: "gemini-3.5-flash", GeminiAPIKey: "AIza-env-7777",
+		GeminiBaseURL: "https://gemini-proxy.example/v1beta"}))
+	if g := must(e2.app.GetAISettings(e2.ctx)).Providers[0]; g.ID != "env-gemini" || !g.Ready ||
+		*g.BaseURL != "https://gemini-proxy.example/v1beta" {
+		t.Errorf("env gemini with a model: %+v", g)
+	}
+	if g := must(newEnv(t, withAIEnv(app.AIEnv{GeminiModel: "gemini-3.5-flash"})).app.GetAISettings(e.ctx)).Providers[0]; g.Ready {
+		t.Errorf("env gemini without a key: %+v", g)
+	}
+
+	// A saved provider needs a key and a model, on any base URL.
+	p := e.addProvider(t, `{"name":"Gemini","kind":"gemini"}`)
+	_, err := e.app.UpdateAISettings(e.ctx, decodeInto[app.AISettingsInput](t, `{"defaultProviderId":"`+p.ID+`"}`))
+	if ae := wantCode(t, err, app.CodeValidation); ae.Fields["defaultProviderId"] != "the provider is not ready — it needs a model and an API key" {
+		t.Errorf("fields: %v", ae.Fields)
+	}
+	if p = must(e.patchProvider(t, p.ID, `{"baseUrl":"http://localhost:8000/v1beta","model":"gemini-3.5-flash"}`)); p.Ready {
+		t.Errorf("a gemini provider on another base URL still needs a key: %+v", p)
+	}
+	if p = must(e.patchProvider(t, p.ID, `{"baseUrl":null,"apiKey":"`+key+`"}`)); !p.Ready || *p.APIKeyHint != "…5555" {
+		t.Errorf("with a key and a model: %+v", p)
+	}
+
+	// A missing key stops a test or a listing before any request.
+	n, lists := len(e.ai.Configs()), e.ai.ListCalls()
+	if res := e.testProvider(t, `{"kind":"gemini","model":"gemini-3.5-flash"}`); res.OK || res.Error == nil || res.Models != nil {
+		t.Errorf("test without a key: %+v", res)
+	}
+	if res := e.listModels(t, `{"kind":"gemini"}`); res.Models != nil || res.Error == nil {
+		t.Errorf("listing without a key: %+v", res)
+	}
+	if len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
+		t.Error("a request was made without a required key")
+	}
+
+	// Tested, listed and used with its own values; the kind is what the log
+	// and the meta endpoint report.
+	e.ai.ListModelsFunc = func() ([]string, error) { return []string{"gemini-3.5-pro", "gemini-3.5-flash"}, nil }
+	if res := e.testProvider(t, `{"providerId":"`+p.ID+`"}`); !res.OK || res.Model == nil ||
+		strings.Join(res.Models, ",") != "gemini-3.5-flash,gemini-3.5-pro" {
+		t.Errorf("test: %+v", res)
+	}
+	if cfg := e.lastConfig(); cfg.APIKey != key || cfg.Model != "gemini-3.5-flash" || cfg.BaseURL != "" {
+		t.Errorf("test config: %+v", cfg)
+	}
+	if res := e.listModels(t, `{"kind":"gemini","apiKey":"AIza-typed-1212"}`); res.Error != nil || len(res.Models) != 2 {
+		t.Errorf("listing an unsaved configuration: %+v", res)
+	}
+	e.ai.ListModelsFunc = nil
+	e.setDefault(t, p.ID)
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`)))
+	e.ai.Respond = nil
+	if m := must(e.app.Meta(e.ctx)).AI; !m.Enabled || *m.Kind != "gemini" || *m.Model != "gemini-3.5-flash" {
+		t.Errorf("meta ai: %+v", m)
+	}
+	if items := e.logPage(t, app.AILogQuery{}).Items; len(items) != 2 || items[0].Kind != "gemini" || items[0].ProviderID != p.ID {
+		t.Errorf("log: %+v", items)
+	}
+	if u := e.usageOf(t, p.ID); u.AllTime.Requests != 2 {
+		t.Errorf("usage: %+v", u)
+	}
+
+	// A stored or environment key is never sent to another origin.
+	for _, id := range []string{p.ID, "env-gemini"} {
+		n, lists := len(e.ai.Configs()), e.ai.ListCalls()
+		if res := e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example/v1beta"}`); res.Models != nil ||
+			len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
+			t.Errorf("%s: a listing was made to the override without a key: %+v", id, res)
+		}
+		if res := e.testProvider(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example/v1beta","model":"m"}`); res.OK ||
+			len(e.ai.Configs()) != n {
+			t.Errorf("%s: a test was made to the override without a key: %+v", id, res)
+		}
+		e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example/v1beta","apiKey":"AIza-own-6666"}`)
+		for _, cfg := range e.ai.Configs()[n:] {
+			if cfg.APIKey != "AIza-own-6666" {
+				t.Errorf("%s: a stored key was sent to the override: %q", id, cfg.APIKey)
+			}
+		}
+	}
+	// The same origin keeps the key; moving the saved provider to another
+	// origin deletes it.
+	e.listModels(t, `{"providerId":"env-gemini","baseUrl":"https://generativelanguage.googleapis.com/v1beta/"}`)
+	if cfg := e.lastConfig(); cfg.APIKey != "AIza-env-7777" {
+		t.Errorf("same-origin override: %q", cfg.APIKey)
+	}
+	if p = must(e.patchProvider(t, p.ID, `{"baseUrl":"https://gemini-proxy.example/v1beta"}`)); p.APIKeySet || p.Ready {
+		t.Errorf("the key followed an origin change: %+v", p)
 	}
 }

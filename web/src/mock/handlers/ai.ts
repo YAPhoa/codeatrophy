@@ -118,7 +118,8 @@ function failIfAsked(db: MockDb, call: Call, ...texts: (string | null)[]): void 
  * the provider that made it. The figures follow from the sizes of what went
  * in and what came out, at about four characters a token on top of the
  * instructions every request carries. A hosted Anthropic model reports its
- * prompt cache and no reasoning; other services the reverse.
+ * prompt cache and no reasoning, Gemini its reasoning and cache reads, and
+ * other services their reasoning alone.
  */
 function spend(db: MockDb, call: Call, output: unknown, title: string | null = call.title): GenerationUsage {
   const provider = call.provider;
@@ -126,9 +127,11 @@ function spend(db: MockDb, call: Call, output: unknown, title: string | null = c
   const inputTokens = 1800 + Math.ceil(call.content.length / 4);
   const outputTokens = Math.ceil(response.length / 4);
   const tokens =
-    provider.kind === 'openai_compatible'
-      ? { inputTokens, outputTokens, reasoningTokens: Math.round(outputTokens * 0.3), cacheReadTokens: null, cacheWriteTokens: null }
-      : { inputTokens, outputTokens, reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    provider.kind === 'anthropic'
+      ? { inputTokens, outputTokens, reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0 }
+      : provider.kind === 'gemini'
+        ? { inputTokens, outputTokens, reasoningTokens: Math.round(outputTokens * 0.3), cacheReadTokens: 0, cacheWriteTokens: null }
+        : { inputTokens, outputTokens, reasoningTokens: Math.round(outputTokens * 0.3), cacheReadTokens: null, cacheWriteTokens: null };
   const durationMs = 2500 + outputTokens * 11;
   const logId = db.logRequest(provider, { operation: call.operation, itemId: call.itemId, title, status: 'ok', error: null, durationMs, usage: tokens, request: requestOf(call), response });
   return { logId, model: db.modelOf(provider) ?? '', durationMs, ...tokens };

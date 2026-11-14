@@ -17,6 +17,7 @@ import (
 
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/ai/anthropic"
+	"codeatrophy/internal/ai/gemini"
 	"codeatrophy/internal/ai/openaicompat"
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/config"
@@ -129,10 +130,12 @@ func serve() error {
 		Engine: engine,
 		Providers: map[string]ai.Factory{
 			ai.ProviderAnthropic:        anthropic.New,
+			ai.ProviderGemini:           gemini.New,
 			ai.ProviderOpenAICompatible: openaicompat.New,
 		},
 		ProviderDefaults: map[string]app.ProviderDefaults{
 			ai.ProviderAnthropic:        {Model: &anthropicModel, BaseURL: anthropic.DefaultBaseURL},
+			ai.ProviderGemini:           {BaseURL: gemini.DefaultBaseURL},
 			ai.ProviderOpenAICompatible: {BaseURL: openaicompat.DefaultBaseURL},
 		},
 		Secrets: box,
@@ -141,6 +144,9 @@ func serve() error {
 			AnthropicAPIKey:  cfg.AI.AnthropicAPIKey,
 			AnthropicModel:   cfg.AI.AnthropicModel,
 			AnthropicBaseURL: cfg.AI.AnthropicBaseURL,
+			GeminiAPIKey:     cfg.AI.GeminiAPIKey,
+			GeminiModel:      cfg.AI.GeminiModel,
+			GeminiBaseURL:    cfg.AI.GeminiBaseURL,
 			OpenAIAPIKey:     cfg.AI.OpenAIAPIKey,
 			OpenAIModel:      cfg.AI.OpenAIModel,
 			OpenAIBaseURL:    cfg.AI.OpenAIBaseURL,

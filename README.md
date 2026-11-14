@@ -76,8 +76,8 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_DATABASE_URL` | the Compose `db` service | PostgreSQL URL; empty for SQLite (see [Storage](#storage)) |
 | `CODEATROPHY_POSTGRES_PASSWORD` | `codeatrophy-postgres` | Password of the Compose database; change it before the first start |
 | `CODEATROPHY_DB_AUTO_MIGRATE` | `on` | Apply schema migrations at startup; `off` leaves them to `db migrate` (see [Upgrading](#upgrading)) |
-| `CODEATROPHY_AI_PROVIDER` | unset | Initial default AI provider: the environment provider of `anthropic` or `openai_compatible` |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
+| `CODEATROPHY_AI_PROVIDER` | unset | Initial default AI provider: the environment provider of `anthropic`, `gemini` or `openai_compatible` |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
 | `CODEATROPHY_MCP_TOKEN` | unset | Require a bearer token on `/mcp` |
 
 AI providers are normally set up in the UI under Settings. You can keep

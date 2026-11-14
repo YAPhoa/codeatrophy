@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, KeyRound, PlugZap, Server } from 'lucide-react';
 import { api, isAbort, isApiError } from '../../api/client';
@@ -6,7 +6,7 @@ import { invalidateAi, useLimits } from '../../api/queries';
 import type { AiProvider, AiProviderKind, AiSettings, AiTestResponse } from '../../api/types';
 import { errorLine, sentence } from '../../lib/errors';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
-import { formatMs, plural } from '../../lib/format';
+import { formatMs, plural, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Checkbox, Field, TextField } from '../../ui/Field';
@@ -16,20 +16,28 @@ import { hostOf } from './aiKeyBinding';
 import {
   KINDS,
   baseUrlProblem,
+  baseUrlRequired,
   charLength,
   createBody,
   formOf,
   kindName,
   listNeeds,
+  modelPlaceholder,
   modelProblem,
+  modelsBody,
   nameProblem,
   needsOf,
+  needsTest,
   outlookOf,
+  passedTestOf,
   patchBody,
   suggestName,
   testBody,
+  testPassedFor,
+  type PassedTest,
   type ProviderForm,
 } from './aiProviders';
+import { rememberModels, rememberedModels, type RememberedModels } from './modelCache';
 import { ModelField } from './ModelField';
 
 interface AiProviderDialogProps {
@@ -41,18 +49,25 @@ interface AiProviderDialogProps {
   onClose: () => void;
 }
 
-/** The models a connection test brought back, and the server they belong to. */
+/** The models the service listed in this dialog, through a load or a test, or why it could not. */
 interface Listing {
   models: string[] | null;
-  modelsError: string | null;
-  host: string;
+  error: string | null;
+  at: string;
 }
+
+/** What moves the focus once a load is done: the field and the Enter key keep it, the refresh button hands it on. */
+type LoadFrom = 'open' | 'field' | 'enter' | 'button';
 
 /**
  * Add or edit one provider. The form follows the order of setting one up:
- * the key (and, rarely, another server), a connection test that also loads
- * the models on offer, the model, then save. Nothing depends on the test:
- * a provider can be saved untested, and before it is complete.
+ * the key (and, rarely, another server), loading the models on offer,
+ * picking one, a connection test of it, then save. A test covers the
+ * endpoint (kind and base URL) and the key: a new provider is added once a
+ * test of them has passed, and a saved one given another endpoint or a new
+ * key is saved once a test of those has; the model can change freely.
+ * Loaded models are remembered per endpoint in this browser and offered
+ * whenever the form is on that endpoint, until a newer list replaces them.
  */
 export function AiProviderDialog({ settings, provider, kind: initialKind = 'anthropic', onClose }: AiProviderDialogProps) {
   const qc = useQueryClient();
@@ -62,7 +77,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const adding = provider === null;
 
   const [form, setForm] = useState<ProviderForm>(() =>
-    provider ? formOf(provider) : { name: suggestName(initialKind, '', settings.providers, kinds), kind: initialKind, model: '', baseUrl: '', apiKey: '', removeKey: false },
+    provider ? formOf(provider, kinds) : { name: suggestName(initialKind, '', settings.providers, kinds), kind: initialKind, model: '', baseUrl: '', apiKey: '', removeKey: false },
   );
   // A new provider is named after where it connects until the user names it.
   const [named, setNamed] = useState(!adding);
@@ -71,35 +86,75 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const [asDefault, setAsDefault] = useState(adding && settings.defaultProviderId === null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const [testing, setTesting] = useState(false);
+  // A load and a test both fetch the list, so only one runs: a test cancels a load, and no load starts during a test.
+  const [busy, setBusy] = useState<'load' | 'test' | null>(null);
+  const testing = busy === 'test';
   const [test, setTest] = useState<AiTestResponse | null>(null);
   const [testError, setTestError] = useState<unknown>(null);
+  // What the last test that passed, with a generation, covered.
+  const [lastPass, setLastPass] = useState<PassedTest | null>(null);
   const [listing, setListing] = useState<Listing | null>(null);
+  // The user tried to test or add without a model in effect.
+  const [modelAsked, setModelAsked] = useState(false);
 
-  const running = useRef<AbortController | null>(null);
-  const focusAfterTest = useRef<'model' | 'save' | 'test' | null>(null);
+  const running = useRef<{ what: 'load' | 'test'; controller: AbortController } | null>(null);
+  const focusAfter = useRef<'model' | 'save' | 'test' | 'refresh' | null>(null);
   const modelRef = useRef<HTMLInputElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   const testRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => () => running.current?.abort(), []);
+  useEffect(
+    () => () => {
+      running.current?.controller.abort();
+      running.current = null;
+    },
+    [],
+  );
 
-  // The Test button is disabled while it runs, which drops the focus. Once
-  // it is back, put the focus on the next step.
+  // The Test and Refresh buttons are disabled while they run, which drops
+  // the focus. Once they are back, put the focus on the next step.
   useEffect(() => {
-    if (testing || focusAfterTest.current === null) return;
-    ({ model: modelRef, save: saveRef, test: testRef })[focusAfterTest.current].current?.focus();
-    focusAfterTest.current = null;
-  }, [testing]);
+    if (busy !== null || focusAfter.current === null) return;
+    ({ model: modelRef, save: saveRef, test: testRef, refresh: refreshRef })[focusAfter.current].current?.focus();
+    focusAfter.current = null;
+  }, [busy]);
 
   const kind = kinds[form.kind];
+  const urlRequired = baseUrlRequired(form.kind);
+  // No server is named yet: there is no endpoint to list or remember models for.
+  const urlMissing = urlRequired && form.baseUrl.trim() === '';
   const outlook = outlookOf(form, provider, kinds);
   const host = hostOf(outlook.nextBaseUrl);
   const modelInUse = form.model.trim() || kind.defaultModel;
+  // The list of the endpoint in the form. A loaded one is remembered too, so this is read again with each new listing.
+  const known = useMemo<RememberedModels | null>(
+    () => (listing?.models && listing.models.length > 0 ? { models: listing.models, at: listing.at } : urlMissing ? null : rememberedModels(form.kind, outlook.nextBaseUrl)),
+    [listing, urlMissing, form.kind, outlook.nextBaseUrl],
+  );
+  const models = known?.models ?? null;
+  const keyMissing = outlook.keyRequired && !outlook.keyWillBeSet;
+  // A failure the test's own callout does not already report.
+  const listFailed = listing?.error != null && listing.error !== test?.error ? listing.error : null;
+  const passed = testPassedFor(form, kinds, lastPass);
+  const testNeeded = needsTest(form, provider, kinds, lastPass);
+  // The flow is not complete: a new provider needs a model and a passed test, a saved one only a test of a new connection.
+  const blocked = (adding && modelInUse === null) || testNeeded;
 
-  /** A change to the kind, server or key. A test result and the models it loaded belong to the old ones. */
+  /** Cancel a running load or test. */
+  const stop = () => {
+    running.current?.controller.abort();
+    running.current = null;
+    setBusy(null);
+  };
+
+  /**
+   * A change to the kind, server or key. A test result and the models loaded
+   * belong to the old ones; what passed a test is kept, for when the form
+   * comes back to it.
+   */
   const reconnect = (change: Partial<ProviderForm>) => {
-    running.current?.abort();
+    stop();
     setForm((f) => ({ ...f, ...change }));
     setTest(null);
     setTestError(null);
@@ -124,8 +179,8 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const [attempted, setAttempted] = useState(false);
   const nameError = nameProblem(form.name, settings.providers, provider, bounds.nameMax) ?? (attempted && nameLen === 0 ? 'Give the provider a name.' : null);
   const modelError = modelProblem(form.model, bounds.modelMax);
-  const urlError = baseUrlProblem(form.baseUrl);
-  const patch = provider ? patchBody(form, provider) : null;
+  const urlError = baseUrlProblem(form.baseUrl, form.kind);
+  const patch = provider ? patchBody(form, provider, kinds) : null;
   const dirty = patch === null || Object.keys(patch).length > 0;
   const canSave = nameLen > 0 && !nameError && !modelError && dirty;
 
@@ -139,31 +194,83 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const onField = (fields: Record<string, unknown>) => ['name', 'model', 'baseUrl', 'apiKey'].some((f) => fields[f] != null);
   const baseUrlError = (urlChecked ? urlError : null) ?? serverError('baseUrl');
 
+  const begin = (what: 'load' | 'test') => {
+    running.current?.controller.abort();
+    const controller = new AbortController();
+    running.current = { what, controller };
+    setBusy(what);
+    return controller;
+  };
+
+  const end = (controller: AbortController) => {
+    if (running.current?.controller !== controller) return;
+    running.current = null;
+    setBusy(null);
+  };
+
+  /** Show and remember a list the service gave, or why it gave none. */
+  const list = (listed: string[] | null, error: string | null) => {
+    setListing({ models: listed, error, at: new Date().toISOString() });
+    if (listed) rememberModels(form.kind, outlook.nextBaseUrl, listed);
+  };
+
+  const loadModels = async (from: LoadFrom) => {
+    if (running.current !== null) return;
+    if (urlError) {
+      if (from !== 'open') setUrlChecked(true);
+      return;
+    }
+    const controller = begin('load');
+    try {
+      const result = await api.settings.listModels(modelsBody(form, provider, kinds), controller.signal);
+      if (controller.signal.aborted) return;
+      list(result.models, result.error);
+      // Models to pick from and none picked: picking one is the next step.
+      if (from !== 'open') focusAfter.current = result.models?.length && form.model.trim() === '' ? 'model' : from === 'button' ? 'refresh' : null;
+    } catch (e) {
+      if (!isAbort(e) && !controller.signal.aborted) list(null, errorLine(e));
+    } finally {
+      end(controller);
+    }
+  };
+
+  // A saved provider opens with its models offered: loaded once, unless they are remembered or a required key is missing.
+  useEffect(() => {
+    if (provider !== null && known === null && !keyMissing) void loadModels('open');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only as the dialog opens
+  }, []);
+
+  /** Without a model there is nothing to test: point at the field instead. */
+  const askForModel = () => {
+    setModelAsked(true);
+    modelRef.current?.focus();
+  };
+
   const runTest = async () => {
     if (urlError) {
       setUrlChecked(true);
       return;
     }
-    running.current?.abort();
-    const controller = new AbortController();
-    running.current = controller;
-    setTesting(true);
+    if (modelInUse === null) {
+      askForModel();
+      return;
+    }
+    const sentFor = passedTestOf(form, kinds);
+    const controller = begin('test');
     setTest(null);
     setTestError(null);
     try {
       const result = await api.settings.testAi(testBody(form, provider, kinds), controller.signal);
       if (controller.signal.aborted) return;
       setTest(result);
-      setListing({ models: result.models, modelsError: result.modelsError, host });
-      // With no model yet, a working connection leads straight to picking one.
-      focusAfterTest.current = !result.ok ? 'test' : modelInUse === null ? 'model' : canSave ? 'save' : 'test';
+      // A failure since the last pass leaves the connection untested again.
+      setLastPass(result.ok && result.model !== null ? sentFor : null);
+      list(result.models, result.modelsError);
+      focusAfter.current = result.ok && canSave ? 'save' : 'test';
     } catch (e) {
       if (!isAbort(e) && !controller.signal.aborted) setTestError(e);
     } finally {
-      if (running.current === controller) {
-        running.current = null;
-        setTesting(false);
-      }
+      end(controller);
     }
   };
 
@@ -177,6 +284,12 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     if (urlError) {
       setUrlChecked(true);
       focusFirstInvalid();
+      return;
+    }
+    // The button is disabled then; Enter in a field still gets here, and is led to the missing step.
+    if (blocked) {
+      if (modelInUse === null) askForModel();
+      else testRef.current?.focus();
       return;
     }
     // Nothing was changed: there is nothing to send.
@@ -220,17 +333,39 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     }
   };
 
-  /** Enter in a field of the connection tests it, as the next step of the form, rather than saving. */
-  const testOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
+  /** Enter in a field of the connection loads the models, as the next step of the form, rather than saving. */
+  const loadOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    if (!testing && !saving) void runTest();
+    if (!saving) void loadModels('enter');
   };
 
   const keyHint = (provider?.apiKeyHint ?? '').replace(/^…/, '');
-  const tested = test?.ok === true && outlook.missing.length === 0;
   /** The default stays selected when it is no longer ready, and AI features are then off. */
   const breaksDefault = provider?.isDefault === true && provider.ready && outlook.missing.length > 0;
+
+  // The footer's word on saving: the next step of the flow, or what saving leads to.
+  const note: { text: ReactNode; tone?: 'is-ok' | 'is-warn' } | null =
+    !adding && !dirty
+      ? { text: 'No unsaved changes.' }
+      : (adding || testNeeded) && modelInUse === null
+        ? { text: 'Pick a model, then test the connection.' }
+        : testNeeded
+          ? { text: adding ? 'Test the connection to add it.' : 'Test the connection to save it.' }
+          : breaksDefault
+            ? { text: <>This is the default provider: saved without {listNeeds(outlook.missing)}, AI features are off.</>, tone: 'is-warn' }
+            : !adding && outlook.missing.length > 0
+              ? { text: <>Can be saved now; it still needs {listNeeds(outlook.missing)}.</> }
+              : passed
+                ? {
+                    text: (
+                      <>
+                        <CheckCircle2 size={14} aria-hidden="true" /> {adding ? 'Tested. Ready to add.' : 'Tested. Save to keep it.'}
+                      </>
+                    ),
+                    tone: 'is-ok',
+                  }
+                : null;
 
   return (
     <Dialog
@@ -242,23 +377,13 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
       locked={saving}
       footer={
         <>
-          <span className={cx('dialog-note', tested && 'is-ok', breaksDefault && 'is-warn')} role="status">
-            {!dirty ? (
-              'No unsaved changes.'
-            ) : breaksDefault ? (
-              <>This is the default provider: saved without {listNeeds(outlook.missing)}, AI features are off.</>
-            ) : outlook.missing.length > 0 ? (
-              <>Can be saved now; it still needs {listNeeds(outlook.missing)}.</>
-            ) : tested ? (
-              <>
-                <CheckCircle2 size={14} aria-hidden="true" /> Tested. Save to keep it.
-              </>
-            ) : null}
+          <span className={cx('dialog-note', note?.tone)} role="status">
+            {note?.text}
           </span>
           <Button onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button ref={saveRef} variant="primary" type="submit" form="provider-form" busy={saving}>
+          <Button ref={saveRef} variant="primary" type="submit" form="provider-form" busy={saving} disabled={blocked}>
             {adding ? 'Add provider' : 'Save provider'}
           </Button>
         </>
@@ -302,7 +427,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           </div>
         )}
 
-        <Field label="Name" error={nameError ?? serverError('name')} hint={nameLen > bounds.nameMax * 0.75 ? `${nameLen} / ${bounds.nameMax}` : undefined}>
+        <Field label="Name" inlineError error={nameError ?? serverError('name')} hint={nameLen > bounds.nameMax * 0.75 ? `${nameLen} / ${bounds.nameMax}` : undefined}>
           {(a) => (
             <input
               {...a}
@@ -325,7 +450,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
             type="password"
             value={form.apiKey}
             onChange={(v) => reconnect({ apiKey: v, removeKey: false })}
-            onKeyDown={testOnEnter}
+            onKeyDown={loadOnEnter}
             placeholder={outlook.savedKeyDropped ? 'Paste the key for this server…' : provider?.apiKeySet ? 'Enter a new key to replace the current one…' : 'Paste the key…'}
             name="api-key"
             // Not a login: browsers ignore "off" on a password field and would offer the site's saved
@@ -342,7 +467,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           {outlook.savedKeyDropped && (
             <Callout tone="warn" role="status" title="The saved key will not carry over to this server">
               The saved key belongs to <code translate="no">{hostOf(outlook.currentBaseUrl)}</code>. A key is never sent to a different server than the one it was saved for, so saving this base URL deletes it, and
-              Test connection runs without it.{' '}
+              the models and the test are asked for without it.{' '}
               {outlook.keyRequired ? (
                 <>
                   Enter the key for <code translate="no">{host}</code> to continue.
@@ -382,19 +507,20 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
               )}
             </div>
           )}
-          <p className="field-hint">Keys are write-only: stored encrypted on the server and never sent back to the browser. Only the last four characters are shown.</p>
+          <p className="field-hint">Keys are write only. Only the last four characters are shown.</p>
         </div>
 
-        {urlOpen || baseUrlError ? (
+        {urlRequired || urlOpen || baseUrlError ? (
           <TextField
-            label="Base URL (optional)"
+            label={urlRequired ? 'Base URL' : 'Base URL (optional)'}
+            inlineError
             type="url"
             value={form.baseUrl}
             onChange={(v) => reconnect({ baseUrl: v, name: named ? form.name : suggestName(form.kind, v, settings.providers, kinds) })}
             onBlur={() => setUrlChecked(true)}
-            onKeyDown={testOnEnter}
-            placeholder={kind.defaultBaseUrl}
-            hint={`Leave empty to use ${kind.defaultBaseUrl}.${form.kind === 'openai_compatible' ? ' For Ollama: http://localhost:11434/v1' : ' Only needed for a proxy or gateway.'}`}
+            onKeyDown={loadOnEnter}
+            placeholder={urlRequired ? `e.g. ${kind.defaultBaseUrl}…` : kind.defaultBaseUrl}
+            hint={urlRequired ? undefined : `Leave empty to use ${kind.defaultBaseUrl}. Only needed for a proxy or gateway.`}
             error={baseUrlError}
             autoComplete="off"
             spellCheck={false}
@@ -406,10 +532,38 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
               Connects to <code translate="no">{host}</code>.
             </span>
             <button type="button" className="link-btn" onClick={() => setUrlOpen(true)}>
-              {form.kind === 'openai_compatible' ? 'Use another server' : 'Use a proxy or gateway'}
+              Use a proxy or gateway
             </button>
           </div>
         )}
+
+        <ModelField
+          value={form.model}
+          onChange={setModel}
+          models={models}
+          loading={busy === 'load'}
+          onLoad={(from) => void loadModels(from)}
+          loadOnFocus={listing === null && !keyMissing && !urlError}
+          refreshDisabled={saving || testing}
+          inputRef={modelRef}
+          refreshRef={refreshRef}
+          placeholder={modelPlaceholder(form.kind, kinds, models !== null)}
+          maxLength={limits?.maxModelIdChars}
+          error={modelError ?? serverError('model') ?? (modelAsked && modelInUse === null ? 'Pick a model to test the connection.' : null)}
+          hint={
+            busy === 'load'
+              ? 'Loading models…'
+              : listFailed !== null
+                ? `The models could not be loaded: ${sentence(listFailed)}`
+                : known
+                  ? `${plural(known.models.length, 'model')} from ${host}, loaded ${relativeTime(known.at)}.`
+                  : listing?.models?.length === 0
+                    ? `${host} lists no models.`
+                    : kind.defaultModel
+                      ? `Leave empty to use ${kind.defaultModel}.`
+                      : undefined
+          }
+        />
 
         <div className="form-actions">
           <Button ref={testRef} icon={<PlugZap size={14} />} onClick={() => void runTest()} busy={testing} disabled={saving}>
@@ -418,68 +572,23 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
         </div>
         {test?.ok && (
           <Callout tone="ok" role="status" title="The connection works">
-            {test.model !== null && test.model === modelInUse ? (
+            {test.model !== null ? (
               <>
                 <code translate="no">{test.model}</code> answered{test.latencyMs != null ? ` in ${formatMs(test.latencyMs)}` : ''}.
               </>
-            ) : modelInUse === null ? (
-              listing?.models && listing.models.length > 0 ? (
-                <>
-                  <code translate="no">{listing.host}</code> offers {plural(listing.models.length, 'model')}. Pick one below.
-                </>
-              ) : (
-                <>Enter the model to use below.</>
-              )
-            ) : listing?.models?.includes(modelInUse) ? (
-              <>
-                <code translate="no">{modelInUse}</code> is one of the models <code translate="no">{listing.host}</code> offers.
-              </>
             ) : (
-              <>
-                <code translate="no">{modelInUse}</code> has not been tried yet. Test again to check it, or save it as it is.
-              </>
+              <>The service answered.</>
             )}
           </Callout>
         )}
         {test && !test.ok && (
-          <Callout tone="danger" role="alert" title="The connection failed">
+          <Callout tone="danger" role="alert" title="Connection failed">
             {test.error ? sentence(test.error) : 'The provider did not accept the request.'}
-            {test.models !== null && test.models.length > 0 && <> The {plural(test.models.length, 'model')} it offers are listed below.</>}
           </Callout>
         )}
         {testError != null && !onField(testFields) && <ErrorCallout error={testError} title="The test could not be run" />}
 
-        <ModelField
-          value={form.model}
-          onChange={setModel}
-          models={listing?.models ?? null}
-          inputRef={modelRef}
-          placeholder={kind.defaultModel ?? (listing?.models?.length ? 'Pick a model…' : 'e.g. gpt-4.1, llama3.1:70b…')}
-          maxLength={limits?.maxModelIdChars}
-          error={modelError ?? serverError('model')}
-          hint={
-            listing?.models && listing.models.length > 0
-              ? `${plural(listing.models.length, 'model')} loaded from ${listing.host}. Pick one, or type a name.`
-              : listing?.modelsError && listing.modelsError !== test?.error
-                ? `The list of models could not be loaded: ${sentence(listing.modelsError)} Type the name exactly as the endpoint expects it.`
-                : kind.defaultModel
-                  ? `Leave empty to use ${kind.defaultModel}. Test the connection to load the models on offer.`
-                  : 'Test the connection to load the models on offer, or type the name as the endpoint expects it.'
-          }
-        />
-
-        {adding && (
-          <Checkbox
-            checked={asDefault}
-            onChange={setAsDefault}
-            label="Use as the default"
-            hint={
-              asDefault && outlook.missing.length > 0
-                ? `It needs ${listNeeds(outlook.missing)} first: saved as it is, it is kept but not made the default.`
-                : 'Drafting, test cases and variants use the default provider.'
-            }
-          />
-        )}
+        {adding && <Checkbox checked={asDefault} onChange={setAsDefault} label="Use as the default" hint="Drafting, test cases and variants use the default provider." />}
         {saveError != null && !onField(saveFields) && (
           <ErrorCallout error={saveError} title={adding && isApiError(saveError) && saveError.code === 'conflict' ? 'The limit of providers has been reached' : 'Could not save the provider'} />
         )}

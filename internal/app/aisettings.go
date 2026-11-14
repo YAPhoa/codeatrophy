@@ -90,6 +90,9 @@ const (
 	// testGenerationTimeout bounds the generation request of a connection
 	// test, unless the request timeout is shorter.
 	testGenerationTimeout = 90 * time.Second
+	// modelListTimeout bounds the request of a model listing, unless the
+	// request timeout is shorter.
+	modelListTimeout = 30 * time.Second
 
 	sourceSettings    = "settings"
 	sourceEnvironment = "environment"
@@ -98,12 +101,14 @@ const (
 // envProviderIDs are the fixed ids of the environment providers, per kind.
 var envProviderIDs = map[string]string{
 	ai.ProviderAnthropic:        "env-anthropic",
+	ai.ProviderGemini:           "env-gemini",
 	ai.ProviderOpenAICompatible: "env-openai-compatible",
 }
 
 // kindNames name each kind for people.
 var kindNames = map[string]string{
 	ai.ProviderAnthropic:        "Anthropic",
+	ai.ProviderGemini:           "Google Gemini",
 	ai.ProviderOpenAICompatible: "OpenAI-compatible",
 }
 
@@ -131,6 +136,8 @@ func (a *App) envFor(kind string) (model, baseURL, key string) {
 	switch kind {
 	case ai.ProviderAnthropic:
 		return a.aiEnv.AnthropicModel, a.aiEnv.AnthropicBaseURL, a.aiEnv.AnthropicAPIKey
+	case ai.ProviderGemini:
+		return a.aiEnv.GeminiModel, a.aiEnv.GeminiBaseURL, a.aiEnv.GeminiAPIKey
 	case ai.ProviderOpenAICompatible:
 		return a.aiEnv.OpenAIModel, a.aiEnv.OpenAIBaseURL, a.aiEnv.OpenAIAPIKey
 	}
@@ -252,14 +259,21 @@ func (a *App) defaultModel(kind string) string {
 
 func (a *App) defaultBaseURL(kind string) string { return a.defaults[kind].BaseURL }
 
+// keyAlwaysRequired reports whether a kind needs an API key whatever its
+// base URL: Anthropic and Gemini do.
+func keyAlwaysRequired(kind string) bool {
+	return kind == ai.ProviderAnthropic || kind == ai.ProviderGemini
+}
+
 // keyRequired reports whether a kind needs an API key with this base URL:
-// always for Anthropic; for OpenAI-compatible endpoints only on the default
-// (public OpenAI) endpoint, since local servers need none.
+// always for the kinds of keyAlwaysRequired; for OpenAI-compatible
+// endpoints only on the default (public OpenAI) endpoint, since local
+// servers need none.
 func (a *App) keyRequired(kind, baseURL string) bool {
-	switch kind {
-	case ai.ProviderAnthropic:
+	switch {
+	case keyAlwaysRequired(kind):
 		return true
-	case ai.ProviderOpenAICompatible:
+	case kind == ai.ProviderOpenAICompatible:
 		return originOf(a.effectiveBase(kind, baseURL)) == originOf(a.defaultBaseURL(kind))
 	}
 	return false
@@ -379,7 +393,7 @@ func (a *App) aiSettings(tx store.Tx) (AISettings, error) {
 	}
 	for _, kind := range ai.ProviderIDs {
 		d := a.defaults[kind]
-		out.Kinds[kind] = AIKind{DefaultModel: d.Model, DefaultBaseURL: d.BaseURL, KeyRequired: kind == ai.ProviderAnthropic}
+		out.Kinds[kind] = AIKind{DefaultModel: d.Model, DefaultBaseURL: d.BaseURL, KeyRequired: keyAlwaysRequired(kind)}
 	}
 	return out, nil
 }
@@ -798,11 +812,24 @@ func cleanModelIDs(ids []string, secret string) []string {
 	return out
 }
 
-// TestAIProvider checks a provider configuration: it lists the service's
-// models and, when a model is configured, makes one minimal generation
-// request. Overrides apply on top of a saved or environment provider, or
-// describe an unsaved configuration of a kind. Nothing is saved.
-func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult, error) {
+// connection is a provider configuration resolved for a connection test or
+// a model listing. Nothing about it is saved.
+type connection struct {
+	id      string // the saved or environment provider named, "" for a kind
+	p       provider
+	timeout time.Duration // the request timeout
+}
+
+// safe makes msg safe to return: the key in use is redacted from it.
+func (c connection) safe(msg string) *string {
+	m := ai.Redact(msg, c.p.apiKey)
+	return &m
+}
+
+// resolveConnection validates in and resolves the configuration it names:
+// a saved or environment provider with the overrides applied on top, or an
+// unsaved configuration of a kind.
+func (a *App) resolveConnection(ctx context.Context, in AITestInput) (connection, error) {
 	id, kind := optText(in.ProviderID), optText(in.Kind)
 	fe := domain.FieldErrors{}
 	switch {
@@ -813,73 +840,104 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 	}
 	checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
 	if err := errValidation(fe); err != nil {
-		return AITestResult{}, err
+		return connection{}, err
 	}
-	p := provider{kind: kind}
+	c := connection{id: id, p: provider{kind: kind}}
 	var found *provider
-	var timeout time.Duration
 	if err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
-		if timeout, err = a.requestTimeout(tx); err != nil || id == "" {
+		if c.timeout, err = a.requestTimeout(tx); err != nil || id == "" {
 			return err
 		}
 		ps, err := a.listProviders(tx)
 		found = findProvider(ps, id)
 		return err
 	}); err != nil {
-		return AITestResult{}, err
+		return connection{}, err
 	}
 	if id != "" {
 		if found == nil {
-			return AITestResult{}, errField("providerId", "unknown provider")
+			return connection{}, errField("providerId", "unknown provider")
 		}
-		p = *found
+		c.p = *found
 	}
 	if v := optText(in.Model); v != "" {
-		p.model = v
+		c.p.model = v
 	}
 	if v := optText(in.BaseURL); v != "" {
-		if originOf(v) != originOf(a.effectiveBase(p.kind, p.baseURL)) {
+		if originOf(v) != originOf(a.effectiveBase(c.p.kind, c.p.baseURL)) {
 			// A saved or environment key is never sent to another origin;
 			// only a key given in this request may be.
-			p.apiKey = ""
+			c.p.apiKey = ""
 		}
-		p.baseURL = v
+		c.p.baseURL = v
 	}
 	if v := optText(in.APIKey); v != "" {
-		p.apiKey = v
+		c.p.apiKey = v
 	}
-	cfg := a.providerConfig(p, timeout)
-	res := AITestResult{}
-	safe := func(msg string) *string {
-		m := ai.Redact(msg, p.apiKey)
-		return &m
+	return c, nil
+}
+
+// open builds the provider for c, or returns why no request can be made
+// with it: a required key is missing, or the provider cannot be built.
+func (a *App) open(c connection) (ai.Config, ai.Provider, string) {
+	cfg := a.providerConfig(c.p, c.timeout)
+	if c.p.apiKey == "" && a.keyRequired(c.p.kind, c.p.baseURL) {
+		return cfg, nil, "no API key is configured for this base URL"
 	}
-	if p.apiKey == "" && a.keyRequired(p.kind, p.baseURL) {
-		res.Error = safe("no API key is configured for this base URL")
-		return res, nil
-	}
-	factory, ok := a.providers[p.kind]
+	factory, ok := a.providers[c.p.kind]
 	if !ok {
-		res.Error = safe("this provider is not available in this build")
-		return res, nil
+		return cfg, nil, "this provider is not available in this build"
 	}
 	prov, err := factory(cfg)
 	if err != nil {
-		res.Error = safe(ai.SafeMessage(err, p.apiKey))
+		return cfg, nil, ai.SafeMessage(err, c.p.apiKey)
+	}
+	return cfg, prov, ""
+}
+
+// listModels asks prov for the service's models, cleaned for showing, or
+// returns why they could not be listed.
+func listModels(ctx context.Context, prov ai.Provider, secret string) ([]string, string) {
+	lister, ok := prov.(ai.ModelLister)
+	if !ok {
+		return nil, "this provider cannot list its models"
+	}
+	ids, err := lister.ListModels(ctx)
+	if err != nil {
+		return nil, ai.SafeMessage(err, secret)
+	}
+	return cleanModelIDs(ids, secret), ""
+}
+
+// shorterOf returns limit, or timeout when it is set and shorter.
+func shorterOf(limit, timeout time.Duration) time.Duration {
+	if timeout > 0 && timeout < limit {
+		return timeout
+	}
+	return limit
+}
+
+// TestAIProvider checks a provider configuration: it lists the service's
+// models and, when a model is configured, makes one minimal generation
+// request. Overrides apply on top of a saved or environment provider, or
+// describe an unsaved configuration of a kind. Nothing is saved.
+func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult, error) {
+	c, err := a.resolveConnection(ctx, in)
+	if err != nil {
+		return AITestResult{}, err
+	}
+	p, safe := c.p, c.safe
+	res := AITestResult{}
+	cfg, prov, problem := a.open(c)
+	if problem != "" {
+		res.Error = safe(problem)
 		return res, nil
 	}
 
 	// 1. The model list.
-	if lister, ok := prov.(ai.ModelLister); ok {
-		ids, err := lister.ListModels(ctx)
-		if err != nil {
-			res.ModelsError = safe(ai.SafeMessage(err, p.apiKey))
-		} else {
-			res.Models = cleanModelIDs(ids, p.apiKey)
-		}
-	} else {
-		res.ModelsError = safe("this provider cannot list its models")
+	if res.Models, problem = listModels(ctx, prov, p.apiKey); problem != "" {
+		res.ModelsError = safe(problem)
 	}
 	if cfg.Model == "" {
 		// Nothing to generate with: the list shows whether the base URL
@@ -893,15 +951,11 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 
 	// 2. One minimal generation with the configured model.
 	res.Model = &cfg.Model
-	bound := testGenerationTimeout
-	if timeout > 0 && timeout < bound {
-		bound = timeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, bound)
+	ctx, cancel := context.WithTimeout(ctx, shorterOf(testGenerationTimeout, c.timeout))
 	defer cancel()
 	// Counted in the provider's usage when one was named; a configuration
 	// that is not saved has no counts.
-	ap := activeProvider{Provider: prov, id: id, name: p.name, kind: p.kind, secret: p.apiKey}
+	ap := activeProvider{Provider: prov, id: c.id, name: p.name, kind: p.kind, secret: p.apiKey}
 	u, err := a.generate(ctx, "test", ap, nil, ai.GenerateRequest{
 		System:     "You are answering an automated connectivity check.",
 		User:       `Reply with the JSON object {"ok": true}.`,
@@ -919,6 +973,43 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 		res.Model = &m
 	}
 	res.OK = true
+	return res, nil
+}
+
+// AIModelsInput is the body of POST /settings/ai/models. A model in it is
+// ignored.
+type AIModelsInput struct {
+	ProviderID domain.Opt[string] `json:"providerId"`
+	Kind       domain.Opt[string] `json:"kind"`
+	BaseURL    domain.Opt[string] `json:"baseUrl"`
+	APIKey     domain.Opt[string] `json:"apiKey"`
+}
+
+// AIModelsResult reports a model listing: Models is nil when the list could
+// not be fetched, and Error then says why.
+type AIModelsResult struct {
+	Models []string `json:"models"`
+	Error  *string  `json:"error"`
+}
+
+// ListAIModels lists the models a provider configuration offers, named as
+// for TestAIProvider, without a generation request: nothing is saved,
+// counted or logged.
+func (a *App) ListAIModels(ctx context.Context, in AIModelsInput) (AIModelsResult, error) {
+	c, err := a.resolveConnection(ctx, AITestInput{ProviderID: in.ProviderID, Kind: in.Kind, BaseURL: in.BaseURL, APIKey: in.APIKey})
+	if err != nil {
+		return AIModelsResult{}, err
+	}
+	_, prov, problem := a.open(c)
+	if problem != "" {
+		return AIModelsResult{Error: c.safe(problem)}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, shorterOf(modelListTimeout, c.timeout))
+	defer cancel()
+	res := AIModelsResult{}
+	if res.Models, problem = listModels(ctx, prov, c.p.apiKey); problem != "" {
+		res.Error = c.safe(problem)
+	}
 	return res, nil
 }
 

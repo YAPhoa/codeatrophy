@@ -46,10 +46,12 @@ func newEnv(t *testing.T, opts ...option) *env {
 		Engine: engine,
 		Providers: map[string]ai.Factory{
 			ai.ProviderAnthropic:        fake.Factory(),
+			ai.ProviderGemini:           fake.Factory(),
 			ai.ProviderOpenAICompatible: fake.Factory(),
 		},
 		ProviderDefaults: map[string]app.ProviderDefaults{
 			ai.ProviderAnthropic:        {Model: &model, BaseURL: "https://api.anthropic.com"},
+			ai.ProviderGemini:           {BaseURL: "https://generativelanguage.googleapis.com/v1beta"},
 			ai.ProviderOpenAICompatible: {BaseURL: "https://api.openai.com/v1"},
 		},
 		Secrets:          box,

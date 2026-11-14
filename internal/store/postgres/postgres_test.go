@@ -12,6 +12,7 @@ import (
 
 	"codeatrophy/internal/store"
 	"codeatrophy/internal/store/postgres/pgtest"
+	"codeatrophy/internal/store/storetest"
 )
 
 func open(t *testing.T, url string, log *slog.Logger) *DB {
@@ -212,4 +213,52 @@ func TestOpenWithoutMigrating(t *testing.T) {
 		t.Fatalf("a current database: %v", err)
 	}
 	cur.Close()
+}
+
+// Migration 8 allows the gemini kind: a database at version 7 keeps every
+// provider, its usage and log rows and every other row, and the kind is
+// still checked.
+func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
+	ctx := context.Background()
+	url := pgtest.URL(t)
+	db := open(t, url, nil)
+	// Back to version 7, whose check knew two kinds.
+	if _, err := db.pool.Exec(`ALTER TABLE ai_providers DROP CONSTRAINT ai_providers_kind_check;
+		ALTER TABLE ai_providers ADD CONSTRAINT ai_providers_kind_check CHECK (kind IN ('anthropic', 'openai_compatible'));
+		DELETE FROM schema_migrations WHERE version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	storetest.Populate(t, db)
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	insert := func(db *DB, p store.AIProvider) error {
+		return db.Write(ctx, func(tx store.Tx) error { return tx.InsertAIProvider(&p) })
+	}
+	gemini := store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now}
+	if err := insert(db, gemini); err == nil {
+		t.Fatal("version 7 accepted the gemini kind")
+	}
+	if err := insert(db, store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
+		BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	want := storetest.Dump(t, db)
+	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
+		t.Fatalf("the fixture has no providers or usage: %v", want)
+	}
+	db.Close()
+
+	db = open(t, url, nil)
+	if v, _ := db.SchemaVersion(ctx); v != 8 {
+		t.Fatalf("version %d after migrating", v)
+	}
+	storetest.SameDump(t, "after migration 8", want, storetest.Dump(t, db))
+	if err := insert(db, gemini); err != nil {
+		t.Fatalf("a gemini provider: %v", err)
+	}
+	if err := insert(db, store.AIProvider{ID: "m", Name: "Mistral", Kind: "mistral", CreatedAt: now, UpdatedAt: now}); err == nil {
+		t.Error("an unknown kind was accepted")
+	}
+	if _, err := db.pool.Exec(`UPDATE ai_providers SET kind = 'anthropic' WHERE id = 'g'`); err == nil {
+		t.Error("the kind was changed")
+	}
 }

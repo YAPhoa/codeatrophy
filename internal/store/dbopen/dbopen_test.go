@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -125,6 +126,45 @@ func db2(t *testing.T, url string) dbopen.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// A SQLite database of the previous schema version is migrated, then
+// imported whole, and PostgreSQL then takes the provider kind the migration
+// added.
+func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
+	url := pgtest.URL(t)
+	path, want := sqliteLibrary(t, t.TempDir())
+	// Back to version 7, whose ai_providers knew two kinds. Migration 8
+	// rebuilds the table, so its triggers are not needed here.
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE ai_providers_old (
+			seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
+			kind TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')), model TEXT NOT NULL DEFAULT '',
+			base_url TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '', api_key_origin TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+		INSERT INTO ai_providers_old SELECT * FROM ai_providers;
+		DROP TABLE ai_providers;
+		ALTER TABLE ai_providers_old RENAME TO ai_providers;
+		DELETE FROM schema_migrations WHERE version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	if st, err := sqlite.Inspect(context.Background(), path); err != nil || st.Version != 7 {
+		t.Fatalf("the SQLite database is at %+v %v", st, err)
+	}
+	db, logs := open(t, dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true})
+	defer db.Close()
+	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "imported the SQLite database") {
+		t.Errorf("logs:\n%s", logs)
+	}
+	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	storetest.Write(t, db, func(tx store.Tx) error {
+		return tx.InsertAIProvider(&store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now})
+	})
 }
 
 func TestImportCanBeTurnedOff(t *testing.T) {

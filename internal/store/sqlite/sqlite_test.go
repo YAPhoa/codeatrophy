@@ -14,6 +14,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/storetest"
 )
 
 func openTest(t *testing.T) *DB {
@@ -65,6 +66,33 @@ var downMigrations = map[int]string{
 		ALTER TABLE submissions DROP COLUMN line_offset;
 		ALTER TABLE submissions DROP COLUMN harness;`,
 	7: `DROP TABLE ai_usage; DROP TABLE ai_log_bodies; DROP TABLE ai_log_texts; DROP TABLE ai_log;`,
+	// The ai_providers table of 0004, which knew two kinds.
+	8: `CREATE TABLE ai_providers_old (
+			seq            INTEGER PRIMARY KEY,
+			id             TEXT    NOT NULL UNIQUE,
+			name           TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+			name_key       TEXT    NOT NULL UNIQUE,
+			kind           TEXT    NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
+			model          TEXT    NOT NULL DEFAULT '',
+			base_url       TEXT    NOT NULL DEFAULT '',
+			api_key        TEXT    NOT NULL DEFAULT '',
+			api_key_origin TEXT    NOT NULL DEFAULT '',
+			created_at     INTEGER NOT NULL,
+			updated_at     INTEGER NOT NULL);
+		INSERT INTO ai_providers_old SELECT * FROM ai_providers;
+		DROP TABLE ai_providers;
+		ALTER TABLE ai_providers_old RENAME TO ai_providers;
+		CREATE TRIGGER ai_providers_kind_immutable BEFORE UPDATE OF kind ON ai_providers
+		WHEN NEW.kind != OLD.kind BEGIN SELECT RAISE(ABORT, 'the kind of an AI provider cannot be changed'); END;
+		CREATE TRIGGER ai_providers_name_single_line_insert BEFORE INSERT ON ai_providers
+		WHEN instr(NEW.name, char(10)) > 0 OR instr(NEW.name, char(9)) > 0 OR instr(NEW.name, char(13)) > 0
+		BEGIN SELECT RAISE(ABORT, 'AI provider name must be a single line'); END;
+		CREATE TRIGGER ai_providers_name_single_line_update BEFORE UPDATE OF name ON ai_providers
+		WHEN instr(NEW.name, char(10)) > 0 OR instr(NEW.name, char(9)) > 0 OR instr(NEW.name, char(13)) > 0
+		BEGIN SELECT RAISE(ABORT, 'AI provider name must be a single line'); END;
+		CREATE TRIGGER ai_providers_max_count BEFORE INSERT ON ai_providers
+		WHEN (SELECT COUNT(*) FROM ai_providers) >= 20
+		BEGIN SELECT RAISE(ABORT, 'too many AI providers'); END;`,
 }
 
 // undoLatestMigration takes the database back to the version before the
@@ -316,4 +344,78 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	}
 	write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
 	db.Close()
+}
+
+// Migration 8 rebuilds ai_providers to allow the gemini kind: a database at
+// version 7 keeps every provider, its usage and log rows and every other
+// row, and the table's rules still hold.
+func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v7.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoMigrationsFrom(t, db, 8)
+	storetest.Populate(t, db)
+	gemini := &store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now}
+	insert := func(db *DB, p *store.AIProvider) error {
+		return db.Write(ctx, func(tx store.Tx) error { return tx.InsertAIProvider(p) })
+	}
+	if err := insert(db, gemini); err == nil {
+		t.Fatal("version 7 accepted the gemini kind")
+	}
+	write(t, db, func(tx store.Tx) error {
+		return tx.InsertAIProvider(&store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
+			BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now})
+	})
+	triggers := func(db *DB) string {
+		var names string
+		if err := db.writer.QueryRow(`SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master
+			WHERE tbl_name = 'ai_providers' ORDER BY name)`).Scan(&names); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	wantTriggers := triggers(db)
+	want := storetest.Dump(t, db)
+	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
+		t.Fatalf("the fixture has no providers or usage: %v", want)
+	}
+	db.Close()
+
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v, _ := db.SchemaVersion(ctx); v != 8 {
+		t.Fatalf("version %d after migrating", v)
+	}
+	storetest.SameDump(t, "after migration 8", want, storetest.Dump(t, db))
+	if got := triggers(db); got != wantTriggers {
+		t.Errorf("triggers and indexes: %s, want %s", got, wantTriggers)
+	}
+	if err := insert(db, gemini); err != nil {
+		t.Fatalf("a gemini provider: %v", err)
+	}
+	if got := read(t, db, func(tx store.Tx) (store.AIProvider, error) { return tx.GetAIProvider("g") }); got.Kind != "gemini" {
+		t.Errorf("stored as %+v", got)
+	}
+	// New rows follow the copied ones, and the table's rules still hold.
+	var seqs string
+	if err := db.writer.QueryRow(`SELECT group_concat(id, ',') FROM (SELECT id FROM ai_providers ORDER BY seq)`).
+		Scan(&seqs); err != nil || !strings.HasSuffix(seqs, ",o,g") {
+		t.Errorf("insertion order: %s %v", seqs, err)
+	}
+	for what, q := range map[string]string{
+		"an unknown kind":   `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'X', 'x', 'mistral', 0, 0)`,
+		"a duplicate name":  `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'Local', 'local', 'gemini', 0, 0)`,
+		"a multi-line name": `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'a` + "\n" + `b', 'a b', 'gemini', 0, 0)`,
+		"a changed kind":    `UPDATE ai_providers SET kind = 'anthropic' WHERE id = 'g'`,
+	} {
+		if _, err := db.writer.Exec(q); err == nil {
+			t.Errorf("%s was accepted", what)
+		}
+	}
 }

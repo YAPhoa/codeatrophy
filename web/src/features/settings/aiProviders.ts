@@ -2,20 +2,32 @@
  * What the AI providers section works out from the settings and from the
  * add/edit form before anything is sent: which model and server a provider
  * uses, what it still needs before it can be the default, and the request
- * bodies for saving and for a connection test.
+ * bodies for saving, for a connection test and for a model listing.
  */
 
-import type { AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
+import type { AiModelsRequest, AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
 import { hostOf, movesToAnotherServer, originOf } from './aiKeyBinding';
+import { endpointKey } from './modelCache';
 
 type Kinds = AiSettings['kinds'];
 
-export const KINDS: readonly { id: AiProviderKind; name: string; text: string }[] = [
-  { id: 'anthropic', name: 'Anthropic', text: 'Claude models, through the Anthropic API.' },
-  { id: 'openai_compatible', name: 'OpenAI-compatible', text: 'OpenAI, OpenRouter, Ollama, LM Studio, vLLM and the like.' },
+/** The kinds a provider can be of. `models` are examples of model names, for a field with nothing to offer yet. */
+export const KINDS: readonly { id: AiProviderKind; name: string; text: string; models: string }[] = [
+  { id: 'anthropic', name: 'Anthropic', text: 'Claude models, through the Anthropic API.', models: 'claude-opus-5-5' },
+  { id: 'gemini', name: 'Google Gemini', text: 'Gemini models, through the Gemini API.', models: 'gemini-3.5-flash' },
+  { id: 'openai_compatible', name: 'OpenAI-compatible', text: 'OpenAI, OpenRouter, Ollama, LM Studio, vLLM and the like.', models: 'gpt-4.1, llama3.1:70b' },
 ];
 
 export const kindName = (kind: AiProviderKind): string => KINDS.find((k) => k.id === kind)?.name ?? kind;
+
+/** What the Model field shows while it is empty: the kind's default, else a prompt to pick from the list, else examples. */
+export function modelPlaceholder(kind: AiProviderKind, kinds: Kinds, listed: boolean): string {
+  const fallback = kinds[kind].defaultModel;
+  if (fallback !== null) return fallback;
+  if (listed) return 'Pick a model…';
+  const examples = KINDS.find((k) => k.id === kind)?.models;
+  return examples ? `e.g. ${examples}…` : 'Pick a model…';
+}
 
 /** The model a provider uses: its own, else the kind's default, else none. */
 export const modelInEffect = (provider: Pick<AiProvider, 'kind' | 'model'>, kinds: Kinds): string | null => provider.model ?? kinds[provider.kind].defaultModel;
@@ -62,24 +74,33 @@ export interface ProviderForm {
   removeKey: boolean;
 }
 
-export const formOf = (provider: AiProvider): ProviderForm => ({
+/** Whether the form asks for a base URL: an OpenAI-compatible provider has to say which server it means. */
+export const baseUrlRequired = (kind: AiProviderKind): boolean => kind === 'openai_compatible';
+
+/** A saved provider's base URL as the form shows it. One saved without it shows the server it has been using, where the form asks for one. */
+const shownBaseUrl = (provider: AiProvider, kinds: Kinds): string => provider.baseUrl ?? (baseUrlRequired(provider.kind) ? kinds[provider.kind].defaultBaseUrl : '');
+
+export const formOf = (provider: AiProvider, kinds: Kinds): ProviderForm => ({
   name: provider.name,
   kind: provider.kind,
   model: provider.model ?? '',
-  baseUrl: provider.baseUrl ?? '',
+  baseUrl: shownBaseUrl(provider, kinds),
   apiKey: '',
   removeKey: false,
 });
 
 /**
  * A name for a new provider that no saved provider has yet. It says where
- * the provider connects: "Anthropic", "OpenAI", or the host of another
- * server ("localhost:11434"), with a number when that is taken.
+ * the provider connects: "Anthropic", "Google Gemini", "OpenAI", or the host
+ * of another server ("localhost:11434"), with a number when that is taken.
+ * An OpenAI-compatible provider that names no server yet is called by its
+ * kind.
  */
 export function suggestName(kind: AiProviderKind, baseUrl: string, providers: readonly AiProvider[], kinds: Kinds): string {
   const taken = new Set(providers.filter((p) => p.source === 'settings').map((p) => p.name.trim().toLowerCase()));
-  const elsewhere = originOf(baseUrl) !== null && originOf(baseUrl) !== originOf(kinds[kind].defaultBaseUrl);
-  const base = elsewhere ? hostOf(baseUrl) : kind === 'openai_compatible' ? 'OpenAI' : kindName(kind);
+  const origin = originOf(baseUrl);
+  const elsewhere = origin !== null && origin !== originOf(kinds[kind].defaultBaseUrl);
+  const base = elsewhere ? hostOf(baseUrl) : kind === 'openai_compatible' && origin !== null ? 'OpenAI' : kindName(kind);
   for (let n = 1; ; n++) {
     const name = n === 1 ? base : `${base} ${n}`;
     if (!taken.has(name.toLowerCase())) return name;
@@ -116,9 +137,10 @@ export function modelProblem(model: string, max: number): string | null {
   return LINE_BREAK.test(text) || CONTROL.test(text) ? 'A model name is a single line, without tabs or control characters.' : null;
 }
 
-/** Why a base URL cannot be used, or `null`. Empty is fine: the kind's default applies. */
-export function baseUrlProblem(baseUrl: string): string | null {
-  return baseUrl.trim() === '' || originOf(baseUrl) !== null ? null : 'Enter the whole address, starting with http:// or https://.';
+/** Why a base URL cannot be used, or `null`. Empty is fine where the kind has a server of its own. */
+export function baseUrlProblem(baseUrl: string, kind: AiProviderKind): string | null {
+  if (baseUrl.trim() === '') return baseUrlRequired(kind) ? 'Enter the base URL.' : null;
+  return originOf(baseUrl) !== null ? null : 'Enter the whole address, starting with http:// or https://.';
 }
 
 export interface Outlook {
@@ -160,32 +182,68 @@ export function createBody(form: ProviderForm): AiProviderInput {
 }
 
 /** Only what differs from the saved provider is sent, so untouched values (and the key) stay as they are. */
-export function patchBody(form: ProviderForm, provider: AiProvider): AiProviderPatch {
+export function patchBody(form: ProviderForm, provider: AiProvider, kinds: Kinds): AiProviderPatch {
   const patch: AiProviderPatch = {};
   if (form.name.trim() !== provider.name) patch.name = form.name.trim();
   if (form.model.trim() !== (provider.model ?? '')) patch.model = form.model.trim() || null;
-  if (form.baseUrl.trim() !== (provider.baseUrl ?? '')) patch.baseUrl = form.baseUrl.trim() || null;
+  if (form.baseUrl.trim() !== shownBaseUrl(provider, kinds)) patch.baseUrl = form.baseUrl.trim() || null;
   if (form.apiKey.trim()) patch.apiKey = form.apiKey.trim();
   else if (form.removeKey && provider.apiKeySet) patch.apiKey = null;
   return patch;
 }
 
 /**
- * A connection test of the values in the form, saved or not, so a key can
- * be tried before it is stored.
+ * The provider of a model listing: the values in the form, saved or not, so
+ * a key can be tried before it is stored.
  *
  * For a saved provider the values are overrides, and a `null` override
  * means "as saved" rather than "none". A field the user emptied is
  * therefore sent as the kind's default, which is what saving it would
  * lead to.
  */
-export function testBody(form: ProviderForm, provider: AiProvider | null, kinds: Kinds): AiTestRequest {
-  const model = form.model.trim() || null;
+export function modelsBody(form: ProviderForm, provider: AiProvider | null, kinds: Kinds): AiModelsRequest {
   const baseUrl = form.baseUrl.trim() || null;
   const apiKey = form.apiKey.trim() || null;
-  if (!provider) return { kind: form.kind, model, baseUrl, apiKey };
-  const kind = kinds[provider.kind];
-  return { providerId: provider.id, model: model ?? kind.defaultModel, baseUrl: baseUrl ?? kind.defaultBaseUrl, apiKey };
+  if (!provider) return { kind: form.kind, baseUrl, apiKey };
+  return { providerId: provider.id, baseUrl: baseUrl ?? kinds[provider.kind].defaultBaseUrl, apiKey };
+}
+
+/** A connection test of the values in the form: the listing's provider and the model, with the same meaning of an emptied field. */
+export function testBody(form: ProviderForm, provider: AiProvider | null, kinds: Kinds): AiTestRequest {
+  const model = form.model.trim() || null;
+  return { ...modelsBody(form, provider, kinds), model: provider ? (model ?? kinds[provider.kind].defaultModel) : model };
+}
+
+/** The endpoint the form's requests go to, as model lists are remembered under; `null` while the base URL is not a URL. */
+const endpointOfForm = (form: ProviderForm, kinds: Kinds): string | null => endpointKey(form.kind, form.baseUrl.trim() || kinds[form.kind].defaultBaseUrl);
+
+/** What a passed connection test covers: the endpoint, and the key typed into the form (empty for none). */
+export interface PassedTest {
+  endpoint: string;
+  apiKey: string;
+}
+
+export const passedTestOf = (form: ProviderForm, kinds: Kinds): PassedTest | null => {
+  const endpoint = endpointOfForm(form, kinds);
+  return endpoint === null ? null : { endpoint, apiKey: form.apiKey.trim() };
+};
+
+/** A test of the endpoint and key now in the form has passed. The model and the name can have changed since. */
+export const testPassedFor = (form: ProviderForm, kinds: Kinds, passed: PassedTest | null): boolean => {
+  const now = passedTestOf(form, kinds);
+  return now !== null && passed !== null && now.endpoint === passed.endpoint && now.apiKey === passed.apiKey;
+};
+
+/**
+ * Whether saving the form waits for a connection test. A new provider is
+ * added once a test of its endpoint and key has passed. A saved one saves
+ * freely while its connection is as saved (its endpoint, and no new key;
+ * deleting the key is not a new one), and otherwise once a test of the new
+ * connection has passed. `passed` is what the last passed test covered.
+ */
+export function needsTest(form: ProviderForm, provider: AiProvider | null, kinds: Kinds, passed: PassedTest | null): boolean {
+  if (testPassedFor(form, kinds, passed)) return false;
+  return provider === null || form.apiKey.trim() !== '' || endpointOfForm(form, kinds) !== endpointKey(provider.kind, baseUrlInEffect(provider, kinds));
 }
 
 /**

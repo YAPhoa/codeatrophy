@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, setTransport } from '../api/client';
 import type { Submission } from '../api/types';
 import type { MockOptions, MockServer } from './index';
-import { DEFAULT_PREFERENCES, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
+import { DEFAULT_PREFERENCES, envProviderId, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
 import { assemble, functionKit, KIT_LANGUAGES } from './harness';
 import { buildBundleZip, createMockServer, optionsFromFlags, parseBundleZip, seedIds } from './index';
 import { TLE_GRACE_MS } from './judge';
@@ -2285,6 +2285,7 @@ describe('AI settings', () => {
     expect(provider.createdAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     expect(settings.kinds).toEqual({
       anthropic: { defaultModel: 'claude-opus-5-5', defaultBaseUrl: 'https://api.anthropic.com', keyRequired: true },
+      gemini: { defaultModel: null, defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true },
       openai_compatible: { defaultModel: null, defaultBaseUrl: 'https://api.openai.com/v1', keyRequired: false },
     });
     expect(JSON.stringify(settings)).not.toContain('sk-ant');
@@ -2342,6 +2343,8 @@ describe('AI settings', () => {
     expect(env).toMatchObject({ id: 'env-anthropic', kind: 'anthropic', source: 'environment', isDefault: true, ready: true, apiKeySet: true, createdAt: null, updatedAt: null });
     expect(env.baseUrl).toMatch(/^https:/);
     expect(await api.meta()).toMatchObject({ ai: { enabled: true, providerId: 'env-anthropic', kind: 'anthropic', model: 'claude-opus-5-5' } });
+    // The other kinds have fixed ids of their own.
+    expect([envProviderId('gemini'), envProviderId('openai_compatible')]).toEqual(['env-gemini', 'env-openai-compatible']);
 
     // It can be tested and chosen, but not changed or deleted.
     expect((await api.settings.testAi({ providerId: 'env-anthropic' })).ok).toBe(true);
@@ -2376,7 +2379,7 @@ describe('AI settings', () => {
     expect((await failure(api.settings.createProvider({ kind: 'anthropic' } as never))).fields).toEqual({ name: 'is required' });
     expect((await failure(api.settings.createProvider({ name: '   ', kind: 'anthropic' }))).fields).toEqual({ name: 'is required' });
     expect((await failure(api.settings.createProvider({ name: 'x' } as never))).fields).toEqual({ kind: 'is required' });
-    expect((await failure(api.settings.createProvider({ name: 'x', kind: 'gemini' as never }))).fields).toHaveProperty('kind');
+    expect((await failure(api.settings.createProvider({ name: 'x', kind: 'mistral' as never }))).fields).toHaveProperty('kind');
     expect((await failure(api.settings.createProvider({ name: 'n'.repeat(LIMITS.maxAiProviderNameChars + 1), kind: 'anthropic' }))).fields).toHaveProperty('name');
     expect((await api.settings.createProvider({ name: 'é'.repeat(LIMITS.maxAiProviderNameChars), kind: 'anthropic' })).name).toHaveLength(LIMITS.maxAiProviderNameChars);
     expect((await failure(api.settings.createProvider({ name: 'two\tparts', kind: 'anthropic' }))).fields.name).toMatch(/single line/);
@@ -2553,6 +2556,49 @@ describe('AI settings', () => {
     expect((await api.settings.testAi({ providerId: made.id })).ok).toBe(true);
   });
 
+  it('needs a key and a model for Google Gemini, on its own server or a gateway', async () => {
+    const made = await api.settings.createProvider({ name: 'Gemini', kind: 'gemini' });
+    expect(made).toMatchObject({ kind: 'gemini', model: null, baseUrl: null, apiKeySet: false, ready: false });
+    expect((await failure(api.settings.putAi({ defaultProviderId: made.id }))).fields.defaultProviderId).toMatch(/a model and an API key$/);
+    expect((await api.settings.updateProvider(made.id, { model: 'gemini-3.5-flash' })).ready).toBe(false);
+    expect((await api.settings.updateProvider(made.id, { apiKey: 'AIza-mock-0000Gm1n' })).ready).toBe(true);
+    // A gateway does not make the key optional.
+    const proxied = await api.settings.updateProvider(made.id, { baseUrl: 'https://gateway.example.org/google' });
+    expect(proxied).toMatchObject({ apiKeySet: false, ready: false });
+    expect((await failure(api.settings.putAi({ defaultProviderId: made.id }))).fields.defaultProviderId).toMatch(/needs an API key$/);
+  });
+
+  it('lists only the text models of Google Gemini, by bare id, and generates through it', async () => {
+    // Without a key nothing is asked of the service.
+    expect(await api.settings.listModels({ kind: 'gemini' })).toEqual({ models: null, error: 'No API key is set for this provider.' });
+    expect(await api.settings.testAi({ kind: 'gemini', model: 'gemini-3.5-flash' })).toMatchObject({ ok: false, models: null, error: expect.stringMatching(/key/i) });
+
+    const { models } = await api.settings.listModels({ kind: 'gemini', apiKey: 'AIza-typed' });
+    expect(models).toContain('gemini-3.5-flash');
+    expect(models).toEqual([...new Set(models)].sort());
+    expect(models!.every((m) => /^gem(ini|ma)-/.test(m))).toBe(true);
+    expect(models!.some((m) => /embedding|tts|image|imagen|veo/.test(m))).toBe(false);
+    expect((await api.settings.listModels({ kind: 'gemini', baseUrl: 'https://gateway.example.org/google', apiKey: 'AIza-typed' })).models).toEqual(models);
+
+    // With no default model, a test without one only fetches the list.
+    expect(await api.settings.testAi({ kind: 'gemini', apiKey: 'AIza-typed' })).toMatchObject({ ok: true, model: null, models });
+    expect(await api.settings.testAi({ kind: 'gemini', apiKey: 'AIza-typed', model: 'gemini-3.5-flash' })).toMatchObject({ ok: true, model: 'gemini-3.5-flash' });
+    expect((await api.settings.testAi({ kind: 'gemini', apiKey: 'AIza-typed', model: 'models/gemini-3.5-flash' })).error).toMatch(/does not know the model/);
+    const bad = await api.settings.listModels({ kind: 'gemini', apiKey: 'AIza-bad-key' });
+    expect(bad).toMatchObject({ models: null, error: expect.stringMatching(/rejected the API key/) });
+    expect(bad.error).not.toContain('AIza-bad-key');
+
+    // Made the default, it is the one in use, and what it spends is counted towards it.
+    const gemini = await api.settings.createProvider({ name: 'Gemini', kind: 'gemini', model: 'gemini-3.5-flash', apiKey: 'AIza-mock-0000Gm1n' });
+    expect(gemini).toMatchObject({ ready: true, apiKeyHint: '…Gm1n' });
+    await api.settings.putAi({ defaultProviderId: gemini.id });
+    expect((await api.meta()).ai).toEqual({ enabled: true, providerId: gemini.id, providerName: 'Gemini', kind: 'gemini', model: 'gemini-3.5-flash' });
+    const { usage } = await api.ai.draft({ text: 'two sum' });
+    expect(usage).toMatchObject({ model: 'gemini-3.5-flash', cacheReadTokens: 0, cacheWriteTokens: null });
+    expect(usage.reasoningTokens).toBeGreaterThan(0);
+    expect((await api.settings.getAi()).providers.find((p) => p.id === gemini.id)!.usage.allTime.requests).toBe(1);
+  });
+
   it('tests a configuration without saving it, and lists the service\'s models', async () => {
     const { id } = await seeded();
     const works = await api.settings.testAi({ providerId: id });
@@ -2610,12 +2656,39 @@ describe('AI settings', () => {
     expect(nothing.modelsError).not.toBeNull();
   });
 
+  it('lists the models without a generation request, steered as a test is', async () => {
+    const { id } = await seeded();
+    const before = { log: (await api.settings.log({ limit: 1 })).total, usage: (await seeded()).usage };
+
+    expect(await api.settings.listModels({ providerId: id })).toEqual({ models: ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'], error: null });
+    // A model in the body is ignored, even one the service does not have.
+    expect((await api.settings.listModels({ providerId: id, model: 'claude-nonesuch' } as never)).error).toBeNull();
+    expect((await api.settings.listModels({ kind: 'openai_compatible', baseUrl: 'http://localhost:11434/v1' })).models).toContain('llama3.1:8b');
+
+    const bad = await api.settings.listModels({ providerId: id, apiKey: 'sk-ant-bad-key' });
+    expect(bad).toMatchObject({ models: null, error: expect.stringMatching(/rejected the API key/) });
+    expect(bad.error).not.toContain('sk-ant-bad-key');
+    expect((await api.settings.listModels({ kind: 'openai_compatible', baseUrl: 'http://unreachable.lan:1234/v1' })).error).toContain('unreachable.lan');
+    expect((await api.settings.listModels({ kind: 'openai_compatible', baseUrl: 'http://no-models.lan:8000/v1' })).error).toContain('does not list its models');
+    // A missing required key is reported in the body, as is the saved key kept from another origin.
+    expect(await api.settings.listModels({ kind: 'anthropic' })).toEqual({ models: null, error: 'No API key is set for this provider.' });
+    expect((await api.settings.listModels({ providerId: id, baseUrl: 'https://gateway.example.org/anthropic' })).error).toMatch(/saved key/);
+
+    expect((await failure(api.settings.listModels({}))).status).toBe(422);
+    expect((await failure(api.settings.listModels({ providerId: id, kind: 'anthropic' }))).status).toBe(422);
+    expect((await failure(api.settings.listModels({ providerId: id, baseUrl: 'localhost:11434' }))).fields).toEqual({ baseUrl: 'must be an http(s) URL' });
+
+    // Nothing was logged, counted or saved.
+    expect((await api.settings.log({ limit: 1 })).total).toBe(before.log);
+    expect(await seeded()).toMatchObject({ usage: before.usage, baseUrl: null, apiKeyHint: '…x7Qa' });
+  });
+
   it('requires exactly one of providerId and kind for a test', async () => {
     const { id } = await seeded();
     expect((await failure(api.settings.testAi({}))).status).toBe(422);
     expect((await failure(api.settings.testAi({ providerId: id, kind: 'anthropic' }))).status).toBe(422);
     expect((await failure(api.settings.testAi({ providerId: 'nope' }))).fields).toHaveProperty('providerId');
-    expect((await failure(api.settings.testAi({ kind: 'gemini' as never }))).fields).toHaveProperty('kind');
+    expect((await failure(api.settings.testAi({ kind: 'mistral' as never }))).fields).toHaveProperty('kind');
     expect((await failure(api.settings.testAi({ providerId: id, baseUrl: 'localhost:11434' }))).fields).toEqual({ baseUrl: 'must be an http(s) URL' });
   });
 

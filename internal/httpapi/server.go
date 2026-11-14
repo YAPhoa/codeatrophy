@@ -127,6 +127,7 @@ func (s *Server) routes() {
 	s.handle("GET /settings/ai", s.getAISettings)
 	s.handle("PUT /settings/ai", s.putAISettings)
 	s.handle("POST /settings/ai/test", s.testAISettings)
+	s.handle("POST /settings/ai/models", s.listAIModels)
 	s.handle("POST /settings/ai/providers", s.createAIProvider)
 	s.handle("PATCH /settings/ai/providers/{id}", s.updateAIProvider)
 	s.handle("DELETE /settings/ai/providers/{id}", s.deleteAIProvider)
@@ -791,6 +792,19 @@ func (s *Server) testAISettings(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	res, err := s.app.TestAIProvider(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) listAIModels(w http.ResponseWriter, r *http.Request) error {
+	var in app.AIModelsInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	res, err := s.app.ListAIModels(r.Context(), in)
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"codeatrophy/internal/ai"
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
 )
@@ -1119,7 +1120,7 @@ func testSolutionConstraints(t *testing.T, db store.Store) {
 }
 
 // The database enforces the AI provider rules: unique case-insensitive
-// single-line names, known kinds, at most 20. (The kind is never written
+// single-line names, known kinds (every kind of ai.ProviderIDs), at most 20. (The kind is never written
 // by an update; each backend tests its own database rule against changing
 // it.)
 func testAIProviderConstraints(t *testing.T, db store.Store) {
@@ -1137,7 +1138,7 @@ func testAIProviderConstraints(t *testing.T, db store.Store) {
 	for what, p := range map[string]*store.AIProvider{
 		"a case-insensitive duplicate name": prov("p2", " WORK ", "anthropic"),
 		"a duplicate id":                    prov("p1", "Other", "anthropic"),
-		"an unknown kind":                   prov("p3", "Other", "gemini"),
+		"an unknown kind":                   prov("p3", "Other", "mistral"),
 		"a multi-line name":                 prov("p4", "a\nb", "anthropic"),
 		"a tab in the name":                 prov("p4", "a\tb", "anthropic"),
 		"an empty name":                     prov("p4", "", "anthropic"),
@@ -1163,9 +1164,17 @@ func testAIProviderConstraints(t *testing.T, db store.Store) {
 		t.Errorf("after update: %+v", got)
 	}
 	for i := 2; i <= domain.MaxAIProviders; i++ {
-		if err := insert(prov(fmt.Sprint("q", i), fmt.Sprint("provider ", i), "openai_compatible")); err != nil {
-			t.Fatalf("provider %d: %v", i, err)
+		kind := ai.ProviderIDs[i%len(ai.ProviderIDs)]
+		if err := insert(prov(fmt.Sprint("q", i), fmt.Sprint("provider ", i), kind)); err != nil {
+			t.Fatalf("provider %d (%s): %v", i, kind, err)
 		}
+	}
+	kinds := map[string]bool{}
+	for _, p := range Read(t, db, func(tx store.Tx) ([]store.AIProvider, error) { return tx.ListAIProviders() }) {
+		kinds[p.Kind] = true
+	}
+	if len(kinds) != len(ai.ProviderIDs) || !kinds["gemini"] {
+		t.Errorf("kinds stored: %v", kinds)
 	}
 	if err := insert(prov("q21", "one too many", "anthropic")); err == nil {
 		t.Error("a 21st provider was accepted")

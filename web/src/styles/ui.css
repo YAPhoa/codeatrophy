@@ -176,6 +176,24 @@
   color: var(--danger);
 }
 
+/* The label's line with an error at its end, where the error moves nothing as it comes and goes. */
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.field-head .field-error {
+  text-align: right;
+}
+
+/* A line kept for a field's hint, so that it does not move the form as it comes and goes. */
+.field-message {
+  min-height: 1lh;
+  font-size: var(--text-sm);
+}
+
 .input {
   width: 100%;
   height: var(--control-h);

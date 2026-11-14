@@ -1,6 +1,6 @@
 // Settings endpoints: the AI providers and the user's preferences.
 
-import type { AiProviderKind, AiTestResponse } from '../../api/types';
+import type { AiModelsResponse, AiProviderKind, AiTestResponse } from '../../api/types';
 import type { MockDb, StoredAiProvider } from '../db';
 import { AI_KIND_IDS, AI_KINDS, atMostChars, charCount, keyNeeded, LIMITS, noUsage, sameOrigin } from '../db';
 import type { Handler, Req } from '../http';
@@ -87,7 +87,7 @@ function nameTaken(db: MockDb, name: string, except?: StoredAiProvider): boolean
 function missing(db: MockDb, p: StoredAiProvider): string {
   const parts: string[] = [];
   if (db.modelOf(p) === null) parts.push('a model');
-  if (p.apiKey === null && keyNeeded(p.kind, db.baseUrlOf(p))) parts.push(p.kind === 'anthropic' ? 'an API key' : 'an API key for this base URL');
+  if (p.apiKey === null && keyNeeded(p.kind, db.baseUrlOf(p))) parts.push(AI_KINDS[p.kind].keyRequired ? 'an API key' : 'an API key for this base URL');
   return parts.join(' and ');
 }
 
@@ -192,23 +192,34 @@ function deleteProvider(db: MockDb, req: Req) {
 
 // What the pretend services answer when asked for their models.
 const ANTHROPIC_MODELS = ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'];
+// Google's list holds embedding, speech and image models too; the server keeps the ones that generate text and drops the `models/` prefix.
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-3-pro', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemma-3-27b-it'];
 const OPENAI_MODELS = ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini', 'text-embedding-3-large', 'text-embedding-3-small'];
 const LOCAL_MODELS = ['deepseek-r1:14b', 'gemma3:12b', 'llama3.1:70b', 'llama3.1:8b', 'mistral-nemo:12b', 'qwen2.5-coder:14b'];
 
 function modelsAt(kind: AiProviderKind, baseUrl: string): string[] {
   if (kind === 'anthropic') return [...ANTHROPIC_MODELS];
+  if (kind === 'gemini') return [...GEMINI_MODELS];
   return sameOrigin(baseUrl, AI_KINDS[kind].defaultBaseUrl) ? [...OPENAI_MODELS] : [...LOCAL_MODELS];
 }
 
+/** Where a test or a listing goes, and with which key. */
+interface Connection {
+  /** The saved provider it was asked for, if any. */
+  saved: StoredAiProvider | undefined;
+  kind: AiProviderKind;
+  baseUrl: string;
+  /** The base URL is on another origin than the one the saved key belongs to. */
+  elsewhere: boolean;
+  key: string | null;
+}
+
 /**
- * Pretend to check a configuration against its service: fetch the model
- * list, then make one generation request when there is a model to make it
- * with. Markers steer the outcome: `unreachable` in the base URL, `bad` or
- * `invalid` in the key, and `no-models` in the base URL for a server that
- * does not list its models.
+ * The provider a test or a listing is about: `providerId` with overrides,
+ * or `kind` for a configuration that has not been saved. The overrides are
+ * checked into `v`, for the caller to report together with its own fields.
  */
-async function testSettings(db: MockDb, req: Req) {
-  const raw = objectBody(req);
+function connectionOf(db: MockDb, raw: Record<string, unknown>, v: Validator): Connection {
   const byId = raw.providerId != null;
   if (byId && raw.kind != null) throw invalid('kind', 'must not be given together with providerId');
   if (!byId && raw.kind == null) throw invalid('providerId', 'or kind is required');
@@ -217,16 +228,53 @@ async function testSettings(db: MockDb, req: Req) {
   if (!byId && !isKind(raw.kind)) throw invalid('kind', 'must be a known provider kind');
   const kind = saved ? saved.kind : (raw.kind as AiProviderKind);
 
-  const v = new Validator();
-  const model = checkModel(raw.model, v) ?? (saved ? db.modelOf(saved) : AI_KINDS[kind].defaultModel);
   const configuredBaseUrl = saved ? db.baseUrlOf(saved) : AI_KINDS[kind].defaultBaseUrl;
   const baseUrl = checkBaseUrl(raw.baseUrl, v) ?? configuredBaseUrl;
   // The provider's key is never sent to a server other than the one it was
-  // saved for: a test against a different origin uses only a key typed into
-  // this request.
+  // saved for: a request to a different origin uses only a key typed into
+  // this one.
   const typedKey = checkApiKey(raw.apiKey, v) ?? null;
   const elsewhere = !sameOrigin(baseUrl, configuredBaseUrl);
-  const key = typedKey ?? (elsewhere ? null : (saved?.apiKey ?? null));
+  return { saved, kind, baseUrl, elsewhere, key: typedKey ?? (elsewhere ? null : (saved?.apiKey ?? null)) };
+}
+
+/** Why nothing can be asked of the service: a key it insists on is missing. */
+function missingKey({ saved, kind, baseUrl, elsewhere, key }: Connection): string | null {
+  if (key !== null || !keyNeeded(kind, baseUrl)) return null;
+  return elsewhere && saved != null && saved.apiKey !== null
+    ? 'No API key was sent: the saved key is only used with the base URL it was saved for. Enter a key to test this URL.'
+    : 'No API key is set for this provider.';
+}
+
+/** Why the service answers nothing at all: `unreachable` in the base URL, `bad` or `invalid` in the key. */
+function refusal({ kind, baseUrl, key }: Connection): string | null {
+  const host = new URL(baseUrl).host;
+  if (/unreachable/i.test(baseUrl)) return `Could not reach ${host}: dial tcp: lookup ${host.replace(/:\d+$/, '')}: no such host`;
+  if (key !== null && /bad|invalid/i.test(key)) {
+    if (kind === 'anthropic') return 'The provider rejected the API key (401 authentication_error: invalid x-api-key).';
+    if (kind === 'gemini') return 'The provider rejected the API key (400 INVALID_ARGUMENT: API key not valid. Please pass a valid API key.).';
+    return 'The provider rejected the API key (401: Incorrect API key provided).';
+  }
+  return null;
+}
+
+/** The service's model list once it answers; `no-models` in the base URL stands for a server that does not list them. */
+function listing({ kind, baseUrl }: Connection): { models: string[] | null; error: string | null } {
+  if (!/no-?models/i.test(baseUrl)) return { models: modelsAt(kind, baseUrl), error: null };
+  return { models: null, error: `${new URL(baseUrl).host} does not list its models (404 Not Found for /models).` };
+}
+
+/**
+ * Pretend to check a configuration against its service: fetch the model
+ * list, then make one generation request when there is a model to make it
+ * with. Markers steer the outcome as described at `refusal` and `listing`.
+ */
+async function testSettings(db: MockDb, req: Req) {
+  const raw = objectBody(req);
+  const v = new Validator();
+  const connection = connectionOf(db, raw, v);
+  const { saved } = connection;
+  const model = checkModel(raw.model, v) ?? (saved ? db.modelOf(saved) : AI_KINDS[connection.kind].defaultModel);
   v.check();
 
   await sleep(db.delay('aiTest'));
@@ -253,31 +301,12 @@ async function testSettings(db: MockDb, req: Req) {
   };
 
   // Without a key the service insists on, there is nothing to ask it.
-  if (key === null && keyNeeded(kind, baseUrl)) {
-    return reply({
-      error:
-        elsewhere && saved != null && saved.apiKey !== null
-          ? 'No API key was sent: the saved key is only used with the base URL it was saved for. Enter a key to test this URL.'
-          : 'No API key is set for this provider.',
-    });
-  }
+  const missing = missingKey(connection);
+  if (missing !== null) return reply({ error: missing });
+  const refused = refusal(connection);
+  if (refused !== null) return model === null ? reply({ model, error: refused, modelsError: refused }) : generated({ model, error: refused, modelsError: refused });
 
-  const host = new URL(baseUrl).host;
-  if (/unreachable/i.test(baseUrl)) {
-    const error = `Could not reach ${host}: dial tcp: lookup ${host.replace(/:\d+$/, '')}: no such host`;
-    return model === null ? reply({ model, error, modelsError: error }) : generated({ model, error, modelsError: error });
-  }
-  if (key !== null && /bad|invalid/i.test(key)) {
-    const error =
-      kind === 'anthropic'
-        ? 'The provider rejected the API key (401 authentication_error: invalid x-api-key).'
-        : 'The provider rejected the API key (401: Incorrect API key provided).';
-    return model === null ? reply({ model, error, modelsError: error }) : generated({ model, error, modelsError: error });
-  }
-
-  const listed = !/no-?models/i.test(baseUrl);
-  const models = listed ? modelsAt(kind, baseUrl) : null;
-  const modelsError = listed ? null : `${host} does not list its models (404 Not Found for /models).`;
+  const { models, error: modelsError } = listing(connection);
   if (model === null) {
     // Nothing to generate with: fetching the list is the whole test.
     return models !== null ? reply({ ok: true, models }) : reply({ error: 'No model is set, and the model list could not be fetched.', modelsError });
@@ -286,6 +315,17 @@ async function testSettings(db: MockDb, req: Req) {
     return generated({ model, error: `The provider does not know the model "${model}" (404 model_not_found).`, models });
   }
   return generated({ ok: true, model, latencyMs: 380 + Math.floor(Math.random() * 500), models, modelsError });
+}
+
+/** The model list alone, steered by the same markers as a test. It makes no generation request, so nothing is logged or counted. */
+async function listModels(db: MockDb, req: Req) {
+  const v = new Validator();
+  const connection = connectionOf(db, objectBody(req), v);
+  v.check();
+
+  await sleep(db.delay('aiTest'));
+  const error = missingKey(connection) ?? refusal(connection);
+  return ok((error !== null ? { models: null, error } : listing(connection)) satisfies AiModelsResponse);
 }
 
 // ---- AI activity log -----------------------------------------------------------
@@ -388,6 +428,7 @@ export function settingsRoutes(db: MockDb): [string, string, Handler][] {
     ['PATCH', '/settings/ai/providers/:id', (req) => patchProvider(db, req)],
     ['DELETE', '/settings/ai/providers/:id', (req) => deleteProvider(db, req)],
     ['POST', '/settings/ai/test', (req) => testSettings(db, req)],
+    ['POST', '/settings/ai/models', (req) => listModels(db, req)],
     ['GET', '/settings/ai/log', (req) => listLog(db, req)],
     ['GET', '/settings/ai/log/:id', (req) => getLogEntry(db, req)],
     ['DELETE', '/settings/ai/log', (req) => clearLog(db, req)],

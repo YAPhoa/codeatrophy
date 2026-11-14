@@ -506,7 +506,7 @@ test('settings: each category is its own page, and a link to an old section stil
   await expect(page).toHaveURL(/\/settings\/preferences$/);
 });
 
-test('AI providers: a new one is tested, gets a model from the loaded list, and becomes the default', async ({ page }) => {
+test('AI providers: a new one gets a model from the loaded list, is added once tested, and becomes the default', async ({ page }) => {
   await open(page, '/settings/ai');
   const section = page.getByRole('region', { name: 'AI providers' });
   await expect(section.getByText('On · Personal key · claude-opus-5-5')).toBeVisible();
@@ -520,20 +520,56 @@ test('AI providers: a new one is tested, gets a model from the loaded list, and 
 
   await section.getByRole('button', { name: 'Add provider' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add provider' });
+  const note = dialog.locator('.dialog-note');
+  const add = dialog.getByRole('button', { name: 'Add provider' });
+  const testButton = dialog.getByRole('button', { name: 'Test connection' });
+  const listed = dialog.getByText(/^9 models from api\.openai\.com, loaded just now\.$/);
   await dialog.getByRole('radio', { name: /OpenAI-compatible/ }).check();
   await dialog.getByLabel('Name').fill('Work OpenAI');
   await dialog.getByLabel('API key').fill('sk-smoke-test-0000Zk9d');
+  await expect(note).toHaveText('Pick a model, then test the connection.');
 
-  // Testing the connection loads the models the service offers and, with none set, asks for one.
+  // An OpenAI-compatible provider has to name its server before anything is asked of it.
+  const baseUrl = dialog.getByLabel('Base URL');
+  await expect(baseUrl).toHaveValue('');
+  await dialog.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(dialog.getByText('Enter the base URL.')).toBeVisible();
+  await baseUrl.fill('https://api.openai.com/v1');
+
+  // Refreshing loads the models the service offers and, with none set, leads to picking one.
   const model = dialog.getByRole('combobox', { name: 'Model' });
   await expect(model).toHaveValue('');
-  await dialog.getByRole('button', { name: 'Test connection' }).click();
-  await expect(dialog.getByText('The connection works')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(listed).toBeVisible();
   await expect(model).toBeFocused();
-  await page.getByRole('option', { name: 'gpt-4.1-mini' }).click();
-  await expect(model).toHaveValue('gpt-4.1-mini');
+  await page.getByRole('option', { name: 'gpt-4.1', exact: true }).click();
+  await expect(model).toHaveValue('gpt-4.1');
 
-  await dialog.getByRole('button', { name: 'Add provider' }).click();
+  // Not added before a test has passed.
+  await expect(note).toHaveText('Test the connection to add it.');
+  await expect(add).toBeDisabled();
+  await testButton.click();
+  await expect(dialog.getByText('The connection works')).toBeVisible();
+  await expect(note).toHaveText('Tested. Ready to add.');
+  await expect(add).toBeFocused();
+
+  // Another model needs no new test; another key does.
+  await model.fill('gpt-4.1-mini');
+  await expect(note).toHaveText('Tested. Ready to add.');
+  await dialog.getByLabel('API key').fill('sk-smoke-other-Zk9d');
+  await expect(note).toHaveText('Test the connection to add it.');
+  await expect(add).toBeDisabled();
+  await testButton.click();
+  await expect(note).toHaveText('Tested. Ready to add.');
+
+  // Another server has none of these models to offer and needs a test of its own; back on this one, the test still counts.
+  await baseUrl.fill('http://localhost:11434/v1');
+  await expect(dialog.getByText(/ models from /)).toHaveCount(0);
+  await expect(note).toHaveText('Test the connection to add it.');
+  await baseUrl.fill('https://api.openai.com/v1');
+  await expect(dialog.getByText(/^9 models from api\.openai\.com, loaded /)).toBeVisible();
+  await expect(note).toHaveText('Tested. Ready to add.');
+  await add.click();
   await expect(dialog).toBeHidden();
 
   // It is listed as ready, with its key shown by the last four characters only; the default has not moved.
@@ -549,6 +585,117 @@ test('AI providers: a new one is tested, gets a model from the loaded list, and 
   await expect(section.getByText('On · Work OpenAI · gpt-4.1-mini')).toBeVisible();
   await expect(row.getByText('default', { exact: true })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Navigation' }).getByTitle('AI drafting: Work OpenAI · gpt-4.1-mini')).toBeVisible();
+
+  // The models loaded are offered again when the provider is edited.
+  await row.getByRole('button', { name: 'Edit Work OpenAI' }).click();
+  const editing = page.getByRole('dialog', { name: 'Edit provider' });
+  await expect(editing.getByText(/^9 models from api\.openai\.com, loaded /)).toBeVisible();
+  await editing.getByRole('combobox', { name: 'Model' }).click();
+  await expect(page.getByRole('option', { name: 'gpt-4.1-mini' })).toBeVisible();
+});
+
+test('AI providers: a Google Gemini one is added from its listed models, on Google\'s own server', async ({ page }) => {
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  await section.getByRole('button', { name: 'Add provider' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add provider' });
+  const note = dialog.locator('.dialog-note');
+  await dialog.getByRole('radio', { name: /Google Gemini/ }).check();
+  await expect(dialog.getByLabel('Name')).toHaveValue('Google Gemini');
+  // It has a server of its own, so no base URL is asked for; nor is there a default model.
+  await expect(dialog.getByText('Connects to generativelanguage.googleapis.com.')).toBeVisible();
+  const model = dialog.getByRole('combobox', { name: 'Model' });
+  await expect(model).toHaveAttribute('placeholder', 'e.g. gemini-3.5-flash…');
+
+  await dialog.getByLabel('API key').fill('AIza-smoke-test-0000Gm1n');
+  await dialog.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(dialog.getByText(/^7 models from generativelanguage\.googleapis\.com, loaded just now\.$/)).toBeVisible();
+  await expect(model).toBeFocused();
+  await expect(page.getByRole('option', { name: /embedding|^models\// })).toHaveCount(0);
+  await page.getByRole('option', { name: 'gemini-3.5-flash', exact: true }).click();
+  await expect(note).toHaveText('Test the connection to add it.');
+  await dialog.getByRole('button', { name: 'Test connection' }).click();
+  await expect(dialog.getByText('The connection works')).toBeVisible();
+  await expect(note).toHaveText('Tested. Ready to add.');
+  await dialog.getByRole('button', { name: 'Add provider' }).click();
+  await expect(dialog).toBeHidden();
+
+  const row = section.getByRole('listitem').filter({ hasText: 'Google Gemini' });
+  await expect(row).toContainText('gemini-3.5-flash');
+  await expect(row).toContainText('key ending in Gm1n');
+  await expect(row.getByText('ready', { exact: true })).toBeVisible();
+});
+
+test('AI providers: editing one offers its models without a test, and asks for a test only for a new server or key', async ({ page }) => {
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  const gateway = section.getByRole('listitem').filter({ hasText: 'Work gateway' });
+  const editing = page.getByRole('dialog', { name: 'Edit provider' });
+  const note = editing.locator('.dialog-note');
+  const model = editing.getByRole('combobox', { name: 'Model' });
+  const baseUrl = editing.getByLabel('Base URL');
+  const save = editing.getByRole('button', { name: 'Save provider' });
+  const testButton = editing.getByRole('button', { name: 'Test connection' });
+  const listed = editing.getByText(/^6 models from llm\.example\.org, loaded just now\.$/);
+
+  // Nothing remembered for its server: the list is loaded as the dialog opens, without a test, and another model saves as it is.
+  await gateway.getByRole('button', { name: 'Edit Work gateway' }).click();
+  await expect(listed).toBeVisible();
+  await editing.getByRole('button', { name: 'Show models' }).click();
+  await page.getByRole('option', { name: 'llama3.1:8b' }).click();
+  await expect(editing.getByText('The connection works')).toBeHidden();
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(gateway).toContainText('llama3.1:8b');
+
+  // Another server blanks the list and asks for a test; put back, its list is there again and it saves untested.
+  await gateway.getByRole('button', { name: 'Edit Work gateway' }).click();
+  await expect(listed).toBeVisible();
+  await baseUrl.fill('https://gpu.example.org/v1');
+  await expect(editing.getByText(/ models from /)).toHaveCount(0);
+  await expect(note).toHaveText('Test the connection to save it.');
+  await baseUrl.fill('https://llm.example.org/v1/');
+  await expect(listed).toBeVisible();
+  await expect(note).toHaveText('');
+  await save.click();
+  await expect(editing).toBeHidden();
+
+  // A new key is saved once a test of it has passed.
+  await gateway.getByRole('button', { name: 'Edit Work gateway' }).click();
+  await editing.getByLabel('API key').fill('sk-gateway-new-0000Wq3e');
+  await expect(note).toHaveText('Test the connection to save it.');
+  await expect(save).toBeDisabled();
+  await testButton.click();
+  await expect(note).toHaveText('Tested. Save to keep it.');
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(gateway).toContainText('key ending in Wq3e');
+
+  // A server that does not list its models says so; a name typed by hand is tested and saved.
+  await gateway.getByRole('button', { name: 'Edit Work gateway' }).click();
+  await baseUrl.fill('http://no-models.lan:8000/v1');
+  await editing.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(editing.getByText('The models could not be loaded: no-models.lan:8000 does not list its models (404 Not Found for /models).')).toBeVisible();
+  await model.fill('my-finetune');
+  await expect(save).toBeDisabled();
+  await testButton.click();
+  await expect(editing.getByText('The connection works')).toBeVisible();
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(gateway).toContainText('my-finetune');
+
+  // A remembered list shows straight away, and Refresh models replaces it.
+  await page.evaluate(() => {
+    const at = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    localStorage.setItem('codeatrophy:ai-models', JSON.stringify({ 'openai_compatible http://localhost:11434/v1': { models: ['stale-model'], at } }));
+  });
+  await section.getByRole('button', { name: 'Edit Local Ollama' }).click();
+  await expect(editing.getByText('1 model from localhost:11434, loaded 3 days ago.')).toBeVisible();
+  await editing.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(editing.getByText(/^6 models from localhost:11434, loaded just now\.$/)).toBeVisible();
+  await editing.getByRole('button', { name: 'Show models' }).click();
+  await expect(page.getByRole('option', { name: 'qwen2.5-coder:14b' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'stale-model' })).toHaveCount(0);
 });
 
 test('AI providers: the request timeout is saved when committed, and a value out of range is not sent', async ({ page }) => {

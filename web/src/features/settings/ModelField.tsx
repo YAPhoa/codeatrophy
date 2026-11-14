@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import { Check, ChevronsUpDown } from 'lucide-react';
-import { cx } from '../../ui/Button';
+import { Check, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { IconButton, cx } from '../../ui/Button';
 import { Field } from '../../ui/Field';
 import { Popover } from '../../ui/Popover';
 import { matchModels } from './aiProviders';
@@ -8,29 +8,41 @@ import { matchModels } from './aiProviders';
 interface ModelFieldProps {
   value: string;
   onChange: (model: string) => void;
-  /** The model ids the service offers, once a connection test has fetched them; `null` until then, and when it lists none. */
+  /** The model ids the service offers, loaded now or remembered from earlier; `null` when none are known. */
   models: readonly string[] | null;
+  /** The list is being loaded. */
+  loading: boolean;
+  /** Load the list: from the refresh button, or from the field when it is opened with no models known. */
+  onLoad: (from: 'button' | 'field') => void;
+  /** Whether focusing the field with no models known loads them too. Opening the list from the toggle or the keyboard always does. */
+  loadOnFocus: boolean;
+  /** No load can start now; the refresh button is disabled. */
+  refreshDisabled?: boolean;
   placeholder?: string;
   hint?: ReactNode;
   error?: string | null;
   maxLength?: number;
   inputRef?: Ref<HTMLInputElement>;
+  refreshRef?: Ref<HTMLButtonElement>;
 }
 
 /**
- * The model of a provider: a text field that, once the service's models are
- * known, also offers them to pick from. A name typed by hand always stands,
- * because some servers do not list their models.
+ * The model of a provider: a text field with the service's models to pick
+ * from, and a button that loads them again. A name typed by hand always
+ * stands, because some servers do not list their models.
  */
-export function ModelField({ value, onChange, models, placeholder, hint, error, maxLength, inputRef }: ModelFieldProps) {
+export function ModelField({ value, onChange, models, loading, onLoad, loadOnFocus, refreshDisabled, placeholder, hint, error, maxLength, inputRef, refreshRef }: ModelFieldProps) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [navigated, setNavigated] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
+  const known = models !== null && models.length > 0;
   const matches = useMemo(() => (models ? matchModels(models, value) : []), [models, value]);
-  const showList = open && matches.length > 0;
+  // With nothing to offer yet, a load in progress says so in the list.
+  const waiting = !known && loading;
+  const showList = open && (matches.length > 0 || waiting);
 
   useEffect(() => {
     if (showList && navigated) document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
@@ -40,6 +52,12 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
     setOpen(true);
     setActive(0);
     setNavigated(false);
+  };
+
+  /** Open the list; with no models known, fetch them when asked for, or on focus when that is wanted. */
+  const showOrLoad = (asked: boolean) => {
+    show();
+    if (!known && !loading && !refreshDisabled && (asked || loadOnFocus)) onLoad('field');
   };
 
   const pick = (model: string) => {
@@ -53,6 +71,9 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
       setOpen(true);
       setActive((i) => (showList && navigated ? Math.min(matches.length - 1, i + 1) : 0));
       setNavigated(true);
+    } else if (e.key === 'ArrowDown' && !known) {
+      e.preventDefault();
+      showOrLoad(true);
     } else if (e.key === 'ArrowUp' && showList) {
       e.preventDefault();
       setActive((i) => Math.max(0, i - 1));
@@ -72,35 +93,35 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
   };
 
   return (
-    <Field label="Model" hint={hint} error={error}>
+    <Field label="Model" hint={hint} error={error} inlineError reserve>
       {(a) => (
-        <div ref={wrapRef} className="combo">
-          <input
-            {...a}
-            ref={inputRef}
-            className="input"
-            value={value}
-            placeholder={placeholder}
-            maxLength={maxLength}
-            role="combobox"
-            aria-expanded={showList}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            aria-activedescendant={showList && navigated ? `${listId}-${active}` : undefined}
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            onChange={(e) => {
-              onChange(e.target.value);
-              show();
-            }}
-            onFocus={show}
-            onMouseDown={show}
-            onBlur={() => setOpen(false)}
-            onKeyDown={onKeyDown}
-          />
-          {models !== null && models.length > 0 && (
-            // Out of the tab order: the input itself opens the list from the keyboard.
+        <div className="row row-tight">
+          <div ref={wrapRef} className="combo grow">
+            <input
+              {...a}
+              ref={inputRef}
+              className="input"
+              value={value}
+              placeholder={placeholder}
+              maxLength={maxLength}
+              role="combobox"
+              aria-expanded={showList}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={showList && navigated && !waiting ? `${listId}-${active}` : undefined}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              onChange={(e) => {
+                onChange(e.target.value);
+                show();
+              }}
+              onFocus={() => showOrLoad(false)}
+              onMouseDown={() => showOrLoad(false)}
+              onBlur={() => setOpen(false)}
+              onKeyDown={onKeyDown}
+            />
+            {/* Out of the tab order: the input itself opens the list from the keyboard. */}
             <button
               type="button"
               className="combo-toggle"
@@ -112,34 +133,45 @@ export function ModelField({ value, onChange, models, placeholder, hint, error, 
                 e.preventDefault();
                 wrapRef.current?.querySelector('input')?.focus();
                 if (showList) setOpen(false);
-                else show();
+                else showOrLoad(true);
               }}
             >
               <ChevronsUpDown size={14} aria-hidden="true" />
             </button>
-          )}
-          <Popover anchorRef={wrapRef} open={showList} onClose={() => setOpen(false)} matchWidth noAutoFocus className="menu combo-menu">
-            <ul id={listId} role="listbox" aria-label="Models">
-              {matches.map((m, i) => (
-                <li
-                  key={m}
-                  id={`${listId}-${i}`}
-                  role="option"
-                  aria-selected={m === value.trim()}
-                  className={cx('menu-item', navigated && i === active && 'is-active')}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(m);
-                  }}
-                >
-                  <span className="menu-item-icon" aria-hidden="true">
-                    {m === value.trim() && <Check size={14} />}
-                  </span>
-                  <span className="grow mono">{m}</span>
-                </li>
-              ))}
-            </ul>
-          </Popover>
+            <Popover anchorRef={wrapRef} open={showList} onClose={() => setOpen(false)} matchWidth noAutoFocus className="menu combo-menu">
+              <ul id={listId} role="listbox" aria-label="Models" aria-busy={waiting || undefined}>
+                {waiting ? (
+                  <li role="option" aria-selected={false} aria-disabled="true" className="menu-item" onMouseDown={(e) => e.preventDefault()}>
+                    <span className="grow">Loading models…</span>
+                    <span className="menu-item-icon" aria-hidden="true">
+                      <span className="spinner" />
+                    </span>
+                  </li>
+                ) : (
+                  matches.map((m, i) => (
+                    <li
+                      key={m}
+                      id={`${listId}-${i}`}
+                      role="option"
+                      aria-selected={m === value.trim()}
+                      className={cx('menu-item', navigated && i === active && 'is-active')}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pick(m);
+                      }}
+                    >
+                      {/* The name starts where the text of the field does; the mark of the chosen one goes after it. */}
+                      <span className="grow mono">{m}</span>
+                      <span className="menu-item-icon" aria-hidden="true">
+                        {m === value.trim() && <Check size={14} />}
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </Popover>
+          </div>
+          <IconButton ref={refreshRef} label="Refresh models" icon={<RefreshCw size={14} />} busy={loading} disabled={refreshDisabled} onClick={() => onLoad('button')} />
         </div>
       )}
     </Field>

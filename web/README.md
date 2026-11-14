@@ -106,10 +106,13 @@ its input or expected output contains `MOCK:WA` and as `failed` when it
 contains `MOCK:RE`; `MOCK:CE` in the reference solution fails every case, and
 `MOCK:TIMEOUT` there leaves the second half `not_run`. Every generation adds to
 the usage counts of the default provider. In Settings, an API key containing `bad` or a base URL
-containing `unreachable` makes the connection test of a provider fail, and a
-base URL containing `no-models` stands for a server that does not list its
-models (the test of a model typed by hand still succeeds). A model the
-pretend service does not list fails the test as unknown.
+containing `unreachable` makes the model list and the connection test of a
+provider fail, and a base URL containing `no-models` stands for a server that
+does not list its models (the test of a model typed by hand still succeeds).
+A model the pretend service does not list fails the test as unknown. The
+pretend Gemini service lists only text models, by bare id
+(`gemini-3.5-flash`), as the server passes them on. Listing the models is not
+logged or counted in a provider's usage.
 
 The running mock is exposed as `window.__codeatrophyMock`. To exercise the
 "changed elsewhere" flow, open an item's edit page, run
@@ -130,7 +133,8 @@ runner rows and folded regions of the solve editor;
 keeping an accepted submission as a solution and making it the reference;
 preferences taking effect; the large test case, from its preference to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
-(key → connection test → model → save → default); the AI request timeout; choosing the model a draft, revision or test-case generation uses; and filing selected items
+(key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
+editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; and filing selected items
 into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a
@@ -233,7 +237,11 @@ A few conventions worth knowing:
   guards this; do not add `rehype-raw`.
 - **Work in progress is kept locally.** Solution code is stored per item and
   language in `localStorage`; capture input and drafts under review survive a
-  reload the same way.
+  reload the same way. The model names loaded for a provider, by Refresh models
+  or a connection test, are remembered there too, per kind and base URL
+  (`features/settings/modelCache.ts`): the Model field of the provider form
+  offers the list remembered for the server in the form, and a saved provider
+  with none loads its list as the form opens. A key is never stored.
 - **Colours are tokens.** Use the custom properties in
   `src/styles/tokens.css` so both themes stay correct, and check contrast in
   light and dark when adding one.
