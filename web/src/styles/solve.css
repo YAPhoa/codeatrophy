@@ -8,7 +8,7 @@
   flex: none;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 34px;
   padding: 11px 0;
   border: 0;
@@ -44,7 +44,7 @@
 .drawer-bar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
   min-width: 0;
   padding: 0 11px;
   border: 0;
@@ -83,7 +83,7 @@
 }
 
 .drawer > .pane-body {
-  padding: 12px 16px 20px;
+  padding: var(--space-3) var(--space-4) var(--space-5);
 }
 
 .editor-save {
@@ -95,7 +95,7 @@
 .tcases {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
   max-width: 980px;
 }
 
@@ -103,7 +103,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
 }
 
 .tcases-summary {
@@ -119,7 +119,7 @@
 .tcase-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -128,8 +128,8 @@
 .tcase {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -137,8 +137,8 @@
 .tcase.is-concealed {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 3px 4px 3px 10px;
+  gap: var(--space-2);
+  padding: 3px var(--space-1) 3px var(--space-3);
   border-style: dashed;
   color: var(--text-2);
 }
@@ -146,7 +146,7 @@
 .tcase-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
   margin: -3px -6px -3px 0;
 }
@@ -169,8 +169,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 8px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-3);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   color: var(--text-2);
@@ -215,7 +215,7 @@ a.result-saved:hover {
 .history-entry {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-0-5);
 }
 
 .history-entry > .history-row {

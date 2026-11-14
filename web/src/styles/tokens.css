@@ -18,8 +18,9 @@
   /* Static code; the code editor itself is 14px by default. */
   --text-code: 13px;
 
-  /* Spacing, on a 4px grid. --space-0-5 and --space-1-5 are only for the gap
-     between an icon and its label inside a control. */
+  /* Spacing, on a 4px grid. The half steps --space-0-5 and --space-1-5 are
+     for tight spots inside controls, such as the gap between an icon and its
+     label; layout between blocks uses the whole steps. */
   --space-0-5: 2px;
   --space-1: 4px;
   --space-1-5: 6px;

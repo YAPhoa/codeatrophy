@@ -54,14 +54,14 @@
 .prefs-preview {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   margin: 0;
   min-width: 0;
 }
 
 .prefs-preview-code {
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
