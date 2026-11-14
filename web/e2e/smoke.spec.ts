@@ -216,7 +216,7 @@ test('solve: the editor has the room, and a failing submission shows which case 
   // Submitting opens the drawer on the result.
   const result = page.getByRole('status').filter({ hasText: /passed/ });
   await expect(result).toContainText('Wrong answer');
-  await expect(result).toContainText(/Ran \d+ test cases — \d+ passed/);
+  await expect(result).toContainText(/Ran \d+ test cases: \d+ passed/);
 
   // A failing sample case is opened with expected and actual output side by side.
   await expect(page.getByRole('button', { name: /^Case \d+, .*: Wrong answer$/ }).first()).toBeVisible();
@@ -870,7 +870,7 @@ test('variants: a problem lists them in a tab of their own, with the offer of an
   await expect(page).toHaveURL(/[?&]tab=variants/);
   const panel = page.getByRole('tabpanel');
   await expect(panel.getByRole('link', { name: 'Two Sum in a Sorted Ledger' })).toBeVisible();
-  await expect(panel.getByRole('heading', { name: 'Want another one like it?' })).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Practise a variant' })).toBeVisible();
 
   // A direction leads to the variant page with that choice made.
   await panel.getByRole('link', { name: /^Harder/ }).click();

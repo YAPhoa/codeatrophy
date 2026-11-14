@@ -265,7 +265,7 @@ function VariantFlow({ original }: { original: Item }) {
           </>
         ) : (
           <>
-            Draft a new reading derived from <strong>{original.title}</strong> — the same material from a different angle. Say what you want below.
+            Draft a new reading that covers the material in <strong>{original.title}</strong> from a different angle. Say what you want below.
           </>
         )}
       </p>

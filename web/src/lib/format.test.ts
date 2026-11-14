@@ -45,10 +45,10 @@ describe('describeCases', () => {
 
 describe('describeRun', () => {
   it('counts what ran and what passed', () => {
-    expect(describeRun('submit', 7, 5)).toBe('Ran 7 test cases — 5 passed');
-    expect(describeRun('submit', 7, 7)).toBe('Ran 7 test cases — all passed');
-    expect(describeRun('submit', 1, 1)).toBe('Ran 1 test case — 1 passed');
-    expect(describeRun('run', 2, 0)).toBe('Ran 2 sample cases — 0 passed');
+    expect(describeRun('submit', 7, 5)).toBe('Ran 7 test cases: 5 passed');
+    expect(describeRun('submit', 7, 7)).toBe('Ran 7 test cases: all passed');
+    expect(describeRun('submit', 1, 1)).toBe('Ran 1 test case: 1 passed');
+    expect(describeRun('run', 2, 0)).toBe('Ran 2 sample cases: 0 passed');
   });
 });
 

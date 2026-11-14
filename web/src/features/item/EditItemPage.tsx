@@ -255,7 +255,7 @@ function EditForm({ initial }: { initial: Item }) {
         >
           <div className="conflict">
             <p className="dialog-text">
-              While you were editing, this item was changed — in another tab, or by an assistant connected over MCP. It is now at revision {conflict.latest.revision}; you started from revision{' '}
+              While you were editing, this item was changed in another tab or by an assistant connected over MCP. It is now at revision {conflict.latest.revision}; you started from revision{' '}
               {base.revision}. <strong>Nothing has been overwritten and your edits are still here.</strong>
             </p>
 

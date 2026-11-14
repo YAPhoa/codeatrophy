@@ -264,7 +264,7 @@ function Generator({ item }: { item: Item }) {
           <p className="page-sub">
             The AI writes a reference solution and proposes inputs that probe the edges of the problem.{' '}
             {judgeOn
-              ? 'The solution is then run on every input, so the expected outputs are real results rather than the model’s arithmetic.'
+              ? 'The solution is then run on every input, and what it prints becomes the expected output.'
               : 'No judge engine is available, so expected outputs will be the model’s own predictions and are kept as unverified.'}{' '}
             You review everything before it is saved.
           </p>
@@ -379,7 +379,7 @@ function Generator({ item }: { item: Item }) {
 
               {mismatches > 0 && (
                 <Callout tone="warn" role="alert" title={`The model’s predicted output disagreed with the actual output in ${plural(mismatches, 'case')}`}>
-                  The expected output shown is the real one. A disagreement often just means the model miscalculated — but it can also mean the reference solution or the statement is wrong. Look at the
+                  The expected output shown is the real one. Usually the model miscalculated, but the reference solution or the statement may be wrong. Look at the
                   marked {mismatches === 1 ? 'case' : 'cases'} and the solution before saving.
                 </Callout>
               )}
@@ -523,7 +523,7 @@ function Generator({ item }: { item: Item }) {
                     </>
                   }
                 >
-                  Another tab, or an assistant connected over MCP, edited it — possibly its statement or its reference solution — after this proposal was generated. Nothing was saved. Saving anyway
+                  Another tab or an assistant connected over MCP edited this problem after this proposal was generated, possibly its statement or reference solution. Nothing was saved. Saving anyway
                   stores the selected cases{keepSolution ? ' and makes the solution above the problem’s reference solution' : ''}.
                 </Callout>
               )}
@@ -539,7 +539,7 @@ function Generator({ item }: { item: Item }) {
                     <label className="check">
                       <input type="radio" name="replace" checked={replace} onChange={() => setReplace(true)} />
                       <span>
-                        Replace them <span className="muted">— the existing {plural(existingCount, 'case')} {existingCount === 1 ? 'is' : 'are'} deleted</span>
+                        Replace them <span className="muted">(the existing {plural(existingCount, 'case')} {existingCount === 1 ? 'is' : 'are'} deleted)</span>
                       </span>
                     </label>
                   </fieldset>

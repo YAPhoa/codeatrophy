@@ -273,7 +273,7 @@ export default function CapturePage() {
       <Steps current={0} labels={STEPS} />
       <h1 className="page-title">Capture</h1>
       <p className="page-sub">
-        Paste or type whatever you have — a chunk of a problem statement, a few lines from memory, an article.
+        Paste or type what you have: part of a problem statement, a few lines from memory, or an article.
         {aiEnabled ? ' The AI turns it into a complete entry and tells you what it had to assume. Nothing is saved until you have reviewed it.' : ''}
       </p>
 
@@ -343,7 +343,7 @@ export default function CapturePage() {
           {/* An alert only while something is wrong, so the running count is not read out on every keystroke. */}
           <span id="capture-count" className={tooLong || needsText ? 'field-error' : 'muted capture-count'} role={tooLong || needsText ? 'alert' : undefined}>
             {tooLong
-              ? `${textLength.toLocaleString()} / ${maxText.toLocaleString()} characters — too long to draft from`
+              ? `${textLength.toLocaleString()} / ${maxText.toLocaleString()} characters, too long to draft from`
               : needsText
                 ? 'Type or paste something to draft from.'
                 : textLength > 0

@@ -81,7 +81,7 @@ export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: Bu
       className={cx('fav-btn', item.favorite && 'is-fav')}
       aria-pressed={item.favorite}
       aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
-      title={item.favorite ? 'Favorite — click to remove' : 'Add to favorites'}
+      title={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
       icon={<Star size={16} fill={item.favorite ? 'currentColor' : 'none'} />}
       onClick={(e) => {
         e.stopPropagation();
@@ -168,7 +168,7 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
         )}
         {nodes.length === 0 ? (
           <p className="muted picklist-empty">
-            No collections yet. Collections are ordered lists — a study plan, a topic.
+            No collections yet. Collections are ordered lists, such as a study plan or a topic.
           </p>
         ) : (
           <div className="picklist">

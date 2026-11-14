@@ -115,8 +115,8 @@ export function AssumptionsPanel({ assumptions, kind, style, showStyle, usage }:
       <p className="assumptions-lead">
         {kind === 'draft'
           ? assumptions.length === 0
-            ? 'It says everything below came from your input. It is still a draft — read it before saving.'
-            : 'None of the following was in what you wrote — the model inferred or invented it. Check each against what you remember and fix the draft where it guessed wrong.'
+            ? 'It says everything below came from your input. Read the draft before saving it.'
+            : 'The model inferred or invented each of these; none of it was in what you wrote. Check each against what you remember and fix the draft where it guessed wrong.'
           : 'The model changed these things relative to the original problem. Everything is editable below.'}
       </p>
       {assumptions.length > 0 && (

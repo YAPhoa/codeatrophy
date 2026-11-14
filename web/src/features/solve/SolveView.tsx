@@ -593,8 +593,7 @@ export function SolveView({ item }: { item: Item }) {
       <div>
         <h2>Running code is not available here</h2>
         <p>
-          This server has no judge engine configured, so code cannot be run or submitted. Everything else works: read the problem, keep notes, and draft a solution — the editor keeps it in this
-          browser.
+          This server has no judge engine configured, so code cannot be run or submitted. You can still read the problem, keep notes and write a solution; the editor saves your code in this browser.
         </p>
         <Link to="/settings/judge">Judge status</Link>
       </div>
@@ -647,7 +646,7 @@ export function SolveView({ item }: { item: Item }) {
       <div className="pane-tabs">
         <Tabs idBase="drawer" label="Tests and results" value={drawerTab} onChange={setDrawerTab} tabs={drawerTabs} />
         <span className="spacer" />
-        {judgeOn && !judge?.healthy && <span className="judge-warn truncate">The judge engine is not responding — runs may fail</span>}
+        {judgeOn && !judge?.healthy && <span className="judge-warn truncate">The judge engine is not responding, so runs may fail</span>}
         <IconButton
           id={FOCUS.drawerPane}
           size="sm"

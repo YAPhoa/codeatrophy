@@ -340,7 +340,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         </div>
         {tree.length === 0 ? (
           <p className="nav-empty">
-            Group items into ordered lists — a study plan, a topic.{' '}
+            Group items into ordered lists, such as a study plan or a topic.{' '}
             <button type="button" className="link-btn" onClick={() => actions.create(null)}>
               Create one
             </button>

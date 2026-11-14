@@ -80,18 +80,18 @@ export default function SavedPage() {
 
       {isProblem && (
         <>
-          <h2 className="saved-next">Next, if you like</h2>
+          <h2 className="saved-next">Next steps</h2>
           <div className="next-cards">
             <section className="next-card" aria-labelledby="next-tests">
               <div className="next-card-icon" aria-hidden="true">
                 <FlaskConical size={18} />
               </div>
-              <h3 id="next-tests">Give it a real test suite</h3>
+              <h3 id="next-tests">Add hidden test cases</h3>
               {aiEnabled ? (
                 <p>
-                  The AI writes a reference solution and proposes edge cases — smallest inputs, limits, tricky shapes.{' '}
+                  The AI writes a reference solution and proposes edge cases, such as the smallest inputs and inputs at the limits.{' '}
                   {judge?.enabled
-                    ? 'Each expected output comes from actually running the solution, and you choose which cases to keep.'
+                    ? 'Each expected output comes from running the solution, and you choose which cases to keep.'
                     : 'Without a judge engine the expected outputs are the model’s predictions, so they are kept as unverified.'}
                 </p>
               ) : (

@@ -46,7 +46,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
     // A collection cannot be moved under itself or one of its descendants.
     const blocked = new Set(editing ? [editing.id, ...descendantIds(tree, editing.id)] : []);
     return [
-      { value: ROOT, label: '— Top level —' },
+      { value: ROOT, label: 'Top level' },
       ...flattenTree(tree)
         .filter((n) => !blocked.has(n.collection.id))
         .map((n) => ({ value: n.collection.id, label: `${' '.repeat(n.depth)}${n.collection.name}` })),

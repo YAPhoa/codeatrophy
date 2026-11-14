@@ -15,10 +15,10 @@ export function VariantCard({ item, aiEnabled, heading: Heading = 'h3' }: { item
       <div className="next-card-icon" aria-hidden="true">
         <GitBranch size={18} />
       </div>
-      <Heading id="next-variant">Want another one like it?</Heading>
+      <Heading id="next-variant">Practise a variant</Heading>
       {aiEnabled ? (
         <>
-          <p>Get a fresh problem built on the same idea, so you practise the technique rather than remember this answer. Pick a direction:</p>
+          <p>Draft a new problem that uses the same technique. Pick a direction:</p>
           <div className="variant-quick">
             {VARIANT_MODES.map((m) => (
               <Link key={m.mode} to={`/items/${item.id}/variant?mode=${m.mode}`} className="variant-quick-item">
@@ -30,7 +30,7 @@ export function VariantCard({ item, aiEnabled, heading: Heading = 'h3' }: { item
         </>
       ) : (
         <>
-          <p>A variant is a related problem — the same technique in a new setting, easier, harder, or with a twist — saved alongside this one. With AI set up, one is drafted for you.</p>
+          <p>A variant is a related problem saved alongside this one: the same technique in a new setting, or an easier, harder or twisted version. With AI set up, one is drafted for you.</p>
           <div className="next-card-actions">
             <LinkButton to={`/items/${item.id}/variant`}>Write a variant by hand</LinkButton>
             <Link to="/settings/ai">Set up AI</Link>

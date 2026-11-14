@@ -80,7 +80,7 @@ export function StylesSection() {
               : null;
   const textError =
     textLen > bounds.instructionsMax
-      ? `${(textLen - bounds.instructionsMax).toLocaleString()} over the limit. Shorten it — nothing is cut off automatically.`
+      ? `${(textLen - bounds.instructionsMax).toLocaleString()} over the limit. Shorten it; nothing is cut off automatically.`
       : editing && CONTROL.test(editing.instructions.replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
         ? 'Contains a control character that cannot be saved (often pasted from a terminal or PDF).'
         : attempted && textLen === 0

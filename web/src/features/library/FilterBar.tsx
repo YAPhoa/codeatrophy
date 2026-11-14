@@ -238,7 +238,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
       {sort !== 'position' && sort !== 'relevance' && (
         <IconButton
           size="sm"
-          label={order === 'asc' ? 'Ascending — switch to descending' : 'Descending — switch to ascending'}
+          label={order === 'asc' ? 'Ascending, switch to descending' : 'Descending, switch to ascending'}
           icon={order === 'asc' ? <ArrowDownAZ size={16} /> : <ArrowUpAZ size={16} />}
           onClick={() => onChange({ ...filters, sort, order: order === 'asc' ? 'desc' : 'asc' })}
         />

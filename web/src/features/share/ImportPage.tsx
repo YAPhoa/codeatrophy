@@ -186,10 +186,10 @@ export default function ImportPage() {
 
           {tooLarge && (
             <Callout tone="danger" role="alert" title="This file is too large">
-              It is {formatBytes(file.size)}; this server accepts bundles up to {formatBytes(maxBytes)}. Export a smaller part of the source library — one collection at a time, say.
+              It is {formatBytes(file.size)}; this server accepts bundles up to {formatBytes(maxBytes)}. Export a smaller part of the source library, such as one collection at a time.
             </Callout>
           )}
-          {error != null && <ErrorCallout error={error} title={preview ? 'The import failed — nothing was changed' : 'This file could not be read as a bundle'} onRetry={preview ? () => void run() : undefined} />}
+          {error != null && <ErrorCallout error={error} title={preview ? 'The import failed. Nothing was changed.' : 'This file could not be read as a bundle'} onRetry={preview ? () => void run() : undefined} />}
 
           {preview && counts && (
             <>

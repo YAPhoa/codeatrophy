@@ -14,13 +14,13 @@ export const VARIANT_MODES: readonly VariantModeInfo[] = [
     mode: 'similar',
     label: 'Similar',
     short: 'Same idea, new setting',
-    description: 'The same technique at the same difficulty, in a different story with different data. Checks that you learned the idea rather than the answer.',
+    description: 'The same technique at the same difficulty, with a different story and different data.',
   },
   {
     mode: 'easier',
     label: 'Easier',
     short: 'A gentler warm-up',
-    description: 'A simplified version — smaller limits or a relaxed requirement. A stepping stone if the original felt out of reach.',
+    description: 'A simpler version with smaller limits or a relaxed requirement, for when the original is too hard.',
   },
   {
     mode: 'harder',

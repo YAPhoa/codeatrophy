@@ -292,7 +292,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
                   className={cx('case-chip', `tone-${verdictTone(r.verdict)}`, selected === i && 'is-selected')}
                   aria-pressed={selected === i}
                   aria-label={`Case ${i + 1}${name ? `, ${name}` : ''}: ${VERDICT_LABEL[r.verdict]}`}
-                  title={`${name || `Case ${i + 1}`} — ${VERDICT_LABEL[r.verdict]}`}
+                  title={`${name || `Case ${i + 1}`}: ${VERDICT_LABEL[r.verdict]}`}
                   onClick={() => setPicked(i)}
                 >
                   <CaseIcon verdict={r.verdict} />

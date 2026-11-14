@@ -170,7 +170,7 @@ function SolutionsManager({ item }: { item: Item }) {
             {solutionsQuery.isSuccess && (
               <span className="muted">
                 {solutions.length === 0 ? 'none saved' : `${solutions.length} saved`}
-                {atLimit && ' — the most a problem can have'}
+                {atLimit && ' · limit reached'}
                 {solutions.length > 0 && !reference && ' · no reference solution'}
               </span>
             )}
@@ -210,7 +210,7 @@ function SolutionsManager({ item }: { item: Item }) {
                     }
                   >
                     <p>
-                      Keep the solutions worth coming back to: different approaches, the same idea in another language, a brute force next to the intended one — each with your notes. You can also
+                      Keep the solutions worth coming back to, each with your notes: different approaches, the same idea in another language, or a brute force next to the intended one. You can also
                       save the code you are working on from the Solve page.
                     </p>
                     <p>One solution can be marked as the reference. The reference solution is run on the test cases to verify their expected outputs, or to compute them.</p>

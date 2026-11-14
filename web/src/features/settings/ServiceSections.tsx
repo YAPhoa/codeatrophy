@@ -78,7 +78,7 @@ export function McpSection({ meta }: { meta: Meta }) {
         {mcp.enabled && (mcp.authRequired ? <Badge tone="accent">Token required</Badge> : <Badge>No token</Badge>)}
       </div>
       <p className="settings-lead">
-        The Model Context Protocol endpoint lets an AI assistant browse, write and edit this library on your behalf — “add this problem to my DP collection and write tests for it”. The assistant you
+        The Model Context Protocol endpoint lets an AI assistant browse, write and edit this library on your behalf, for example “add this problem to my DP collection and write tests for it”. The assistant you
         connect is the model; it does not use the <Link to="/settings/ai">AI providers</Link> set up here.
       </p>
       {!mcp.enabled ? (
@@ -92,7 +92,7 @@ export function McpSection({ meta }: { meta: Meta }) {
           <CopyRow label="Clients that only speak stdio" value={conn.stdioCommand} />
           {!mcp.url && (
             <p className="field-hint">
-              The address above is taken from this page. If assistants reach the server under a different address — through a reverse proxy, say — set <code translate="no">CODEATROPHY_PUBLIC_URL</code> on the
+              The address above is taken from this page. If assistants reach the server under a different address (through a reverse proxy, for example), set <code translate="no">CODEATROPHY_PUBLIC_URL</code> on the
               server and it will be shown here instead.
             </p>
           )}

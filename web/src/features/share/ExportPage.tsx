@@ -98,7 +98,7 @@ export default function ExportPage() {
       <ShareTabs active="export" />
       <h1 className="page-title">Export a bundle</h1>
       <p className="page-sub">
-        A bundle is a zip of plain Markdown, JSON and source files — readable, diffable, and importable into any Codeatrophy instance. It carries content only:{' '}
+        A bundle is a zip of plain Markdown, JSON and source files that any Codeatrophy instance can import. It carries content only:{' '}
         <strong>your status, favorites, notes and submissions are never included</strong>.
       </p>
 
@@ -132,7 +132,7 @@ export default function ExportPage() {
             <span>
               <strong>Selected items</strong>
               <span className="choice-text">
-                {passedIds.length > 0 ? `${plural(passedIds.length, 'item')} you selected — no collections` : 'Select items in the library, then choose “Export” in the selection bar'}
+                {passedIds.length > 0 ? `${plural(passedIds.length, 'item')} you selected (no collections)` : 'Select items in the library, then choose “Export” in the selection bar'}
               </span>
             </span>
           </label>

@@ -191,7 +191,7 @@ export function describeCases(total: number, samples: number, hiding: boolean): 
 
 /** "Ran 7 test cases — 5 passed": what a finished run or submission covered. */
 export function describeRun(mode: 'run' | 'submit', total: number, passed: number): string {
-  return `Ran ${plural(total, mode === 'submit' ? 'test case' : 'sample case')} — ${passed === total && total > 1 ? 'all' : passed} passed`;
+  return `Ran ${plural(total, mode === 'submit' ? 'test case' : 'sample case')}: ${passed === total && total > 1 ? 'all' : passed} passed`;
 }
 
 /** Rough reading time for Markdown text, in minutes (at least 1). */

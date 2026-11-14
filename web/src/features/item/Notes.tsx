@@ -92,7 +92,7 @@ export function Notes({ item }: { item: Item }) {
             </>
           )}
           {state === 'dirty' && 'Unsaved'}
-          {state === 'error' && <span className="field-error">Not saved — {error}</span>}
+          {state === 'error' && <span className="field-error">Not saved: {error}</span>}
         </span>
         <Segmented
           size="sm"

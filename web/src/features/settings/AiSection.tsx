@@ -119,8 +119,8 @@ export function AiSection({ meta }: { meta: Meta }) {
         </Button>
       </div>
       <p className="settings-lead">
-        Used to draft items from rough input, generate test cases and create variants. You can keep several providers — a hosted service and a server of your own, say — and the default is the
-        one that gets used. Without one everything else works, and items are written by hand. Assistants connected over MCP bring their own model and do not use this.
+        Used to draft items from rough input, generate test cases and create variants. You can keep several providers, such as a hosted service and a server of your own. The
+        default one is used. Without one everything else works, and items are written by hand. Assistants connected over MCP bring their own model and do not use this.
       </p>
 
       {data && full && (

@@ -462,7 +462,7 @@ export function LibraryPage() {
                   />
                 </span>
                 <span className="item-head-label">
-                  {reorderable ? 'Manual order — drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
+                  {reorderable ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
                 </span>
                 {query.isFetching && <Spinner size={14} label="Refreshing…" />}
               </div>

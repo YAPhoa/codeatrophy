@@ -51,7 +51,7 @@ export function WriteProblems({
           </>
         }
       >
-        Another tab, or an assistant connected over MCP, edited it — possibly its statement or its reference solution — while this was open. Nothing was saved, and the page now shows the current
+        Another tab or an assistant connected over MCP edited this problem while it was open, possibly its statement or reference solution. Nothing was saved, and the page now shows the current
         version. {consequence ?? 'Saving anyway applies your change on top of it.'}
       </Callout>
     );
