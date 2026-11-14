@@ -937,6 +937,11 @@
   margin-bottom: 2px;
 }
 
+/* The Edit page puts the bar straight in .page, with no gap from a parent. */
+.page > .review-bar {
+  margin-bottom: var(--space-5);
+}
+
 .review-bar .steps {
   margin-bottom: 4px;
 }
@@ -2723,12 +2728,12 @@ button.case-chip:hover {
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  scroll-margin-top: 16px;
+  gap: var(--space-4);
+  scroll-margin-top: var(--space-4);
 }
 
 .settings-section > .row {
-  min-height: 30px;
+  min-height: var(--control-h);
 }
 
 .settings-lead {
@@ -2790,15 +2795,15 @@ button.case-chip:hover {
 .provider-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .style-item,
 .provider-item {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 10px 10px 10px 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
 }
 
 .style-text {
