@@ -51,6 +51,29 @@ func TestGenerateWithJSONSchema(t *testing.T) {
 	}
 }
 
+func TestErrorsCarryTheServiceMessage(t *testing.T) {
+	body := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{Model: "m", BaseURL: srv.URL, APIKey: "k"})
+	for _, c := range []struct{ body, want string }{
+		{`{"error":{"message":"The model is overloaded."}}`, "the provider returned HTTP 503: The model is overloaded."},
+		// The same object inside an array, as some services send it.
+		{`[{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}]`, "the provider returned HTTP 503: The model is overloaded."},
+		{`[]`, "the provider returned HTTP 503"},
+		{`upstream connect error`, "the provider returned HTTP 503"},
+	} {
+		body = c.body
+		_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: got %v, want %q", c.body, err, c.want)
+		}
+	}
+}
+
 func TestFallsBackToJSONMode(t *testing.T) {
 	var formats []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

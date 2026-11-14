@@ -75,6 +75,25 @@ type chatRequest struct {
 	MaxTokens      int            `json:"max_tokens,omitempty"`
 }
 
+// errorDetail returns the service's own message from an error response,
+// or "" when there is none. Some services (Google's endpoint among them)
+// send the usual error object inside an array.
+func errorDetail(data []byte) string {
+	var e chatResponse
+	if json.Unmarshal(data, &e) == nil && e.Error != nil {
+		return e.Error.Message
+	}
+	var list []chatResponse
+	if json.Unmarshal(data, &list) == nil {
+		for _, e := range list {
+			if e.Error != nil && e.Error.Message != "" {
+				return e.Error.Message
+			}
+		}
+	}
+	return ""
+}
+
 type chatResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
@@ -211,11 +230,7 @@ func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, in
 		return out, resp.StatusCode, ai.Errorf(0, "could not read the provider's response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		detail := ""
-		var e chatResponse
-		if json.Unmarshal(data, &e) == nil && e.Error != nil {
-			detail = e.Error.Message
-		}
+		detail := errorDetail(data)
 		var msg string
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
