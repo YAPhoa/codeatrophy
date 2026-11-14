@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,14 +51,19 @@ type AIProvider struct {
 
 // AISettings is the body of GET /settings/ai.
 type AISettings struct {
-	DefaultProviderID *string           `json:"defaultProviderId"`
-	Providers         []AIProvider      `json:"providers"`
-	Kinds             map[string]AIKind `json:"kinds"`
+	DefaultProviderID *string `json:"defaultProviderId"`
+	// TimeoutSeconds is the request timeout in effect: the saved one, else
+	// DefaultTimeoutSeconds, the environment's.
+	TimeoutSeconds        int               `json:"timeoutSeconds"`
+	DefaultTimeoutSeconds int               `json:"defaultTimeoutSeconds"`
+	Providers             []AIProvider      `json:"providers"`
+	Kinds                 map[string]AIKind `json:"kinds"`
 }
 
 // AISettingsInput is the body of PUT /settings/ai.
 type AISettingsInput struct {
 	DefaultProviderID domain.Opt[string] `json:"defaultProviderId"`
+	TimeoutSeconds    domain.Opt[int]    `json:"timeoutSeconds"`
 }
 
 // AIProviderInput is the body of provider create and update requests.
@@ -74,10 +80,16 @@ const (
 	// keyDefaultProvider holds the default provider's id once a default has
 	// been saved; "" means explicitly none.
 	keyDefaultProvider = "ai.default_provider"
-	maxModelChars      = domain.MaxModelIDChars
-	maxAPIKeyChars     = domain.MaxAPIKeyChars
+	// keyTimeout holds the saved request timeout in whole seconds; without
+	// it the environment's timeout applies.
+	keyTimeout     = "ai.timeout_seconds"
+	maxModelChars  = domain.MaxModelIDChars
+	maxAPIKeyChars = domain.MaxAPIKeyChars
 	// maxListedModels bounds the model list a connection test returns.
 	maxListedModels = 500
+	// testGenerationTimeout bounds the generation request of a connection
+	// test, unless the request timeout is shorter.
+	testGenerationTimeout = 90 * time.Second
 
 	sourceSettings    = "settings"
 	sourceEnvironment = "environment"
@@ -311,8 +323,39 @@ func (a *App) view(p provider, isDefault bool, usage map[string]store.AIUsage) A
 	}
 }
 
+// savedTimeout returns the saved request timeout in seconds, or 0 when none
+// is saved. A stored value outside the limits counts as none.
+func savedTimeout(tx store.Tx) (int, error) {
+	v, ok, err := tx.GetSetting(keyTimeout)
+	if err != nil || !ok {
+		return 0, err
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < domain.MinAITimeoutSeconds || n > domain.MaxAITimeoutSeconds {
+		return 0, nil
+	}
+	return n, nil
+}
+
+// requestTimeout is how long one request to a provider may take: the saved
+// timeout, else the environment's as it is.
+func (a *App) requestTimeout(tx store.Tx) (time.Duration, error) {
+	n, err := savedTimeout(tx)
+	if err != nil || n == 0 {
+		return a.aiEnv.Timeout, err
+	}
+	return time.Duration(n) * time.Second, nil
+}
+
 func (a *App) aiSettings(tx store.Tx) (AISettings, error) {
 	out := AISettings{Providers: []AIProvider{}, Kinds: map[string]AIKind{}}
+	out.DefaultTimeoutSeconds = int(a.aiEnv.Timeout / time.Second)
+	out.TimeoutSeconds = out.DefaultTimeoutSeconds
+	if n, err := savedTimeout(tx); err != nil {
+		return out, err
+	} else if n != 0 {
+		out.TimeoutSeconds = n
+	}
 	ps, err := a.listProviders(tx)
 	if err != nil {
 		return out, err
@@ -341,7 +384,8 @@ func (a *App) aiSettings(tx store.Tx) (AISettings, error) {
 	return out, nil
 }
 
-// GetAISettings returns the AI providers and the default.
+// GetAISettings returns the AI providers, the default and the request
+// timeout.
 func (a *App) GetAISettings(ctx context.Context) (AISettings, error) {
 	var out AISettings
 	err := a.store.Read(ctx, func(tx store.Tx) error {
@@ -352,27 +396,44 @@ func (a *App) GetAISettings(ctx context.Context) (AISettings, error) {
 	return out, err
 }
 
-// UpdateAISettings chooses the default provider; null turns AI features
-// off.
+// UpdateAISettings applies a merge update: defaultProviderId chooses the
+// default provider (null turns AI features off), timeoutSeconds sets the
+// request timeout (null removes it, so the environment's applies). Nothing
+// is saved unless both are valid.
 func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISettings, error) {
 	var out AISettings
 	err := a.store.Write(ctx, func(tx store.Tx) error {
-		if in.DefaultProviderID.Set {
-			id := strings.TrimSpace(in.DefaultProviderID.Val)
-			if id != "" {
-				ps, err := a.listProviders(tx)
-				if err != nil {
-					return err
-				}
-				p := findProvider(ps, id)
-				if p == nil {
-					return errField("defaultProviderId", "unknown provider")
-				}
-				if !a.ready(*p) {
-					return errField("defaultProviderId", a.notReady(*p))
-				}
+		fe := domain.FieldErrors{}
+		id := optText(in.DefaultProviderID)
+		if id != "" {
+			ps, err := a.listProviders(tx)
+			if err != nil {
+				return err
 			}
+			if p := findProvider(ps, id); p == nil {
+				fe.Add("defaultProviderId", "unknown provider")
+			} else if !a.ready(*p) {
+				fe.Add("defaultProviderId", a.notReady(*p))
+			}
+		}
+		if t := in.TimeoutSeconds; t.HasValue() && (t.Val < domain.MinAITimeoutSeconds || t.Val > domain.MaxAITimeoutSeconds) {
+			fe.Add("timeoutSeconds", fmt.Sprintf("must be between %d and %d", domain.MinAITimeoutSeconds, domain.MaxAITimeoutSeconds))
+		}
+		if err := errValidation(fe); err != nil {
+			return err
+		}
+		if in.DefaultProviderID.Set {
 			if err := tx.SetSetting(keyDefaultProvider, id); err != nil {
+				return err
+			}
+		}
+		switch t := in.TimeoutSeconds; {
+		case t.Set && t.Null:
+			if err := tx.DeleteSetting(keyTimeout); err != nil {
+				return err
+			}
+		case t.Set:
+			if err := tx.SetSetting(keyTimeout, strconv.Itoa(t.Val)); err != nil {
 				return err
 			}
 		}
@@ -599,43 +660,63 @@ func (a *App) DeleteAIProvider(ctx context.Context, id string) error {
 	})
 }
 
-// providerConfig builds the configuration for constructing a provider.
-func (a *App) providerConfig(p provider) ai.Config {
-	model := p.model
-	if model == "" {
-		model = a.defaultModel(p.kind)
+// modelOf is the model a provider uses: its own, else the kind's default.
+func (a *App) modelOf(p provider) string {
+	if p.model != "" {
+		return p.model
 	}
-	return ai.Config{Model: model, BaseURL: p.baseURL, APIKey: p.apiKey, Timeout: a.aiEnv.Timeout}
+	return a.defaultModel(p.kind)
 }
 
-// activeAI constructs the default provider for a request from the current
-// settings.
-func (a *App) activeAI(ctx context.Context) (activeProvider, error) {
+// providerConfig builds the configuration for constructing a provider for
+// requests bounded by timeout.
+func (a *App) providerConfig(p provider, timeout time.Duration) ai.Config {
+	return ai.Config{Model: a.modelOf(p), BaseURL: p.baseURL, APIKey: p.apiKey, Timeout: timeout}
+}
+
+// activeAI constructs the provider for a request from the current settings,
+// the request timeout included: the one providerID names, or the default
+// when it is omitted or null. A named provider must exist and be ready
+// (422 on providerId); a missing or unready default is 503. Naming a
+// provider never changes the default.
+func (a *App) activeAI(ctx context.Context, providerID domain.Opt[string]) (activeProvider, error) {
+	named := providerID.HasValue()
+	id := optText(providerID)
 	var p *provider
+	var timeout time.Duration
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		ps, err := a.listProviders(tx)
 		if err != nil {
 			return err
 		}
-		def, err := a.defaultProviderID(tx, ps)
-		p = findProvider(ps, def)
+		if !named {
+			if id, err = a.defaultProviderID(tx, ps); err != nil {
+				return err
+			}
+		}
+		p = findProvider(ps, id)
+		timeout, err = a.requestTimeout(tx)
 		return err
 	})
 	if err != nil {
 		return activeProvider{}, err
 	}
-	if p == nil {
+	switch {
+	case named && p == nil:
+		return activeProvider{}, errField("providerId", "unknown provider")
+	case named && !a.ready(*p):
+		return activeProvider{}, errField("providerId", a.notReady(*p))
+	case p == nil:
 		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: "no default AI provider is chosen"}
-	}
-	if !a.ready(*p) {
+	case !a.ready(*p):
 		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: fmt.Sprintf("the default AI provider %q is not ready — it needs %s",
 			p.name, strings.Join(a.missing(*p), " and "))}
 	}
 	factory, ok := a.providers[p.kind]
 	if !ok {
-		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: "the default AI provider is not available in this build"}
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: fmt.Sprintf("the AI provider %q is not available in this build", p.name)}
 	}
-	prov, err := factory(a.providerConfig(*p))
+	prov, err := factory(a.providerConfig(*p, timeout))
 	if err != nil {
 		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: ai.SafeMessage(err, p.apiKey)}
 	}
@@ -669,7 +750,7 @@ func (a *App) AIInfo(ctx context.Context) (AIInfo, error) {
 			return nil
 		}
 		if _, ok := a.providers[p.kind]; ok {
-			model := a.providerConfig(*p).Model
+			model := a.modelOf(*p)
 			out = AIInfo{Enabled: true, ProviderID: &p.id, ProviderName: &p.name, Kind: &p.kind, Model: &model}
 		}
 		return nil
@@ -735,15 +816,20 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 		return AITestResult{}, err
 	}
 	p := provider{kind: kind}
-	if id != "" {
-		var found *provider
-		if err := a.store.Read(ctx, func(tx store.Tx) error {
-			ps, err := a.listProviders(tx)
-			found = findProvider(ps, id)
+	var found *provider
+	var timeout time.Duration
+	if err := a.store.Read(ctx, func(tx store.Tx) error {
+		var err error
+		if timeout, err = a.requestTimeout(tx); err != nil || id == "" {
 			return err
-		}); err != nil {
-			return AITestResult{}, err
 		}
+		ps, err := a.listProviders(tx)
+		found = findProvider(ps, id)
+		return err
+	}); err != nil {
+		return AITestResult{}, err
+	}
+	if id != "" {
 		if found == nil {
 			return AITestResult{}, errField("providerId", "unknown provider")
 		}
@@ -763,7 +849,7 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 	if v := optText(in.APIKey); v != "" {
 		p.apiKey = v
 	}
-	cfg := a.providerConfig(p)
+	cfg := a.providerConfig(p, timeout)
 	res := AITestResult{}
 	safe := func(msg string) *string {
 		m := ai.Redact(msg, p.apiKey)
@@ -807,7 +893,11 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 
 	// 2. One minimal generation with the configured model.
 	res.Model = &cfg.Model
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	bound := testGenerationTimeout
+	if timeout > 0 && timeout < bound {
+		bound = timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	// Counted in the provider's usage when one was named; a configuration
 	// that is not saved has no counts.

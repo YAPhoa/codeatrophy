@@ -7,6 +7,10 @@ import "strings"
 const (
 	MaxAIProviders         = 20
 	MaxAIProviderNameChars = 60
+	// MinAITimeoutSeconds and MaxAITimeoutSeconds bound the saved request
+	// timeout. The environment's default is not held to them.
+	MinAITimeoutSeconds = 10
+	MaxAITimeoutSeconds = 300
 )
 
 // ValidateAIProviderName trims a provider name and checks it: 1 to

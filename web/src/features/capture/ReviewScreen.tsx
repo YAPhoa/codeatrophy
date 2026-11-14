@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, RefreshCw, Save, ShieldCheck, Square, Trash2, X } from 'lucide-react';
-import type { AppliedStyle, Collection, DraftCheck, GenerationUsage, StylePreset } from '../../api/types';
+import type { AiSettings, AppliedStyle, Collection, DraftCheck, GenerationUsage, StylePreset } from '../../api/types';
 import { useLimits, useMeta } from '../../api/queries';
 import { describeDraftCheck } from '../../lib/checks';
 import { plural } from '../../lib/format';
@@ -13,6 +13,7 @@ import { useToast } from '../../ui/Toast';
 import { ItemEditor } from '../item/ItemEditor';
 import type { DraftCheckControl } from './draftChecks';
 import { AssumptionsPanel, GeneratingPanel } from './parts';
+import { ModelPicker } from './ModelPicker';
 import { StylePicker, type StyleChoice } from './StylePicker';
 
 interface ReviewScreenProps {
@@ -44,6 +45,10 @@ interface ReviewScreenProps {
   styles: readonly StylePreset[];
   styleChoice: StyleChoice;
   onStyleChange: (choice: StyleChoice) => void;
+  /** The providers a revision can use, and the one it will use (see `useProviderChoice`). */
+  aiSettings: AiSettings | undefined;
+  providerChoice: string | null;
+  onProviderChange: (providerId: string) => void;
   onRevise: (instruction: string) => void;
   revising: boolean;
   reviseStartedAt: number | null;
@@ -199,6 +204,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
             autoComplete="off"
           />
           <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
+          <ModelPicker id="revise-model" settings={props.aiSettings} value={props.providerChoice} onChange={props.onProviderChange} disabled={busy} />
           <Button type="submit" disabled={busy}>
             Revise draft
           </Button>

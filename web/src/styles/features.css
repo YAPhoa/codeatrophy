@@ -827,6 +827,11 @@
   max-width: 200px;
 }
 
+/* A provider's name and model take more room than a style's name. */
+.model-picker .select {
+  max-width: 300px;
+}
+
 .style-link {
   display: inline-flex;
   align-items: center;
@@ -1117,6 +1122,13 @@ a.usage-line:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+}
+
+/* With a model picker the row has one more control before the button. */
+@media (min-width: 701px) {
+  .revise:has(.model-picker) {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  }
 }
 
 .revise-label {
@@ -2428,6 +2440,13 @@ button.case-chip:hover {
   gap: var(--space-3);
 }
 
+/* The model, when there is a choice, sits beside the language. */
+@media (min-width: 901px) {
+  .generate-fields:has(> :nth-child(3)) {
+    grid-template-columns: max-content minmax(0, 240px) minmax(0, 320px);
+  }
+}
+
 .proposal {
   display: flex;
   flex-direction: column;
@@ -2941,6 +2960,37 @@ button.case-chip:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* The request timeout: label, field and unit on one line, any error after them. Lined up with the providers above. */
+.ai-timeout-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+
+.field.ai-timeout {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5) var(--space-3);
+}
+
+.ai-timeout-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.ai-timeout-input {
+  width: 80px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-timeout-unit {
+  font-size: var(--text-sm);
+  color: var(--text-2);
 }
 
 .style-item,

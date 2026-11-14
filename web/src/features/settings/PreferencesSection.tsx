@@ -11,7 +11,7 @@ function merge(base: PreferencesUpdate | null, change: PreferencesUpdate): Prefe
   return { ...base, ...change, editor: { ...base?.editor, ...change.editor } };
 }
 
-type SaveState = { status: 'idle' | 'saving' | 'saved' } | { status: 'error'; error: unknown };
+export type SaveState = { status: 'idle' | 'saving' | 'saved' } | { status: 'error'; error: unknown };
 
 /**
  * Saves each change as it is made. Changes made while a save is under way
@@ -58,7 +58,8 @@ function useAutosave() {
   return { save, pending, state };
 }
 
-function SaveStatus({ state }: { state: SaveState }) {
+/** "Saving…", then "Saved": how a setting that saves itself says so. */
+export function SaveStatus({ state }: { state: SaveState }) {
   return (
     <span className="prefs-status" role="status">
       {state.status === 'saving' && (

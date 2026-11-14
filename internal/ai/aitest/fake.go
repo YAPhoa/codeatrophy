@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"codeatrophy/internal/ai"
 )
@@ -24,6 +25,7 @@ type Provider struct {
 
 	mu        sync.Mutex
 	requests  []ai.GenerateRequest
+	deadlines []time.Time
 	configs   []ai.Config
 	listCalls int
 }
@@ -60,9 +62,11 @@ func (p *Provider) Model() string {
 }
 
 // Generate implements ai.Provider.
-func (p *Provider) Generate(_ context.Context, req ai.GenerateRequest) (ai.GenerateResponse, error) {
+func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.GenerateResponse, error) {
+	deadline, _ := ctx.Deadline()
 	p.mu.Lock()
 	p.requests = append(p.requests, req)
+	p.deadlines = append(p.deadlines, deadline)
 	n := len(p.requests)
 	p.mu.Unlock()
 	var out any
@@ -118,6 +122,17 @@ func (p *Provider) Last() ai.GenerateRequest {
 		return ai.GenerateRequest{}
 	}
 	return r[len(r)-1]
+}
+
+// LastDeadline returns the context deadline of the most recent request, or
+// the zero time when it had none.
+func (p *Provider) LastDeadline() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.deadlines) == 0 {
+		return time.Time{}
+	}
+	return p.deadlines[len(p.deadlines)-1]
 }
 
 // Configs returns the configurations the factory was called with.

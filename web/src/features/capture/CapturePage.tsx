@@ -15,6 +15,7 @@ import { useConfirm } from '../../ui/Dialog';
 import { Segmented } from '../../ui/Field';
 import { Callout, ErrorCallout, Kbd } from '../../ui/misc';
 import { useCollectionActions } from '../collections/CollectionActions';
+import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
 import { ReviewScreen } from './ReviewScreen';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
@@ -30,6 +31,8 @@ interface CaptureSession {
   interfaceHint?: InterfaceHint;
   /** `undefined` until the user picks one; then a preset id or `null` for none. */
   styleChoice?: StyleChoice;
+  /** `undefined` until the user picks one: the default provider. Kept for the revisions of this draft. */
+  providerChoice?: ProviderChoice;
   form: ItemFormState | null;
   assumptions: string[];
   aiDrafted: boolean;
@@ -75,6 +78,7 @@ export default function CapturePage() {
   const presetCollection = searchParams.get('collection');
   const defaults = (): Partial<ItemFormState> => ({ collectionIds: presetCollection ? [presetCollection] : [] });
   const styleChoice = resolveStyleChoice(session.styleChoice, styles);
+  const provider = useProviderChoice(session.providerChoice, generation.error);
   const patch = (change: Partial<CaptureSession>) => setSession((s) => ({ ...s, ...change }));
   // The step is part of the address (`?step=review`) and of the history, so Back returns from the review to the input.
   useUrlMirror('step', session.stage === 'review' && session.form ? 'review' : null, (raw) => setSession((s) => ({ ...s, stage: raw === 'review' ? 'review' : 'input' })), true);
@@ -124,7 +128,7 @@ export default function CapturePage() {
     }
     verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCase }, signal),
+      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCase, ...provider.request }, signal),
     );
     if (!res) return;
     const drafted = formFromDraft(res.draft, defaults(), res.check?.largeCase);
@@ -151,7 +155,7 @@ export default function CapturePage() {
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCase }, signal);
+      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCase, ...provider.request }, signal);
     });
     if (!res) return;
     // Keep what the model does not produce: where the item is filed and where it came from.
@@ -240,6 +244,9 @@ export default function CapturePage() {
           styles={styles}
           styleChoice={styleChoice}
           onStyleChange={(c) => patch({ styleChoice: c })}
+          aiSettings={provider.settings}
+          providerChoice={provider.value}
+          onProviderChange={(id) => patch({ providerChoice: id })}
           onRevise={(instruction) => void revise(instruction)}
           revising={generation.running}
           reviseStartedAt={generation.startedAt}
@@ -330,6 +337,7 @@ export default function CapturePage() {
             />
           )}
           {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={(c) => patch({ styleChoice: c })} disabled={generation.running} />}
+          {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={(id) => patch({ providerChoice: id })} disabled={generation.running} />}
           <span className="spacer" />
           {/* An alert only while something is wrong, so the running count is not read out on every keystroke. */}
           <span id="capture-count" className={tooLong || needsText ? 'field-error' : 'muted capture-count'} role={tooLong || needsText ? 'alert' : undefined}>

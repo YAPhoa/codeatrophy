@@ -110,10 +110,12 @@ describe('meta and stats', () => {
       maxApiKeyChars: 1000,
       maxAiProviders: 20,
       maxAiProviderNameChars: 60,
+      minAiTimeoutSeconds: 10,
+      maxAiTimeoutSeconds: 300,
       maxBundleNameChars: 200,
       maxBundleDescriptionChars: 5000,
     });
-    expect(Object.keys(meta.limits)).toHaveLength(38);
+    expect(Object.keys(meta.limits)).toHaveLength(40);
     expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
     expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
       'c GCC 9.2.0',
@@ -1802,6 +1804,84 @@ describe('AI test cases', () => {
   });
 });
 
+describe('choosing the provider of a request', () => {
+  const providers = async () => {
+    const { providers: list } = await api.settings.getAi();
+    const named = (name: string) => list.find((p) => p.name === name)!;
+    return { personal: named('Personal key'), ollama: named('Local Ollama'), gateway: named('Work gateway') };
+  };
+  const latestLog = async () => (await api.settings.log({ limit: 1 })).items[0]!;
+  const requestsOf = async (id: string) => (await api.settings.getAi()).providers.find((p) => p.id === id)!.usage.allTime.requests;
+
+  it('uses the named provider for a draft, a variant and test cases, and leaves the default alone', async () => {
+    const { personal, ollama, gateway } = await providers();
+    const before = { personal: await requestsOf(personal.id), ollama: await requestsOf(ollama.id), gateway: await requestsOf(gateway.id) };
+
+    const drafted = await api.ai.draft({ text: 'two sum, array + target, return indices', providerId: ollama.id });
+    expect(drafted.usage.model).toBe('qwen2.5-coder:14b');
+    expect(await latestLog()).toMatchObject({ operation: 'draft', providerId: ollama.id, providerName: 'Local Ollama', model: 'qwen2.5-coder:14b' });
+
+    const variant = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', providerId: gateway.id });
+    expect(variant.usage.model).toBe('llama3.1:70b');
+    expect(await latestLog()).toMatchObject({ operation: 'variant', providerId: gateway.id, model: 'llama3.1:70b' });
+
+    const cases = await api.ai.testCases(seedIds.items.twoSum, { count: 3, providerId: ollama.id });
+    expect(cases.usage.model).toBe('qwen2.5-coder:14b');
+    expect(await latestLog()).toMatchObject({ operation: 'testcases', providerId: ollama.id });
+
+    expect(await requestsOf(ollama.id)).toBe(before.ollama + 2);
+    expect(await requestsOf(gateway.id)).toBe(before.gateway + 1);
+    expect(await requestsOf(personal.id)).toBe(before.personal);
+    expect((await api.settings.getAi()).defaultProviderId).toBe(personal.id);
+    expect((await api.meta()).ai.providerId).toBe(personal.id);
+
+    // Without one, or with `null`, the default answers.
+    expect((await api.ai.draft({ text: 'two sum', providerId: null })).usage.model).toBe('claude-opus-5-5');
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2 })).usage.model).toBe('claude-opus-5-5');
+    expect(await requestsOf(personal.id)).toBe(before.personal + 2);
+  });
+
+  it('logs a failed request against the named provider', async () => {
+    const { ollama } = await providers();
+    const before = await requestsOf(ollama.id);
+    expect((await failure(api.ai.draft({ text: 'MOCK:FAIL', providerId: ollama.id }))).code).toBe('upstream_error');
+    expect(await latestLog()).toMatchObject({ providerId: ollama.id, status: 'failed' });
+    expect(await requestsOf(ollama.id)).toBe(before + 1);
+  });
+
+  it('turns down an unknown or unready provider without generating anything', async () => {
+    const notReady = await api.settings.createProvider({ name: 'Bare', kind: 'openai_compatible' });
+    const logged = (await api.settings.log()).total;
+    const requests = [
+      () => api.ai.draft({ text: 'two sum', providerId: 'nope' }),
+      () => api.ai.draft({ text: 'two sum', providerId: notReady.id }),
+      () => api.ai.variant(seedIds.items.twoSum, { providerId: 'nope' }),
+      () => api.ai.variant(seedIds.items.twoSum, { providerId: notReady.id }),
+      () => api.ai.testCases(seedIds.items.twoSum, { providerId: 'nope' }),
+      () => api.ai.testCases(seedIds.items.twoSum, { providerId: notReady.id }),
+      () => api.ai.draft({ text: 'two sum', providerId: 42 as never }),
+    ];
+    for (const request of requests) {
+      const err = await failure(request());
+      expect(err.status).toBe(422);
+      expect(Object.keys(err.fields)).toEqual(['providerId']);
+    }
+    expect((await api.settings.log()).total).toBe(logged);
+  });
+
+  it('works with a named provider when there is no default, environment providers included', async () => {
+    const { ollama } = await providers();
+    await api.settings.putAi({ defaultProviderId: null });
+    expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+    expect((await api.ai.draft({ text: 'two sum', providerId: ollama.id })).usage.model).toBe('qwen2.5-coder:14b');
+
+    start(optionsFromFlags(['ai-env', 'no-ai', 'instant']));
+    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, providerId: 'env-anthropic' })).usage.model).toBe('claude-opus-5-5');
+    expect(await latestLog()).toMatchObject({ providerId: 'env-anthropic' });
+    expect((await api.settings.getAi()).defaultProviderId).toBeNull();
+  });
+});
+
 describe('checking a problem that is not saved', () => {
   const problem = { interface: 'program' as const, compare: 'tokens' as const, timeLimitMs: 2000, referenceSolution: { language: 'python', source: 'print(1)' } };
   const cases = [
@@ -2364,7 +2444,9 @@ describe('AI settings', () => {
     expect(err.status).toBe(422);
     expect(err.fields.defaultProviderId).toMatch(/a model and an API key/);
     expect((await failure(api.settings.putAi({ defaultProviderId: 'nope' }))).fields).toHaveProperty('defaultProviderId');
-    expect((await failure(api.settings.putAi({} as never))).fields).toHaveProperty('defaultProviderId');
+    // Leaving it out keeps it: the update is a merge.
+    expect((await api.settings.putAi({})).defaultProviderId).toBe(first.id);
+    expect((await api.settings.putAi({ timeoutSeconds: 60 })).defaultProviderId).toBe(first.id);
     expect((await api.settings.getAi()).defaultProviderId).toBe(first.id);
 
     const ollama = await api.settings.createProvider(local);
@@ -2382,6 +2464,46 @@ describe('AI settings', () => {
 
     err = await failure(api.settings.putAi({ defaultProviderId: notReady.id }));
     expect(err.status).toBe(422);
+  });
+
+  it('keeps a request timeout, with the environment\'s value until one is saved', async () => {
+    const first = await seeded();
+    expect(await api.settings.getAi()).toMatchObject({ timeoutSeconds: 300, defaultTimeoutSeconds: 300 });
+
+    // A merge update: the timeout alone leaves the default provider where it was, and the other way round.
+    expect(await api.settings.putAi({ timeoutSeconds: 120 })).toMatchObject({ timeoutSeconds: 120, defaultTimeoutSeconds: 300, defaultProviderId: first.id });
+    const ollama = await api.settings.createProvider(local);
+    expect(await api.settings.putAi({ defaultProviderId: ollama.id })).toMatchObject({ timeoutSeconds: 120, defaultProviderId: ollama.id });
+    expect((await api.settings.getAi()).timeoutSeconds).toBe(120);
+
+    // Both at once.
+    expect(await api.settings.putAi({ defaultProviderId: first.id, timeoutSeconds: 10 })).toMatchObject({ timeoutSeconds: 10, defaultProviderId: first.id });
+
+    // `null` removes the saved value.
+    expect(await api.settings.putAi({ timeoutSeconds: null })).toMatchObject({ timeoutSeconds: 300, defaultTimeoutSeconds: 300 });
+  });
+
+  it('rejects a request timeout outside the limits or not a whole number, and changes nothing', async () => {
+    const first = await seeded();
+    await api.settings.putAi({ timeoutSeconds: 90 });
+    const { minAiTimeoutSeconds: min, maxAiTimeoutSeconds: max } = (await api.meta()).limits;
+    expect([min, max]).toEqual([10, 300]);
+    expect(await api.settings.putAi({ timeoutSeconds: max })).toMatchObject({ timeoutSeconds: max });
+    await api.settings.putAi({ timeoutSeconds: 90 });
+
+    for (const bad of [min - 1, max + 1, 0, -30, 60.5, '60', true]) {
+      const err = await failure(api.settings.putAi({ timeoutSeconds: bad as never }));
+      expect(err.status).toBe(422);
+      expect(Object.keys(err.fields)).toEqual(['timeoutSeconds']);
+    }
+    expect((await failure(api.settings.putAi({ timeoutSeconds: 301 }))).fields.timeoutSeconds).toBe('must be between 10 and 300');
+
+    // One bad field rejects the whole update.
+    const ollama = await api.settings.createProvider(local);
+    const err = await failure(api.settings.putAi({ defaultProviderId: ollama.id, timeoutSeconds: 5 }));
+    expect(Object.keys(err.fields)).toEqual(['timeoutSeconds']);
+    expect(Object.keys((await failure(api.settings.putAi({ defaultProviderId: 'nope', timeoutSeconds: 60 }))).fields)).toEqual(['defaultProviderId']);
+    expect(await api.settings.getAi()).toMatchObject({ timeoutSeconds: 90, defaultProviderId: first.id });
   });
 
   it('leaves no default when the default is deleted', async () => {

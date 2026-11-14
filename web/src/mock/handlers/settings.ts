@@ -98,17 +98,28 @@ function requireSaved(provider: StoredAiProvider): void {
   }
 }
 
+/** A merge update: each field given is checked, and nothing changes unless all of them pass. */
 function putSettings(db: MockDb, req: Req) {
   const raw = objectBody(req);
+  const v = new Validator();
   const id = raw.defaultProviderId;
-  if (id === undefined) throw invalid('defaultProviderId', 'is required; send null to turn AI features off');
-  if (id === null) db.ai.defaultProviderId = null;
-  else {
-    const provider = db.ai.providers.find((p) => p.id === id);
-    if (!provider) throw invalid('defaultProviderId', 'is not the id of an existing provider');
-    if (!db.isReady(provider)) throw invalid('defaultProviderId', `cannot be chosen: the provider needs ${missing(db, provider)}`);
-    db.ai.defaultProviderId = provider.id;
+  let provider: StoredAiProvider | null | undefined;
+  if (id === null) provider = null;
+  else if (id !== undefined) {
+    provider = db.ai.providers.find((p) => p.id === id);
+    if (!provider) v.add('defaultProviderId', 'is not the id of an existing provider');
+    else if (!db.isReady(provider)) v.add('defaultProviderId', `cannot be chosen: the provider needs ${missing(db, provider)}`);
   }
+  const timeout = raw.timeoutSeconds;
+  const { minAiTimeoutSeconds: min, maxAiTimeoutSeconds: max } = LIMITS;
+  if (timeout !== undefined && timeout !== null) {
+    if (typeof timeout !== 'number' || !Number.isInteger(timeout)) v.add('timeoutSeconds', 'must be an integer or null');
+    else if (timeout < min || timeout > max) v.add('timeoutSeconds', `must be between ${min} and ${max}`);
+  }
+  v.check();
+
+  if (provider !== undefined) db.ai.defaultProviderId = provider?.id ?? null;
+  if (timeout !== undefined) db.ai.timeoutSeconds = timeout as number | null;
   return ok(db.aiSettings());
 }
 

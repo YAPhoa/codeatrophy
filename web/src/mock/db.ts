@@ -212,9 +212,14 @@ export const LIMITS: Limits = {
   maxApiKeyChars: 1000,
   maxAiProviders: 20,
   maxAiProviderNameChars: 60,
+  minAiTimeoutSeconds: 10,
+  maxAiTimeoutSeconds: 300,
   maxBundleNameChars: 200,
   maxBundleDescriptionChars: 5000,
 };
+
+/** The request timeout the server's environment gives (`CODEATROPHY_AI_TIMEOUT` unset). */
+export const DEFAULT_AI_TIMEOUT_SECONDS = 300;
 
 /** The server's wording for a text that is too long. */
 export const atMostChars = (max: number): string => `must be at most ${max} characters`;
@@ -285,7 +290,8 @@ export class MockDb {
    * this is how verification can report a mismatch.
    */
   readonly truth = new Map<string, string>();
-  ai: { defaultProviderId: string | null; providers: StoredAiProvider[] } = { defaultProviderId: null, providers: [] };
+  /** `timeoutSeconds` is the saved request timeout; `null` leaves the environment's value in effect. */
+  ai: { defaultProviderId: string | null; timeoutSeconds: number | null; providers: StoredAiProvider[] } = { defaultProviderId: null, timeoutSeconds: null, providers: [] };
   /** The AI activity log, oldest first. Nothing is removed unless the user asks. */
   aiLog: StoredLogEntry[] = [];
   styles: StylePreset[] = [];
@@ -723,6 +729,8 @@ export class MockDb {
     );
     return {
       defaultProviderId: this.ai.defaultProviderId,
+      timeoutSeconds: this.ai.timeoutSeconds ?? DEFAULT_AI_TIMEOUT_SECONDS,
+      defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS,
       providers: providers.map((p) => this.providerView(p)),
       kinds: structuredClone(AI_KINDS),
     };

@@ -14,6 +14,7 @@ import { useConfirm } from '../../ui/Dialog';
 import { TextAreaField } from '../../ui/Field';
 import { Callout, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useCollectionActions } from '../collections/CollectionActions';
+import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
 import { ReviewScreen } from './ReviewScreen';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
@@ -27,6 +28,8 @@ interface VariantSession {
   mode: VariantMode;
   instruction: string;
   styleChoice?: StyleChoice;
+  /** `undefined` until the user picks one: the default provider. Kept for the revisions of this draft. */
+  providerChoice?: ProviderChoice;
   form: ItemFormState | null;
   assumptions: string[];
   aiDrafted: boolean;
@@ -97,6 +100,7 @@ function VariantFlow({ original }: { original: Item }) {
     if (isProblem && isVariantMode(requested)) setSession((s) => (s.stage === 'choose' && s.mode !== requested ? { ...s, mode: requested } : s));
   }, [requested, isProblem, setSession]);
   const styleChoice = resolveStyleChoice(session.styleChoice, styles);
+  const provider = useProviderChoice(session.providerChoice, generation.error);
 
   // The original's tags and collections are a sensible starting point for the new item.
   const inherited: Partial<ItemFormState> = { tags: original.tags, collectionIds: original.collectionIds };
@@ -104,7 +108,7 @@ function VariantFlow({ original }: { original: Item }) {
   const generate = async () => {
     verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice, largeTestCase }, signal),
+      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice, largeTestCase, ...provider.request }, signal),
     );
     if (!res) return;
     const drafted = formFromDraft(res.draft, inherited, res.check?.largeCase);
@@ -132,7 +136,7 @@ function VariantFlow({ original }: { original: Item }) {
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint, largeTestCase }, signal);
+      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint, largeTestCase, ...provider.request }, signal);
     });
     if (!res) return;
     const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCase), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
@@ -223,6 +227,9 @@ function VariantFlow({ original }: { original: Item }) {
           styles={styles}
           styleChoice={styleChoice}
           onStyleChange={(c) => patch({ styleChoice: c })}
+          aiSettings={provider.settings}
+          providerChoice={provider.value}
+          onProviderChange={(id) => patch({ providerChoice: id })}
           onRevise={(instruction) => void revise(instruction)}
           revising={generation.running}
           reviseStartedAt={generation.startedAt}
@@ -303,6 +310,7 @@ function VariantFlow({ original }: { original: Item }) {
               </Button>
             )}
             {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={(c) => patch({ styleChoice: c })} />}
+            {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={(id) => patch({ providerChoice: id })} disabled={generation.running} />}
             <span className="spacer" />
             <Button variant={aiEnabled ? 'ghost' : 'primary'} icon={<PenLine size={14} />} onClick={writeByHand}>
               Write one by hand

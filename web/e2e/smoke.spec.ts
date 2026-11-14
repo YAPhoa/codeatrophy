@@ -551,6 +551,87 @@ test('AI providers: a new one is tested, gets a model from the loaded list, and 
   await expect(page.getByRole('complementary', { name: 'Navigation' }).getByTitle('AI drafting: Work OpenAI · gpt-4.1-mini')).toBeVisible();
 });
 
+test('AI providers: the request timeout is saved when committed, and a value out of range is not sent', async ({ page }) => {
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  const timeout = section.getByLabel('Request timeout');
+  // What the server holds. A reload would reset the mock, so it is asked directly.
+  const saved = () =>
+    page.evaluate(async () => {
+      const mock = (window as unknown as { __codeatrophyMock: { fetch: (url: string) => Promise<Response> } }).__codeatrophyMock;
+      return ((await (await mock.fetch('/api/v1/settings/ai')).json()) as { timeoutSeconds: number }).timeoutSeconds;
+    });
+
+  await expect(timeout).toHaveValue('300');
+  await expect(timeout).toHaveAccessibleDescription('seconds');
+  await timeout.fill('120');
+  expect(await saved()).toBe(300);
+  await timeout.press('Enter');
+  await expect.poll(saved).toBe(120);
+  await expect(section.locator('.ai-timeout-card').getByRole('status')).toHaveText('Saved');
+
+  // Still there after leaving the page and coming back.
+  const nav = page.getByRole('navigation', { name: 'Settings' });
+  await nav.getByRole('link', { name: 'Preferences' }).click();
+  await expect(timeout).toBeHidden();
+  await nav.getByRole('link', { name: 'AI providers' }).click();
+  await expect(timeout).toHaveValue('120');
+
+  // Out of range: the field says why and keeps what was typed, and nothing is saved.
+  await timeout.fill('5');
+  await timeout.blur();
+  await expect(section.getByRole('alert')).toHaveText('Between 10 and 300.');
+  await expect(timeout).toHaveValue('5');
+  await expect(timeout).toHaveAttribute('aria-invalid', 'true');
+  expect(await saved()).toBe(120);
+});
+
+test('model: a draft, its revision and generated test cases use the provider chosen for them, and the default stays', async ({ page }) => {
+  await open(page, '/new');
+  const model = page.getByRole('combobox', { name: 'Model' });
+  await expect(model.locator('option')).toHaveText(['Personal key · claude-opus-5-5 (default)', 'Local Ollama · qwen2.5-coder:14b', 'Work gateway · llama3.1:70b']);
+  await expect(model.locator('option:checked')).toHaveText('Personal key · claude-opus-5-5 (default)');
+  await model.selectOption({ label: 'Local Ollama · qwen2.5-coder:14b' });
+
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+  await expect(page.locator('.usage-line')).toContainText('qwen2.5-coder:14b');
+
+  // The revise bar carries the choice on, and can change it.
+  const revise = page.locator('form.revise').getByRole('combobox', { name: 'Model' });
+  await expect(revise.locator('option:checked')).toHaveText('Local Ollama · qwen2.5-coder:14b');
+  await revise.selectOption({ label: 'Work gateway · llama3.1:70b' });
+  await page.getByLabel('Ask for a revision').fill('use 1-based indices');
+  await page.getByRole('button', { name: 'Revise draft' }).click();
+  await expect(page.getByText('Revising the draft…')).toBeHidden();
+  await expect(page.locator('.usage-line')).toContainText('llama3.1:70b');
+
+  // Choosing did not move the default.
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'AI providers' }).getByText('On · Personal key · claude-opus-5-5')).toBeVisible();
+
+  // The Generate test cases page has its own choice, which starts on the default.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
+  await page.getByRole('link', { name: /Generate/ }).first().click();
+  await expect(model.locator('option:checked')).toHaveText('Personal key · claude-opus-5-5 (default)');
+  await model.selectOption({ label: 'Work gateway · llama3.1:70b' });
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
+  await expect(page.locator('.proposal-head .usage-line')).toContainText('llama3.1:70b');
+});
+
+test('model: there is no picker with only one provider ready', async ({ page }) => {
+  // The environment's provider is the only one.
+  await open(page, '/settings/ai?mock=ai-env,fast');
+  await expect(page.getByRole('region', { name: 'AI providers' }).getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('link', { name: 'New item' }).click();
+  await expect(page.getByRole('button', { name: 'Draft with AI' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Style' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveCount(0);
+});
+
 test('AI activity: a generation is logged with its raw request, and the list loads as it is scrolled', async ({ page }) => {
   await open(page, '/new');
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');

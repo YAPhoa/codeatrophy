@@ -130,7 +130,7 @@ runner rows and folded regions of the solve editor;
 keeping an accepted submission as a solution and making it the reference;
 preferences taking effect; the large test case, from its preference to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
-(key → connection test → model → save → default); and filing selected items
+(key → connection test → model → save → default); the AI request timeout; choosing the model a draft, revision or test-case generation uses; and filing selected items
 into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a

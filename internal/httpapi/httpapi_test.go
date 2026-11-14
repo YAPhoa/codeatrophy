@@ -257,14 +257,14 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxCollectionDescriptionChars", "timeLimitMs", "memoryLimitKb", "maxTestCasesPerItem", "maxTestDataBytes",
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
 		"maxLargeInputBytes", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
-		"maxAiProviders", "maxAiProviderNameChars", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
+		"maxAiProviders", "maxAiProviderNameChars", "minAiTimeoutSeconds", "maxAiTimeoutSeconds", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
 		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 38 {
-		t.Errorf("limits has %d keys, want 38", len(lim))
+	if len(lim) != 40 {
+		t.Errorf("limits has %d keys, want 40", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -272,7 +272,8 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	for k, want := range map[string]float64{"maxGeneratedTestCases": 30, "maxSummaryChars": 5000, "maxTextBytes": 1048576,
 		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
 		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxImportCollections": 10000,
-		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60} {
+		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60,
+		"minAiTimeoutSeconds": 10, "maxAiTimeoutSeconds": 300} {
 		if lim[k] != want {
 			t.Errorf("limits.%s = %v, want %v", k, lim[k], want)
 		}
@@ -291,6 +292,27 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	if settings["defaultProviderId"] != nil || len(settings["providers"].([]any)) != 0 ||
 		settings["kinds"].(map[string]any)["anthropic"].(map[string]any)["keyRequired"] != true {
 		t.Errorf("initial settings: %v", settings)
+	}
+	// The request timeout: the environment's (none here) until one is saved.
+	if v, ok := settings["timeoutSeconds"]; !ok || v != float64(0) || settings["defaultTimeoutSeconds"] != float64(0) {
+		t.Errorf("initial timeout: %v", settings)
+	}
+	if st := c.expect("PUT", api+"/settings/ai", `{"timeoutSeconds":120}`, 200).json(t); st["timeoutSeconds"] != float64(120) ||
+		st["defaultTimeoutSeconds"] != float64(0) || st["defaultProviderId"] != nil {
+		t.Errorf("PUT timeout: %v", st)
+	}
+	for _, js := range []string{`{"timeoutSeconds":9}`, `{"timeoutSeconds":301}`, `{"timeoutSeconds":12.5}`, `{"timeoutSeconds":"60"}`,
+		`{"timeoutSeconds":true}`, `{"timeoutSeconds":[60]}`, `{"timeoutSeconds":{}}`, `{"timeoutSeconds":1e30}`} {
+		r := c.expect("PUT", api+"/settings/ai", js, 422)
+		if e := r.json(t)["error"].(map[string]any); e["code"] != "validation_failed" || e["fields"].(map[string]any)["timeoutSeconds"] == nil {
+			t.Errorf("%s: %s", js, r.body)
+		}
+	}
+	if st := c.expect("GET", api+"/settings/ai", "", 200).json(t); st["timeoutSeconds"] != float64(120) {
+		t.Errorf("a rejected timeout changed the saved one: %v", st)
+	}
+	if st := c.expect("PUT", api+"/settings/ai", `{"timeoutSeconds":null}`, 200).json(t); st["timeoutSeconds"] != float64(0) {
+		t.Errorf("null timeout: %v", st)
 	}
 	p := c.expect("POST", api+"/settings/ai/providers", `{"name":"Personal key","kind":"anthropic"}`, 201).json(t)
 	id := p["id"].(string)
@@ -412,6 +434,54 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 	if pu["allTime"].(map[string]any)["requests"] != float64(3) || pu["allTime"].(map[string]any)["failed"] != float64(1) ||
 		pu["lastUsedAt"] == nil {
 		t.Errorf("provider usage: %v", pu)
+	}
+}
+
+// The AI routes pass providerId through: a named provider is used instead
+// of the default, and a bad one is 422 on the field.
+func TestAIRoutesTakeAProvider(t *testing.T) {
+	c := newServer(t)
+	def := c.expect("POST", api+"/settings/ai/providers", `{"name":"Default","kind":"anthropic","apiKey":"sk-ant-def-1111"}`, 201).json(t)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+def["id"].(string)+`"}`, 200)
+	other := c.expect("POST", api+"/settings/ai/providers", `{"name":"Other","kind":"anthropic","apiKey":"sk-ant-other-2222"}`, 201).json(t)
+	reading := c.expect("POST", api+"/items", `{"type":"reading","title":"R","body":"b"}`, 201).json(t)["id"].(string)
+	problem := c.expect("POST", api+"/items", `{"type":"problem","title":"P","problem":{"referenceSolution":{"language":"python","source":"sum"}},
+		"testCases":[{"stdin":"1 2","expectedStdout":"3","isSample":true}]}`, 201).json(t)["id"].(string)
+	readingDraft := map[string]any{"type": "reading", "title": "T", "summary": "", "body": "b", "difficulty": nil, "tags": []string{},
+		"problem": nil, "testCases": []any{}, "assumptions": []string{}}
+	cases := map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
+		"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14"}}}
+	routes := []struct {
+		path, body string
+		answer     any
+	}{
+		{api + "/ai/draft", `"text":"x"`, readingDraft},
+		{api + "/items/" + reading + "/ai/variant", `"mode":"similar"`, readingDraft},
+		{api + "/items/" + problem + "/ai/testcases", `"count":1`, cases},
+	}
+	lastKey := func() string {
+		cs := c.ai.Configs()
+		return cs[len(cs)-1].APIKey
+	}
+	for _, r := range routes {
+		c.ai.Respond = func(ai.GenerateRequest) (any, error) { return r.answer, nil }
+		c.expect("POST", r.path, `{`+r.body+`}`, 200)
+		if k := lastKey(); k != "sk-ant-def-1111" {
+			t.Errorf("%s without providerId used %q", r.path, k)
+		}
+		c.expect("POST", r.path, `{`+r.body+`,"providerId":"`+other["id"].(string)+`"}`, 200)
+		if k := lastKey(); k != "sk-ant-other-2222" {
+			t.Errorf("%s with providerId used %q", r.path, k)
+		}
+		for _, bad := range []string{`"nope"`, `5`, `["x"]`} {
+			res := c.expect("POST", r.path, `{`+r.body+`,"providerId":`+bad+`}`, 422)
+			if e := res.json(t)["error"].(map[string]any); e["code"] != "validation_failed" || e["fields"].(map[string]any)["providerId"] == nil {
+				t.Errorf("%s with providerId %s: %s", r.path, bad, res.body)
+			}
+		}
+	}
+	if st := c.expect("GET", api+"/settings/ai", "", 200).json(t); st["defaultProviderId"] != def["id"] {
+		t.Errorf("the default changed: %v", st["defaultProviderId"])
 	}
 }
 

@@ -127,6 +127,9 @@ export interface Limits {
   /** Saved AI providers per instance; environment providers do not count. */
   maxAiProviders: number;
   maxAiProviderNameChars: number;
+  /** Bounds of the AI request timeout (`AiSettings.timeoutSeconds`) when it is set. */
+  minAiTimeoutSeconds: number;
+  maxAiTimeoutSeconds: number;
   /** Applies to an export's `name` and `author`. */
   maxBundleNameChars: number;
   maxBundleDescriptionChars: number;
@@ -512,6 +515,8 @@ export interface DraftRequest {
   styleId?: string | null;
   /** Also build a large test case. Ignored for a reading. */
   largeTestCase?: boolean;
+  /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
+  providerId?: string | null;
 }
 
 /** The style preset a generation was actually written in. */
@@ -603,6 +608,8 @@ export interface VariantRequest {
   /** Omitted → the variant keeps the original's interface. */
   interfaceHint?: ProblemInterface;
   largeTestCase?: boolean;
+  /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
+  providerId?: string | null;
 }
 
 export interface AiTestCasesRequest {
@@ -612,6 +619,8 @@ export interface AiTestCasesRequest {
   instruction?: string | null;
   /** Also build a large test case, in addition to the `count` cases. */
   largeTestCase?: boolean;
+  /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
+  providerId?: string | null;
 }
 
 export interface ProposedTestCase {
@@ -766,13 +775,25 @@ export interface AiKindInfo {
 export interface AiSettings {
   /** The provider the AI endpoints use; `null` means AI features are off. */
   defaultProviderId: string | null;
+  /**
+   * How long one request to a provider may take, in seconds: the saved value,
+   * or `defaultTimeoutSeconds` when none is saved. A server from before the
+   * setting existed sends neither field.
+   */
+  timeoutSeconds?: number;
+  /** The environment's value (`CODEATROPHY_AI_TIMEOUT`), which applies when none is saved. */
+  defaultTimeoutSeconds?: number;
   /** The default first, then saved providers by name, then environment providers. */
   providers: AiProvider[];
   kinds: Record<AiProviderKind, AiKindInfo>;
 }
 
+/** A merge update: a field left out keeps its value. */
 export interface AiSettingsUpdate {
-  defaultProviderId: string | null;
+  /** `null` turns AI features off. */
+  defaultProviderId?: string | null;
+  /** `null` removes the saved value, so `defaultTimeoutSeconds` applies. */
+  timeoutSeconds?: number | null;
 }
 
 export interface AiProviderInput {

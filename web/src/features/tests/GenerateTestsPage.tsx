@@ -18,6 +18,7 @@ import { Checkbox, Field, NumberStepper, SelectField, TextAreaField } from '../.
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { useToast } from '../../ui/Toast';
+import { modelOptions, useProviderChoice, type ProviderChoice } from '../capture/ModelPicker';
 import { GeneratingPanel, UsageLine } from '../capture/parts';
 import { useGeneration } from '../capture/useGeneration';
 import { ItemBar } from '../item/ItemBar';
@@ -131,6 +132,10 @@ function Generator({ item }: { item: Item }) {
     return languageOptions.some((o) => o.value === preferred) ? preferred : (languageOptions[0]?.value ?? 'python');
   });
   const [instruction, setInstruction] = useState('');
+  // The provider for this page's generations; the default until another is chosen.
+  const [providerChoice, setProviderChoice] = useState<ProviderChoice>(undefined);
+  const provider = useProviderChoice(providerChoice, generation.error);
+  const models = modelOptions(provider.settings);
 
   const [proposal, setProposal] = useState<AiTestCasesResponse | null>(null);
   // Counts the proposals, so that what was opened in one is closed in the next.
@@ -159,7 +164,7 @@ function Generator({ item }: { item: Item }) {
 
   const generate = async () => {
     if (noRunner) return;
-    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCase: large }, signal));
+    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCase: large, ...provider.request }, signal));
     if (!res) return;
     setProposal(res);
     setProposalNo((n) => n + 1);
@@ -300,6 +305,7 @@ function Generator({ item }: { item: Item }) {
                   )}
                 </Field>
                 <SelectField label="Reference solution in" value={language} onChange={setLanguage} options={languageOptions} disabled={generation.running || noRunner} />
+                {models.length > 1 && <SelectField label="Model" value={provider.value ?? ''} onChange={setProviderChoice} options={models} disabled={generation.running} />}
               </div>
               <Checkbox checked={large} onChange={setLarge} disabled={generation.running || !judgeOn} label="Add a large test case" hint={judgeOn ? undefined : 'Needs a judge engine.'} />
               <TextAreaField

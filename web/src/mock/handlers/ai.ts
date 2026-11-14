@@ -2,7 +2,7 @@
 
 import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
 import { applyStyle, breakRunner, checkDraft, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface } from '../ai';
-import type { MockDb } from '../db';
+import type { MockDb, StoredAiProvider } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
 import type { Handler, Req } from '../http';
 import { aiUnavailable, invalid, isRecord, objectBody, ok, upstream, Validator } from '../http';
@@ -58,8 +58,35 @@ function promptDraft(previousDraft: unknown): unknown {
 
 const applied = (style: StylePreset | null): AppliedStyle | null => (style ? { id: style.id, name: style.name } : null);
 
+/**
+ * The provider a request names with `providerId`, which must be ready; or
+ * `null` when it names none, so the default is used. A named provider does
+ * not need a default to exist.
+ */
+function parseProvider(db: MockDb, raw: Record<string, unknown>, v: Validator): StoredAiProvider | null {
+  const id = raw.providerId;
+  if (id == null) return null;
+  if (typeof id !== 'string') {
+    v.add('providerId', 'must be a string or null');
+    return null;
+  }
+  const provider = db.ai.providers.find((p) => p.id === id);
+  if (!provider) v.add('providerId', 'is not the id of an existing provider');
+  else if (!db.isReady(provider)) v.add('providerId', 'names a provider that is not ready');
+  else return provider;
+  return null;
+}
+
+/** The provider a valid request goes to: the one it names, else the default; `503` when there is neither. */
+function providerFor(db: MockDb, named: StoredAiProvider | null): StoredAiProvider {
+  const provider = named ?? db.activeProvider;
+  if (!provider) throw aiUnavailable();
+  return provider;
+}
+
 /** One request to the provider, as the activity log names it. */
 interface Call {
+  provider: StoredAiProvider;
   operation: 'draft' | 'variant' | 'testcases';
   itemId: string | null;
   /** The label of its log entry, when the item is known beforehand. */
@@ -81,10 +108,7 @@ const NO_TOKENS = { inputTokens: null, outputTokens: null, reasoningTokens: null
 function failIfAsked(db: MockDb, call: Call, ...texts: (string | null)[]): void {
   if (texts.some((t) => t?.includes('MOCK:FAIL'))) {
     const error = 'the AI provider returned an error: 529 overloaded_error — Overloaded';
-    const provider = db.activeProvider;
-    if (provider) {
-      db.logRequest(provider, { operation: call.operation, itemId: call.itemId, title: call.title, status: 'failed', error, durationMs: 1300, usage: NO_TOKENS, request: requestOf(call), response: null });
-    }
+    db.logRequest(call.provider, { operation: call.operation, itemId: call.itemId, title: call.title, status: 'failed', error, durationMs: 1300, usage: NO_TOKENS, request: requestOf(call), response: null });
     throw upstream(error);
   }
 }
@@ -97,19 +121,17 @@ function failIfAsked(db: MockDb, call: Call, ...texts: (string | null)[]): void 
  * prompt cache and no reasoning; other services the reverse.
  */
 function spend(db: MockDb, call: Call, output: unknown, title: string | null = call.title): GenerationUsage {
-  const provider = db.activeProvider;
+  const provider = call.provider;
   const response = JSON.stringify(output);
   const inputTokens = 1800 + Math.ceil(call.content.length / 4);
   const outputTokens = Math.ceil(response.length / 4);
   const tokens =
-    provider?.kind === 'openai_compatible'
+    provider.kind === 'openai_compatible'
       ? { inputTokens, outputTokens, reasoningTokens: Math.round(outputTokens * 0.3), cacheReadTokens: null, cacheWriteTokens: null }
       : { inputTokens, outputTokens, reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const durationMs = 2500 + outputTokens * 11;
-  const logId = provider
-    ? db.logRequest(provider, { operation: call.operation, itemId: call.itemId, title, status: 'ok', error: null, durationMs, usage: tokens, request: requestOf(call), response })
-    : null;
-  return { logId, model: (provider && db.modelOf(provider)) ?? '', durationMs, ...tokens };
+  const logId = db.logRequest(provider, { operation: call.operation, itemId: call.itemId, title, status: 'ok', error: null, durationMs, usage: tokens, request: requestOf(call), response });
+  return { logId, model: db.modelOf(provider) ?? '', durationMs, ...tokens };
 }
 
 const asks = (marker: string, ...texts: (string | null)[]): boolean => texts.some((t) => t?.includes(marker));
@@ -187,12 +209,13 @@ async function draft(db: MockDb, req: Req) {
   const instruction = parseInstruction(raw, v);
   const previousDraft = parsePreviousDraft(raw, v);
   const large = parseLargeTestCase(raw, v);
+  const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
-  if (!db.aiEnabled) throw aiUnavailable();
+  const provider = providerFor(db, named);
 
   await sleep(db.delay('aiDraft'));
-  const call: Call = { operation: 'draft', itemId: null, title: null, schema: 'item_draft', content: said(text as string, instruction, previousDraft, style) };
+  const call: Call = { provider, operation: 'draft', itemId: null, title: null, schema: 'item_draft', content: said(text as string, instruction, previousDraft, style) };
   failIfAsked(db, call, text as string, instruction);
   const result = draftFromText(text as string, typeHint as 'auto' | 'problem' | 'reading', instruction, previousDraft, interfaceHint as InterfaceHint);
   return drafted(db, result, style, call, large, text as string, instruction);
@@ -212,12 +235,13 @@ async function variant(db: MockDb, req: Req) {
     v.add('interfaceHint', 'must be program or function');
   } else if (interfaceHint !== null && item.type === 'reading') v.add('interfaceHint', 'does not apply to a reading');
   const large = parseLargeTestCase(raw, v);
+  const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
-  if (!db.aiEnabled) throw aiUnavailable();
+  const provider = providerFor(db, named);
 
   await sleep(db.delay('aiDraft'));
-  const call: Call = { operation: 'variant', itemId: item.id, title: item.title, schema: 'item_draft', content: said(`Write a variant (${mode}) of this item.\n\n# ${item.title}\n\n${item.body}`, instruction, previousDraft, style) };
+  const call: Call = { provider, operation: 'variant', itemId: item.id, title: item.title, schema: 'item_draft', content: said(`Write a variant (${mode}) of this item.\n\n# ${item.title}\n\n${item.body}`, instruction, previousDraft, style) };
   failIfAsked(db, call, instruction);
   // With an earlier variant draft and an instruction this is a revision of
   // that draft, not a fresh variant.
@@ -244,13 +268,15 @@ async function testCases(db: MockDb, req: Req) {
   }
   const instruction = parseInstruction(raw, v);
   const large = parseLargeTestCase(raw, v);
+  const named = parseProvider(db, raw, v);
   v.check();
-  if (!db.aiEnabled) throw aiUnavailable();
+  const provider = providerFor(db, named);
 
   await sleep(db.delay('aiTests'));
   // Large test data is never sent to the model.
   const inputs = db.casesOf(item.id).map(promptCase).join('\n---\n');
   const call: Call = {
+    provider,
     operation: 'testcases',
     itemId: item.id,
     title: item.title,

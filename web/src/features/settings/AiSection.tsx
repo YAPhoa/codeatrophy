@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, KeyRound, Pencil, PlugZap, Plus, Power, Sparkles, Star, Trash2, XCircle } from 'lucide-react';
@@ -10,10 +10,13 @@ import { errorLine, sentence } from '../../lib/errors';
 import { absoluteTime, formatMs, plural, relativeTime } from '../../lib/format';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
+import { Field } from '../../ui/Field';
 import { Badge, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { AiProviderDialog } from './AiProviderDialog';
 import { customHost, kindName, listNeeds, modelInEffect, needsOf } from './aiProviders';
+import { readTimeout } from './aiTimeout';
+import { SaveStatus, type SaveState } from './PreferencesSection';
 
 /** The outcome of a connection test started from the list, for the provider as it was at `stamp`. */
 interface RowTest {
@@ -169,8 +172,94 @@ export function AiSection({ meta }: { meta: Meta }) {
         </ul>
       )}
 
+      {/* A server from before the setting existed sends no timeout. */}
+      {data?.timeoutSeconds != null && limits && <TimeoutRow saved={data.timeoutSeconds} min={limits.minAiTimeoutSeconds} max={limits.maxAiTimeoutSeconds} />}
+
       {editing && data && <AiProviderDialog settings={data} provider={editing.provider} kind={editing.kind} onClose={() => setEditing(null)} />}
     </section>
+  );
+}
+
+/**
+ * How long a request to a provider may take; it applies to all of them. A
+ * typed value is saved when the field is left or Enter is pressed, and only
+ * when it is inside the limits.
+ */
+function TimeoutRow({ saved, min, max }: { saved: number; min: number; max: number }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const unitId = useId();
+  // What is being typed, until it is committed; then the value on its way to the server.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [sending, setSending] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Said beside the field as the preferences say it; a failure is a toast instead.
+  const [state, setState] = useState<SaveState>({ status: 'idle' });
+  // Only the answer to the latest save goes into the cache.
+  const latest = useRef(0);
+
+  const commit = async () => {
+    if (draft == null) return;
+    const entry = readTimeout(draft, min, max);
+    if (entry.error != null) {
+      setError(entry.error);
+      return;
+    }
+    setError(null);
+    setDraft(null);
+    if (entry.seconds === (sending ?? saved)) return;
+    const call = ++latest.current;
+    setSending(entry.seconds);
+    setState({ status: 'saving' });
+    try {
+      const next = await api.settings.putAi({ timeoutSeconds: entry.seconds });
+      if (call === latest.current) {
+        qc.setQueryData(qk.aiSettings, next);
+        setState({ status: 'saved' });
+      }
+    } catch (e) {
+      toast.error(e);
+      if (call === latest.current) setState({ status: 'idle' });
+    } finally {
+      // On failure the field shows the saved value again.
+      if (call === latest.current) setSending(null);
+    }
+  };
+
+  return (
+    <div className="card ai-timeout-card">
+      <Field label="Request timeout" error={error} className="ai-timeout">
+        {(a) => (
+          <span className="ai-timeout-control">
+            <input
+              {...a}
+              aria-describedby={[a['aria-describedby'], unitId].filter(Boolean).join(' ')}
+              className="input ai-timeout-input"
+              type="number"
+              inputMode="numeric"
+              autoComplete="off"
+              min={min}
+              max={max}
+              step={1}
+              value={draft ?? String(sending ?? saved)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                // Once a value has been turned down, say as it is corrected whether it would now do.
+                if (error != null) setError(readTimeout(e.target.value, min, max).error ?? null);
+              }}
+              onBlur={() => void commit()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void commit();
+              }}
+            />
+            <span id={unitId} className="ai-timeout-unit">
+              seconds
+            </span>
+          </span>
+        )}
+      </Field>
+      <SaveStatus state={state} />
+    </div>
   );
 }
 

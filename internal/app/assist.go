@@ -125,6 +125,8 @@ type DraftInput struct {
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
+	// ProviderID names the provider to use instead of the default.
+	ProviderID domain.Opt[string] `json:"providerId"`
 	// LargeTestCase asks for a large test case as well.
 	LargeTestCase bool `json:"largeTestCase"`
 }
@@ -188,7 +190,7 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	provider, err := a.activeAI(ctx)
+	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
 		return DraftResponse{}, err
 	}
@@ -404,6 +406,7 @@ type VariantInput struct {
 	Instruction   domain.Opt[string] `json:"instruction"`
 	PreviousDraft json.RawMessage    `json:"previousDraft"`
 	StyleID       domain.Opt[string] `json:"styleId"`
+	ProviderID    domain.Opt[string] `json:"providerId"`
 	LargeTestCase bool               `json:"largeTestCase"`
 }
 
@@ -466,7 +469,7 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	provider, err := a.activeAI(ctx)
+	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
 		return DraftResponse{}, err
 	}
@@ -523,6 +526,7 @@ type GenerateTestCasesInput struct {
 	Count         domain.Opt[int]    `json:"count"`
 	Language      string             `json:"language"`
 	Instruction   domain.Opt[string] `json:"instruction"`
+	ProviderID    domain.Opt[string] `json:"providerId"`
 }
 
 // GeneratedCase is one proposed test case.
@@ -596,7 +600,7 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	if err != nil {
 		return GenerateTestCasesResponse{}, err
 	}
-	provider, err := a.activeAI(ctx)
+	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
 		return GenerateTestCasesResponse{}, err
 	}

@@ -310,6 +310,8 @@ const limits: Limits = {
   maxApiKeyChars: 1000,
   maxAiProviders: 20,
   maxAiProviderNameChars: 60,
+  minAiTimeoutSeconds: 10,
+  maxAiTimeoutSeconds: 300,
   maxBundleNameChars: 200,
   maxBundleDescriptionChars: 5000,
   maxSolutionsPerItem: 50,

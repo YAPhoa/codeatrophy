@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/app"
@@ -519,6 +520,236 @@ func TestRejectedAIProviderUpdateChangesNothing(t *testing.T) {
 	a, _ := json.Marshal(after)
 	if string(a) != string(b) {
 		t.Errorf("a rejected update changed the settings:\n before %s\n after  %s", b, a)
+	}
+}
+
+// testBound runs a connection test on e and fails unless its generation
+// request was given want.
+func testBound(t *testing.T, e *env, js string, want time.Duration) {
+	t.Helper()
+	start := time.Now()
+	if res := e.testProvider(t, js); !res.OK {
+		t.Fatalf("connection test: %+v", res)
+	}
+	end := time.Now()
+	if dl := e.ai.LastDeadline(); dl.Before(start.Add(want)) || dl.After(end.Add(want)) {
+		t.Errorf("the test's generation request was given %v, want %v", dl.Sub(start), want)
+	}
+}
+
+// The request timeout is the saved one, else the environment's as it is,
+// and it reaches every provider built for a request.
+func TestAIRequestTimeout(t *testing.T) {
+	const envTimeout = 7*time.Minute + 500*time.Millisecond
+	e := newEnv(t, withAIEnv(app.AIEnv{Timeout: envTimeout}))
+	put := func(js string) (app.AISettings, error) {
+		return e.app.UpdateAISettings(e.ctx, decodeInto[app.AISettingsInput](t, js))
+	}
+	draft := func() ai.Config {
+		t.Helper()
+		e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+		defer func() { e.ai.Respond = nil }()
+		must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`)))
+		return e.lastConfig()
+	}
+
+	// Nothing saved: the environment's value, in whole seconds and unclamped.
+	st := must(e.app.GetAISettings(e.ctx))
+	if st.TimeoutSeconds != 420 || st.DefaultTimeoutSeconds != 420 {
+		t.Errorf("initial timeout: %d, default %d", st.TimeoutSeconds, st.DefaultTimeoutSeconds)
+	}
+	p := e.addProvider(t, `{"name":"Mine","kind":"anthropic","apiKey":"sk-ant-mine-1234"}`)
+	e.setDefault(t, p.ID)
+	if cfg := draft(); cfg.Timeout != envTimeout {
+		t.Errorf("unsaved timeout reaches the provider as %v", cfg.Timeout)
+	}
+	testBound(t, e, `{"providerId":"`+p.ID+`"}`, 90*time.Second)
+
+	// Saving the timeout alone keeps the default provider.
+	st = must(put(`{"timeoutSeconds":120}`))
+	if st.TimeoutSeconds != 120 || st.DefaultTimeoutSeconds != 420 || st.DefaultProviderID == nil || *st.DefaultProviderID != p.ID {
+		t.Errorf("after saving: %+v", st)
+	}
+	if st := must(e.app.GetAISettings(e.ctx)); st.TimeoutSeconds != 120 {
+		t.Errorf("read back: %d", st.TimeoutSeconds)
+	}
+	if cfg := draft(); cfg.Timeout != 120*time.Second {
+		t.Errorf("saved timeout reaches the provider as %v", cfg.Timeout)
+	}
+	testBound(t, e, `{"kind":"anthropic","apiKey":"sk-ant-other-5678"}`, 90*time.Second)
+	if cfg := e.lastConfig(); cfg.Timeout != 120*time.Second {
+		t.Errorf("connection test provider timeout: %v", cfg.Timeout)
+	}
+
+	// Choosing the default alone keeps the timeout.
+	if st := must(put(`{"defaultProviderId":null}`)); st.TimeoutSeconds != 120 || st.DefaultProviderID != nil {
+		t.Errorf("after turning AI off: %+v", st)
+	}
+	e.setDefault(t, p.ID)
+	if st := must(put(`{}`)); st.TimeoutSeconds != 120 || st.DefaultProviderID == nil {
+		t.Errorf("an empty update changed something: %+v", st)
+	}
+
+	// Out of range, alone or with a valid default: nothing is saved.
+	for _, js := range []string{`{"timeoutSeconds":9}`, `{"timeoutSeconds":301}`, `{"timeoutSeconds":0}`,
+		`{"timeoutSeconds":-30}`, `{"defaultProviderId":null,"timeoutSeconds":1000}`} {
+		_, err := put(js)
+		wantField(t, err, "timeoutSeconds")
+	}
+	// A valid timeout with an invalid default is not saved either.
+	_, err := put(`{"defaultProviderId":"nope","timeoutSeconds":30}`)
+	wantField(t, err, "defaultProviderId")
+	if st := must(e.app.GetAISettings(e.ctx)); st.TimeoutSeconds != 120 || st.DefaultProviderID == nil || *st.DefaultProviderID != p.ID {
+		t.Errorf("a rejected update changed the settings: %+v", st)
+	}
+
+	// The limits are inclusive; a shorter timeout bounds the test too.
+	if st := must(put(`{"timeoutSeconds":300}`)); st.TimeoutSeconds != 300 {
+		t.Errorf("upper limit: %d", st.TimeoutSeconds)
+	}
+	if st := must(put(`{"timeoutSeconds":10}`)); st.TimeoutSeconds != 10 {
+		t.Errorf("lower limit: %d", st.TimeoutSeconds)
+	}
+	testBound(t, e, `{"providerId":"`+p.ID+`"}`, 10*time.Second)
+
+	// The saved value survives a restart, under another environment.
+	same := newEnv(t, func(o *app.Options) {
+		o.Store = e.db
+		o.AIEnv = app.AIEnv{Timeout: time.Minute}
+	})
+	if st := must(same.app.GetAISettings(same.ctx)); st.TimeoutSeconds != 10 || st.DefaultTimeoutSeconds != 60 {
+		t.Errorf("after a restart: %d, default %d", st.TimeoutSeconds, st.DefaultTimeoutSeconds)
+	}
+
+	// null removes it: the environment's value applies again.
+	st = must(put(`{"timeoutSeconds":null}`))
+	if st.TimeoutSeconds != 420 || st.DefaultTimeoutSeconds != 420 || st.DefaultProviderID == nil {
+		t.Errorf("after null: %+v", st)
+	}
+	if cfg := draft(); cfg.Timeout != envTimeout {
+		t.Errorf("after null the provider gets %v", cfg.Timeout)
+	}
+	_ = e.db.Read(e.ctx, func(tx store.Tx) error {
+		if _, ok, _ := tx.GetSetting("ai.timeout_seconds"); ok {
+			t.Error("null should remove the saved value")
+		}
+		return nil
+	})
+
+	// An environment timeout shorter than 90 seconds bounds the test; none
+	// at all leaves the 90 seconds.
+	short := newEnv(t, withAIEnv(app.AIEnv{Timeout: 30 * time.Second}))
+	testBound(t, short, `{"kind":"anthropic","apiKey":"sk-ant-short-1234"}`, 30*time.Second)
+	none := newEnv(t)
+	if st := must(none.app.GetAISettings(none.ctx)); st.TimeoutSeconds != 0 || st.DefaultTimeoutSeconds != 0 {
+		t.Errorf("no environment timeout: %+v", st)
+	}
+	testBound(t, none, `{"kind":"anthropic","apiKey":"sk-ant-none-1234"}`, 90*time.Second)
+	if cfg := none.lastConfig(); cfg.Timeout != 0 {
+		t.Errorf("without an environment timeout the provider keeps its own: %v", cfg.Timeout)
+	}
+}
+
+// A draft, variant or test case generation can name the provider it uses;
+// without one it uses the default. Naming one never changes the default,
+// and its usage is counted and logged under that provider.
+func TestRequestsCanNameAProvider(t *testing.T) {
+	e := newEnv(t, withAIEnv(app.AIEnv{AnthropicAPIKey: "sk-ant-env-7777"}))
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	ops := []string{"draft", "variant", "testcases"}
+	run := func(op, extra string) (app.Usage, error) {
+		t.Helper()
+		switch op {
+		case "draft":
+			e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+			r, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"`+extra+`}`))
+			return r.Usage, err
+		case "variant":
+			e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+			r, err := e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"mode":"similar"`+extra+`}`))
+			return r.Usage, err
+		default:
+			e.ai.Respond = func(ai.GenerateRequest) (any, error) {
+				return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
+					"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14"}}}, nil
+			}
+			r, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1`+extra+`}`))
+			return r.Usage, err
+		}
+	}
+	// usedBy checks that a request went to the provider with this key and
+	// was logged under id.
+	usedBy := func(what string, u app.Usage, id, key string) {
+		t.Helper()
+		if cfg := e.lastConfig(); cfg.APIKey != key {
+			t.Errorf("%s: sent with key %q, want %q", what, cfg.APIKey, key)
+		}
+		if u.LogID == nil {
+			t.Fatalf("%s: not logged", what)
+		}
+		if d := must(e.app.GetAILogEntry(e.ctx, *u.LogID)); d.ProviderID != id {
+			t.Errorf("%s: logged under %s, want %s", what, d.ProviderID, id)
+		}
+	}
+	named := func(id string) string { return `,"providerId":"` + id + `"` }
+	work := e.addProvider(t, `{"name":"Work","kind":"anthropic","apiKey":"sk-ant-work-1111"}`)
+	home := e.addProvider(t, `{"name":"Home","kind":"anthropic","model":"claude-home","apiKey":"sk-ant-home-2222"}`)
+	noKey := e.addProvider(t, `{"name":"No key","kind":"anthropic"}`)
+
+	// With no default, omitting the provider is 503; naming one works.
+	for _, op := range ops {
+		for _, extra := range []string{"", `,"providerId":null`} {
+			_, err := run(op, extra)
+			wantCode(t, err, app.CodeAIUnavailable)
+		}
+		u := must(run(op, named(home.ID)))
+		usedBy(op+" with no default", u, home.ID, "sk-ant-home-2222")
+		if cfg := e.lastConfig(); cfg.Model != "claude-home" {
+			t.Errorf("%s: the provider's own model is used, got %q", op, cfg.Model)
+		}
+	}
+	if st := must(e.app.GetAISettings(e.ctx)); st.DefaultProviderID != nil {
+		t.Errorf("naming a provider chose a default: %v", *st.DefaultProviderID)
+	}
+
+	// With a default: omitted or null uses it; a named saved or environment
+	// provider is used instead, and the default stays.
+	e.setDefault(t, work.ID)
+	for _, op := range ops {
+		for _, extra := range []string{"", `,"providerId":null`} {
+			usedBy(op+" with the default", must(run(op, extra)), work.ID, "sk-ant-work-1111")
+		}
+		usedBy(op+" naming another", must(run(op, named(home.ID))), home.ID, "sk-ant-home-2222")
+		usedBy(op+" naming the environment's", must(run(op, named("  env-anthropic "))), "env-anthropic", "sk-ant-env-7777")
+	}
+	// A revision uses the provider it names.
+	u := must(run("draft", `,"instruction":"make it harder","previousDraft":{"title":"Old"}`+named(home.ID)))
+	usedBy("a revision", u, home.ID, "sk-ant-home-2222")
+	if st := must(e.app.GetAISettings(e.ctx)); st.DefaultProviderID == nil || *st.DefaultProviderID != work.ID {
+		t.Errorf("naming a provider changed the default: %+v", st.DefaultProviderID)
+	}
+	for id, want := range map[string]int64{work.ID: 6, home.ID: 7, "env-anthropic": 3, noKey.ID: 0} {
+		if n := e.usageOf(t, id).AllTime.Requests; n != want {
+			t.Errorf("provider %s counted %d requests, want %d", id, n, want)
+		}
+	}
+
+	// An unknown, unready or blank provider is rejected before any request.
+	configs, reqs := len(e.ai.Configs()), len(e.ai.Requests())
+	for _, op := range ops {
+		for extra, msg := range map[string]string{
+			named("nope"):   "unknown provider",
+			named(""):       "unknown provider",
+			named(noKey.ID): "the provider is not ready — it needs an API key",
+		} {
+			_, err := run(op, extra)
+			if ae := wantCode(t, err, app.CodeValidation); ae.Fields["providerId"] != msg {
+				t.Errorf("%s %s: fields %v", op, extra, ae.Fields)
+			}
+		}
+	}
+	if len(e.ai.Configs()) != configs || len(e.ai.Requests()) != reqs {
+		t.Error("a rejected provider was asked")
 	}
 }
 

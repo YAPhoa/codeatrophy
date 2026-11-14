@@ -161,6 +161,8 @@ to show.
     "maxApiKeyChars": 1000,
     "maxAiProviders": 20,
     "maxAiProviderNameChars": 60,
+    "minAiTimeoutSeconds": 10,
+    "maxAiTimeoutSeconds": 300,
     "maxBundleNameChars": 200,
     "maxBundleDescriptionChars": 5000,
     "maxSolutionsPerItem": 50,
@@ -183,7 +185,9 @@ to show.
   `maxPageSize` is the largest `limit`. `maxPreviousDraftBytes` bounds the
   re-encoded `previousDraft` of a draft or variant revision.
   `maxModelIdChars`, `maxApiKeyChars`, `maxAiProviders` and
-  `maxAiProviderNameChars` bound [AI providers](#ai-settings).
+  `maxAiProviderNameChars` bound [AI providers](#ai-settings);
+  `minAiTimeoutSeconds` and `maxAiTimeoutSeconds` bound the request timeout
+  set there.
   `maxBundleNameChars` applies to an export's `name` and `author`,
   `maxBundleDescriptionChars` to its `description`. `maxImportUncompressedBytes`
   and `maxImportEntries` bound the contents of an uploaded bundle
@@ -848,12 +852,19 @@ Query: `mode` (optional filter), `limit`, `offset`. Newest first. Returns
 
 ## AI
 
-These endpoints call the default AI provider (see [AI settings](#ai-settings))
+These endpoints call an AI provider (see [AI settings](#ai-settings))
 synchronously and can take from a few seconds to a couple of minutes. They
 never write to the library; the client saves results through the item and
 test-case endpoints after the user has reviewed them. All return
-`503 ai_unavailable` when no default provider is chosen and ready, and `502 upstream_error`
-when the provider fails or returns output that does not validate.
+`502 upstream_error` when the provider fails or returns output that does not
+validate.
+
+Each of them takes an optional `providerId`: the provider to use for this
+request, with the model saved on it. It must name a provider that is
+`ready` (`422` on `providerId` otherwise), and it does not change the
+default. Without it, or with `null`, the default provider is used, and the
+answer is `503 ai_unavailable` when no default is chosen and ready. A
+request that names a provider works whether or not there is a default.
 
 If the client disconnects, the server cancels the provider request. Operators
 who put a reverse proxy in front of the server must raise its read timeout for
@@ -892,6 +903,7 @@ Turn rough input into a complete item draft.
 - `instruction` — at most 2000 characters.
 - `largeTestCase` — boolean, default `false`: also build a
   [large test case](#large-test-case). Ignored for a reading.
+- `providerId` — optional; the [provider](#ai) to use instead of the default.
 
 Response:
 
@@ -1008,6 +1020,8 @@ the same idea on, or a reading reworked for a different angle.
 ```
 
 `styleId` is optional and selects a [style preset](#style-presets).
+`providerId` is optional and names the [provider](#ai) to use instead of the
+default.
 `largeTestCase` (boolean, default `false`) asks for a
 [large test case](#large-test-case), as for a draft.
 `instruction` is at most 2000 characters. `previousDraft` is an optional
@@ -1051,6 +1065,7 @@ Propose test cases for an existing problem.
   For a `function` problem the language must have a harness (`422`), and the
   reference solution is the solution part only.
 - `instruction` — optional, at most 2000 characters.
+- `providerId` — optional; the [provider](#ai) to use instead of the default.
 - `422` for a reading.
 
 Response:
@@ -1270,6 +1285,8 @@ bundles and are not available over MCP.
 ```json
 {
   "defaultProviderId": "...",
+  "timeoutSeconds": 300,
+  "defaultTimeoutSeconds": 300,
   "providers": [ AiProvider ],
   "kinds": {
     "anthropic": { "defaultModel": "claude-opus-5-5", "defaultBaseUrl": "https://api.anthropic.com", "keyRequired": true },
@@ -1291,16 +1308,31 @@ bundles and are not available over MCP.
   been removed is reported as `null`.
 - `kinds[kind].keyRequired` is whether a key is always required for the kind;
   see `ready` for the conditional case.
+- `timeoutSeconds` is the request timeout: how long one request to a
+  provider may take before the server gives up with `502 upstream_error`. It
+  applies to every provider and every AI endpoint. It is the saved value, or
+  `defaultTimeoutSeconds` when none is saved.
+- `defaultTimeoutSeconds` is the value of `CODEATROPHY_AI_TIMEOUT` in whole
+  seconds (300 unless set). It is not clamped to the limits of the saved
+  value.
 
 ### `PUT /settings/ai`
 
 ```json
-{ "defaultProviderId": "..." }
+{ "defaultProviderId": "...", "timeoutSeconds": 120 }
 ```
 
-Chooses the default provider; `null` turns AI features off and keeps every
-provider. An unknown id, or a provider that is not `ready`, is `422`. Returns
-the same body as `GET /settings/ai`.
+A merge update: a field left out keeps its value. Returns the same body as
+`GET /settings/ai`.
+
+- `defaultProviderId` chooses the default provider; `null` turns AI features
+  off and keeps every provider. An unknown id, or a provider that is not
+  `ready`, is `422`.
+- `timeoutSeconds` sets the request timeout: an integer from
+  `limits.minAiTimeoutSeconds` to `limits.maxAiTimeoutSeconds`, `422`
+  otherwise. `null` removes the saved value, so `defaultTimeoutSeconds`
+  applies again. The new value applies from the next request; a request
+  already under way keeps the timeout it started with.
 
 ### Providers
 
@@ -1348,6 +1380,8 @@ The test does two things:
 1. It asks the service for its model list.
 2. If a model is configured — given here, saved on the provider, or the
    kind's default — it makes one minimal generation request with that model.
+   The request is given up after 90 seconds, or after the
+   [request timeout](#get-settingsai) when that is shorter.
 
 ```json
 {
