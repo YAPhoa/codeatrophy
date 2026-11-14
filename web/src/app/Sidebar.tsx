@@ -5,8 +5,6 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpen,
-  ChevronDown,
-  ChevronRight,
   Code2,
   Download,
   FolderPlus,
@@ -41,6 +39,7 @@ import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
 import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
 import { Kbd } from '../ui/misc';
+import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
 
 /** MIME type used when dragging library rows onto a collection. */
@@ -147,7 +146,7 @@ function CollectionTreeNode({
             aria-label={`Collections inside ${c.name}`}
             onClick={() => toggle(c.id)}
           >
-            {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            <ExpandChevron open={!isCollapsed} />
           </button>
         ) : (
           <span className="nav-twisty" aria-hidden="true" />
@@ -180,12 +179,14 @@ function CollectionTreeNode({
           ]}
         />
       </div>
-      {hasChildren && !isCollapsed && (
-        <ul>
-          {node.children.map((child) => (
-            <CollectionTreeNode key={child.collection.id} node={child} all={all} collapsed={collapsed} toggle={toggle} activeId={activeId} />
-          ))}
-        </ul>
+      {hasChildren && (
+        <Collapse open={!isCollapsed}>
+          <ul>
+            {node.children.map((child) => (
+              <CollectionTreeNode key={child.collection.id} node={child} all={all} collapsed={collapsed} toggle={toggle} activeId={activeId} />
+            ))}
+          </ul>
+        </Collapse>
       )}
     </li>
   );

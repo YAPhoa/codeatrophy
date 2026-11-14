@@ -145,7 +145,8 @@ export function Shell() {
           onOpenPalette={openPalette}
           onOpenShortcuts={() => setShortcutsOpen(true)}
         />
-        {drawerOpen && <div className="drawer-scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />}
+        {/* Always there on narrow screens, so it can fade out as the drawer closes. */}
+        <div className={cx('drawer-scrim', drawerOpen && 'is-open')} onClick={() => setDrawerOpen(false)} aria-hidden="true" />
         <main id="main" className="main" tabIndex={-1} inert={drawer}>
           <Suspense fallback={<PageLoading />}>
             <Outlet />

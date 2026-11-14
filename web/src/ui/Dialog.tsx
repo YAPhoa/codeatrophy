@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Button, IconButton, cx } from './Button';
+import { exitOnRemove } from '../lib/motion';
 
 interface DialogProps {
   open: boolean;
@@ -107,6 +108,7 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
 
   return createPortal(
     <div
+      ref={exitOnRemove}
       className="dialog-backdrop"
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;

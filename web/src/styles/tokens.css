@@ -24,6 +24,18 @@
   --control-h: 30px;
   --control-h-sm: 24px;
 
+  /* Motion. Things that open take --duration-fast and close in --duration-quick;
+     lib/motion.ts reads --duration-quick to know how long a closing overlay
+     stays mounted. Under reduced motion base.css cuts every duration to nil. */
+  --duration-hover: 120ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --scale-modal: 0.96;
+  --scale-popover: 0.97;
+
   color-scheme: light;
 
   --bg: #f5f5f2;

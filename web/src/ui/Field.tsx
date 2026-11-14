@@ -1,6 +1,7 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton, cx } from './Button';
+import { useSlidingIndicator } from '../lib/motion';
 
 interface FieldProps {
   label: string;
@@ -175,8 +176,9 @@ interface SegmentedProps<T extends string> {
 /** A compact single-choice control, exposed as a radio group. */
 export function Segmented<T extends string>({ label, value, onChange, options, size = 'md', className }: SegmentedProps<T>) {
   const name = useId();
+  const ref = useSlidingIndicator<HTMLDivElement>('.segmented-option.is-selected');
   return (
-    <div role="radiogroup" aria-label={label} className={cx('segmented', size === 'sm' && 'segmented-sm', className)}>
+    <div ref={ref} role="radiogroup" aria-label={label} className={cx('segmented', size === 'sm' && 'segmented-sm', className)}>
       {options.map((o) => (
         <label key={o.value} className={cx('segmented-option', value === o.value && 'is-selected', o.disabled && 'is-disabled')} title={o.title}>
           <input

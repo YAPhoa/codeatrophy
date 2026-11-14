@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Copy, Info, Loader2, RotateCw, XCircle } from 'lu
 import type { Tone } from '../lib/format';
 import { describeError } from '../lib/errors';
 import { Button, cx } from './Button';
+import { useSlidingIndicator } from '../lib/motion';
 
 export function Badge({ tone = 'neutral', children, title, className }: { tone?: Tone; children: ReactNode; title?: string; className?: string }) {
   return (
@@ -216,8 +217,10 @@ interface TabsProps<T extends string> {
 
 /** A tab list with roving focus (arrow keys). Render the panel yourself with `tabPanelProps`. */
 export function Tabs<T extends string>({ label, value, onChange, tabs, className, idBase }: TabsProps<T>) {
+  const ref = useSlidingIndicator<HTMLDivElement>(TAB_SELECTED);
   return (
     <div
+      ref={ref}
       role="tablist"
       aria-label={label}
       className={cx('tabs', className)}
@@ -250,6 +253,9 @@ export function Tabs<T extends string>({ label, value, onChange, tabs, className
     </div>
   );
 }
+
+/** The selected tab, for the underline that slides between tabs (see `useSlidingIndicator`). */
+export const TAB_SELECTED = '.tab.is-selected';
 
 export function tabPanelProps(idBase: string, value: string) {
   return { role: 'tabpanel' as const, id: `${idBase}-panel-${value}`, 'aria-labelledby': `${idBase}-tab-${value}` };

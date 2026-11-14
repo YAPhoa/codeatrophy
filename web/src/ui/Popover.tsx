@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 import { Check } from 'lucide-react';
 import { Button, cx, type ButtonProps } from './Button';
+import { exitOnRemove } from '../lib/motion';
 
 interface PopoverProps {
   anchorRef: RefObject<HTMLElement | null>;
@@ -36,7 +37,15 @@ interface PopoverProps {
  */
 export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth, className, role, label, id, children, noAutoFocus }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; minWidth?: number; maxHeight: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; minWidth?: number; maxHeight: number; origin: string } | null>(null);
+  const attach = useCallback((node: HTMLDivElement | null) => {
+    ref.current = node;
+    const exit = exitOnRemove(node);
+    return () => {
+      ref.current = null;
+      exit?.();
+    };
+  }, []);
 
   const place = useCallback(() => {
     const anchor = anchorRef.current;
@@ -57,7 +66,9 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
     let left = align === 'end' ? a.right - width : a.left;
     left = Math.max(margin, Math.min(left, vw - width - margin));
     const top = openUp ? a.top - gap - height : a.bottom + gap;
-    setPos({ top, left, minWidth: matchWidth ? a.width : undefined, maxHeight });
+    // It grows out of the corner nearest its anchor.
+    const origin = `${align === 'end' ? 'right' : 'left'} ${openUp ? 'bottom' : 'top'}`;
+    setPos({ top, left, minWidth: matchWidth ? a.width : undefined, maxHeight, origin });
   }, [anchorRef, align, matchWidth]);
 
   useLayoutEffect(() => {
@@ -105,7 +116,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
 
   return createPortal(
     <div
-      ref={ref}
+      ref={attach}
       id={id}
       role={role}
       aria-label={label}
@@ -116,6 +127,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
         left: pos?.left ?? 0,
         minWidth: pos?.minWidth,
         maxHeight: pos?.maxHeight,
+        transformOrigin: pos?.origin,
         visibility: pos ? 'visible' : 'hidden',
       }}
       onKeyDown={onKeyDown}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Download, Trash2 } from 'lucide-react';
+import { Download, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { qk, useAiLog, useAiLogEntry, useAiSettings } from '../../api/queries';
 import type { AiLogDetail, AiLogEntry, AiLogFilters, AiLogStatus, AiOperation } from '../../api/types';
@@ -11,6 +11,7 @@ import { errorLine, sentence } from '../../lib/errors';
 import { absoluteTime, formatDuration, formatTokens, plural, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
+import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { Dialog } from '../../ui/Dialog';
 import { SelectField } from '../../ui/Field';
 import { Badge, ErrorState, PageLoading } from '../../ui/misc';
@@ -158,7 +159,7 @@ function LogRow({ entry, open, onToggle }: { entry: AiLogEntry; open: boolean; o
   return (
     <li className={cx('log-entry', open && 'is-open')}>
       <button type="button" className="log-row" aria-expanded={open} onClick={onToggle}>
-        {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+        <ExpandChevron open={open} />
         <span className="log-what" title={what}>
           <span className="truncate">
             <strong>{OPERATION_LABEL[entry.operation]}</strong>
@@ -193,7 +194,9 @@ function LogRow({ entry, open, onToggle }: { entry: AiLogEntry; open: boolean; o
           </time>
         </span>
       </button>
-      {open && <LogDetail entry={entry} />}
+      <Collapse open={open}>
+        <LogDetail entry={entry} />
+      </Collapse>
     </li>
   );
 }

@@ -663,7 +663,10 @@ button.nav-twisty:hover {
     z-index: 150;
     width: min(300px, 86vw);
     transform: translateX(-102%);
-    transition: transform 0.18s ease;
+    /* Closing is quicker than opening; visibility waits for the slide out to finish. */
+    transition:
+      transform var(--duration-fast) var(--ease-out),
+      visibility 0s linear var(--duration-fast);
     box-shadow: var(--shadow-dialog);
     visibility: hidden;
     overscroll-behavior: contain;
@@ -672,6 +675,9 @@ button.nav-twisty:hover {
   .sidebar.is-open {
     transform: none;
     visibility: visible;
+    transition:
+      transform var(--duration-medium) var(--ease-out),
+      visibility 0s;
   }
 
   .sidebar-close {
@@ -687,6 +693,19 @@ button.nav-twisty:hover {
     inset: 0;
     z-index: 140;
     background: var(--overlay);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity var(--duration-fast) var(--ease-out),
+      visibility 0s linear var(--duration-fast);
+  }
+
+  .drawer-scrim.is-open {
+    opacity: 1;
+    visibility: visible;
+    transition:
+      opacity var(--duration-medium) var(--ease-out),
+      visibility 0s;
   }
 
   .page {

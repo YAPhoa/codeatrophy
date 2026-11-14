@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ChevronRight, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
+import { AlertTriangle, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { qk, useItem, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
 import type { AiTestCasesResponse, Item, ProposedTestCase } from '../../api/types';
@@ -12,6 +12,7 @@ import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
 import { textFilename } from '../../lib/largeText';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
+import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { DiffView } from '../../ui/DiffView';
 import { Checkbox, Field, NumberStepper, SelectField, TextAreaField } from '../../ui/Field';
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
@@ -447,7 +448,7 @@ function Generator({ item }: { item: Item }) {
                           onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))}
                         />
                         <button type="button" className="proposal-main" aria-expanded={isOpen} onClick={() => toggleOpen(i)}>
-                          {isOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                          <ExpandChevron open={isOpen} />
                           <span className="proposal-text">
                             <span className="proposal-name">{c.name}</span>
                             <span className="proposal-rationale">{c.rationale}</span>
@@ -460,7 +461,7 @@ function Generator({ item }: { item: Item }) {
                           Sample
                         </label>
                       </div>
-                      {isOpen && (
+                      <Collapse open={isOpen}>
                         <div className="proposal-detail">
                           {c.error && (
                             <Callout tone="danger" title="The solution did not produce an output for this input">
@@ -484,7 +485,7 @@ function Generator({ item }: { item: Item }) {
                             </div>
                           )}
                         </div>
-                      )}
+                      </Collapse>
                     </li>
                   );
                 })}

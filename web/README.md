@@ -237,5 +237,12 @@ A few conventions worth knowing:
 - **Colours are tokens.** Use the custom properties in
   `src/styles/tokens.css` so both themes stay correct, and check contrast in
   light and dark when adding one.
+- **Motion is tokens too.** Durations and easing come from the motion tokens
+  in `src/styles/tokens.css`: things open in `--duration-fast` and close in
+  `--duration-quick`. Overlays play their exit when React removes them:
+  dialogs, popovers and the palette through `exitOnRemove`
+  (`src/lib/motion.ts`), opening rows through `Collapse` (`src/ui`). Neither waits
+  under reduced motion, where `base.css` also cuts every CSS duration to nil.
+  Keep list rows, menu items and other keyboard-driven highlights instant.
 - **Unit tests cover logic, not layout**: the API client, the mock, and the
   modules in `src/lib`. The Playwright suite covers the main flows end to end.

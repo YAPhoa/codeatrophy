@@ -8,6 +8,7 @@ import { useNewItemHref } from '../lib/newItem';
 import { resolveTheme, setThemePreference, getThemePreference } from '../lib/theme';
 import { cx } from '../ui/Button';
 import { Spinner } from '../ui/misc';
+import { exitOnRemove } from '../lib/motion';
 
 interface Entry {
   key: string;
@@ -114,6 +115,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <div
+      ref={exitOnRemove}
       className="dialog-backdrop palette-backdrop"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();

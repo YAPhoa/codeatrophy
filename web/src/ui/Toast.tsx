@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { errorLine } from '../lib/errors';
 import { isAbort } from '../api/client';
+import { exitDuration } from '../lib/motion';
+import { cx } from './Button';
 
 type ToastKind = 'success' | 'error' | 'info';
 
@@ -16,6 +18,8 @@ interface ToastItem {
   kind: ToastKind;
   message: string;
   action?: ToastAction;
+  /** Playing its exit; it is removed once that is over. */
+  leaving?: boolean;
 }
 
 interface ToastApi {
@@ -33,7 +37,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const seq = useRef(0);
 
-  const dismiss = useCallback((id: number) => setToasts((list) => list.filter((t) => t.id !== id)), []);
+  const dismiss = useCallback((id: number) => {
+    const remove = () => setToasts((list) => list.filter((t) => t.id !== id));
+    const ms = exitDuration('--duration-medium');
+    if (ms === 0) {
+      remove();
+      return;
+    }
+    setToasts((list) => list.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    window.setTimeout(remove, ms);
+  }, []);
 
   const push = useCallback(
     (kind: ToastKind, message: string, action?: ToastAction) => {
@@ -65,24 +78,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           {toasts.map((t) => {
             const Icon = ICONS[t.kind];
             return (
-              <div key={t.id} className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : undefined}>
-                <Icon size={16} aria-hidden="true" className="toast-icon" />
-                <span className="grow">{t.message}</span>
-                {t.action && (
-                  <button
-                    type="button"
-                    className="toast-action"
-                    onClick={() => {
-                      t.action?.onClick();
-                      dismiss(t.id);
-                    }}
-                  >
-                    {t.action.label}
+              // The slot closes up the space a leaving toast held, so the rest of the stack eases into place.
+              <div key={t.id} className={cx('toast-slot', t.leaving && 'is-leaving')} inert={t.leaving}>
+                <div className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : undefined}>
+                  <Icon size={16} aria-hidden="true" className="toast-icon" />
+                  <span className="grow">{t.message}</span>
+                  {t.action && (
+                    <button
+                      type="button"
+                      className="toast-action"
+                      onClick={() => {
+                        t.action?.onClick();
+                        dismiss(t.id);
+                      }}
+                    >
+                      {t.action.label}
+                    </button>
+                  )}
+                  <button type="button" className="toast-close" aria-label="Dismiss" onClick={() => dismiss(t.id)}>
+                    <X size={14} />
                   </button>
-                )}
-                <button type="button" className="toast-close" aria-label="Dismiss" onClick={() => dismiss(t.id)}>
-                  <X size={14} />
-                </button>
+                </div>
               </div>
             );
           })}

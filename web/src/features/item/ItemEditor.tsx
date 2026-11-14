@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Eye, EyeOff, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, Eye, EyeOff, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useLimits, useMeta } from '../../api/queries';
 import type { CheckOutcome, Collection, CompareMode, Difficulty, DraftCheck, HarnessCode, ItemType, ProblemInterface, RunnerCheck } from '../../api/types';
 import { describeDraftCheck, runnerChecks } from '../../lib/checks';
@@ -11,6 +11,7 @@ import { LANGUAGES, languageLabel, languageName, sortLanguages } from '../../lib
 import { readString, writeString } from '../../lib/storage';
 import { Button, IconButton } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
+import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { Checkbox, Field, Segmented, SelectField, TextField } from '../../ui/Field';
 import { TestDataField } from '../../ui/LargeText';
 import { Markdown } from '../../ui/Markdown';
@@ -293,7 +294,7 @@ export function ItemEditor({
                   {solutionOnly && (
                     <div className={`runner${runnerOpen ? ' is-open' : ''}`}>
                       <button type="button" className="runner-toggle" aria-expanded={runnerOpen} onClick={() => setRunnerOpen((v) => !v)}>
-                        {runnerOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                        <ExpandChevron open={runnerOpen} />
                         <strong>Runner</strong>
                         <span className="chip">
                           <EyeOff size={11} aria-hidden="true" /> hidden from the solver
@@ -315,7 +316,7 @@ export function ItemEditor({
                           {sentence(runnerFailed.error ?? 'The runner did not run')}
                         </p>
                       )}
-                      {runnerOpen && (
+                      <Collapse open={runnerOpen}>
                         <div className="runner-parts">
                           <div className="io-block">
                             <div className="io-label">Before the solution</div>
@@ -344,7 +345,7 @@ export function ItemEditor({
                             </div>
                           </div>
                         </div>
-                      )}
+                      </Collapse>
                     </div>
                   )}
                 </div>

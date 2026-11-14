@@ -4,6 +4,8 @@ import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { LinkButton, cx } from '../../ui/Button';
 import { MenuButton } from '../../ui/Popover';
+import { TAB_SELECTED } from '../../ui/misc';
+import { useSlidingIndicator } from '../../lib/motion';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl } from './controls';
 import { libraryHref, useItemActions } from './itemActions';
@@ -17,6 +19,7 @@ export function ItemBar({ item }: { item: Item }) {
   const { data: collections = [] } = useCollections();
   const actions = useItemActions(item);
   const collectionActions = useCollectionActions();
+  const tabsRef = useSlidingIndicator<HTMLElement>(TAB_SELECTED);
   return (
     <header className="itembar">
       <Link to={libraryHref()} className="btn btn-ghost btn-icon" aria-label="Back to the library" title="Back to the library">
@@ -26,7 +29,7 @@ export function ItemBar({ item }: { item: Item }) {
         {item.title}
       </h1>
       <DifficultyBadge difficulty={item.difficulty} />
-      <nav className="tabs itembar-tabs" aria-label="Problem sections">
+      <nav ref={tabsRef} className="tabs itembar-tabs" aria-label="Problem sections">
         <NavLink to={`/items/${item.id}`} end className={({ isActive }) => cx('tab', isActive && 'is-selected')}>
           Solve
         </NavLink>

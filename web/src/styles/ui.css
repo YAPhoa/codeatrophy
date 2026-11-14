@@ -272,6 +272,7 @@ input[type='radio'] {
 }
 
 .segmented {
+  position: relative;
   display: inline-flex;
   padding: 2px;
   border-radius: var(--radius);
@@ -280,7 +281,32 @@ input[type='radio'] {
   flex: none;
 }
 
+/* One pill that slides to the selected option (lib/motion.ts measures it).
+   Until it is measured, the selected option draws its own. */
+.segmented[data-indicator]::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: var(--indicator-w);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transform: translateX(var(--indicator-x));
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    width var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.segmented[data-indicator] .segmented-option.is-selected {
+  background: none;
+  box-shadow: none;
+}
+
 .segmented-option {
+  position: relative;
   display: inline-flex;
   align-items: center;
   height: calc(var(--control-h) - 4px);
@@ -291,6 +317,7 @@ input[type='radio'] {
   color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
+  transition: color var(--duration-hover) ease-out;
 }
 
 .segmented-option > span {
@@ -507,6 +534,28 @@ button.chip:hover {
   background: var(--surface);
   box-shadow: var(--shadow-pop);
   max-width: min(420px, calc(100vw - 16px));
+  /* Grows out of its anchor's corner (Popover.tsx sets transform-origin). */
+  animation: popover-in var(--duration-fast) var(--ease-out);
+}
+
+/* A closing popover is a copy left in its place for the exit (exitOnRemove in lib/motion.ts). */
+.popover.is-closing {
+  animation: popover-out var(--duration-quick) var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-popover));
+  }
+}
+
+@keyframes popover-out {
+  to {
+    opacity: 0;
+    transform: scale(0.99);
+  }
 }
 
 .menu {
@@ -634,6 +683,46 @@ button.chip:hover {
   overflow: auto;
   /* Scrolling past either end stays in the dialog instead of moving the page behind it. */
   overscroll-behavior: contain;
+  /* The fade carries the dialog with it; the dialog itself only scales. */
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
+/* A closing dialog is a copy left in its place for the exit (exitOnRemove in lib/motion.ts). */
+.dialog-backdrop.is-closing {
+  animation: fade-out var(--duration-quick) var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+.dialog-backdrop > [role='dialog'] {
+  animation: modal-in var(--duration-fast) var(--ease-out);
+}
+
+.dialog-backdrop.is-closing > [role='dialog'] {
+  animation: modal-out var(--duration-quick) var(--ease-out) forwards;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    transform: scale(var(--scale-modal));
+  }
+}
+
+@keyframes modal-out {
+  to {
+    transform: scale(var(--scale-modal));
+  }
 }
 
 .dialog {
@@ -727,9 +816,47 @@ button.chip:hover {
   z-index: 400;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   width: min(400px, calc(100vw - 32px));
   pointer-events: none;
+}
+
+/* A toast sits in a one-row grid so that, as it leaves, the row closes to
+   nothing and the toasts above slide down instead of jumping. The space
+   between toasts is padding, which closes along with it. */
+.toast-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.toast-slot + .toast-slot {
+  padding-top: 8px;
+}
+
+.toast-slot > .toast {
+  min-height: 0;
+}
+
+.toast-slot.is-leaving {
+  overflow: hidden;
+  animation: toast-collapse var(--duration-medium) var(--ease-out) forwards;
+}
+
+.toast-slot.is-leaving > .toast {
+  animation: toast-out var(--duration-quick) ease-in forwards;
+}
+
+@keyframes toast-collapse {
+  to {
+    grid-template-rows: 0fr;
+    padding-top: 0;
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .toast {
@@ -743,7 +870,7 @@ button.chip:hover {
   box-shadow: var(--shadow-pop);
   pointer-events: auto;
   line-height: 1.4;
-  animation: toast-in 0.16s ease-out;
+  animation: toast-in var(--duration-fast) var(--ease-out);
 }
 
 @keyframes toast-in {
@@ -804,9 +931,32 @@ button.chip:hover {
 /* ---- Tabs ---- */
 
 .tabs {
+  position: relative;
   display: flex;
   gap: 2px;
   min-width: 0;
+}
+
+/* One underline that slides to the selected tab (lib/motion.ts measures it).
+   Until it is measured, the selected tab draws its own. */
+.tabs[data-indicator]::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  bottom: 0;
+  width: calc(var(--indicator-w) - 16px);
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  transform: translateX(var(--indicator-x));
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    width var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.tabs[data-indicator] .tab::after {
+  content: none;
 }
 
 .tab {
@@ -823,6 +973,7 @@ button.chip:hover {
   white-space: nowrap;
   text-decoration: none;
   border-radius: var(--radius-sm);
+  transition: color var(--duration-hover) ease-out;
 }
 
 .tab:hover {
@@ -1319,4 +1470,66 @@ button.chip:hover {
   margin-right: 2px;
   font-size: var(--text-sm);
   color: var(--text-3);
+}
+
+/* ---- Opening rows (ui/Collapse.tsx) ---- */
+
+/* A one-row grid whose row grows from 0fr to its content's height. Padding
+   belongs to the content inside, never to this track, or it would not close
+   all the way. */
+.collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.collapse.is-entering {
+  animation: collapse-open var(--duration-fast) var(--ease-out);
+}
+
+.collapse.is-closing {
+  animation: collapse-close var(--duration-quick) var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+.collapse-inner {
+  min-height: 0;
+}
+
+.collapse.is-moving > .collapse-inner {
+  overflow: hidden;
+}
+
+@keyframes collapse-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes collapse-close {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.expand-chevron {
+  flex: none;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.expand-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* A <details> cannot animate its height everywhere yet; its content fades in instead. */
+details[open] > :not(summary) {
+  animation: reveal-in var(--duration-fast) var(--ease-out);
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }

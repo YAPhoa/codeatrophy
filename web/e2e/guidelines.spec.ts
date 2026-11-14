@@ -320,3 +320,54 @@ test('AI activity: a row says which column each of its values belongs to', async
   const row = page.getByRole('list', { name: 'Requests' }).getByRole('button').first();
   await expect(row).toHaveAccessibleName(/Provider: .+Model: .+Tokens in: .+Tokens out: .+Time: .+When: /);
 });
+
+test('motion: a closing dialog plays its exit out of reach, then goes', async ({ page }) => {
+  await open(page, '/');
+  const opener = page.getByRole('button', { name: 'New collection' });
+  await opener.click();
+  await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
+  const closing = await page.evaluate(() => {
+    const backdrop = document.querySelector('.dialog-backdrop');
+    return backdrop && { closing: backdrop.classList.contains('is-closing'), inert: backdrop.hasAttribute('inert'), hidden: backdrop.getAttribute('aria-hidden') };
+  });
+  expect(closing).toEqual({ closing: true, inert: true, hidden: 'true' });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+});
+
+test('reduced motion: dialogs and menus close at once', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await open(page, '/');
+  await page.getByRole('button', { name: 'New collection' }).click();
+  await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(await page.locator('.dialog-backdrop').count()).toBe(0);
+
+  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(await page.locator('.popover').count()).toBe(0);
+});
+
+test('motion: the tab underline is one indicator that follows the selected tab', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+  const tabs = page.locator('.itembar-tabs');
+  const placed = () =>
+    tabs.evaluate((el) => {
+      const selected = el.querySelector<HTMLElement>('.tab.is-selected');
+      return { at: el.style.getPropertyValue('--indicator-x'), selected: selected ? `${selected.offsetLeft}px` : null };
+    });
+  await expect(tabs).toHaveAttribute('data-indicator', '');
+  let p = await placed();
+  expect(p.at).toBe(p.selected);
+  await tabs.getByRole('link', { name: /Test cases/ }).click();
+  await expect(tabs.getByRole('link', { name: /Test cases/ })).toHaveClass(/is-selected/);
+  p = await placed();
+  expect(p.at).toBe(p.selected);
+  expect(p.at).not.toBe('0px');
+});
