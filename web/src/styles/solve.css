@@ -51,7 +51,7 @@
   background: none;
   color: var(--text-2);
   font-size: var(--text-sm);
-  font-weight: 550;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }

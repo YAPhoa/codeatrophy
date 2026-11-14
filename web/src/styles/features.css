@@ -86,7 +86,7 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-3);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
   text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -368,7 +368,7 @@
 
 .item-title {
   color: var(--text);
-  font-weight: 550;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -512,7 +512,7 @@
 .input-title {
   height: 38px;
   font-size: var(--text-xl);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .body-editor {
@@ -563,7 +563,7 @@
 
 .editor-section-title {
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .editor-empty {
@@ -660,7 +660,7 @@
   background: var(--surface-3);
   color: var(--text-2);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
   flex: none;
   font-variant-numeric: tabular-nums;
 }
@@ -853,7 +853,7 @@
 }
 
 .generating-title {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .generating-time {
@@ -900,7 +900,7 @@
   border-radius: 50%;
   border: 1px solid var(--border-strong);
   font-size: var(--text-2xs);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .steps .is-current {
@@ -958,7 +958,7 @@
 
 .assumptions-head h2 {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .assumptions-progress {
@@ -1183,7 +1183,7 @@ a.usage-line:hover {
 }
 
 .mode-card-title {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .mode-card-text,
@@ -1258,7 +1258,7 @@ fieldset.stack legend {
 .saved-kicker {
   color: var(--ok);
   font-size: var(--text-sm);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .saved-meta {
@@ -1283,14 +1283,14 @@ fieldset.stack legend {
 
 .saved-solution h2 {
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .saved-next {
   margin: 26px 0 10px;
   color: var(--text-2);
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .next-cards {
@@ -1322,7 +1322,7 @@ fieldset.stack legend {
 
 .next-card h3 {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .next-card p {
@@ -1433,7 +1433,7 @@ fieldset.stack legend {
 
 .itembar-title {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: 600;
   min-width: 60px;
   flex: 0 1 auto;
 }
@@ -1507,7 +1507,7 @@ fieldset.stack legend {
   align-items: center;
   gap: 6px;
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .related-origin {
@@ -1655,7 +1655,7 @@ fieldset.stack legend {
 .no-judge h2 {
   color: var(--text);
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .no-judge p {
@@ -1772,7 +1772,7 @@ fieldset.stack legend {
   border-radius: var(--radius);
   background: var(--surface);
   font-size: var(--text-sm);
-  font-weight: 650;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1818,7 +1818,7 @@ button.case-chip:hover {
 }
 
 .verdict-text {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .case-help {
@@ -1837,7 +1837,7 @@ button.case-chip:hover {
 .io-label {
   color: var(--text-3);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1902,7 +1902,7 @@ button.case-chip:hover {
 
 .history-verdict {
   overflow: hidden;
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1962,7 +1962,7 @@ button.case-chip:hover {
 
 .reader-bar-title {
   color: var(--text-2);
-  font-weight: 550;
+  font-weight: 500;
   min-width: 0;
 }
 
@@ -2004,7 +2004,7 @@ button.case-chip:hover {
 
 .reader-head h1 {
   font-size: 30px;
-  font-weight: 720;
+  font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -2047,7 +2047,7 @@ button.case-chip:hover {
   margin-bottom: 8px;
   color: var(--text-3);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -2068,7 +2068,7 @@ button.case-chip:hover {
 .reader-outline a.is-active {
   border-left-color: var(--accent);
   color: var(--accent-text);
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .reader-notes {
@@ -2090,7 +2090,7 @@ button.case-chip:hover {
 
 .reader-notes-head h2 {
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 @media (max-width: 1100px) {
@@ -2130,7 +2130,7 @@ button.case-chip:hover {
 
 .conflict h3 {
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .conflict-overlap {
@@ -2595,7 +2595,7 @@ button.case-chip:hover {
 .import-counts dt {
   color: var(--text-3);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2704,7 +2704,7 @@ button.case-chip:hover {
   margin-bottom: 8px;
   padding: 0 9px;
   font-size: var(--text-lg);
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .settings-nav .about {
@@ -2833,7 +2833,7 @@ button.case-chip:hover {
 
 .style-count.is-over {
   color: var(--danger);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .style-fill {

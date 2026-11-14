@@ -761,7 +761,7 @@ button.chip:hover {
 
 .dialog-header h2 {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .dialog-body {
@@ -1065,7 +1065,7 @@ button.chip:hover {
 
 .empty-title {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .empty-text {
@@ -1107,7 +1107,7 @@ button.chip:hover {
 }
 
 .callout-title {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .callout-text {
