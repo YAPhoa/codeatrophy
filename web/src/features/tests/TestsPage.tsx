@@ -176,7 +176,7 @@ function TestsManager({ item }: { item: Item }) {
 
   const select = async (id: string) => {
     if (id === selectedId) return;
-    if (dirty && !(await confirm({ title: 'Discard changes to this case?', confirmLabel: 'Discard', danger: true }))) return;
+    if (dirty && !(await confirm({ title: 'Discard changes to this case?', confirmLabel: 'Discard changes', danger: true }))) return;
     setCaseError(null);
     setSelectedId(id);
     const c = cases.find((x) => x.id === id);
@@ -247,7 +247,7 @@ function TestsManager({ item }: { item: Item }) {
       return;
     }
     if (!selected) return;
-    if (!(await confirm({ title: `Delete “${selected.name || 'this case'}”?`, confirmLabel: 'Delete', danger: true }))) return;
+    if (!(await confirm({ title: `Delete “${selected.name || 'this case'}”?`, confirmLabel: 'Delete test case', danger: true }))) return;
     setBusy(true);
     try {
       await api.testCases.remove(selected.id);
@@ -375,7 +375,7 @@ function TestsManager({ item }: { item: Item }) {
     const ok = await confirm({
       title: `Delete ${plural(n, 'test case')}?`,
       body: `${n === 1 ? 'It does' : 'They do'} not match the reference solution, or it fails on ${n === 1 ? 'it' : 'them'}.`,
-      confirmLabel: 'Delete',
+      confirmLabel: `Delete ${plural(n, 'test case')}`,
       danger: true,
     });
     if (!ok) return;

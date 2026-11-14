@@ -226,7 +226,7 @@ export function SolveView({ item }: { item: Item }) {
     const ok = await confirm({
       title: 'Reset to the starter code?',
       body: `Your ${languageName(language)} code for this problem is replaced${target ? ' by the starter code' : ' by an empty file'}.`,
-      confirmLabel: 'Reset',
+      confirmLabel: 'Reset code',
       danger: true,
     });
     if (!ok) return;
@@ -698,6 +698,7 @@ export function SolveView({ item }: { item: Item }) {
                   className="input textarea mono"
                   rows={5}
                   spellCheck={false}
+                  autoComplete="off"
                   value={customInput}
                   onChange={(e) => setCustomInput(e.target.value)}
                   placeholder={solutionOnly ? 'One JSON value per line, one per argument…' : 'Type or paste the input your program should read…'}

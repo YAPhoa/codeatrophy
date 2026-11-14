@@ -215,7 +215,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
             onChange({ ...filters, q: '', type: null, status: [], difficulty: [], tags: [], favorite: false, uncollected: false });
           }}
         >
-          Clear
+          Clear filters
         </Button>
       )}
 
@@ -229,7 +229,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         title="Sort"
         items={sorts.map((s) => ({
           label: SORT_LABEL[s],
-          hint: s === sort ? 'current' : undefined,
+          selected: s === sort,
           onSelect: () => onChange({ ...filters, sort: s, order: null }),
         }))}
       >

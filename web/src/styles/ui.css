@@ -282,8 +282,9 @@ input[type='radio'] {
   flex: none;
 }
 
-/* One pill that slides to the selected option (lib/motion.ts measures it).
-   Until it is measured, the selected option draws its own. */
+/* One pill that slides to the selected option (lib/motion.ts measures it
+   and plays the slide on transform only). Until it is measured, the selected
+   option draws its own. */
 .segmented[data-indicator]::before {
   content: '';
   position: absolute;
@@ -295,9 +296,7 @@ input[type='radio'] {
   background: var(--surface);
   box-shadow: 0 0 0 1px var(--border-strong);
   transform: translateX(var(--indicator-x));
-  transition:
-    transform var(--duration-fast) var(--ease-out),
-    width var(--duration-fast) var(--ease-out);
+  transform-origin: left;
   pointer-events: none;
 }
 
@@ -582,10 +581,18 @@ button.chip:hover {
 }
 
 .menu-item:hover,
-.menu-item:focus-visible,
 .menu-item.is-active {
   background: var(--surface-3);
-  outline: none;
+}
+
+/* Keyboard focus keeps a ring so it stays distinct from the row under the
+   pointer; drawn inside so the menu's scroll box does not clip it. .is-active
+   is the option a combobox's arrow keys reached (aria-activedescendant), which
+   is keyboard focus in all but name. */
+.menu-item:focus-visible,
+.menu-item.is-active {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .menu-item[aria-disabled='true'] {
@@ -956,8 +963,9 @@ button.chip:hover {
   min-width: 0;
 }
 
-/* One underline that slides to the selected tab (lib/motion.ts measures it).
-   Until it is measured, the selected tab draws its own. */
+/* One underline that slides to the selected tab (lib/motion.ts measures it
+   and plays the slide on transform only). Until it is measured, the selected
+   tab draws its own. */
 .tabs[data-indicator]::after {
   content: '';
   position: absolute;
@@ -968,9 +976,7 @@ button.chip:hover {
   border-radius: 2px 2px 0 0;
   background: var(--accent);
   transform: translateX(var(--indicator-x));
-  transition:
-    transform var(--duration-fast) var(--ease-out),
-    width var(--duration-fast) var(--ease-out);
+  transform-origin: left;
   pointer-events: none;
 }
 
@@ -1499,6 +1505,10 @@ button.chip:hover {
 .collapse {
   display: grid;
   grid-template-rows: 1fr;
+  /* Without an explicit column the implicit auto track grows to the widest
+     unwrapped line inside (a long nested collection name), so truncation
+     inside the content never kicks in. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .collapse.is-entering {
@@ -1512,6 +1522,7 @@ button.chip:hover {
 
 .collapse-inner {
   min-height: 0;
+  min-width: 0;
 }
 
 .collapse.is-moving > .collapse-inner {
@@ -1529,6 +1540,23 @@ button.chip:hover {
   to {
     grid-template-rows: 0fr;
     opacity: 0;
+  }
+}
+
+/* Heavy content (Collapse's `heavy`): fades and settles in, transform and
+   opacity only, and closes at once. */
+.collapse-fade {
+  min-width: 0;
+}
+
+.collapse-fade.is-entering {
+  animation: collapse-fade-in var(--duration-fast) var(--ease-out);
+}
+
+@keyframes collapse-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
 }
 

@@ -4,15 +4,28 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
 
+// Tokens are read from the stylesheet once and kept: a style read forces a
+// style recalculation, and these are read while rendering. Nothing is kept
+// while the stylesheet is missing (in unit tests), so a later read still finds it.
+const tokenCache = new Map<string, string>();
+
+function token(name: string): string {
+  const cached = tokenCache.get(name);
+  if (cached !== undefined) return cached;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (value) tokenCache.set(name, value);
+  return value;
+}
+
 /**
  * How long something closing plays its exit before it unmounts, in ms: a
  * duration token, `--duration-quick` unless told otherwise. Nil under reduced
  * motion, and where the stylesheet is not loaded (in unit tests), so it goes
  * at once.
  */
-export function exitDuration(token = '--duration-quick'): number {
+export function exitDuration(name = '--duration-quick'): number {
   if (prefersReducedMotion()) return 0;
-  const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(token));
+  const ms = parseFloat(token(name));
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
 
@@ -95,34 +108,71 @@ export function exitOnRemove(node: HTMLElement | null): (() => void) | undefined
  * offset and width to `--indicator-x` and `--indicator-w` on the container and
  * marks it `data-indicator`; the stylesheet draws the indicator from those.
  * With nothing selected the mark comes off and each child draws its own.
+ *
+ * It measures only when something could have moved it: on mount, when a
+ * child's class changes (the selection), when children come or go, and when
+ * the container or a child changes size. Re-renders that change none of
+ * those (a parent typing into a search box) read no layout.
+ *
+ * The move itself animates only `transform`: the indicator takes its new
+ * width at once and plays from where it was, scaled to its old width, back to
+ * scale 1 (`pseudo` names the pseudo-element that draws it, and `inset` how
+ * much narrower than the child it is drawn).
  */
-export function useSlidingIndicator<T extends HTMLElement>(selector: string) {
+export function useSlidingIndicator<T extends HTMLElement>(selector: string, { pseudo, inset = 0 }: { pseudo: '::before' | '::after'; inset?: number }) {
   const ref = useRef<T>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el) placeIndicator(el, selector);
-  });
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => placeIndicator(el, selector));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [selector]);
+    if (!el) return;
+    const place = () => placeIndicator(el, selector, pseudo, inset);
+    place();
+    if (typeof MutationObserver === 'undefined') return;
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    const observeSizes = () => {
+      if (!ro) return;
+      ro.disconnect();
+      ro.observe(el);
+      for (const child of el.children) ro.observe(child);
+    };
+    observeSizes();
+    const mo = new MutationObserver((records) => {
+      if (records.some((r) => r.type === 'childList' && r.target === el)) observeSizes();
+      place();
+    });
+    mo.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, [selector, pseudo, inset]);
 
   return ref;
 }
 
-function placeIndicator(container: HTMLElement, selector: string) {
+const placed = new WeakMap<HTMLElement, { x: number; w: number }>();
+
+function placeIndicator(container: HTMLElement, selector: string, pseudo: string, inset: number) {
   const selected = container.querySelector<HTMLElement>(selector);
   if (!selected || selected.offsetWidth === 0) {
     container.removeAttribute('data-indicator');
+    placed.delete(container);
     return;
   }
-  container.style.setProperty('--indicator-x', `${selected.offsetLeft}px`);
-  container.style.setProperty('--indicator-w', `${selected.offsetWidth}px`);
+  const x = selected.offsetLeft;
+  const w = selected.offsetWidth;
+  const prev = placed.get(container);
+  if (prev && prev.x === x && prev.w === w) return;
+  placed.set(container, { x, w });
+  container.style.setProperty('--indicator-x', `${x}px`);
+  container.style.setProperty('--indicator-w', `${w}px`);
   // The indicator is created in place the first time, so it does not slide in from the edge.
   container.setAttribute('data-indicator', '');
+  const ms = exitDuration('--duration-fast');
+  if (!prev || ms === 0 || typeof container.animate !== 'function') return;
+  const scale = Math.max(0, prev.w - inset) / Math.max(1, w - inset);
+  container.animate(
+    [{ transform: `translateX(${prev.x}px) scaleX(${scale})` }, { transform: `translateX(${x}px) scaleX(1)` }],
+    { duration: ms, easing: token('--ease-out') || 'ease-out', pseudoElement: pseudo },
+  );
 }

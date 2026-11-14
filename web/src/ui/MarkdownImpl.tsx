@@ -14,7 +14,9 @@ import { headingSlugs } from './markdownPlugins';
 // react-markdown's default URL filter drops `javascript:` and similar links.
 const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath];
 const rehypePlugins: Options['rehypePlugins'] = [
-  [rehypeKatex, { throwOnError: false, strict: 'ignore', trust: false }],
+  // KaTeX writes errorColor inline on a command it will not render; its own
+  // #cc0000 is too faint on the dark theme.
+  [rehypeKatex, { throwOnError: false, strict: 'ignore', trust: false, errorColor: 'var(--danger)' }],
   [rehypeHighlight, { detect: false }],
   headingSlugs,
 ];

@@ -114,7 +114,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
   };
 
   const cancel = async () => {
-    if (dirty && !(await confirm({ title: solution ? 'Discard changes to this solution?' : 'Discard this solution?', confirmLabel: 'Discard', danger: true }))) return;
+    if (dirty && !(await confirm({ title: solution ? 'Discard changes to this solution?' : 'Discard this solution?', confirmLabel: solution ? 'Discard changes' : 'Discard solution', danger: true }))) return;
     onCancel();
   };
 

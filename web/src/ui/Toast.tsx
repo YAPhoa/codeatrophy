@@ -33,11 +33,30 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 const ICONS = { success: CheckCircle2, error: AlertCircle, info: Info };
 
+/** A toast's time left: running while `handle` is set, paused otherwise. */
+interface Countdown {
+  handle: number;
+  deadline: number;
+  remaining: number;
+}
+
+/** The least time a toast gets back when the pointer or focus leaves the stack. */
+const MIN_RESUME_MS = 2000;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const seq = useRef(0);
+  // Each toast's countdown. While the pointer is over the stack or focus is
+  // in it, every countdown is paused, so an Undo cannot slip away under the
+  // pointer; it picks up again on leaving, with at least MIN_RESUME_MS left.
+  const timers = useRef(new Map<number, Countdown>());
+  const hovered = useRef(false);
+  const focused = useRef(false);
 
   const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer?.handle) window.clearTimeout(timer.handle);
+    timers.current.delete(id);
     const remove = () => setToasts((list) => list.filter((t) => t.id !== id));
     const ms = exitDuration('--duration-medium');
     if (ms === 0) {
@@ -48,13 +67,45 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     window.setTimeout(remove, ms);
   }, []);
 
+  const start = useCallback(
+    (id: number, timer: Countdown) => {
+      timer.deadline = Date.now() + timer.remaining;
+      timer.handle = window.setTimeout(() => dismiss(id), timer.remaining);
+    },
+    [dismiss],
+  );
+
+  const setPaused = useCallback(() => {
+    const paused = hovered.current || focused.current;
+    for (const [id, timer] of timers.current) {
+      if (paused && timer.handle) {
+        window.clearTimeout(timer.handle);
+        timer.handle = 0;
+        timer.remaining = Math.max(0, timer.deadline - Date.now());
+      } else if (!paused && !timer.handle) {
+        timer.remaining = Math.max(timer.remaining, MIN_RESUME_MS);
+        start(id, timer);
+      }
+    }
+  }, [start]);
+
   const push = useCallback(
     (kind: ToastKind, message: string, action?: ToastAction) => {
       const id = ++seq.current;
-      setToasts((list) => [...list.slice(-3), { id, kind, message, action }]);
-      window.setTimeout(() => dismiss(id), kind === 'error' ? 9000 : action ? 7000 : 4000);
+      setToasts((list) => {
+        // The oldest drop off the stack; their countdowns go with them.
+        for (const old of list.slice(0, -3)) {
+          const timer = timers.current.get(old.id);
+          if (timer?.handle) window.clearTimeout(timer.handle);
+          timers.current.delete(old.id);
+        }
+        return [...list.slice(-3), { id, kind, message, action }];
+      });
+      const timer: Countdown = { handle: 0, deadline: 0, remaining: kind === 'error' ? 9000 : action ? 7000 : 4000 };
+      timers.current.set(id, timer);
+      if (!hovered.current && !focused.current) start(id, timer);
     },
-    [dismiss],
+    [start],
   );
 
   const api = useMemo<ToastApi>(
@@ -74,7 +125,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {createPortal(
         // The live region is there before any toast is, which is what gets a new one read out.
-        <div className="toasts" role="region" aria-label="Notifications" aria-live="polite">
+        <div
+          className="toasts"
+          role="region"
+          aria-label="Notifications"
+          aria-live="polite"
+          onPointerEnter={() => {
+            hovered.current = true;
+            setPaused();
+          }}
+          onPointerLeave={() => {
+            hovered.current = false;
+            setPaused();
+          }}
+          onFocus={() => {
+            focused.current = true;
+            setPaused();
+          }}
+          onBlur={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            focused.current = false;
+            setPaused();
+          }}
+        >
           {toasts.map((t) => {
             const Icon = ICONS[t.kind];
             return (

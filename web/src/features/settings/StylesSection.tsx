@@ -270,6 +270,7 @@ export function StylesSection() {
                   {...a}
                   className="input textarea"
                   rows={8}
+                  autoComplete="off"
                   value={editing.instructions}
                   onChange={(e) => setEditing({ ...editing, instructions: e.target.value })}
                   placeholder="Describe how you want statements laid out and written…"

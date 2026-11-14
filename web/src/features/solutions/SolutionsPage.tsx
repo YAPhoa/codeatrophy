@@ -104,7 +104,7 @@ function SolutionsManager({ item }: { item: Item }) {
 
   const startEditing = async (id: string) => {
     if (editing !== null && editing !== id && formDirty) {
-      const ok = await confirm({ title: 'Discard the changes you have not saved?', body: 'Another solution is open for editing, and its changes were not saved.', confirmLabel: 'Discard', danger: true });
+      const ok = await confirm({ title: 'Discard the changes you have not saved?', body: 'Another solution is open for editing, and its changes were not saved.', confirmLabel: 'Discard changes', danger: true });
       if (!ok) return;
     }
     referenceWrite.reset();
@@ -132,7 +132,7 @@ function SolutionsManager({ item }: { item: Item }) {
       body: solution.isReference
         ? 'Its code and notes are deleted. It is the reference solution, so the problem will have none until you choose another. Submissions are not affected.'
         : 'Its code and notes are deleted. Submissions are not affected.',
-      confirmLabel: 'Delete',
+      confirmLabel: 'Delete solution',
       danger: true,
     });
     if (!ok) return;

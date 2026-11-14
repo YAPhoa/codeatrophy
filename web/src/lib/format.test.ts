@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens } from './format';
+import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, withUnit } from './format';
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
@@ -102,3 +102,10 @@ describe('describeUsage', () => {
   });
 });
 
+
+describe('withUnit', () => {
+  it('groups digits and keeps the unit on the same line', () => {
+    expect(withUnit(10000, 'ms')).toBe(`${(10000).toLocaleString()}\u00a0ms`);
+    expect(withUnit('1.5', 'MB')).toBe('1.5\u00a0MB');
+  });
+});

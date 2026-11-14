@@ -316,7 +316,7 @@ export function ItemEditor({
                           {sentence(runnerFailed.error ?? 'The runner did not run')}
                         </p>
                       )}
-                      <Collapse open={runnerOpen}>
+                      <Collapse open={runnerOpen} heavy>
                         <div className="runner-parts">
                           <div className="io-block">
                             <div className="io-label">Before the solution</div>

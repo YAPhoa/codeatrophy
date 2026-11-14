@@ -22,7 +22,7 @@ import type {
   TestCaseInput,
   TestOrigin,
 } from '../api/types';
-import { formatBytes } from './format';
+import { formatBytes, formatNumber, withUnit } from './format';
 import { isLargeText } from './largeText';
 
 export interface FormTestCase {
@@ -409,10 +409,10 @@ export function validateForm(form: ItemFormState, limits: Limits | undefined): F
         errors.code = `Starter or runner code is larger than ${formatBytes(limits.maxSourceBytes)}.`;
       }
       if (!Number.isFinite(form.timeLimitMs) || form.timeLimitMs < time.min || form.timeLimitMs > time.max) {
-        errors.timeLimitMs = `Between ${time.min} and ${time.max} ms.`;
+        errors.timeLimitMs = `Between ${formatNumber(time.min)} and ${withUnit(time.max, 'ms')}.`;
       }
       if (!Number.isFinite(form.memoryLimitKb) || form.memoryLimitKb < memory.min || form.memoryLimitKb > memory.max) {
-        errors.memoryLimitKb = `Between ${memory.min / 1024} and ${memory.max / 1024} MB.`;
+        errors.memoryLimitKb = `Between ${formatNumber(memory.min / 1024)} and ${withUnit(memory.max / 1024, 'MB')}.`;
       }
       if (form.testCases.length > limits.maxTestCasesPerItem) {
         errors.testCases = `At most ${limits.maxTestCasesPerItem.toLocaleString()} test cases.`;

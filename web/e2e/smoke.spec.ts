@@ -463,7 +463,7 @@ test('verify all: a draft is checked again as edited, and a saved problem from t
   await page.getByRole('button', { name: 'Verify all' }).click();
   await expect(page.getByText(/^\d+ of \d+ match · 1 differ · 0 failed to run$/)).toBeVisible();
   await page.getByRole('button', { name: 'Discard 1 failed' }).click();
-  await page.getByRole('dialog', { name: 'Delete 1 test case?' }).getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('dialog', { name: 'Delete 1 test case?' }).getByRole('button', { name: 'Delete 1 test case' }).click();
   await expect(page.getByText('Deleted 1 test case')).toBeVisible();
   await expect(rows).toHaveCount(before - 1);
 });

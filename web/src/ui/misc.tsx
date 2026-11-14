@@ -217,7 +217,7 @@ interface TabsProps<T extends string> {
 
 /** A tab list with roving focus (arrow keys). Render the panel yourself with `tabPanelProps`. */
 export function Tabs<T extends string>({ label, value, onChange, tabs, className, idBase }: TabsProps<T>) {
-  const ref = useSlidingIndicator<HTMLDivElement>(TAB_SELECTED);
+  const ref = useSlidingIndicator<HTMLDivElement>(TAB_SELECTED, TAB_INDICATOR);
   return (
     <div
       ref={ref}
@@ -256,6 +256,9 @@ export function Tabs<T extends string>({ label, value, onChange, tabs, className
 
 /** The selected tab, for the underline that slides between tabs (see `useSlidingIndicator`). */
 export const TAB_SELECTED = '.tab.is-selected';
+
+/** How the tab underline is drawn: `.tabs::after`, 8px in from each side of the tab. */
+export const TAB_INDICATOR = { pseudo: '::after', inset: 16 } as const;
 
 export function tabPanelProps(idBase: string, value: string) {
   return { role: 'tabpanel' as const, id: `${idBase}-panel-${value}`, 'aria-labelledby': `${idBase}-tab-${value}` };

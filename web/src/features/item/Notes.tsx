@@ -110,6 +110,7 @@ export function Notes({ item }: { item: Item }) {
           name="notes"
           className="input textarea notes-text"
           aria-label="Private notes (Markdown)"
+          autoComplete="off"
           placeholder="Approach, gotchas, or things to revisit… (Markdown supported)"
           value={text}
           onChange={(e) => {

@@ -185,7 +185,7 @@ export default function CapturePage() {
     const ok = await confirm({
       title: 'Discard this draft?',
       body: 'The draft and your original input are thrown away. Nothing has been saved to the library.',
-      confirmLabel: 'Discard',
+      confirmLabel: 'Discard draft',
       danger: true,
     });
     if (ok) {
@@ -289,6 +289,7 @@ export default function CapturePage() {
           id="capture-text"
           ref={textRef}
           className="capture-text"
+          autoComplete="off"
           value={text}
           readOnly={generation.running}
           onChange={(e) => patch({ text: e.target.value })}

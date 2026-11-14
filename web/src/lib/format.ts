@@ -95,7 +95,7 @@ export function formatNumber(n: number): string {
 }
 
 /** A number and its unit, kept on one line by a non-breaking space: "10 MB". */
-function withUnit(n: string | number, unit: string): string {
+export function withUnit(n: string | number, unit: string): string {
   return `${typeof n === 'number' ? wholeFmt.format(n) : n}\u00a0${unit}`;
 }
 

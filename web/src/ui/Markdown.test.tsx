@@ -39,6 +39,12 @@ describe('Markdown rendering of untrusted input', () => {
     expect(html).not.toMatch(/href="javascript:/i);
   });
 
+  it('colours a TeX command it will not render with the theme, not KaTeX\'s fixed red', () => {
+    const html = render('$\\href{https://example.com}{x}$');
+    expect(html).toContain('color:var(--danger)');
+    expect(html).not.toContain('#cc0000');
+  });
+
   it('renders GitHub-flavoured Markdown, math and highlighted code', () => {
     const html = render('| a | b |\n| - | - |\n| 1 | 2 |\n\n- [x] done\n\n~~gone~~\n\n$1 \\le n \\le 10^5$\n\n```python\ndef f():\n    return 1\n```\n\n## Input');
     expect(html).toContain('<table>');

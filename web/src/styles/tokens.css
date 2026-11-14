@@ -47,7 +47,8 @@
 
   /* Motion. Things that open take --duration-fast and close in --duration-quick;
      lib/motion.ts reads --duration-quick to know how long a closing overlay
-     stays mounted. Under reduced motion base.css cuts every duration to nil. */
+     stays mounted, and --duration-fast with --ease-out for the sliding tab
+     and segmented indicators. Under reduced motion base.css cuts every duration to nil. */
   --duration-hover: 120ms;
   --duration-quick: 150ms;
   --duration-fast: 250ms;

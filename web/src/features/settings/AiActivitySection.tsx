@@ -235,7 +235,7 @@ function LinkedEntry({ id, onClose }: { id: string; onClose: () => void }) {
 function RawMessages({ detail }: { detail: AiLogDetail }) {
   return (
     <>
-      {detail.truncated && <p className="muted">Cut off at 256 KiB.</p>}
+      {detail.truncated && <p className="muted">Cut off at 256&nbsp;KiB.</p>}
       <Raw label="Request" raw={rawRequest(detail.request)}>
         <Button size="sm" variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(detail, exportName(detail))}>
           Export

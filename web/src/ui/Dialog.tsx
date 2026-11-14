@@ -72,7 +72,7 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
     void confirm({
       title: 'Discard what you entered?',
       body: 'It has not been saved.',
-      confirmLabel: 'Discard',
+      confirmLabel: 'Discard changes',
       cancelLabel: 'Keep editing',
       danger: true,
     }).then((ok) => {

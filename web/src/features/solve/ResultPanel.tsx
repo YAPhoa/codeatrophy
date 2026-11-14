@@ -108,7 +108,7 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
         <CaseIo result={result} number={number} compare={compare} failedCompare={failedCompare} />
       )}
       {!crashed && stderr}
-      {!concealed && cut && <p className="case-help">Long input and output are cut off at 64 KiB here; the judge compared the complete output.</p>}
+      {!concealed && cut && <p className="case-help">Long input and output are cut off at 64&nbsp;KiB here; the judge compared the complete output.</p>}
     </div>
   );
 }

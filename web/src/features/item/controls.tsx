@@ -60,7 +60,7 @@ export function StatusControl({ item, compact, size = 'md' }: { item: ItemRef; c
       items={ITEM_STATUSES.map((s) => ({
         label: STATUS_LABEL[s],
         icon: <StatusIcon status={s} size={14} />,
-        hint: s === item.status ? 'current' : undefined,
+        selected: s === item.status,
         onSelect: () => {
           if (s !== item.status) update.mutate({ id: item.id, change: { status: s } }, { onError: (e) => toast.error(e) });
         },

@@ -77,13 +77,30 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
       return;
     }
     place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-    return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+    // Scrolling anywhere (a capture listener) and resizing can move the
+    // anchor; measure at most once a frame for them. The popover changing size
+    // (a combobox list filtering down) is caught by the ResizeObserver, so a
+    // re-render alone measures nothing.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        place();
+      });
     };
-  }, [open, place, children]);
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    const el = ref.current;
+    const ro = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
+    if (el) ro?.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro?.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -100,7 +117,10 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
     if (!open || noAutoFocus || !pos) return;
     const el = ref.current;
     if (!el || el.contains(document.activeElement)) return;
-    const target = el.querySelector<HTMLElement>('[data-autofocus], [role="menuitem"], [role="menuitemcheckbox"], input, button, [tabindex]');
+    // A menu of choices opens on the one in effect.
+    const target =
+      el.querySelector<HTMLElement>('[data-autofocus], [role="menuitemradio"][aria-checked="true"]') ??
+      el.querySelector<HTMLElement>('[role^="menuitem"], input, button, [tabindex]');
     (target ?? el).focus({ preventScroll: true });
   }, [open, pos, noAutoFocus]);
 
@@ -146,6 +166,12 @@ export type MenuEntry =
       disabled?: boolean;
       /** Render as a checkable item; the menu stays open when it is toggled. */
       checked?: boolean;
+      /**
+       * Render as one choice of several (a radio item): `true` on the choice
+       * in effect, `false` on the others. It is marked "current", and choosing
+       * closes the menu.
+       */
+      selected?: boolean;
       hint?: string;
     } & (
       | { onSelect: () => void; to?: undefined }
@@ -232,13 +258,21 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
               );
             }
             const checkable = item.checked !== undefined;
+            const choice = item.selected !== undefined;
             const content = (
               <>
                 <span className="menu-item-icon" aria-hidden="true">
                   {checkable ? item.checked ? <Check size={14} /> : null : item.icon}
                 </span>
                 <span className="grow">{item.label}</span>
-                {item.hint && <span className="menu-item-hint">{item.hint}</span>}
+                {/* For a choice, aria-checked already says which one is in effect. */}
+                {item.selected ? (
+                  <span className="menu-item-hint" aria-hidden="true">
+                    current
+                  </span>
+                ) : (
+                  item.hint && <span className="menu-item-hint">{item.hint}</span>
+                )}
               </>
             );
             if (item.to !== undefined && !item.disabled) {
@@ -266,8 +300,8 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
               <button
                 key={i}
                 type="button"
-                role={checkable ? 'menuitemcheckbox' : 'menuitem'}
-                aria-checked={checkable ? item.checked : undefined}
+                role={checkable ? 'menuitemcheckbox' : choice ? 'menuitemradio' : 'menuitem'}
+                aria-checked={checkable ? item.checked : choice ? item.selected : undefined}
                 aria-disabled={item.disabled || undefined}
                 tabIndex={-1}
                 className={cx('menu-item', item.danger && 'menu-item-danger')}

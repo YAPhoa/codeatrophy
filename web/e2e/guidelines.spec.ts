@@ -66,7 +66,7 @@ test('unsaved work: leaving an edited test case or an unsaved proposal asks firs
   await discard.getByRole('button', { name: 'Stay' }).click();
   await expect(page.getByText('2 of 2 selected')).toBeVisible();
   await page.getByRole('link', { name: 'Discard' }).click();
-  await discard.getByRole('button', { name: 'Discard' }).click();
+  await discard.getByRole('button', { name: 'Discard proposals' }).click();
   await expect(page).toHaveURL(/\/tests$/);
 });
 
@@ -237,7 +237,7 @@ test('dialogs: Escape asks before dropping what was typed, and Cancel does not',
 
   // A click on the backdrop asks as well.
   await page.mouse.click(5, 5);
-  await ask.getByRole('button', { name: 'Discard' }).click();
+  await ask.getByRole('button', { name: 'Discard changes' }).click();
   await expect(dialog).toBeHidden();
 
   // Cancel is the user's own answer already.
@@ -370,4 +370,70 @@ test('motion: the tab underline is one indicator that follows the selected tab',
   p = await placed();
   expect(p.at).toBe(p.selected);
   expect(p.at).not.toBe('0px');
+});
+
+test('sidebar: a long nested collection name truncates, and every count stays inside the sidebar', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('button', { name: 'Actions for Interview prep' }).click();
+  await page.getByRole('menuitem', { name: 'New collection inside…' }).click();
+  const dialog = page.getByRole('dialog', { name: /New collection/ });
+  const name = 'A collection with a name far too long to fit in the sidebar';
+  await dialog.getByLabel('Name').fill(name);
+  await dialog.getByRole('button', { name: /^Create/ }).click();
+  await expect(page.getByRole('link', { name })).toBeVisible();
+
+  const overflow = await page.evaluate(() => {
+    const sidebar = document.querySelector('.sidebar')!.getBoundingClientRect();
+    return [...document.querySelectorAll<HTMLElement>('.sidebar .nav-count, .sidebar .nav-more')]
+      .filter((el) => el.getBoundingClientRect().right > sidebar.right)
+      .map((el) => el.closest('.nav-item')?.textContent);
+  });
+  expect(overflow).toEqual([]);
+});
+
+test('focus: a menu row reached with the keyboard has a ring, so it differs from the row under the pointer', async ({ page }) => {
+  await open(page, '/');
+  const sort = page.getByRole('button', { name: /^Sort/ });
+  await sort.focus();
+  await page.keyboard.press('ArrowDown');
+  const menu = page.getByRole('menu', { name: 'Sort by' });
+  await expect(menu).toBeVisible();
+  // The sort in effect is a checked choice, and the menu opens on it.
+  const current = menu.getByRole('menuitemradio', { checked: true });
+  await expect(current).toHaveCount(1);
+  await expect(current).toBeFocused();
+  await expect(current).toHaveCSS('outline-style', 'solid');
+  await page.keyboard.press('ArrowDown');
+  await expect(current).toHaveCSS('outline-style', 'none');
+});
+
+test('focus: the ring on a tag chip in a library row is not cut off', async ({ page }) => {
+  await open(page, '/');
+  const chip = page.locator('.item-tags .chip').first();
+  await chip.focus();
+  await expect(chip).toHaveCSS('outline-offset', '-2px');
+});
+
+test('reduced motion: the reader jumps to a heading instead of scrolling smoothly', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Consistent Hashing' }).click();
+  await expect(page.getByRole('region', { name: 'Reading', exact: true })).toHaveCSS('scroll-behavior', 'auto');
+});
+
+test('toasts: a toast stays while the pointer is on it, so its Undo cannot slip away', async ({ page }) => {
+  await page.clock.install();
+  await open(page, '/');
+  await page.getByRole('button', { name: 'New collection' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New collection' });
+  await dialog.getByLabel('Name').fill('Graphs');
+  await dialog.getByRole('button', { name: /^Create/ }).click();
+  const toast = page.locator('.toast', { hasText: 'Created “Graphs”' });
+  await expect(toast).toBeVisible();
+  await toast.hover();
+  await page.clock.runFor(15_000);
+  await expect(toast).toBeVisible();
+  await page.mouse.move(5, 5);
+  await page.clock.runFor(15_000);
+  await expect(page.locator('.toast')).toHaveCount(0);
 });

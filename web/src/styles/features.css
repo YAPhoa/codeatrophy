@@ -74,6 +74,13 @@
   min-width: 0;
 }
 
+/* Tag chips are links: 24px tall, the smallest target WCAG 2.2 allows
+   without spacing around it. */
+.tagchips .chip {
+  height: 24px;
+  border-radius: 12px;
+}
+
 /* ---- Table ---- */
 
 .table {
@@ -411,6 +418,11 @@
 .item-tags .chip {
   flex: 0 1 auto;
   min-width: 28px;
+}
+
+/* The cell and chip strip clip overflow, so an outside ring would be cut off. */
+.item-tags .chip:focus-visible {
+  outline-offset: -2px;
 }
 
 .item-diff,
@@ -2227,6 +2239,10 @@ button.case-chip:hover {
   border-bottom: none;
 }
 
+.case-row:has(> .case-row-main:hover):not(.is-selected) {
+  background: var(--surface-2);
+}
+
 .case-row.is-selected {
   background: var(--accent-soft);
 }
@@ -2498,6 +2514,13 @@ button.case-chip:hover {
   position: sticky;
   bottom: 12px;
   box-shadow: var(--shadow-pop);
+}
+
+/* .main is the scroll container; while the sticky Save bar is on the page,
+   keep focused controls scrolled clear of it. The bar is two rows tall at
+   most on desktop widths. */
+.main:has(.proposal-save) {
+  scroll-padding-bottom: 160px;
 }
 
 .proposal-mode {

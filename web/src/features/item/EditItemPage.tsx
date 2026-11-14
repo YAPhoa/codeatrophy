@@ -7,6 +7,7 @@ import { qk, storeItem, useCollections, useItem, useMeta, useTags } from '../../
 import type { Item } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
+import { withUnit } from '../../lib/format';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import {
   FIELD_LABEL,
@@ -62,9 +63,9 @@ function describeValue(field: EditableField, form: ItemFormState, collectionName
     case 'difficulty':
       return form.difficulty ?? '(not set)';
     case 'timeLimitMs':
-      return `${form.timeLimitMs} ms`;
+      return withUnit(form.timeLimitMs, 'ms');
     case 'memoryLimitKb':
-      return `${Math.round(form.memoryLimitKb / 1024)} MB`;
+      return withUnit(Math.round(form.memoryLimitKb / 1024), 'MB');
     default:
       return String(form[field]) || '(empty)';
   }

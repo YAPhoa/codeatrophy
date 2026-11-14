@@ -49,7 +49,7 @@ export function useItemActions(item: Item) {
         item.type === 'problem'
           ? 'Its test cases, submissions and your notes are deleted too. Variants of it stay, unlinked. This cannot be undone.'
           : 'Your notes on it are deleted too. This cannot be undone.',
-      confirmLabel: 'Delete',
+      confirmLabel: item.type === 'problem' ? 'Delete problem' : 'Delete reading',
       danger: true,
     });
     if (!ok) return;

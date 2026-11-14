@@ -154,7 +154,7 @@ function Generator({ item }: { item: Item }) {
     when: proposal !== null && !allRepeats,
     title: 'Discard the proposed test cases?',
     body: 'They have not been saved, and leaving this page discards them.',
-    leaveLabel: 'Discard',
+    leaveLabel: 'Discard proposals',
   });
 
   const generate = async () => {
@@ -461,7 +461,7 @@ function Generator({ item }: { item: Item }) {
                           Sample
                         </label>
                       </div>
-                      <Collapse open={isOpen}>
+                      <Collapse open={isOpen} heavy>
                         <div className="proposal-detail">
                           {c.error && (
                             <Callout tone="danger" title="The solution did not produce an output for this input">

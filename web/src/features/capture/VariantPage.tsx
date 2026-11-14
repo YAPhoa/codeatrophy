@@ -166,7 +166,7 @@ function VariantFlow({ original }: { original: Item }) {
   };
 
   const discard = async () => {
-    const ok = await confirm({ title: 'Discard this variant?', body: 'The draft is thrown away. The original item is not affected.', confirmLabel: 'Discard', danger: true });
+    const ok = await confirm({ title: 'Discard this variant?', body: 'The draft is thrown away. The original item is not affected.', confirmLabel: 'Discard variant', danger: true });
     if (ok) {
       generation.cancel();
       verify.cancel();

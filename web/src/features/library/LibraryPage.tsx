@@ -497,7 +497,7 @@ export function LibraryPage() {
         </>
       )}
       <span className="sr-only" aria-live="polite">
-        {query.isSuccess ? `${total} items` : ''}
+        {query.isSuccess ? plural(total, 'item') : ''}
       </span>
     </div>
   );

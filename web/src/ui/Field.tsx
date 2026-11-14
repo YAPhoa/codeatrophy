@@ -176,7 +176,7 @@ interface SegmentedProps<T extends string> {
 /** A compact single-choice control, exposed as a radio group. */
 export function Segmented<T extends string>({ label, value, onChange, options, size = 'md', className }: SegmentedProps<T>) {
   const name = useId();
-  const ref = useSlidingIndicator<HTMLDivElement>('.segmented-option.is-selected');
+  const ref = useSlidingIndicator<HTMLDivElement>('.segmented-option.is-selected', { pseudo: '::before' });
   return (
     <div ref={ref} role="radiogroup" aria-label={label} className={cx('segmented', size === 'sm' && 'segmented-sm', className)}>
       {options.map((o) => (
@@ -241,6 +241,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
         className="input stepper-input"
         type="number"
         inputMode="numeric"
+        autoComplete="off"
         min={min}
         max={max}
         step={1}

@@ -242,7 +242,12 @@ A few conventions worth knowing:
   `--duration-quick`. Overlays play their exit when React removes them:
   dialogs, popovers and the palette through `exitOnRemove`
   (`src/lib/motion.ts`), opening rows through `Collapse` (`src/ui`). Neither waits
-  under reduced motion, where `base.css` also cuts every CSS duration to nil.
+  under reduced motion, where `base.css` also cuts every CSS duration to nil
+  and turns smooth scrolling off.
   Keep list rows, menu items and other keyboard-driven highlights instant.
+- **Animate `transform` and `opacity`.** The sliding tab and segmented
+  indicators play their move as a transform (`useSlidingIndicator`). `Collapse`
+  grows a row's height, which lays its content out on every frame: fine for a
+  few rows, but pass `heavy` for code editors and diffs, which then fade in.
 - **Unit tests cover logic, not layout**: the API client, the mock, and the
   modules in `src/lib`. The Playwright suite covers the main flows end to end.

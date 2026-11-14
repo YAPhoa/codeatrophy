@@ -237,7 +237,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       items={(['system', 'light', 'dark'] as const).map((t) => ({
         label: t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark',
         icon: THEME_ICON[t],
-        hint: t === theme ? 'current' : undefined,
+        selected: t === theme,
         onSelect: () => setThemePreference(t),
       }))}
     />

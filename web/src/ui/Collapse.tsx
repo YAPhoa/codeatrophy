@@ -8,8 +8,26 @@ import { cx } from './Button';
  * it opens and shrinks back when it closes. The content is only mounted while
  * open, and for the moment it takes to close. What is already open when the
  * page arrives is simply there.
+ *
+ * Height can only be animated through layout, which lays the content out
+ * again on every frame. That is cheap for a few rows; for heavy content (code
+ * editors, diffs) pass `heavy`, and it fades in without growing and closes at
+ * once.
  */
-export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+export function Collapse({ open, heavy, children }: { open: boolean; heavy?: boolean; children: ReactNode }) {
+  if (heavy) return <FadeOpen open={open}>{children}</FadeOpen>;
+  return <GrowOpen open={open}>{children}</GrowOpen>;
+}
+
+function FadeOpen({ open, children }: { open: boolean; children: ReactNode }) {
+  // Whether it has been closed since it mounted: only then does opening play.
+  const [toggled, setToggled] = useState(!open);
+  if (!open && !toggled) setToggled(true);
+  if (!open) return null;
+  return <div className={cx('collapse-fade', toggled && 'is-entering')}>{children}</div>;
+}
+
+function GrowOpen({ open, children }: { open: boolean; children: ReactNode }) {
   const { mounted, closing } = usePresence(open);
   // Whether it has been closed since it mounted: only then does opening play.
   const [toggled, setToggled] = useState(!open);

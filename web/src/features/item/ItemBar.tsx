@@ -4,7 +4,7 @@ import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { LinkButton, cx } from '../../ui/Button';
 import { MenuButton } from '../../ui/Popover';
-import { TAB_SELECTED } from '../../ui/misc';
+import { TAB_INDICATOR, TAB_SELECTED } from '../../ui/misc';
 import { useSlidingIndicator } from '../../lib/motion';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl } from './controls';
@@ -19,7 +19,7 @@ export function ItemBar({ item }: { item: Item }) {
   const { data: collections = [] } = useCollections();
   const actions = useItemActions(item);
   const collectionActions = useCollectionActions();
-  const tabsRef = useSlidingIndicator<HTMLElement>(TAB_SELECTED);
+  const tabsRef = useSlidingIndicator<HTMLElement>(TAB_SELECTED, TAB_INDICATOR);
   return (
     <header className="itembar">
       <Link to={libraryHref()} className="btn btn-ghost btn-icon" aria-label="Back to the library" title="Back to the library">

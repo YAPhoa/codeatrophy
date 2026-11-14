@@ -331,12 +331,14 @@
   text-decoration: none;
 }
 
+/* 24px square: the smallest target WCAG 2.2 allows without spacing. With
+   the tree's indent it also lines collection names up with the nav labels. */
 .nav-twisty {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: 3px;
