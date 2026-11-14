@@ -9,7 +9,7 @@ import { addFormLanguage, formLanguages, newKey, removeFormLanguage, restoreCase
 import { textFilename } from '../../lib/largeText';
 import { LANGUAGES, languageLabel, languageName, sortLanguages } from '../../lib/languages';
 import { readString, writeString } from '../../lib/storage';
-import { Button, IconButton } from '../../ui/Button';
+import { Button, cx, IconButton } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { Checkbox, Field, Segmented, SelectField, TextField } from '../../ui/Field';
@@ -123,6 +123,8 @@ export function ItemEditor({
     set('testCases', before.filter((c) => c.key !== key));
     removed(`case ${position}`, (now) => restoreCases(now, before, [key]));
   };
+  // The cases the form opened with; any other case (added, put back by Undo, brought by a revision) plays its entrance.
+  const [initialCases] = useState(() => new Set(form.testCases.map((t) => t.key)));
   const limits = useLimits();
   const judged = useMeta().data?.judge.languages;
   const [bodyView, setBodyViewState] = useState<BodyView>(() => {
@@ -388,7 +390,7 @@ export function ItemEditor({
             ) : (
               <ol className="case-cards">
                 {form.testCases.map((t, i) => (
-                  <li key={t.key} className="case-card">
+                  <li key={t.key} className={cx('case-card', !initialCases.has(t.key) && 'is-added')}>
                     <div className="row">
                       <span className="case-no">{i + 1}</span>
                       <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />

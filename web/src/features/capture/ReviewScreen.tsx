@@ -6,7 +6,8 @@ import { describeDraftCheck } from '../../lib/checks';
 import { plural } from '../../lib/format';
 import { MOD } from '../../lib/hotkeys';
 import { discardableCases, type FormErrors, type ItemFormState } from '../../lib/itemForm';
-import { Button } from '../../ui/Button';
+import { Button, cx } from '../../ui/Button';
+import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { ErrorCallout, Kbd, Spinner } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { ItemEditor } from '../item/ItemEditor';
@@ -85,6 +86,7 @@ function CheckProgress({ total, startedAt, onCancel }: { total: number; startedA
 /** Review of a draft before anything is saved: assumptions, revision, every field editable. */
 export function ReviewScreen(props: ReviewScreenProps) {
   const [instruction, setInstruction] = useState('');
+  const [originalOpen, setOriginalOpen] = useState(false);
   const busy = props.revising || props.saving;
   const limits = useLimits();
   const toast = useToast();
@@ -109,7 +111,9 @@ export function ReviewScreen(props: ReviewScreenProps) {
   const checkedCases = !props.checkStale && form.testCases.some((t) => t.outcome);
   const discardable = checkedCases ? discardableCases(form) : [];
   const result = checkedCases ? describeDraftCheck(props.check, props.checkStale) : null;
-  const caseNotice = verify.running ? (
+  // Keyed by what it says, so each change of state plays its entrance once.
+  const noticeKind = verify.running ? 'running' : verify.error != null ? 'error' : verify.outdated ? 'outdated' : result ? 'result' : null;
+  const caseNoticeBody = verify.running ? (
     <CheckProgress total={verify.total} startedAt={verify.startedAt} onCancel={verify.cancel} />
   ) : verify.error != null ? (
     <ErrorCallout error={verify.error} title="The test cases could not be verified" onRetry={blocked ? undefined : () => verify.start(form)} />
@@ -134,9 +138,14 @@ export function ReviewScreen(props: ReviewScreenProps) {
       )}
     </div>
   ) : null;
+  const caseNotice = noticeKind && (
+    <div className="case-notice" key={noticeKind}>
+      {caseNoticeBody}
+    </div>
+  );
 
   return (
-    <div className="review">
+    <div className={cx('review', props.revising && 'is-revising')}>
       <div className="review-bar">
         {props.header}
         <span className="spacer" />
@@ -151,7 +160,9 @@ export function ReviewScreen(props: ReviewScreenProps) {
         </Button>
       </div>
 
-      {props.saveError != null && <ErrorCallout error={props.saveError} title="Could not save" onRetry={props.onSave} />}
+      <Collapse open={props.saveError != null}>
+        <div className="review-slot">{props.saveError != null && <ErrorCallout error={props.saveError} title="Could not save" onRetry={props.onSave} />}</div>
+      </Collapse>
 
       {props.aiDrafted && (
         <AssumptionsPanel assumptions={props.assumptions} kind={props.kind} style={props.appliedStyle} showStyle={props.styles.length > 0 || props.appliedStyle !== null} usage={props.usage} />
@@ -195,16 +206,23 @@ export function ReviewScreen(props: ReviewScreenProps) {
         </form>
       )}
 
-      {props.revising && (
-        <GeneratingPanel title="Revising the draft…" startedAt={props.reviseStartedAt} onCancel={props.onCancelRevise}>
-          The current draft stays as it is until the new version arrives.
-        </GeneratingPanel>
-      )}
-      {props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed — your draft is unchanged" />}
+      <Collapse open={props.revising}>
+        <div className="review-slot">
+          <GeneratingPanel title="Revising the draft…" startedAt={props.reviseStartedAt} onCancel={props.onCancelRevise}>
+            The current draft stays as it is until the new version arrives.
+          </GeneratingPanel>
+        </div>
+      </Collapse>
+      <Collapse open={props.reviseError != null}>
+        <div className="review-slot">{props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed — your draft is unchanged" />}</div>
+      </Collapse>
 
       {props.originalText && (
-        <details className="original">
-          <summary>{props.originalLabel ?? 'Your original input'}</summary>
+        <details className="original" onToggle={(e) => setOriginalOpen(e.currentTarget.open)}>
+          <summary>
+            <ExpandChevron open={originalOpen} />
+            {props.originalLabel ?? 'Your original input'}
+          </summary>
           <pre translate="no">{props.originalText}</pre>
         </details>
       )}
