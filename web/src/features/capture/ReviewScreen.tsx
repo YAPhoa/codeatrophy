@@ -126,7 +126,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
     <ErrorCallout error={verify.error} title="The test cases could not be verified" onRetry={blocked ? undefined : () => verify.start(form)} />
   ) : verify.outdated ? (
     <p className="check-line tone-neutral" role="status">
-      The draft changed while it was verified. Verify again.
+      The draft was edited while verification was running. Verify again.
     </p>
   ) : result ? (
     <div className="large-case-row">

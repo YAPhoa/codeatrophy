@@ -353,7 +353,7 @@ function Generator({ item }: { item: Item }) {
           {allRepeats && proposal && !generation.running && (
             <>
               <p className="editor-empty row proposal-none" role="status">
-                {proposal.duplicatesDropped === 1 ? 'The one proposal repeated an existing case.' : `All ${proposal.duplicatesDropped} proposals repeated existing cases.`}
+                {proposal.duplicatesDropped === 1 ? 'The proposed case duplicated an existing one.' : `All ${proposal.duplicatesDropped} proposed cases duplicated existing ones.`}
                 <UsageLine usage={proposal.usage} newTab />
               </p>
               <LargeCaseOutcomes key={proposalNo} reports={proposal.largeCases} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />
@@ -368,12 +368,12 @@ function Generator({ item }: { item: Item }) {
                 </Callout>
               ) : !proposal.verification.attempted ? (
                 <Callout tone="warn" title="Unverified: no judge engine is available">
-                  The expected outputs below are what the model predicts, and models are unreliable at computing outputs by hand. The cases are saved as unverified; once a judge is available, use “Verify
-                  against reference solution”.
+                  The expected outputs below are the model’s predictions and may be wrong, since no code was run. The cases are saved as unverified; once a judge engine is available, use
+                  “Verify all” on the Test cases page.
                 </Callout>
               ) : (
                 <Callout tone={mismatches + failures > 0 ? 'info' : 'ok'} title={`${verifiedCount} of ${proposal.cases.length} expected outputs were verified by running the solution`}>
-                  Engine: {proposal.verification.engine ?? 'judge'}. A verified output is what the reference solution actually printed for that input.
+                  Engine: {proposal.verification.engine ?? 'judge'}. Verified outputs come from running the reference solution on each input.
                 </Callout>
               )}
 
@@ -420,8 +420,7 @@ function Generator({ item }: { item: Item }) {
                         </>
                       ) : storedSolution ? (
                         <>
-                          Updates the current reference solution{storedName ? ` “${storedName}”` : ''} in place: its code ({languageName(storedSolution.language)}) is replaced by this one, its name and
-                          notes are kept.
+                          Replaces the code ({languageName(storedSolution.language)}) of the current reference solution{storedName ? ` “${storedName}”` : ''} and keeps its name and notes.
                         </>
                       ) : (
                         'Adds it to the problem’s saved solutions, named “Reference solution” and marked as the reference. Needed later to verify or regenerate expected outputs.'

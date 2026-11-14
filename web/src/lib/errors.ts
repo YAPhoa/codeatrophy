@@ -101,7 +101,7 @@ export function describeError(err: unknown): ErrorView {
     }
     case 'upstream_error':
       return {
-        title: 'The external service failed',
+        title: 'External service error',
         message: sentence(err.message) || 'The AI provider or judge engine returned an error.',
         action: 'retry',
       };

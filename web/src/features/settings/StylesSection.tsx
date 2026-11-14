@@ -156,14 +156,14 @@ export function StylesSection() {
         </Button>
       </div>
       <p className="settings-lead">
-        A style is a short note of your own on how drafts should be written: the layout of a statement, the tone, which starter languages to include. You pick one whenever you draft, revise or create
-        a variant, and assistants connected over MCP read them too. A style cannot change which fields an item has, or the stdin/stdout convention problems are judged by. Styles are kept short on
-        purpose.
+        A style is a short note on how drafts should be written, such as the statement layout, the tone or which starter languages to include. You can pick one when drafting, revising or
+        creating a variant, and assistants connected over MCP follow them too. A style cannot change an item’s fields or the stdin/stdout format problems are judged by. Styles are kept short
+        on purpose.
       </p>
 
       {full && (
         <p className="styles-full" role="status">
-          You have {bounds.maxPresets} styles, which is the most an instance keeps. Delete one to add another.
+          You have reached the limit of {bounds.maxPresets} styles. Delete one to add another.
         </p>
       )}
 
@@ -288,7 +288,7 @@ export function StylesSection() {
               label="Use by default"
             />
             {error != null && !(isApiError(error) && error.code === 'validation_failed' && (serverFields.name != null || serverFields.instructions != null)) && (
-              <ErrorCallout error={error} title={isApiError(error) && error.code === 'conflict' ? 'The limit of styles has been reached' : 'Could not save the style'} />
+              <ErrorCallout error={error} title={isApiError(error) && error.code === 'conflict' ? 'Style limit reached' : 'Could not save the style'} />
             )}
           </form>
         )}

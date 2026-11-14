@@ -261,10 +261,11 @@ export function SolveView({ item }: { item: Item }) {
     if (narrow) setNarrowPane('code');
     void runner.start(language, code, mode, stdin);
   };
-  const noRunner = hasRunner ? 'No runner for a language the judge offers.' : 'No runner yet.';
+  const noRunnerWhy = hasRunner ? 'no runner for any language the judge supports' : 'no runner yet';
+  const noRunner = `Cannot run: ${noRunnerWhy}.`;
   const runSamples = () => {
     if (cannotRun) {
-      toast.info(`Cannot be run. ${noRunner}`);
+      toast.info(noRunner);
       return;
     }
     if (sampleCount === 0 && cases.isSuccess) {
@@ -276,7 +277,7 @@ export function SolveView({ item }: { item: Item }) {
   };
   const submit = () => {
     if (cannotRun) {
-      toast.info(`Cannot be run. ${noRunner}`);
+      toast.info(noRunner);
       return;
     }
     if (item.testCaseCount === 0) {
@@ -388,7 +389,7 @@ export function SolveView({ item }: { item: Item }) {
       </div>
       {item.body.trim() === '' ? (
         <Callout tone="info" title="No statement yet" actions={<Link to={`/items/${item.id}/edit`}>Write the statement</Link>}>
-          This entry is still a fragment{item.summary ? `: “${item.summary}”` : ''}. Fill it in when you have a moment.
+          {item.summary ? `So far this problem has only a summary: “${item.summary}”.` : 'So far this problem has only a title.'}
         </Callout>
       ) : (
         <Markdown source={item.body} />
@@ -497,7 +498,7 @@ export function SolveView({ item }: { item: Item }) {
       {cannotRun && (
         <div className="editor-notice" role="note">
           <AlertTriangle size={14} aria-hidden="true" />
-          <span>Cannot be run. {noRunner}</span>
+          <span>{noRunner}</span>
           <Link to={`/items/${item.id}/edit`}>Edit the problem</Link>
         </div>
       )}
@@ -534,7 +535,7 @@ export function SolveView({ item }: { item: Item }) {
   const status: { text: string; tone: string; busy?: boolean } = !judgeOn
     ? { text: 'Running code is not available here', tone: 'neutral' }
     : cannotRun
-      ? { text: 'No runner to run this with', tone: 'neutral' }
+      ? { text: 'No runner available', tone: 'neutral' }
       : runner.starting
       ? { text: 'Sending…', tone: 'neutral', busy: true }
       : sub && sub.status !== 'completed'
@@ -626,7 +627,7 @@ export function SolveView({ item }: { item: Item }) {
         runner.startError == null &&
         (cannotRun ? (
           <Callout tone="warn" title="This problem cannot be run yet" actions={<Link to={`/items/${item.id}/edit`}>Edit the problem</Link>}>
-            {noRunner}
+            {hasRunner ? 'No runner for any language the judge supports.' : 'No runner yet.'}
           </Callout>
         ) : item.testCaseCount === 0 ? (
           <Callout tone="info" title="No test cases yet" actions={<Link to={`/items/${item.id}/tests`}>Add test cases</Link>}>

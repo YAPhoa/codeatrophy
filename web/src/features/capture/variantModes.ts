@@ -19,20 +19,20 @@ export const VARIANT_MODES: readonly VariantModeInfo[] = [
   {
     mode: 'easier',
     label: 'Easier',
-    short: 'A gentler warm-up',
+    short: 'Gentler warm-up',
     description: 'A simpler version with smaller limits or a relaxed requirement, for when the original is too hard.',
   },
   {
     mode: 'harder',
     label: 'Harder',
-    short: 'Raise the bar',
-    description: 'Tighter limits or an added requirement. For when the original has become comfortable.',
+    short: 'Higher bar',
+    description: 'Tighter limits or an added requirement, for when the original feels too easy.',
   },
   {
     mode: 'twist',
     label: 'Twist',
-    short: 'Change one rule',
-    description: 'One rule changes so that the approach you know no longer works as it is. Practise adapting, not recalling.',
+    short: 'One changed rule',
+    description: 'One rule changes, so your usual approach no longer works.',
   },
 ];
 

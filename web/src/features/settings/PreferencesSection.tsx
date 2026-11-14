@@ -140,7 +140,7 @@ export function PreferencesSection() {
       <p className="settings-lead">
         Changes are saved as you make them and follow you to any browser, except the theme, which is kept per browser.
       </p>
-      {state.status === 'error' && <ErrorCallout error={state.error} title="That change was not saved, and the setting is back to what it was" />}
+      {state.status === 'error' && <ErrorCallout error={state.error} title="Could not save the change. The previous setting is restored." />}
 
       <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-appearance-title">
         <h2 id="preferences-appearance-title" className="prefs-group-title">
@@ -193,7 +193,7 @@ export function PreferencesSection() {
         />
         <StepperRow
           label="Large test cases to generate"
-          hint="How many, whenever large test cases are asked for."
+          hint="How many to generate whenever large test cases are requested."
           value={Math.min(maxLarge, Math.max(1, shown.largeTestCaseCount))}
           onChange={(largeTestCaseCount) => save({ largeTestCaseCount })}
           min={1}
@@ -211,7 +211,7 @@ export function PreferencesSection() {
           checked={editor.autocomplete}
           onChange={(autocomplete) => setEditor({ autocomplete })}
           label="Code completion"
-          hint="Suggests keywords and snippets of the language where they are available, and words already in the file."
+          hint="Suggests language keywords and snippets where available, along with words already in the file."
         />
         <Checkbox checked={editor.closeBrackets} onChange={(closeBrackets) => setEditor({ closeBrackets })} label="Close brackets and quotes automatically" />
         <Checkbox checked={editor.matchBrackets} onChange={(matchBrackets) => setEditor({ matchBrackets })} label="Highlight the matching bracket" />

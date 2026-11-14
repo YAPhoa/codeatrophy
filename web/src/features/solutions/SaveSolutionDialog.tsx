@@ -155,7 +155,7 @@ function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutio
           label="Use as the reference solution"
           hint={
             <>
-              The reference solution is the one run to verify the expected outputs of test cases.
+              The reference solution is run to check the expected output of each test case.
               {isReference && hasReference && <> It replaces {reference ? `“${reference.name}”` : 'the current one'} as the reference; that solution stays saved.</>}
             </>
           }

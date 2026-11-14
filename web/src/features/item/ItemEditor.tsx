@@ -406,7 +406,7 @@ export function ItemEditor({
                     <div className="row">
                       <span className="case-no">{i + 1}</span>
                       <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
-                      {t.large && <Badge title="Not carried over by a revision">large</Badge>}
+                      {t.large && <Badge title="Not kept when the AI revises the draft">large</Badge>}
                       {t.verified && (
                         <Badge tone="ok" title="The reference solution printed this output">
                           <ShieldCheck size={12} aria-hidden="true" /> verified

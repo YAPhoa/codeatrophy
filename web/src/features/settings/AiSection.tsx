@@ -119,13 +119,14 @@ export function AiSection({ meta }: { meta: Meta }) {
         </Button>
       </div>
       <p className="settings-lead">
-        Used to draft items from rough input, generate test cases and create variants. You can keep several providers, such as a hosted service and a server of your own. The
-        default one is used. Without one everything else works, and items are written by hand. Assistants connected over MCP bring their own model and do not use this.
+        Used to draft items from rough notes, generate test cases and create variants. You can keep several providers, such as a hosted service and your own server, and pick one
+        as the default. Without a provider, everything else still works and items are written by hand. Assistants connected over MCP use their own model and do not use these
+        providers.
       </p>
 
       {data && full && (
         <p className="settings-note" role="status">
-          You have {maxProviders} providers, which is the most an instance keeps. Delete one to add another.
+          You have reached the limit of {maxProviders} providers. Delete one to add another.
         </p>
       )}
       {data && list.length > 0 && !meta.ai.enabled && (
@@ -146,8 +147,8 @@ export function AiSection({ meta }: { meta: Meta }) {
           <div className="grow">
             <strong>No providers yet</strong>
             <p className="muted">
-              AI features are off. To turn them on, add a connection to an AI service: an API key for a hosted one, or the address of a server you run yourself. It takes a key, a connection test
-              and a model.
+              AI features are off. To turn them on, add a provider: an API key for a hosted service, or the address of a server you run yourself. You enter the connection details, test
+              the connection and choose a model.
             </p>
             <div className="form-actions">
               <Button onClick={() => setEditing({ provider: null, kind: 'anthropic' })}>Add Anthropic</Button>
@@ -356,7 +357,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
                   The connection works: <code translate="no">{test.result.model}</code> answered{test.result.latencyMs != null ? ` in ${formatMs(test.result.latencyMs)}` : ''}.
                 </>
               ) : test.result?.ok ? (
-                <>The connection works{test.result.models ? `, and the server offers ${plural(test.result.models.length, 'model')}` : ''}. No model is set to try.</>
+                <>Connection succeeded{test.result.models ? ` (${plural(test.result.models.length, 'model')} available)` : ''}, but no model is selected yet.</>
               ) : (
                 <>Connection failed. {test.result?.error ? sentence(test.result.error) : 'The provider did not accept the request.'}</>
               )}

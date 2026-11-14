@@ -256,12 +256,12 @@ function VariantFlow({ original }: { original: Item }) {
     <div className="page page-narrow capture">
       {crumbs}
       <Steps current={0} labels={STEPS} />
-      <h1 className="page-title">{isProblem ? 'Practise it again, differently' : 'Rework this reading'}</h1>
+      <h1 className="page-title">{isProblem ? 'Practise from a new angle' : 'Rework this reading'}</h1>
       <p className="page-sub">
         {isProblem ? (
           <>
-            Get a fresh problem built on <strong>{original.title}</strong>, so you practise the technique instead of remembering the answer. It is saved as a new item linked to this one; the original
-            is not changed.
+            Make a new problem based on <strong>{original.title}</strong>, so you practise the technique instead of recalling the answer. It is saved as a new item linked to this one, and the
+            original stays as it is.
           </>
         ) : (
           <>

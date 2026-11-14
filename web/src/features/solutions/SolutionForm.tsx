@@ -195,7 +195,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
         label="Use as the reference solution"
         hint={
           <>
-            The reference solution is the one run to verify the expected outputs of test cases.
+            The reference solution is run to check the expected output of each test case.
             {isReference && replaces && <> It replaces “{replaces.name}” as the reference; that solution stays saved.</>}
             {!isReference && solution?.isReference && ' Unticking leaves the problem without a reference solution.'}
           </>

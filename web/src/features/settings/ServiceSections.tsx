@@ -16,8 +16,8 @@ export function JudgeSection({ meta }: { meta: Meta }) {
       <p className="settings-lead">The judge engine runs code in a sandbox: your solutions when you run or submit, and reference solutions when test cases are verified.</p>
       {!judge.enabled ? (
         <Callout tone="info" title="No judge engine is configured">
-          Problems can be read, organised and written, but code cannot be run or submitted, and AI-generated test cases stay unverified. The engine is part of the server’s deployment (the Compose
-          stack and its environment variables), not something set from this page.
+          You can still read, write and organise problems, but code cannot be run or submitted, and AI-generated test cases stay unverified. The judge engine is set in the server’s deployment
+          (the Compose stack and its environment variables), not on this page.
         </Callout>
       ) : (
         <>
@@ -78,8 +78,8 @@ export function McpSection({ meta }: { meta: Meta }) {
         {mcp.enabled && (mcp.authRequired ? <Badge tone="accent">Token required</Badge> : <Badge>No token</Badge>)}
       </div>
       <p className="settings-lead">
-        The Model Context Protocol endpoint lets an AI assistant browse, write and edit this library on your behalf, for example “add this problem to my DP collection and write tests for it”. The assistant you
-        connect is the model; it does not use the <Link to="/settings/ai">AI providers</Link> set up here.
+        The Model Context Protocol (MCP) endpoint lets an AI assistant browse, write and edit your library on your behalf, for example “add this problem to my DP collection and write tests for it”. Connected assistants use
+        their own model and do not use the <Link to="/settings/ai">AI providers</Link> set up here.
       </p>
       {!mcp.enabled ? (
         <Callout tone="info" title="The MCP endpoint is turned off">

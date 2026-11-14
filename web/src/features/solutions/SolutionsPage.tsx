@@ -187,7 +187,7 @@ function SolutionsManager({ item }: { item: Item }) {
               {solutions.length > 0 && (
                 <p className="solutions-intro muted">
                   Code stays hidden until you ask for it, so the page does not spoil a problem you are about to solve again.{' '}
-                  {reference ? 'The reference solution is the one run to verify expected outputs of test cases.' : 'Mark one as the reference to verify the expected outputs of test cases with it.'}
+                  {reference ? 'The reference solution is run to check the expected output of each test case.' : 'Mark one as the reference to verify the expected outputs of test cases with it.'}
                 </p>
               )}
 

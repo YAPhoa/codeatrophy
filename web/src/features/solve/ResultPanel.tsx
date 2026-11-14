@@ -53,7 +53,7 @@ const SHOWN_BYTES = 64 * 1024;
  * and labels locations inside the runner; this says how to read them.
  */
 export function lineOffsetNote(lineOffset: number | undefined): string | null {
-  return lineOffset != null && lineOffset > 0 ? 'line numbers are your code’s; <runner …> is the hidden runner' : null;
+  return lineOffset != null && lineOffset > 0 ? 'Line numbers refer to your code; <runner …> is the hidden runner.' : null;
 }
 
 const VERDICT_HELP: Partial<Record<Verdict, string>> = {

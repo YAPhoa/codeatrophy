@@ -8,7 +8,7 @@ import { isSolutionLimitError, type SolutionWrite } from './solutionWrites';
 /** The marker of the solution that is run to verify expected outputs. */
 export function ReferenceBadge() {
   return (
-    <Badge tone="accent" title="This solution is run to verify the expected outputs of test cases">
+    <Badge tone="accent" title="Run to check the expected output of each test case">
       <ShieldCheck size={12} aria-hidden="true" /> Reference
     </Badge>
   );

@@ -284,7 +284,7 @@ export default function CapturePage() {
           className="capture-callout"
           actions={<Link to="/settings/ai">Set up an AI provider</Link>}
         >
-          No AI provider is configured, so entries are written by hand: put down what you have and continue to the editor.
+          No AI provider is configured, so items are written by hand. Note down what you have and continue to the editor.
         </Callout>
       )}
 

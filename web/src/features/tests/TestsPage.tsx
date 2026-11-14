@@ -544,7 +544,7 @@ function TestsManager({ item }: { item: Item }) {
                             </Badge>
                           )
                         ) : c.verified ? (
-                          <Badge tone="ok" title="Expected output confirmed, by running the reference solution or by hand">
+                          <Badge tone="ok" title="Expected output confirmed by running the reference solution or by hand">
                             <ShieldCheck size={12} /> verified
                           </Badge>
                         ) : (

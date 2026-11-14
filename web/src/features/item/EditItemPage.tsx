@@ -223,7 +223,7 @@ function EditForm({ initial }: { initial: Item }) {
                   toast.info('Loaded the current version. Your edits were discarded.');
                 }}
               >
-                Discard your edits, load theirs
+                Discard your edits and load the latest version
               </Button>
               <Button
                 onClick={() => {

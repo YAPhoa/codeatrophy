@@ -353,7 +353,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
         : testNeeded
           ? { text: adding ? 'Test the connection to add it.' : 'Test the connection to save it.' }
           : breaksDefault
-            ? { text: <>This is the default provider: saved without {listNeeds(outlook.missing)}, AI features are off.</>, tone: 'is-warn' }
+            ? { text: <>This is the default provider. Saving it without {listNeeds(outlook.missing)} turns AI features off.</>, tone: 'is-warn' }
             : !adding && outlook.missing.length > 0
               ? { text: <>Can be saved now; it still needs {listNeeds(outlook.missing)}.</> }
               : passed
@@ -466,8 +466,8 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           />
           {outlook.savedKeyDropped && (
             <Callout tone="warn" role="status" title="The saved key will not carry over to this server">
-              The saved key belongs to <code translate="no">{hostOf(outlook.currentBaseUrl)}</code>. A key is never sent to a different server than the one it was saved for, so saving this base URL deletes it, and
-              the models and the test are asked for without it.{' '}
+              The saved key belongs to <code translate="no">{hostOf(outlook.currentBaseUrl)}</code> and is never sent to a different server. Saving this base URL deletes it, and the model list and connection test run
+              without it.{' '}
               {outlook.keyRequired ? (
                 <>
                   Enter the key for <code translate="no">{host}</code> to continue.
@@ -590,7 +590,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
 
         {adding && <Checkbox checked={asDefault} onChange={setAsDefault} label="Use as the default" hint="Drafting, test cases and variants use the default provider." />}
         {saveError != null && !onField(saveFields) && (
-          <ErrorCallout error={saveError} title={adding && isApiError(saveError) && saveError.code === 'conflict' ? 'The limit of providers has been reached' : 'Could not save the provider'} />
+          <ErrorCallout error={saveError} title={adding && isApiError(saveError) && saveError.code === 'conflict' ? 'Provider limit reached' : 'Could not save the provider'} />
         )}
       </form>
     </Dialog>
