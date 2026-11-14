@@ -49,7 +49,7 @@
 
 .solution-name {
   min-width: 0;
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   font-weight: 600;
   line-height: 1.3;
   overflow-wrap: anywhere;
