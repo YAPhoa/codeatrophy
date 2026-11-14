@@ -1947,8 +1947,22 @@ button.case-chip:hover {
     display: none;
   }
 
+  /* The tabs take a row of their own, so status, favorite and the menu stay on screen. */
+  .itembar {
+    flex-wrap: wrap;
+  }
+
+  /* A zero basis lets the title shrink before anything wraps onto a new line. */
+  .itembar-title {
+    flex: 1 1 0;
+  }
+
   .itembar-tabs {
+    order: 3;
+    flex-basis: 100%;
     margin-left: 0;
+    min-height: var(--control-h);
+    border-top: 1px solid var(--border);
   }
 
   .itembar .badge {
@@ -2732,7 +2746,12 @@ button.case-chip:hover {
 }
 
 .settings-section > .row {
+  flex-wrap: wrap;
   min-height: var(--control-h);
+}
+
+.settings-section > .row .page-title {
+  flex: none;
 }
 
 .settings-lead {
