@@ -162,7 +162,7 @@ export function Steps({ current, labels }: { current: number; labels: readonly s
     <ol className="steps" aria-label="Progress">
       {labels.map((label, i) => (
         <li key={label} className={cx(i === current && 'is-current', i < current && 'is-done')} aria-current={i === current ? 'step' : undefined}>
-          <span className="step-no">{i < current ? <Check size={12} /> : i + 1}</span>
+          <span className="step-no">{i < current ? <Check size={14} aria-hidden="true" /> : i + 1}</span>
           {label}
         </li>
       ))}

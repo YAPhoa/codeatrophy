@@ -1120,7 +1120,7 @@
   gap: var(--space-2);
   margin-bottom: var(--space-4);
   color: var(--text-3);
-  font-size: var(--text-md);
+  font-size: var(--text-lg);
   line-height: 1;
 }
 
@@ -1143,11 +1143,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
