@@ -235,7 +235,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
 
   return (
     <div className="stepper">
-      <IconButton label={decreaseLabel} size="sm" icon={<Minus size={14} aria-hidden="true" />} disabled={disabled || value <= min} onClick={() => commit(clamp(value - 1))} />
+      <IconButton label={decreaseLabel} icon={<Minus size={14} aria-hidden="true" />} disabled={disabled || value <= min} onClick={() => commit(clamp(value - 1))} />
       <input
         id={id}
         className="input stepper-input"
@@ -268,7 +268,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
           {unit}
         </span>
       )}
-      <IconButton label={increaseLabel} size="sm" icon={<Plus size={14} aria-hidden="true" />} disabled={disabled || value >= max} onClick={() => commit(clamp(value + 1))} />
+      <IconButton label={increaseLabel} icon={<Plus size={14} aria-hidden="true" />} disabled={disabled || value >= max} onClick={() => commit(clamp(value + 1))} />
     </div>
   );
 }

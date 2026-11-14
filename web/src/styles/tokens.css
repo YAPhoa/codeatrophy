@@ -8,12 +8,13 @@
     'DejaVu Sans Mono', monospace;
   --font-serif: 'Iowan Old Style', 'Charter', 'Source Serif 4', 'Noto Serif', 'DejaVu Serif', Georgia, serif;
 
-  --text-xs: 11.5px;
-  --text-sm: 12.5px;
-  --text-md: 13.5px;
-  --text-lg: 15px;
-  --text-xl: 18px;
-  --text-2xl: 22px;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
 
   --radius-sm: 4px;
   --radius: 6px;
@@ -21,8 +22,8 @@
 
   --sidebar-width: 252px;
   --rail-width: 48px;
-  --control-h: 30px;
-  --control-h-sm: 24px;
+  --control-h: 32px;
+  --control-h-sm: 28px;
 
   /* Motion. Things that open take --duration-fast and close in --duration-quick;
      lib/motion.ts reads --duration-quick to know how long a closing overlay

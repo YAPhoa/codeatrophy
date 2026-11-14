@@ -180,7 +180,7 @@
   flex: 1 1 150px;
   max-width: 280px;
   min-width: 150px;
-  height: var(--control-h);
+  height: var(--control-h-sm);
   padding: 0 4px 0 9px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -219,7 +219,7 @@
   border-radius: 8px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   line-height: 16px;
   text-align: center;
@@ -284,20 +284,20 @@
 
 .item-row {
   display: grid;
-  grid-template-columns: 30px 26px 28px 22px minmax(0, 1fr) minmax(0, 210px) 66px 108px 78px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) minmax(0, 210px) 72px 116px 84px;
   align-items: center;
   column-gap: 2px;
-  min-height: 36px;
+  min-height: 40px;
   padding: 0 10px 0 4px;
   border-bottom: 1px solid var(--border);
   position: relative;
   /* Rows off screen are not laid out, so a library loaded far down stays light. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 36px;
+  contain-intrinsic-size: auto 40px;
 }
 
 .item-list.is-reorderable .item-row {
-  grid-template-columns: 30px 26px 28px 22px minmax(0, 1fr) minmax(0, 210px) 66px 108px 78px 22px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) minmax(0, 210px) 72px 116px 84px 22px;
 }
 
 .item-row:last-child {
@@ -443,11 +443,11 @@
 @media (max-width: 1180px) {
   .item-row,
   .item-list.is-reorderable .item-row {
-    grid-template-columns: 30px 26px 28px 22px minmax(0, 1fr) 66px 108px 78px;
+    grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 116px 84px;
   }
 
   .item-list.is-reorderable .item-row {
-    grid-template-columns: 30px 26px 28px 22px minmax(0, 1fr) 66px 108px 78px 22px;
+    grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 116px 84px 22px;
   }
 
   .item-tags {
@@ -458,7 +458,7 @@
 @media (max-width: 700px) {
   .item-row,
   .item-list.is-reorderable .item-row {
-    grid-template-columns: 30px 26px 28px minmax(0, 1fr) auto;
+    grid-template-columns: 32px 28px 28px minmax(0, 1fr) auto;
   }
 
   .item-type,
@@ -899,7 +899,7 @@
   height: 17px;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 650;
 }
 
@@ -2201,7 +2201,7 @@ button.case-chip:hover {
   padding-right: 6px;
   border-bottom: 1px solid var(--border);
   content-visibility: auto;
-  contain-intrinsic-size: auto 38px;
+  contain-intrinsic-size: auto 40px;
 }
 
 .case-row:last-child {
@@ -2218,7 +2218,7 @@ button.case-chip:hover {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 6px 0 10px;
   border: none;
   background: none;
@@ -2931,7 +2931,7 @@ button.case-chip:hover {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 34px;
+  height: 36px;
   padding: 0 12px;
   border: none;
   background: none;
@@ -2976,7 +2976,7 @@ button.log-row:hover {
 /* Closed rows off screen are not laid out, so a long list stays light. */
 .log-entry:not(.is-open) {
   content-visibility: auto;
-  contain-intrinsic-size: auto 34px;
+  contain-intrinsic-size: auto 36px;
 }
 
 .log-gone {
