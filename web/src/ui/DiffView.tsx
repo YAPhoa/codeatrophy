@@ -53,12 +53,12 @@ function LargeOutputs({ expected, actual, mode = 'exact', leftLabel = 'Expected'
   const same = useMemo(() => outputsMatch(expected, actual, mode), [expected, actual, mode]);
   return (
     <div className="concealed large-text" role="group" aria-label={`${leftLabel} compared with ${rightLabel}`}>
-      <EyeOff size={15} aria-hidden="true" />
+      <EyeOff size={16} aria-hidden="true" />
       <span className="grow">{same ? 'No difference found' : 'The outputs differ'}; too large to show.</span>
-      <Button size="sm" icon={<Download size={13} />} title="Download" onClick={() => saveText(expected, textFilename(downloadName, leftLabel))}>
+      <Button size="sm" icon={<Download size={14} />} title="Download" onClick={() => saveText(expected, textFilename(downloadName, leftLabel))}>
         {leftLabel}
       </Button>
-      <Button size="sm" icon={<Download size={13} />} title="Download" onClick={() => saveText(actual, textFilename(downloadName, rightLabel))}>
+      <Button size="sm" icon={<Download size={14} />} title="Download" onClick={() => saveText(actual, textFilename(downloadName, rightLabel))}>
         {rightLabel}
       </Button>
     </div>

@@ -9,7 +9,7 @@ import { isSolutionLimitError, type SolutionWrite } from './solutionWrites';
 export function ReferenceBadge() {
   return (
     <Badge tone="accent" title="This solution is run to verify the expected outputs of test cases">
-      <ShieldCheck size={11} aria-hidden="true" /> Reference
+      <ShieldCheck size={12} aria-hidden="true" /> Reference
     </Badge>
   );
 }

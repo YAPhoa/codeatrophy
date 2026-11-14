@@ -93,7 +93,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
       <Button
         size="sm"
         disabled={busy}
-        icon={allFavorite ? <StarOff size={13} /> : <Star size={13} />}
+        icon={allFavorite ? <StarOff size={14} /> : <Star size={14} />}
         onClick={() => void run({ action: 'setFavorite', favorite: !allFavorite }, allFavorite ? 'Removed {n} from favorites' : 'Added {n} to favorites')}
       >
         {allFavorite ? 'Unfavorite' : 'Favorite'}
@@ -101,7 +101,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
       <MenuButton
         size="sm"
         disabled={busy}
-        icon={<Tag size={13} />}
+        icon={<Tag size={14} />}
         menuLabel="Tags"
         items={[
           {
@@ -126,7 +126,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
       <Button
         size="sm"
         disabled={busy}
-        icon={<FolderPlus size={13} />}
+        icon={<FolderPlus size={14} />}
         onClick={() => {
           setTargetCollection('');
           setDialog({ kind: 'collection' });
@@ -138,17 +138,17 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
         <Button
           size="sm"
           disabled={busy}
-          icon={<FolderMinus size={13} />}
+          icon={<FolderMinus size={14} />}
           onClick={() => void run({ action: 'removeFromCollection', collectionId: collection.id }, `Removed {n} from “${collection.name}”`, true)}
         >
           Remove from this collection
         </Button>
       )}
-      <Button size="sm" disabled={busy} icon={<Download size={13} />} onClick={() => navigate(exportItemsPath(ids))}>
+      <Button size="sm" disabled={busy} icon={<Download size={14} />} onClick={() => navigate(exportItemsPath(ids))}>
         Export
       </Button>
       <span className="spacer" />
-      <Button size="sm" variant="ghost" className="bulk-delete" disabled={busy} icon={<Trash2 size={13} />} onClick={() => void remove()}>
+      <Button size="sm" variant="ghost" className="bulk-delete" disabled={busy} icon={<Trash2 size={14} />} onClick={() => void remove()}>
         Delete
       </Button>
 

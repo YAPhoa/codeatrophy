@@ -41,7 +41,7 @@ export default function GenerateTestsPage() {
   if (item.data.type !== 'problem') {
     return (
       <div className="page">
-        <EmptyState icon={<CircleSlash size={24} />} page title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
+        <EmptyState icon={<CircleSlash size={20} />} page title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
           Test cases belong to problems.
         </EmptyState>
       </div>
@@ -55,27 +55,27 @@ function CaseStatus({ c, attempted, revealed }: { c: ProposedTestCase; attempted
   if (c.error) {
     return (
       <Badge tone="danger" title={revealed ? c.error : 'The solution failed on this input'}>
-        <XCircle size={11} /> run failed
+        <XCircle size={12} /> run failed
       </Badge>
     );
   }
   if (c.verified && c.predictionMatched === false) {
     return (
       <Badge tone="warn" title="The model predicted a different output than the solution produced">
-        <AlertTriangle size={11} /> prediction differed
+        <AlertTriangle size={12} /> prediction differed
       </Badge>
     );
   }
   if (c.verified) {
     return (
       <Badge tone="ok" title="Expected output produced by running the reference solution">
-        <ShieldCheck size={11} /> verified by execution
+        <ShieldCheck size={12} /> verified by execution
       </Badge>
     );
   }
   return (
     <Badge title={attempted ? 'Could not be verified' : 'No judge engine: the output is the model’s prediction'}>
-      <ShieldQuestion size={11} /> unverified
+      <ShieldQuestion size={12} /> unverified
     </Badge>
   );
 }
@@ -379,7 +379,7 @@ function Generator({ item }: { item: Item }) {
                   <strong>Reference solution</strong>
                   <span className="muted">{languageName(proposal.referenceSolution.language)}, written by the AI</span>
                   <span className="spacer" />
-                  <Button size="sm" icon={showSolution ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={showSolution} onClick={() => setShowSolution((v) => !v)}>
+                  <Button size="sm" icon={showSolution ? <EyeOff size={14} /> : <Eye size={14} />} aria-expanded={showSolution} onClick={() => setShowSolution((v) => !v)}>
                     {showSolution ? 'Hide solution' : 'Show solution'}
                   </Button>
                 </div>

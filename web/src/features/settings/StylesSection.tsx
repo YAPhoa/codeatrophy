@@ -202,7 +202,7 @@ export function StylesSection() {
                 <p className="style-text">{s.instructions}</p>
               </div>
               <div className="style-actions">
-                <Button size="sm" variant="ghost" icon={<Star size={13} fill={s.isDefault ? 'currentColor' : 'none'} />} onClick={() => void setDefault(s, !s.isDefault)}>
+                <Button size="sm" variant="ghost" icon={<Star size={14} fill={s.isDefault ? 'currentColor' : 'none'} />} onClick={() => void setDefault(s, !s.isDefault)}>
                   {s.isDefault ? 'Unset default' : 'Make default'}
                 </Button>
                 <IconButton size="sm" label={`Edit ${s.name}`} icon={<Pencil size={14} />} onClick={() => open(s)} />

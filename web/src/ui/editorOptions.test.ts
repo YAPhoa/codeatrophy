@@ -125,8 +125,8 @@ describe('resolveEditorOptions', () => {
       lineWrapping: true,
       tabSize: 4,
       indentUnit: '    ',
-      fontSize: 13,
-      lineHeight: 20.15,
+      fontSize: 14,
+      lineHeight: 21,
     });
     expect(resolveEditorOptions({ ...defaults, lineWrapping: true, fontSize: 10 }, { prose: true })).toEqual(prose);
   });

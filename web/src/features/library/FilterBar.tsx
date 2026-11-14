@@ -112,7 +112,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
             }
           }}
         />
-        {text && <IconButton size="sm" label="Clear search" icon={<X size={13} />} onClick={() => setText('')} />}
+        {text && <IconButton size="sm" label="Clear search" icon={<X size={14} />} onClick={() => setText('')} />}
       </div>
 
       <Segmented
@@ -197,7 +197,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         size="sm"
         className={cx('filter-btn', filters.favorite && 'is-active')}
         aria-pressed={filters.favorite}
-        icon={<Star size={13} fill={filters.favorite ? 'currentColor' : 'none'} />}
+        icon={<Star size={14} fill={filters.favorite ? 'currentColor' : 'none'} />}
         onClick={() => onChange({ ...filters, favorite: !filters.favorite })}
       >
         Favorites
@@ -209,7 +209,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         <Button
           size="sm"
           variant="ghost"
-          icon={<X size={13} />}
+          icon={<X size={14} />}
           onClick={() => {
             setText('');
             lastPushed.current = '';
@@ -240,7 +240,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         <IconButton
           size="sm"
           label={order === 'asc' ? 'Ascending — switch to descending' : 'Descending — switch to ascending'}
-          icon={order === 'asc' ? <ArrowDownAZ size={15} /> : <ArrowUpAZ size={15} />}
+          icon={order === 'asc' ? <ArrowDownAZ size={16} /> : <ArrowUpAZ size={16} />}
           onClick={() => onChange({ ...filters, sort, order: order === 'asc' ? 'desc' : 'asc' })}
         />
       )}

@@ -8,7 +8,7 @@ export function NotFoundPage() {
   useDocumentTitle('Not found');
   return (
     <div className="page">
-      <EmptyState icon={<Compass size={24} />} page title="There is nothing at this address" actions={<LinkButton to="/">Back to the library</LinkButton>}>
+      <EmptyState icon={<Compass size={20} />} page title="There is nothing at this address" actions={<LinkButton to="/">Back to the library</LinkButton>}>
         The link may be out of date, or the item was deleted.
       </EmptyState>
     </div>

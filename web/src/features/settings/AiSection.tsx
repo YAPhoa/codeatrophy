@@ -257,7 +257,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
         )}
         {test && !test.busy && (
           <p className={cx('provider-test', test.result?.ok ? 'is-ok' : 'is-failed')} role="status">
-            {test.result?.ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <XCircle size={13} aria-hidden="true" />}
+            {test.result?.ok ? <CheckCircle2 size={14} aria-hidden="true" /> : <XCircle size={14} aria-hidden="true" />}
             <span>
               {test.error != null ? (
                 errorLine(test.error)
@@ -276,7 +276,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
       </div>
       <div className="style-actions">
         {p.ready && !p.isDefault && (
-          <Button size="sm" variant="ghost" icon={<Star size={13} />} onClick={onDefault}>
+          <Button size="sm" variant="ghost" icon={<Star size={14} />} onClick={onDefault}>
             Make default
           </Button>
         )}

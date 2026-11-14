@@ -42,7 +42,7 @@ export default function TestsPage() {
   if (item.data.type !== 'problem') {
     return (
       <div className="page">
-        <EmptyState icon={<CircleSlash size={24} />} page title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
+        <EmptyState icon={<CircleSlash size={20} />} page title="Readings have no test cases" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
           Test cases belong to problems.
         </EmptyState>
       </div>
@@ -433,7 +433,7 @@ function TestsManager({ item }: { item: Item }) {
                   </Button>
                 )}
                 {discardable.length > 0 && (
-                  <Button size="sm" icon={<Trash2 size={13} />} onClick={() => void discardFailed()} busy={discarding} disabled={verifying !== null}>
+                  <Button size="sm" icon={<Trash2 size={14} />} onClick={() => void discardFailed()} busy={discarding} disabled={verifying !== null}>
                     Discard {discardable.length} failed
                   </Button>
                 )}
@@ -497,7 +497,7 @@ function TestsManager({ item }: { item: Item }) {
             <div className="card">
               <EmptyState
                 compact
-                icon={<FlaskConical size={18} />}
+                icon={<FlaskConical size={20} />}
                 title="No test cases yet"
                 actions={
                   <>
@@ -532,27 +532,27 @@ function TestsManager({ item }: { item: Item }) {
                         {v ? (
                           v.ok && v.matches ? (
                             <Badge tone="ok" title={`${capitalize(who)} produces this expected output`}>
-                              <Check size={11} /> matches
+                              <Check size={12} /> matches
                             </Badge>
                           ) : v.ok ? (
                             <Badge tone="danger" title={`${capitalize(who)} produces a different output`}>
-                              <AlertTriangle size={11} /> differs
+                              <AlertTriangle size={12} /> differs
                             </Badge>
                           ) : (
                             <Badge tone="warn" title={VERDICT_LABEL[v.verdict]}>
-                              <X size={11} /> failed
+                              <X size={12} /> failed
                             </Badge>
                           )
                         ) : c.verified ? (
                           <Badge tone="ok" title="Expected output confirmed, by running the reference solution or by hand">
-                            <ShieldCheck size={11} /> verified
+                            <ShieldCheck size={12} /> verified
                           </Badge>
                         ) : (
                           <Badge title="Expected output has not been confirmed by execution">unverified</Badge>
                         )}
                       </button>
-                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} up`} icon={<ArrowUp size={13} />} disabled={i === 0} onClick={() => void move(i, -1)} />
-                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} down`} icon={<ArrowDown size={13} />} disabled={i === cases.length - 1} onClick={() => void move(i, 1)} />
+                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} up`} icon={<ArrowUp size={14} />} disabled={i === 0} onClick={() => void move(i, -1)} />
+                      <IconButton size="sm" label={`Move ${name || `case ${i + 1}`} down`} icon={<ArrowDown size={14} />} disabled={i === cases.length - 1} onClick={() => void move(i, 1)} />
                     </li>
                   );
                 })}
@@ -675,7 +675,7 @@ function TestsManager({ item }: { item: Item }) {
               <div className="card">
                 <EmptyState
                   compact
-                  icon={<ShieldCheck size={18} />}
+                  icon={<ShieldCheck size={20} />}
                   title="No saved solutions yet"
                   actions={
                     <LinkButton to={`/items/${item.id}/solutions?add`} icon={<Plus size={14} />}>

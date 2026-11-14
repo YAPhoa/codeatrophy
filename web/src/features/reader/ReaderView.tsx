@@ -93,11 +93,11 @@ export function ReaderView({ item }: { item: Item }) {
             onCreate={() => collectionActions.create(null, (c) => actions.toggleCollection(c.id, true))}
           />
         </span>
-        <Button size="sm" icon={<NotebookPen size={13} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
+        <Button size="sm" icon={<NotebookPen size={14} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
           Notes
         </Button>
         <span className="itembar-wide">
-          <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={13} />}>
+          <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={14} />}>
             Edit
           </LinkButton>
         </span>

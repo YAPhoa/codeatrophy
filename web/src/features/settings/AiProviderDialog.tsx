@@ -251,7 +251,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
               <>Can be saved now; it still needs {listNeeds(outlook.missing)}.</>
             ) : tested ? (
               <>
-                <CheckCircle2 size={13} aria-hidden="true" /> Tested. Save to keep it.
+                <CheckCircle2 size={14} aria-hidden="true" /> Tested. Save to keep it.
               </>
             ) : null}
           </span>
@@ -356,7 +356,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           )}
           {provider && (
             <div className="key-status">
-              <KeyRound size={13} aria-hidden="true" />
+              <KeyRound size={14} aria-hidden="true" />
               {outlook.savedKeyDropped ? (
                 <span>
                   The saved key ending in <code translate="no">{keyHint}</code> will be deleted when you save.
@@ -401,7 +401,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           />
         ) : (
           <div className="server-line">
-            <Server size={13} aria-hidden="true" />
+            <Server size={14} aria-hidden="true" />
             <span>
               Connects to <code translate="no">{host}</code>.
             </span>

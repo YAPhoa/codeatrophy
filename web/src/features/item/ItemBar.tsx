@@ -53,7 +53,7 @@ export function ItemBar({ item }: { item: Item }) {
         />
       </span>
       <span className="itembar-wide">
-        <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={13} />}>
+        <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={14} />}>
           Edit
         </LinkButton>
       </span>

@@ -23,7 +23,7 @@ export function StylePicker({ styles, value, onChange, disabled, id = 'style-pic
   if (styles.length === 0) {
     return (
       <Link to="/settings/styles" className="style-link" title="Save your own standing instructions for how drafts are written">
-        <PenLine size={13} aria-hidden="true" />
+        <PenLine size={14} aria-hidden="true" />
         Add a writing style
       </Link>
     );
@@ -31,7 +31,7 @@ export function StylePicker({ styles, value, onChange, disabled, id = 'style-pic
   return (
     <span className="style-picker">
       <label htmlFor={id} className="style-picker-label">
-        <PenLine size={13} aria-hidden="true" />
+        <PenLine size={14} aria-hidden="true" />
         Style
       </label>
       <select

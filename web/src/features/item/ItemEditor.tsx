@@ -239,7 +239,7 @@ export function ItemEditor({
               <span className="spacer" />
               <MenuButton
                 size="sm"
-                icon={<Plus size={13} />}
+                icon={<Plus size={14} />}
                 disabled={addable.length === 0}
                 menuLabel="Add a language"
                 items={addable.map((l) => ({
@@ -273,7 +273,7 @@ export function ItemEditor({
                   />
                   {judged?.find((l) => l.id === activeStarter)?.version && <span className="muted">Runs on {languageLabel(activeStarter, judged)}</span>}
                   <span className="spacer" />
-                  <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => removeLanguage(activeStarter)}>
+                  <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={() => removeLanguage(activeStarter)}>
                     Remove {languageName(activeStarter)}
                   </Button>
                 </div>
@@ -297,7 +297,7 @@ export function ItemEditor({
                         <ExpandChevron open={runnerOpen} />
                         <strong>Runner</strong>
                         <span className="chip">
-                          <EyeOff size={11} aria-hidden="true" /> hidden from the solver
+                          <EyeOff size={12} aria-hidden="true" /> hidden from the solver
                         </span>
                         <span className="spacer" />
                         {runnerEmpty ? (
@@ -365,7 +365,7 @@ export function ItemEditor({
               {caseTools}
               <Button
                 size="sm"
-                icon={<Plus size={13} />}
+                icon={<Plus size={14} />}
                 onClick={() =>
                   set('testCases', [
                     ...form.testCases,
@@ -395,12 +395,12 @@ export function ItemEditor({
                       {t.large && <Badge title="Not carried over by a revision">large</Badge>}
                       {t.verified && (
                         <Badge tone="ok" title="The reference solution printed this output">
-                          <ShieldCheck size={11} aria-hidden="true" /> verified
+                          <ShieldCheck size={12} aria-hidden="true" /> verified
                         </Badge>
                       )}
                       {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
                       <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
-                      <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={13} />} onClick={() => removeCase(t.key, i + 1)} />
+                      <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={14} />} onClick={() => removeCase(t.key, i + 1)} />
                     </div>
                     {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
                     <div className="case-io">
@@ -431,13 +431,13 @@ export function ItemEditor({
                 {languageName(form.referenceSolution.language)}, written by the AI
               </span>
               <span className="spacer" />
-              <Button size="sm" icon={solutionShown ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={solutionShown} onClick={() => setSolutionShown((v) => !v)}>
+              <Button size="sm" icon={solutionShown ? <EyeOff size={14} /> : <Eye size={14} />} aria-expanded={solutionShown} onClick={() => setSolutionShown((v) => !v)}>
                 {solutionShown ? 'Hide solution' : 'Show solution'}
               </Button>
               <IconButton
                 size="sm"
                 label="Remove the reference solution"
-                icon={<Trash2 size={13} />}
+                icon={<Trash2 size={14} />}
                 onClick={() => {
                   const solution = form.referenceSolution;
                   setSolutionShown(false);

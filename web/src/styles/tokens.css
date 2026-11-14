@@ -1,12 +1,14 @@
 /* Design tokens. Every colour in the app comes from here so that the light
-   and dark themes stay in step. `data-theme` is set on <html> by lib/theme.ts. */
+   and dark themes stay in step. `data-theme` is set on <html> by lib/theme.ts.
+   Type sizes, spacing, radii, control heights and motion live here too: use a
+   token rather than a raw pixel value. Phones (900px and below) raise the
+   control heights in layout.css. */
 
 :root {
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', 'Liberation Sans', Arial,
     sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono',
     'DejaVu Sans Mono', monospace;
-  --font-serif: 'Iowan Old Style', 'Charter', 'Source Serif 4', 'Noto Serif', 'DejaVu Serif', Georgia, serif;
 
   --text-2xs: 11px;
   --text-xs: 12px;

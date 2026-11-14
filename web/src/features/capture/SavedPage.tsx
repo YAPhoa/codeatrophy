@@ -22,7 +22,7 @@ function SavedSolution({ item, solution }: { item: Item; solution: SourceCode })
   return (
     <section className="saved-solution" aria-labelledby="saved-solution-title">
       <div className="row">
-        <EyeOff size={15} aria-hidden="true" />
+        <EyeOff size={16} aria-hidden="true" />
         <h2 id="saved-solution-title">Reference solution</h2>
         <span className="muted">{languageName(solution.language)}, kept hidden</span>
         <span className="spacer" />
@@ -71,7 +71,7 @@ export default function SavedPage() {
             <TagChips tags={it.tags} max={5} />
           </div>
         </div>
-        <LinkButton to={`/items/${it.id}`} variant="primary" icon={<ArrowRight size={15} />}>
+        <LinkButton to={`/items/${it.id}`} variant="primary" icon={<ArrowRight size={16} />}>
           {isProblem ? 'Open and solve' : 'Open'}
         </LinkButton>
       </div>

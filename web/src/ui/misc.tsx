@@ -152,7 +152,7 @@ export function ErrorCallout({ error, onRetry, title }: { error: unknown; onRetr
           {view.action === 'ai-settings' && <Link to="/settings/ai">Open AI settings</Link>}
           {view.action === 'judge-settings' && <Link to="/settings/judge">Judge status</Link>}
           {onRetry && view.action !== 'ai-settings' && (
-            <Button size="sm" icon={<RotateCw size={13} />} onClick={onRetry}>
+            <Button size="sm" icon={<RotateCw size={14} />} onClick={onRetry}>
               Try again
             </Button>
           )}

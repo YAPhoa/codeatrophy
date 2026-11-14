@@ -417,7 +417,7 @@ export function SolveView({ item }: { item: Item }) {
             id={FOCUS.statementPane}
             size="sm"
             label={`Minimise the statement (${MOD}+E)`}
-            icon={<PanelLeftClose size={15} />}
+            icon={<PanelLeftClose size={16} />}
             onClick={() => setStatementMinimised(true)}
           />
         )}
@@ -457,12 +457,12 @@ export function SolveView({ item }: { item: Item }) {
             </option>
           ))}
         </select>
-        <Button size="sm" variant="ghost" icon={<RotateCcw size={13} />} onClick={() => void resetCode()} title="Replace your code with the starter code">
+        <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => void resetCode()} title="Replace your code with the starter code">
           Reset
         </Button>
         <span className="muted editor-saved">Kept in this browser</span>
         <span className="spacer" />
-        <Button size="sm" variant="ghost" icon={<BookmarkPlus size={13} />} onClick={saveEditorCode} aria-label="Save as solution" title="Keep this code as one of the problem's saved solutions" className="editor-save">
+        <Button size="sm" variant="ghost" icon={<BookmarkPlus size={14} />} onClick={saveEditorCode} aria-label="Save as solution" title="Keep this code as one of the problem's saved solutions" className="editor-save">
           Save as solution
         </Button>
         {!narrow && (
@@ -476,13 +476,13 @@ export function SolveView({ item }: { item: Item }) {
         )}
         {canRun && (
           <>
-            <Button size="sm" icon={<Play size={13} />} onClick={runSamples} busy={runner.starting === 'run'} disabled={runner.judging} title={`Run against the sample cases (${MOD}+Enter)`}>
+            <Button size="sm" icon={<Play size={14} />} onClick={runSamples} busy={runner.starting === 'run'} disabled={runner.judging} title={`Run against the sample cases (${MOD}+Enter)`}>
               Run
             </Button>
             <Button
               size="sm"
               variant="primary"
-              icon={<Send size={13} />}
+              icon={<Send size={14} />}
               onClick={submit}
               busy={runner.starting === 'submit'}
               disabled={runner.judging}
@@ -569,7 +569,7 @@ export function SolveView({ item }: { item: Item }) {
         aria-label="Show tests and results"
         title={`Show tests and results (${MOD}+J)`}
       >
-        <ChevronUp size={15} aria-hidden="true" />
+        <ChevronUp size={16} aria-hidden="true" />
       </button>
       {drawerTabs.map((t) => (
         <button key={t.value} type="button" className="drawer-bar-btn" onClick={() => setDrawer(true, t.value)}>
@@ -578,7 +578,7 @@ export function SolveView({ item }: { item: Item }) {
         </button>
       ))}
       <button type="button" className={cx('drawer-bar-btn drawer-bar-status', `tone-${status.tone}`)} onClick={() => setDrawer(true, 'result')} title="Show the result">
-        {status.busy && <Loader2 size={13} className="spin" aria-hidden="true" />}
+        {status.busy && <Loader2 size={14} className="spin" aria-hidden="true" />}
         <span className="truncate" role="status">
           {status.text}
         </span>
@@ -651,7 +651,7 @@ export function SolveView({ item }: { item: Item }) {
           id={FOCUS.drawerPane}
           size="sm"
           label={`Minimise tests and results (${MOD}+J)`}
-          icon={<ChevronDown size={15} />}
+          icon={<ChevronDown size={16} />}
           onClick={() => setDrawer(false)}
         />
       </div>
@@ -705,7 +705,7 @@ export function SolveView({ item }: { item: Item }) {
               </>
             )}
             <div className="row">
-              <Button size="sm" icon={<Play size={13} />} onClick={() => begin('run', customInput)} disabled={runner.judging}>
+              <Button size="sm" icon={<Play size={14} />} onClick={() => begin('run', customInput)} disabled={runner.judging}>
                 Run with this input
               </Button>
               <span className="muted">The output is shown as it is; nothing is compared.</span>
@@ -741,7 +741,7 @@ export function SolveView({ item }: { item: Item }) {
       aria-label="Show the statement"
       title={`Show the statement (${MOD}+E)`}
     >
-      <PanelLeftOpen size={15} aria-hidden="true" />
+      <PanelLeftOpen size={16} aria-hidden="true" />
       <span className="pane-rail-label">Statement</span>
     </button>
   );

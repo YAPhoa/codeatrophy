@@ -107,7 +107,7 @@ export default function TagsPage() {
       ) : tags.isError ? (
         <ErrorState error={tags.error} onRetry={() => void tags.refetch()} />
       ) : list.length === 0 ? (
-        <EmptyState icon={<Tags size={24} />} title="No tags yet" actions={<LinkButton to="/">Go to the library</LinkButton>}>
+        <EmptyState icon={<Tags size={20} />} title="No tags yet" actions={<LinkButton to="/">Go to the library</LinkButton>}>
           Add tags while capturing or editing an item, or select several items in the library and use “Tags”.
         </EmptyState>
       ) : (

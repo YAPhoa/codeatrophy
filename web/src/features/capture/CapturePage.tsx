@@ -351,7 +351,7 @@ export default function CapturePage() {
           <div className="capture-actions">
             {aiEnabled ? (
               <>
-                <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
+                <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
                   Draft with AI
                 </Button>
                 <span className="muted capture-kbd">
@@ -363,7 +363,7 @@ export default function CapturePage() {
                 </Button>
               </>
             ) : (
-              <Button variant="primary" icon={<PenLine size={15} />} onClick={writeByHand}>
+              <Button variant="primary" icon={<PenLine size={16} />} onClick={writeByHand}>
                 Continue to the editor
               </Button>
             )}

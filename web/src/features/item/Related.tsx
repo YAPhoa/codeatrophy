@@ -23,14 +23,14 @@ export function Related({ item }: { item: Item }) {
           {isProblem ? 'Variants' : 'Related readings'}
         </h2>
         <span className="spacer" />
-        <LinkButton to={`/items/${item.id}/variant`} size="sm" icon={<GitBranch size={13} />}>
+        <LinkButton to={`/items/${item.id}/variant`} size="sm" icon={<GitBranch size={14} />}>
           {isProblem ? 'Practise a variant' : 'Rework this reading'}
         </LinkButton>
       </div>
 
       {item.variantOf && (
         <p className="related-origin">
-          <CornerLeftUp size={13} aria-hidden="true" />
+          <CornerLeftUp size={14} aria-hidden="true" />
           A variant of{' '}
           {origin.data ? <Link to={`/items/${origin.data.id}`}>{origin.data.title}</Link> : origin.isError ? <span className="muted">an item that is no longer available</span> : <span className="muted">…</span>}
         </p>

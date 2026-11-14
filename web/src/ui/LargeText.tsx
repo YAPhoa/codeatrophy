@@ -28,17 +28,17 @@ export function LargeText({ text, filename, onClear, label, className }: LargeTe
   const size = useMemo(() => describeTextSize(textStats(text)), [text]);
   return (
     <div className={cx('concealed large-text', className)} role="group" aria-label={label}>
-      <EyeOff size={15} aria-hidden="true" />
+      <EyeOff size={16} aria-hidden="true" />
       <span className="grow">
         {onClear ? 'Too large to show or edit' : 'Too large to show'} <span className="large-text-size">· {size}</span>
       </span>
       <span className="large-text-actions">
         {onClear && (
-          <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={onClear}>
+          <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={onClear}>
             Clear
           </Button>
         )}
-        <Button size="sm" icon={<Download size={13} />} onClick={() => saveText(text, filename)}>
+        <Button size="sm" icon={<Download size={14} />} onClick={() => saveText(text, filename)}>
           Download
         </Button>
       </span>

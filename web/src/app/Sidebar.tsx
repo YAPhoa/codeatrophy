@@ -193,9 +193,9 @@ function CollectionTreeNode({
 }
 
 const THEME_ICON: Record<ThemePreference, ReactNode> = {
-  system: <Monitor size={15} />,
-  light: <Sun size={15} />,
-  dark: <Moon size={15} />,
+  system: <Monitor size={16} />,
+  light: <Sun size={16} />,
+  dark: <Moon size={16} />,
 };
 
 export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
@@ -252,7 +252,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       <aside className="sidebar is-rail" aria-label="Navigation">
         <Link to="/" className="rail-brand" aria-label="Codeatrophy: all items" title="Codeatrophy">
           <span className="brand-mark" aria-hidden="true">
-            <Code2 size={15} strokeWidth={2.6} />
+            <Code2 size={16} strokeWidth={2.6} />
           </span>
         </Link>
         <IconButton label={`Expand navigation (${MOD}+B)`} size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
@@ -282,7 +282,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
             <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
             <span aria-hidden="true">Judge</span>
           </Link>
-          <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={15} />} onClick={onOpenShortcuts} />
+          <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
           {themeMenu}
         </div>
       </aside>
@@ -294,7 +294,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       <div className="sidebar-head">
         <Link to="/" className="brand" translate="no">
           <span className="brand-mark" aria-hidden="true">
-            <Code2 size={15} strokeWidth={2.6} />
+            <Code2 size={16} strokeWidth={2.6} />
           </span>
           Codeatrophy
         </Link>
@@ -303,7 +303,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       </div>
 
       <div className="sidebar-actions">
-        <LinkButton to={newHref} variant="primary" icon={<Plus size={15} />} className="sidebar-new">
+        <LinkButton to={newHref} variant="primary" icon={<Plus size={16} />} className="sidebar-new">
           New item
           <Kbd>C</Kbd>
         </LinkButton>
@@ -318,19 +318,19 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       <nav className="sidebar-scroll">
         <ul className="nav-group">
           <li>
-            <NavEntry to="/" icon={<Library size={15} />} label="All items" count={s?.items.total} active={onLibrary && !type && !fav && !uncollected} />
+            <NavEntry to="/" icon={<Library size={16} />} label="All items" count={s?.items.total} active={onLibrary && !type && !fav && !uncollected} />
           </li>
           <li>
-            <NavEntry to="/?type=problem" icon={<Code2 size={15} />} label="Problems" count={s?.items.byType.problem} active={onLibrary && type === 'problem' && !fav && !uncollected} />
+            <NavEntry to="/?type=problem" icon={<Code2 size={16} />} label="Problems" count={s?.items.byType.problem} active={onLibrary && type === 'problem' && !fav && !uncollected} />
           </li>
           <li>
-            <NavEntry to="/?type=reading" icon={<BookOpen size={15} />} label="Readings" count={s?.items.byType.reading} active={onLibrary && type === 'reading' && !fav && !uncollected} />
+            <NavEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={onLibrary && type === 'reading' && !fav && !uncollected} />
           </li>
           <li>
-            <NavEntry to="/?favorite=true" icon={<Star size={15} />} label="Favorites" active={onLibrary && fav} />
+            <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
           </li>
           <li>
-            <NavEntry to="/?uncollected=true" icon={<Inbox size={15} />} label="Uncollected" active={onLibrary && uncollected} />
+            <NavEntry to="/?uncollected=true" icon={<Inbox size={16} />} label="Uncollected" active={onLibrary && uncollected} />
           </li>
         </ul>
 
@@ -358,16 +358,16 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         </div>
         <ul className="nav-group" aria-labelledby="nav-manage">
           <li>
-            <NavEntry to="/tags" icon={<Tags size={15} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} />
+            <NavEntry to="/tags" icon={<Tags size={16} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} />
           </li>
           <li>
-            <NavEntry to="/import" icon={<Upload size={15} />} label="Import" active={location.pathname === '/import'} />
+            <NavEntry to="/import" icon={<Upload size={16} />} label="Import" active={location.pathname === '/import'} />
           </li>
           <li>
-            <NavEntry to="/export" icon={<Download size={15} />} label="Export" active={location.pathname === '/export'} />
+            <NavEntry to="/export" icon={<Download size={16} />} label="Export" active={location.pathname === '/export'} />
           </li>
           <li>
-            <NavEntry to="/settings" icon={<Settings size={15} />} label="Settings" active={onSettings} />
+            <NavEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />
           </li>
         </ul>
       </nav>
@@ -382,7 +382,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           Judge<span className="sr-only">: {judgeState === 'ok' ? 'healthy' : judgeState === 'down' ? 'not responding' : 'off'}</span>
         </Link>
         <span className="spacer" />
-        <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={15} />} onClick={onOpenShortcuts} />
+        <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
         {themeMenu}
       </div>
     </aside>

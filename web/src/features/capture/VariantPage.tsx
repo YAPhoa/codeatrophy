@@ -298,7 +298,7 @@ function VariantFlow({ original }: { original: Item }) {
           {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed — your choices are kept" onRetry={() => void generate()} />}
           <div className="capture-actions">
             {aiEnabled && (
-              <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => void generate()} disabled={stylesQuery.isPending}>
+              <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void generate()} disabled={stylesQuery.isPending}>
                 {isProblem ? 'Draft another problem' : 'Draft the reading'}
               </Button>
             )}

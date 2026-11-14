@@ -23,7 +23,7 @@ export function HistoryList({ itemId, activeId, timeLimitMs, onOpen, onSaveSolut
   if (list.isError) return <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />;
   if (list.data.items.length === 0) {
     return (
-      <EmptyState compact icon={<History size={18} />} title="No submissions yet">
+      <EmptyState compact icon={<History size={20} />} title="No submissions yet">
         Runs and submissions appear here, with the code you sent, so you can go back to an earlier attempt.
       </EmptyState>
     );

@@ -328,7 +328,7 @@ export default function ImportPage() {
               )}
 
               <div className="form-actions import-actions">
-                <Button variant="primary" icon={<CheckCircle2 size={15} />} onClick={() => void run()} busy={importing} disabled={nothingToDo}>
+                <Button variant="primary" icon={<CheckCircle2 size={16} />} onClick={() => void run()} busy={importing} disabled={nothingToDo}>
                   {nothingToDo ? 'Nothing to import' : 'Import bundle'}
                 </Button>
                 <Button variant="ghost" onClick={reset} disabled={importing}>

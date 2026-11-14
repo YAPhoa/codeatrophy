@@ -82,7 +82,7 @@ export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: Bu
       aria-pressed={item.favorite}
       aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
       title={item.favorite ? 'Favorite — click to remove' : 'Add to favorites'}
-      icon={<Star size={15} fill={item.favorite ? 'currentColor' : 'none'} />}
+      icon={<Star size={16} fill={item.favorite ? 'currentColor' : 'none'} />}
       onClick={(e) => {
         e.stopPropagation();
         update.mutate({ id: item.id, change: { favorite: !item.favorite } }, { onError: (err) => toast.error(err) });

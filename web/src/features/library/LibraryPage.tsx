@@ -302,7 +302,7 @@ export function LibraryPage() {
   if (collectionId && collectionsQuery.isSuccess && !collection) {
     return (
       <div className="page">
-        <EmptyState icon={<FolderSearch size={24} />} page title="This collection does not exist" actions={<LinkButton to="/">Back to the library</LinkButton>}>
+        <EmptyState icon={<FolderSearch size={20} />} page title="This collection does not exist" actions={<LinkButton to="/">Back to the library</LinkButton>}>
           It may have been deleted. Its items, if any, are still in the library.
         </EmptyState>
       </div>
@@ -342,7 +342,7 @@ export function LibraryPage() {
             <div className="subcollections">
               {children.map((c) => (
                 <Link key={c.id} to={`/collections/${c.id}`} className="subcollection">
-                  <Folder size={13} aria-hidden="true" />
+                  <Folder size={14} aria-hidden="true" />
                   {c.name}
                   <span className="muted">{c.itemCount}</span>
                 </Link>
@@ -372,21 +372,21 @@ export function LibraryPage() {
             ]}
           />
         )}
-        <LinkButton to={newHref} variant="primary" icon={<Plus size={15} />}>
+        <LinkButton to={newHref} variant="primary" icon={<Plus size={16} />}>
           New item
         </LinkButton>
       </header>
 
       {libraryEmpty && filterCount === 0 && !collection ? (
         <EmptyState
-          icon={<Sparkles size={24} />}
+          icon={<Sparkles size={20} />}
           title="Your library is empty"
           actions={
             <>
-              <LinkButton to="/new" variant="primary" icon={<Plus size={15} />}>
+              <LinkButton to="/new" variant="primary" icon={<Plus size={16} />}>
                 Capture your first item
               </LinkButton>
-              <LinkButton to="/import" icon={<Upload size={15} />}>
+              <LinkButton to="/import" icon={<Upload size={16} />}>
                 Import a bundle
               </LinkButton>
             </>
@@ -421,7 +421,7 @@ export function LibraryPage() {
           ) : items.length === 0 ? (
             filterCount > 0 ? (
               <EmptyState
-                icon={<SearchX size={24} />}
+                icon={<SearchX size={20} />}
                 title="No items match"
                 actions={<Button onClick={() => setFilters({ ...filters, q: '', type: null, status: [], difficulty: [], tags: [], favorite: false, uncollected: false })}>Clear filters</Button>}
               >
@@ -429,11 +429,11 @@ export function LibraryPage() {
               </EmptyState>
             ) : collection ? (
               <EmptyState
-                icon={<Inbox size={24} />}
+                icon={<Inbox size={20} />}
                 title="Nothing in this collection yet"
                 actions={
                   <>
-                    <LinkButton to={newHref} variant="primary" icon={<Plus size={15} />}>
+                    <LinkButton to={newHref} variant="primary" icon={<Plus size={16} />}>
                       Capture into this collection
                     </LinkButton>
                     <LinkButton to="/">Pick from the library</LinkButton>
@@ -443,7 +443,7 @@ export function LibraryPage() {
                 In the library, select items and choose “Add to collection”, or drag rows onto a collection in the sidebar.
               </EmptyState>
             ) : (
-              <EmptyState icon={<Inbox size={24} />} title="Nothing here">
+              <EmptyState icon={<Inbox size={20} />} title="Nothing here">
                 No items in this view.
               </EmptyState>
             )
@@ -464,7 +464,7 @@ export function LibraryPage() {
                 <span className="item-head-label">
                   {reorderable ? 'Manual order — drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
                 </span>
-                {query.isFetching && <Spinner size={13} label="Refreshing…" />}
+                {query.isFetching && <Spinner size={14} label="Refreshing…" />}
               </div>
               <ul className={cx('item-list', reorderable && 'is-reorderable')} ref={listRef} onKeyDown={onListKeyDown} aria-label={`${title}: items`}>
                 {items.map((item, i) => (

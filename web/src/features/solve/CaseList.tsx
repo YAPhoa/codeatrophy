@@ -39,7 +39,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
               Add test cases
             </LinkButton>
             {aiEnabled && (
-              <LinkButton size="sm" to={`/items/${item.id}/tests/generate`} icon={<FlaskConical size={13} />}>
+              <LinkButton size="sm" to={`/items/${item.id}/tests/generate`} icon={<FlaskConical size={14} />}>
                 Generate with AI
               </LinkButton>
             )}
@@ -61,16 +61,16 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
         <span className="tcases-summary">{describeCases(list.length, samples, reveal.hiding)}</span>
         <span className="spacer" />
         {concealed > 0 && (
-          <Button size="sm" icon={<Eye size={13} />} onClick={reveal.revealAll}>
+          <Button size="sm" icon={<Eye size={14} />} onClick={reveal.revealAll}>
             Reveal all
           </Button>
         )}
         {revealedSome && concealed === 0 && (
-          <Button size="sm" variant="ghost" icon={<EyeOff size={13} />} onClick={reveal.reset}>
+          <Button size="sm" variant="ghost" icon={<EyeOff size={14} />} onClick={reveal.reset}>
             Hide again
           </Button>
         )}
-        <LinkButton size="sm" variant="ghost" to={`/items/${item.id}/tests`} icon={<Settings2 size={13} />}>
+        <LinkButton size="sm" variant="ghost" to={`/items/${item.id}/tests`} icon={<Settings2 size={14} />}>
           Manage
         </LinkButton>
       </div>
@@ -90,7 +90,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
                 <span className="tcase-name">Case {number}</span>
                 <span className="chip">hidden</span>
                 <span className="spacer" />
-                <Button size="sm" variant="ghost" icon={<Eye size={13} />} onClick={() => reveal.reveal(c.id)} aria-label={`Reveal case ${number}`}>
+                <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => reveal.reveal(c.id)} aria-label={`Reveal case ${number}`}>
                   Reveal
                 </Button>
               </li>

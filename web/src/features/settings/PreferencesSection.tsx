@@ -68,7 +68,7 @@ function SaveStatus({ state }: { state: SaveState }) {
       )}
       {state.status === 'saved' && (
         <>
-          <Check size={13} aria-hidden="true" /> Saved
+          <Check size={14} aria-hidden="true" /> Saved
         </>
       )}
     </span>

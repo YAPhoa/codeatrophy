@@ -55,7 +55,7 @@ export function useSolutionTest(item: Item, solution: { id?: string; language: s
 
 export function TestButton({ test, label = 'Run tests' }: { test: SolutionTest; label?: string }) {
   return (
-    <Button size="sm" icon={<FlaskConical size={13} />} onClick={test.run} busy={test.state.status === 'running'} disabled={test.blocked !== null} title={test.blocked ?? 'Run it on the test cases'}>
+    <Button size="sm" icon={<FlaskConical size={14} />} onClick={test.run} busy={test.state.status === 'running'} disabled={test.blocked !== null} title={test.blocked ?? 'Run it on the test cases'}>
       {label}
     </Button>
   );

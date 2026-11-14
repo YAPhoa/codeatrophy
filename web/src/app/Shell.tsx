@@ -131,7 +131,7 @@ export function Shell() {
             Codeatrophy
           </Link>
           <span className="spacer" />
-          <IconButton label="Search and commands" icon={<Search size={17} />} onClick={openPalette} />
+          <IconButton label="Search and commands" icon={<Search size={18} />} onClick={openPalette} />
           <LinkButton to={newHref} variant="primary" size="sm" icon={<Plus size={14} />}>
             New
           </LinkButton>

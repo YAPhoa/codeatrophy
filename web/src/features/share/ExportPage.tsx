@@ -199,12 +199,12 @@ export default function ExportPage() {
         {error != null && <ErrorCallout error={error} title="The export failed" onRetry={() => void run()} />}
         {done && (
           <Callout tone="ok" role="status" title="Bundle downloaded">
-            <PackageCheck size={13} aria-hidden="true" /> {done.filename} · {formatBytes(done.size)}
+            <PackageCheck size={14} aria-hidden="true" /> {done.filename} · {formatBytes(done.size)}
           </Callout>
         )}
 
         <div className="form-actions">
-          <Button type="submit" variant="primary" icon={<Download size={15} />} busy={busy}>
+          <Button type="submit" variant="primary" icon={<Download size={16} />} busy={busy}>
             Download bundle
           </Button>
         </div>

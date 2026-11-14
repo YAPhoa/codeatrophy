@@ -55,15 +55,15 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     const go = (to: string) => ({ to, run: () => navigate(to) });
     const needle = text.trim().toLowerCase();
     const commands: Entry[] = [
-      { key: 'new', icon: <Plus size={15} />, label: 'Capture a new item', hint: 'C', ...go(newHref) },
-      { key: 'lib', icon: <Library size={15} />, label: 'Go to library', ...go('/') },
-      { key: 'tags', icon: <Tags size={15} />, label: 'Manage tags', ...go('/tags') },
-      { key: 'import', icon: <Upload size={15} />, label: 'Import a bundle', ...go('/import') },
-      { key: 'export', icon: <Download size={15} />, label: 'Export', ...go('/export') },
-      { key: 'settings', icon: <Settings size={15} />, label: 'Settings', ...go('/settings') },
+      { key: 'new', icon: <Plus size={16} />, label: 'Capture a new item', hint: 'C', ...go(newHref) },
+      { key: 'lib', icon: <Library size={16} />, label: 'Go to library', ...go('/') },
+      { key: 'tags', icon: <Tags size={16} />, label: 'Manage tags', ...go('/tags') },
+      { key: 'import', icon: <Upload size={16} />, label: 'Import a bundle', ...go('/import') },
+      { key: 'export', icon: <Download size={16} />, label: 'Export', ...go('/export') },
+      { key: 'settings', icon: <Settings size={16} />, label: 'Settings', ...go('/settings') },
       {
         key: 'theme',
-        icon: resolveTheme(getThemePreference()) === 'dark' ? <Sun size={15} /> : <Moon size={15} />,
+        icon: resolveTheme(getThemePreference()) === 'dark' ? <Sun size={16} /> : <Moon size={16} />,
         label: resolveTheme(getThemePreference()) === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
         run: () => setThemePreference(resolveTheme(getThemePreference()) === 'dark' ? 'light' : 'dark'),
       },
@@ -81,11 +81,11 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       ? (collections.data ?? [])
           .filter((c) => c.name.toLowerCase().includes(needle))
           .slice(0, 5)
-          .map((c) => ({ key: `col-${c.id}`, icon: <Folder size={15} />, label: c.name, hint: 'Collection', ...go(`/collections/${c.id}`) }))
+          .map((c) => ({ key: `col-${c.id}`, icon: <Folder size={16} />, label: c.name, hint: 'Collection', ...go(`/collections/${c.id}`) }))
       : [];
 
     const searchAll: Entry[] = needle
-      ? [{ key: 'search-all', icon: <Search size={15} />, label: `Search the library for “${text.trim()}”`, ...go(`/?q=${encodeURIComponent(text.trim())}`) }]
+      ? [{ key: 'search-all', icon: <Search size={16} />, label: `Search the library for “${text.trim()}”`, ...go(`/?q=${encodeURIComponent(text.trim())}`) }]
       : [];
 
     return needle ? [...itemEntries, ...collectionEntries, ...searchAll, ...commands] : [...commands.slice(0, 1), ...itemEntries, ...commands.slice(1)];

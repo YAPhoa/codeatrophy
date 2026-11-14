@@ -69,7 +69,7 @@ function CheckProgress({ total, startedAt, onCancel }: { total: number; startedA
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
     <div className="check-progress">
-      <Spinner size={13} />
+      <Spinner size={14} />
       {/* The counter stays outside the live region, or it would be read out every second. */}
       <span role="status">Verifying {plural(total, 'test case')}…</span>
       <span className="check-progress-time">{seconds}&nbsp;s</span>
@@ -100,7 +100,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
   const caseTools = (
     <>
       {blocked && <span className="muted verify-reason">{blocked}</span>}
-      <Button size="sm" icon={<ShieldCheck size={13} />} onClick={() => verify.start(form)} busy={verify.running} disabled={blocked !== null}>
+      <Button size="sm" icon={<ShieldCheck size={14} />} onClick={() => verify.start(form)} busy={verify.running} disabled={blocked !== null}>
         Verify all
       </Button>
     </>
@@ -124,7 +124,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
       </p>
       <span className="spacer" />
       {discardable.length > 0 && (
-        <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => {
+        <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={() => {
             const undo = verify.discard(discardable);
             toast.info(`Discarded ${plural(discardable.length, 'failed case')}`, { label: 'Undo', onClick: undo });
           }}

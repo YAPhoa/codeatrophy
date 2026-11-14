@@ -29,7 +29,7 @@ export function LargeCaseOutcome({ report, timeLimitMs, className }: LargeCaseOu
         </p>
         <span className="spacer" />
         {generator && (
-          <Button size="sm" variant="ghost" icon={open ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <Button size="sm" variant="ghost" icon={open ? <EyeOff size={14} /> : <Eye size={14} />} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
             {open ? 'Hide generator' : 'Show generator'}
           </Button>
         )}

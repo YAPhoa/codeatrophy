@@ -15,8 +15,8 @@ export type TabSize = (typeof TAB_SIZES)[number];
 export const TAB_SIZE_DEFAULT: TabSize = 4;
 
 /** Prose editors (Markdown bodies and notes) have fixed metrics of their own. */
-const PROSE_FONT_SIZE = 13;
-const PROSE_LINE_HEIGHT = 20.15;
+const PROSE_FONT_SIZE = 14;
+const PROSE_LINE_HEIGHT = 21;
 
 /** The nearest allowed font size, in whole pixels. Anything that is not a number gives the default. */
 export function clampFontSize(value: unknown): number {

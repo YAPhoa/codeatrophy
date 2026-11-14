@@ -95,9 +95,9 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
       {crashed && stderr}
       {concealed ? (
         <div className="concealed">
-          <EyeOff size={15} aria-hidden="true" />
+          <EyeOff size={16} aria-hidden="true" />
           <span className="grow">The input and output of this hidden test case are kept out of sight.</span>
-          <Button size="sm" icon={<Eye size={13} />} onClick={() => result.testCaseId && reveal.reveal(result.testCaseId)}>
+          <Button size="sm" icon={<Eye size={14} />} onClick={() => result.testCaseId && reveal.reveal(result.testCaseId)}>
             Reveal this case
           </Button>
           <Button size="sm" variant="ghost" onClick={reveal.revealAll}>
@@ -174,7 +174,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
       <span className="truncate">Already saved as “{alreadySaved.name}”</span>
     </Link>
   ) : onSaveSolution ? (
-    <Button size="sm" icon={<BookmarkPlus size={13} />} onClick={onSaveSolution}>
+    <Button size="sm" icon={<BookmarkPlus size={14} />} onClick={onSaveSolution}>
       Save as solution
     </Button>
   ) : null;
@@ -188,7 +188,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
             {s.mode === 'submit' ? 'Submission' : 'Run'} from <time title={absoluteTime(s.createdAt)}>{relativeTime(s.createdAt)}</time> · {languageName(s.language)}
           </span>
           {onLoadCode && (
-            <Button size="sm" icon={<RotateCcw size={13} />} onClick={onLoadCode}>
+            <Button size="sm" icon={<RotateCcw size={14} />} onClick={onLoadCode}>
               Load this code
             </Button>
           )}

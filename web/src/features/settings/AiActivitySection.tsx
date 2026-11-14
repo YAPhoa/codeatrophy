@@ -237,7 +237,7 @@ function RawMessages({ detail }: { detail: AiLogDetail }) {
     <>
       {detail.truncated && <p className="muted">Cut off at 256 KiB.</p>}
       <Raw label="Request" raw={rawRequest(detail.request)}>
-        <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => saveJson(detail, exportName(detail))}>
+        <Button size="sm" variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(detail, exportName(detail))}>
           Export
         </Button>
       </Raw>

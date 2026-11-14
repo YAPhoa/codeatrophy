@@ -13,7 +13,7 @@ import { libraryHref } from './itemActions';
 export function ItemMissing() {
   return (
     <div className="page">
-      <EmptyState icon={<FileQuestion size={24} />} page title="This item does not exist" actions={<LinkButton to={libraryHref()}>Back to the library</LinkButton>}>
+      <EmptyState icon={<FileQuestion size={20} />} page title="This item does not exist" actions={<LinkButton to={libraryHref()}>Back to the library</LinkButton>}>
         It may have been deleted — here, in another tab, or by an assistant connected over MCP.
       </EmptyState>
     </div>

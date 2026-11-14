@@ -41,7 +41,7 @@ export default function SolutionsPage() {
   if (item.data.type !== 'problem') {
     return (
       <div className="page">
-        <EmptyState icon={<CircleSlash size={24} />} page title="Readings have no solutions" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
+        <EmptyState icon={<CircleSlash size={20} />} page title="Readings have no solutions" actions={<LinkButton to={`/items/${item.data.id}`}>Open the reading</LinkButton>}>
           Solutions belong to problems.
         </EmptyState>
       </div>
@@ -291,18 +291,18 @@ function SolutionCard({ item, solution, languageName, revealed, busy, onReveal, 
       {solution.notes.trim() !== '' && <Markdown source={solution.notes} className="solution-notes" />}
       <TestOutcome item={item} test={test} className="solution-outcome" />
       <div className="solution-actions">
-        <Button size="sm" icon={revealed ? <EyeOff size={13} /> : <Eye size={13} />} aria-expanded={revealed} aria-controls={revealed ? sourceId : undefined} onClick={() => onReveal(!revealed)}>
+        <Button size="sm" icon={revealed ? <EyeOff size={14} /> : <Eye size={14} />} aria-expanded={revealed} aria-controls={revealed ? sourceId : undefined} onClick={() => onReveal(!revealed)}>
           {revealed ? 'Hide solution' : 'Show solution'}
         </Button>
         <TestButton test={test} />
-        <Button size="sm" icon={<Code2 size={13} />} onClick={onOpen} title="Put this code into the Solve editor">
+        <Button size="sm" icon={<Code2 size={14} />} onClick={onOpen} title="Put this code into the Solve editor">
           Open in the editor
         </Button>
-        <Button size="sm" icon={<Pencil size={13} />} onClick={onEdit}>
+        <Button size="sm" icon={<Pencil size={14} />} onClick={onEdit}>
           Edit
         </Button>
         {!solution.isReference && (
-          <Button size="sm" icon={<ShieldCheck size={13} />} onClick={() => onReference(true)} disabled={busy}>
+          <Button size="sm" icon={<ShieldCheck size={14} />} onClick={() => onReference(true)} disabled={busy}>
             Use as reference
           </Button>
         )}
