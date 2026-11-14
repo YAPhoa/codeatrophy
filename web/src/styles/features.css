@@ -492,14 +492,14 @@
 .editor-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
 .editor-side {
   position: sticky;
-  top: 12px;
-  padding: 14px;
+  top: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -706,7 +706,7 @@
 /* ---- Capture ---- */
 
 .capture .page-sub {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-5);
 }
 
 .capture-callout {
@@ -2274,7 +2274,7 @@ button.case-chip:hover {
 }
 
 .generate .page-sub {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-5);
   max-width: 78ch;
 }
 
@@ -2525,7 +2525,7 @@ button.case-chip:hover {
 }
 
 .share .page-sub {
-  margin-bottom: 18px;
+  margin-bottom: var(--space-5);
 }
 
 .share-form {
