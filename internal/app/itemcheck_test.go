@@ -31,7 +31,7 @@ func TestCheckUnsavedItem(t *testing.T) {
 		"testCases":[` + strings.Join(cases, ",") + `]}`
 	res := must(e.app.CheckItem(e.ctx, input(t, body)))
 	c := res.Check
-	if !c.Attempted || c.Passed != 12 || c.Total != 13 || c.LargeCase != nil || len(res.Cases) != 13 ||
+	if !c.Attempted || c.Passed != 12 || c.Total != 13 || c.LargeCases == nil || len(c.LargeCases) != 0 || len(res.Cases) != 13 ||
 		res.Cases[11].Outcome != "wrong" || res.Cases[11].Error != nil || res.Cases[12].Outcome != "passed" ||
 		c.Error == nil || !strings.Contains(*c.Error, `"c11"`) || len(c.Runners) != 0 {
 		t.Errorf("check: %+v %+v %v", c, res.Cases, c.Error)

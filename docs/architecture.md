@@ -397,16 +397,22 @@ independent:
   whose input repeats an existing or earlier one (ignoring trailing
   whitespace) is dropped and counted; a draft's own repeated inputs are
   dropped too.
-- **Large test case.** Models write small inputs by hand, so on request a
-  generation also asks for a *generator*: a deterministic program that reads
-  nothing and prints one input near the statement's bounds, in the shape
-  that makes a slow solution run out of time. The server runs it in the
-  judge as a plain program (10 s, 512 MB), refuses an output over 1 MiB,
-  empty, not UTF-8 or repeating an existing input, then runs the reference
-  solution on it under the problem's own limits for the expected output, and
-  appends the result as an ordinary hidden test case. In a draft this runs
-  after the other cases and before the runners, inside the check's time
-  bound and outside its 10-case cap. The generator itself is not stored.
+- **Large test cases.** Models write small inputs by hand, so on request a
+  generation also asks for up to five *generators*: deterministic programs
+  that read nothing and each print one input near the statement's bounds.
+  They are asked to differ in the shape of what they print (the largest
+  size, the worst case for the obvious slower approach, extreme values, a
+  degenerate input), since each catches a different slow or wrong solution.
+  The server runs each in the judge as a plain program (10 s, 512 MB),
+  refuses an output over 1 MiB, empty, not UTF-8 or repeating an existing
+  input or an earlier large case, then runs the reference solution on it
+  under the problem's own limits for the expected output, and appends the
+  results, in the model's order, as ordinary hidden test cases. The cases
+  are independent and run in parallel, each its generator and then the
+  reference solution, so several take about as long as one; one that fails
+  never affects the others. In a draft this runs after the other cases and
+  before the runners, inside the check's time bound and outside its 10-case
+  cap. The generators themselves are not stored.
   Large test data never enters a prompt (and so never the AI log): wherever
   a prompt lists test cases, one larger than 4 KiB is named with its size
   instead.

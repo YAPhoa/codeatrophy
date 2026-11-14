@@ -1,11 +1,14 @@
 import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton, cx } from './Button';
+import { InfoTip } from './InfoTip';
 import { useSlidingIndicator } from '../lib/motion';
 
 interface FieldProps {
   label: string;
   hint?: ReactNode;
+  /** An explanation kept behind an "i" beside the label, for what would be too much as a hint. */
+  info?: ReactNode;
   error?: string | null;
   /** Hide the label visually (it stays available to assistive technology). */
   hideLabel?: boolean;
@@ -30,15 +33,23 @@ export function fieldName(label: string): string {
 }
 
 /** Label, control, hint and error message wired together for accessibility. */
-export function Field({ label, hint, error, hideLabel, inlineError, reserve, className, name, children }: FieldProps) {
+export function Field({ label, hint, info, error, hideLabel, inlineError, reserve, className, name, children }: FieldProps) {
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ') || undefined;
-  const labelEl = (
+  const labelOnly = (
     <label htmlFor={id} className={cx('field-label', hideLabel && 'sr-only')}>
       {label}
     </label>
+  );
+  const labelEl = info ? (
+    <div className="field-label-row">
+      {labelOnly}
+      <InfoTip label={`About ${label.toLowerCase()}`}>{info}</InfoTip>
+    </div>
+  ) : (
+    labelOnly
   );
   const errorEl = error && (
     <div id={errorId} className="field-error" role="alert">
@@ -128,14 +139,15 @@ type SelectFieldProps<T extends string> = Omit<SelectHTMLAttributes<HTMLSelectEl
   onChange: (value: T) => void;
   options: readonly { value: T; label: string; disabled?: boolean }[];
   hint?: ReactNode;
+  info?: ReactNode;
   error?: string | null;
   hideLabel?: boolean;
   fieldClassName?: string;
 };
 
-export function SelectField<T extends string>({ label, value, onChange, options, hint, error, hideLabel, fieldClassName, className, ...rest }: SelectFieldProps<T>) {
+export function SelectField<T extends string>({ label, value, onChange, options, hint, info, error, hideLabel, fieldClassName, className, ...rest }: SelectFieldProps<T>) {
   return (
-    <Field label={label} hint={hint} error={error} hideLabel={hideLabel} className={fieldClassName}>
+    <Field label={label} hint={hint} info={info} error={error} hideLabel={hideLabel} className={fieldClassName}>
       {(a) => (
         <select {...rest} {...a} name={rest.name ?? a.name} className={cx('input select', className)} value={value} onChange={(e) => onChange(e.target.value as T)}>
           {options.map((o) => (

@@ -206,6 +206,7 @@ export const LIMITS: Limits = {
   maxPreviousDraftBytes: 2097152,
   maxGeneratedTestCases: 30,
   maxLargeInputBytes: 1048576,
+  maxLargeTestCases: 5,
   maxStylePresets: 20,
   maxStyleNameChars: 60,
   maxStyleInstructionsChars: 2000,
@@ -242,6 +243,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   hideTestCases: true,
   generatedTestCases: 8,
   largeTestCase: false,
+  largeTestCaseCount: 3,
   editor: {
     autocomplete: true,
     closeBrackets: true,

@@ -126,7 +126,7 @@ export function describeError(err: unknown): ErrorView {
     case 'network':
       return {
         title: 'Cannot reach the server',
-        message: 'Check that Codeatrophy is running and that you are connected to it.',
+        message: 'Check that the Codeatrophy server is running and that you can reach it.',
         action: 'retry',
       };
     case 'aborted':

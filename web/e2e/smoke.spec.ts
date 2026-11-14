@@ -17,8 +17,10 @@ test('capture: rough text becomes a reviewed, saved problem', async ({ page }) =
   await expect(page.getByLabel('Title')).not.toHaveValue('');
   await expect(page.getByRole('region', { name: /assum|filled in/i })).toBeVisible();
 
-  // A revision reworks the draft in place.
-  await page.getByLabel('Ask for a revision').fill('use 1-based indices');
+  // A revision reworks the draft in place. Its form is folded until asked for.
+  await expect(page.getByLabel('What to change')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
   await expect(page.getByText('Revising the draft…')).toBeHidden();
 
@@ -133,10 +135,10 @@ test('solve: the lines that read the input open folded, and unfold in place', as
 test('test cases to generate: the preference is where the generate page starts', async ({ page }) => {
   await open(page, '/settings/preferences');
 
-  await expect(page.getByLabel('Test cases to generate')).toHaveValue('8');
+  await expect(page.getByLabel('Test cases to generate', { exact: true })).toHaveValue('8');
   await page.getByRole('button', { name: 'More test cases' }).click();
-  await page.getByLabel('Test cases to generate').fill('12');
-  await page.getByLabel('Test cases to generate').blur();
+  await page.getByLabel('Test cases to generate', { exact: true }).fill('12');
+  await page.getByLabel('Test cases to generate', { exact: true }).blur();
 
   await page.getByRole('link', { name: /^All items/ }).click();
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
@@ -325,11 +327,17 @@ async function expectNoLargeText(page: Page): Promise<void> {
   expect(await page.locator('textarea').evaluateAll((areas) => Math.max(0, ...areas.map((a) => (a as HTMLTextAreaElement).value.length)))).toBeLessThan(10_000);
 }
 
-test('large test case: the preference asks for one with every draft, kept out of sight', async ({ page }) => {
+test('large test cases: the preferences ask for them with every draft, kept out of sight', async ({ page }) => {
   await open(page, '/settings/preferences');
-  const preference = page.getByRole('checkbox', { name: 'Generate a large test case by default' });
+  const preference = page.getByRole('checkbox', { name: 'Generate large test cases by default' });
   await expect(preference).not.toBeChecked();
   await preference.check();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  // How many is a preference of its own.
+  const count = page.getByLabel('Large test cases to generate');
+  await expect(count).toHaveValue('3');
+  await page.getByRole('button', { name: 'Fewer large test cases' }).click();
+  await expect(count).toHaveValue('2');
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
@@ -337,11 +345,14 @@ test('large test case: the preference asks for one with every draft, kept out of
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
-  // One line says what was added; the input itself is not shown, but can be downloaded.
-  await expect(page.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of \d+\u00a0s$/)).toBeVisible();
-  const card = page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' });
-  await expect(card).toHaveCount(1);
-  await expect(card.getByText('large', { exact: true })).toBeVisible();
+  // A line each says what was added; the inputs themselves are not shown, but can be downloaded.
+  const outcomes = page.getByRole('list', { name: 'Large test cases' });
+  await expect(outcomes.getByRole('listitem')).toHaveCount(2);
+  await expect(outcomes.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of \d+\u00a0s$/)).toHaveCount(2);
+  const cards = page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' });
+  await expect(cards).toHaveCount(2);
+  await expect(cards.getByText('large', { exact: true })).toHaveCount(2);
+  const card = cards.first();
   await expect(card.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
   await expect(card.getByText('30000')).toHaveCount(0);
   // Still renamed and marked like any case: the name and the expected output are the only fields.
@@ -351,51 +362,66 @@ test('large test case: the preference asks for one with every draft, kept out of
   await card.getByRole('button', { name: 'Download' }).click();
   expect((await download).suggestedFilename()).toMatch(/-input\.txt$/);
 
-  // The generator is there on request, read-only.
-  const toggle = page.getByRole('button', { name: 'Show generator' });
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  // Each generator is there on request, read-only.
+  const toggles = outcomes.getByRole('button', { name: /^Show generator of “.+”$/ });
+  await expect(toggles).toHaveCount(2);
+  await expect(toggles.first()).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('random.seed')).toHaveCount(0);
-  await toggle.click();
-  await expect(page.getByRole('textbox', { name: /^Generator of the large case/ })).toContainText('random.seed(');
+  await toggles.first().click();
+  await expect(page.getByRole('textbox', { name: /^Generator of “.+”, Python/ })).toContainText('random.seed(');
+  await expect(toggles).toHaveCount(1);
 
-  // A revision asks again, and the case comes back.
-  await page.getByLabel('Ask for a revision').fill('use 1-based indices');
+  // A revision asks again, and the cases come back rather than adding up.
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
   await expect(page.getByText('Revising the draft…')).toBeHidden();
-  await expect(page.getByText(/^Large case “.+” added/)).toBeVisible();
-  await expect(page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' })).toHaveCount(1);
+  await expect(outcomes.getByText(/^Large case “.+” added/)).toHaveCount(2);
+  await expect(cards).toHaveCount(2);
 
-  // A large case that could not be built is reported, and nothing is added.
+  // Some added and one not: the model wrote one generator fewer than asked for.
+  await page.getByRole('button', { name: 'Back to input' }).click();
+  await page.getByLabel('What you have').fill('two sum, array and target MOCK:LARGE-SHORT');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(outcomes.getByText(/^Large case “.+” added/)).toHaveCount(1);
+  await expect(outcomes.getByText('Large case not added. The model wrote fewer generators than asked for.')).toBeVisible();
+  await expect(outcomes.getByRole('button', { name: /^Show generator/ })).toHaveCount(1);
+  await expect(cards).toHaveCount(1);
+
+  // Large cases that could not be built are reported, and nothing is added.
   await page.getByRole('button', { name: 'Back to input' }).click();
   await page.getByLabel('What you have').fill('two sum, array and target MOCK:LARGE-FAIL');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
-  await expect(page.getByText(/^Large case not added\. The generator crashed/)).toBeVisible();
+  await expect(outcomes.getByText(/^Large case “.+” not added\. The generator crashed/)).toHaveCount(2);
   await expect(page.getByText('Too large to show or edit')).toHaveCount(0);
 });
 
-test('large test case: asked for on the generate form, then kept and managed on the Test cases page', async ({ page }) => {
+test('large test cases: asked for on the generate form, then kept and managed on the Test cases page', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
   await page.getByRole('link', { name: /Generate/ }).first().click();
 
-  // Off, as the preference is; on for this run.
-  const large = page.getByRole('checkbox', { name: 'Add a large test case' });
+  // Off, as the preference is; on for this run, as many as the preference says.
+  const large = page.getByRole('checkbox', { name: 'Add 3 large test cases' });
   await expect(large).not.toBeChecked();
   await large.check();
   await page.getByLabel('How many').fill('3');
   await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
-  await expect(page.getByText('4 of 4 selected')).toBeVisible();
-  await expect(page.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of 2\u00a0s$/)).toBeVisible();
+  await expect(page.getByText('6 of 6 selected')).toBeVisible();
+  const outcomes = page.getByRole('list', { name: 'Large test cases' });
+  await expect(outcomes.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of 2\u00a0s$/)).toHaveCount(3);
 
-  const proposed = page.locator('.proposal-case').last();
-  await expect(proposed.getByText('large', { exact: true })).toBeVisible();
-  await proposed.locator('.proposal-main').click();
-  await expect(proposed.getByRole('button', { name: 'Download' })).toBeVisible();
+  const proposed = page.locator('.proposal-case');
+  await expect(proposed.filter({ has: page.getByText('large', { exact: true }) })).toHaveCount(3);
+  await expect(proposed.nth(2).getByText('large', { exact: true })).toHaveCount(0);
+  const last = proposed.last();
+  await last.locator('.proposal-main').click();
+  await expect(last.getByRole('button', { name: 'Download' })).toBeVisible();
   await expectNoLargeText(page);
-  await page.getByRole('button', { name: 'Save 4 cases' }).click();
+  await page.getByRole('button', { name: 'Save 6 cases' }).click();
 
-  // On the Test cases page it stays out of sight too; renaming, marking and moving still work.
+  // On the Test cases page they stay out of sight too; renaming, marking and moving still work.
   await expect(page).toHaveURL(/\/tests$/);
   await page.getByRole('button', { name: 'Show test cases' }).first().click();
   await page.locator('.case-row').last().locator('.case-row-main').click();
@@ -745,11 +771,12 @@ test('model: a draft, its revision and generated test cases use the provider cho
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(page.locator('.usage-line')).toContainText('qwen2.5-coder:14b');
 
-  // The revise bar carries the choice on, and can change it.
-  const revise = page.locator('form.revise').getByRole('combobox', { name: 'Model' });
+  // The revision form, once unfolded, carries the choice on, and can change it.
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  const revise = page.locator('.revise-form').getByRole('combobox', { name: 'Model' });
   await expect(revise.locator('option:checked')).toHaveText('Local Ollama · qwen2.5-coder:14b');
   await revise.selectOption({ label: 'Work gateway · llama3.1:70b' });
-  await page.getByLabel('Ask for a revision').fill('use 1-based indices');
+  await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
   await expect(page.getByText('Revising the draft…')).toBeHidden();
   await expect(page.locator('.usage-line')).toContainText('llama3.1:70b');
@@ -810,6 +837,45 @@ test('AI activity: a generation is logged with its raw request, and the list loa
   await expect(rows.first()).toContainText('failed');
   await rows.first().locator('.log-row').click();
   await expect(rows.first().getByText('No response arrived.')).toBeVisible();
+});
+
+test('output comparison: the two choices are explained behind the "i" of the field', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  // Exact: the library also has "Edit Distance".
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  const choice = page.getByLabel('Output comparison', { exact: true });
+  await expect(choice.locator('option')).toHaveText(['Values only', 'Exact text']);
+
+  const tip = page.getByRole('button', { name: 'About output comparison' });
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await tip.focus();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText('Values only: spacing and line breaks are ignored.');
+  await expect(tooltip).toContainText('Exact text: spacing and line breaks must match.');
+  // Clear of the control it explains, and Escape puts it away without leaving the page.
+  const [tipBox, choiceBox] = [await tooltip.boundingBox(), await choice.boundingBox()];
+  expect(tipBox!.y + tipBox!.height).toBeLessThanOrEqual(choiceBox!.y);
+  await page.keyboard.press('Escape');
+  await expect(tooltip).toHaveCount(0);
+  await expect(choice).toBeVisible();
+});
+
+test('variants: a problem lists them in a tab of their own, with the offer of another', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  // Not under the statement any more.
+  await expect(page.getByRole('link', { name: 'Two Sum in a Sorted Ledger' })).toHaveCount(0);
+  await page.getByRole('tab', { name: /^Variants\s*2$/ }).click();
+  await expect(page).toHaveURL(/[?&]tab=variants/);
+  const panel = page.getByRole('tabpanel');
+  await expect(panel.getByRole('link', { name: 'Two Sum in a Sorted Ledger' })).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Want another one like it?' })).toBeVisible();
+
+  // A direction leads to the variant page with that choice made.
+  await panel.getByRole('link', { name: /^Harder/ }).click();
+  await expect(page).toHaveURL(/\/variant\?mode=harder/);
+  await expect(page.getByRole('radio', { name: /^Harder/ })).toBeChecked();
 });
 
 test('organise: selected items are filed into a new collection', async ({ page }) => {

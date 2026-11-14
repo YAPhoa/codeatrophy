@@ -83,13 +83,18 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await expect(state).toHaveText('Saved');
 });
 
-test('reduced motion: looping animations stop', async ({ page }) => {
+test('reduced motion: the scroll of a generation in progress is written and still', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Normal mock delays, so the generating panel stays up long enough to look at.
   await page.goto('/new');
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
-  await expect(page.locator('.generating-pulse')).toHaveCSS('animation-iteration-count', '1');
+  const lines = page.locator('.generating-line');
+  await expect(lines).toHaveCount(5);
+  for (const line of await lines.all()) await expect(line).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.generating-ink').first()).toHaveCSS('transform', 'none');
+  await expect(lines.nth(4)).toHaveCSS('opacity', '0');
+  await expect(page.locator('.generating-quill')).toHaveCSS('animation-name', 'none');
 });
 
 test('deep links: the open tabs of the solve page are part of the address', async ({ page }) => {

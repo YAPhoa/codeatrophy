@@ -375,6 +375,7 @@ const PREFERENCE_RULES: Readonly<Record<string, PreferenceRule>> = {
   hideTestCases: { kind: 'boolean' },
   generatedTestCases: { kind: 'range', min: 1, max: LIMITS.maxGeneratedTestCases },
   largeTestCase: { kind: 'boolean' },
+  largeTestCaseCount: { kind: 'range', min: 1, max: LIMITS.maxLargeTestCases },
   'editor.autocomplete': { kind: 'boolean' },
   'editor.closeBrackets': { kind: 'boolean' },
   'editor.matchBrackets': { kind: 'boolean' },

@@ -20,7 +20,7 @@ import { Badge, Tabs, tabPanelProps } from '../../ui/misc';
 import { TagInput } from '../../ui/TagInput';
 import { useToast } from '../../ui/Toast';
 import { lineCount } from '../solutions/solutionWrites';
-import { LargeCaseOutcome } from '../tests/LargeCaseOutcome';
+import { LargeCaseOutcomes } from '../tests/LargeCaseOutcome';
 import { CollectionPicker } from './controls';
 
 type BodyView = 'write' | 'split' | 'preview';
@@ -57,9 +57,20 @@ const NO_RUNNER: HarnessCode = { prefix: '', suffix: '' };
 const OUTCOME_LABEL: Record<Exclude<CheckOutcome, 'passed'>, string> = { wrong: 'wrong', failed: 'failed', not_run: 'not run' };
 
 const COMPARE_OPTIONS: { value: CompareMode; label: string }[] = [
-  { value: 'tokens', label: 'Tokens — ignore whitespace differences' },
-  { value: 'exact', label: 'Exact — only trailing whitespace ignored' },
+  { value: 'tokens', label: 'Values only' },
+  { value: 'exact', label: 'Exact text' },
 ];
+/** What each option means, behind the "i" of the choice. */
+const COMPARE_HELP = (
+  <>
+    <p>
+      <strong>Values only:</strong> spacing and line breaks are ignored.
+    </p>
+    <p>
+      <strong>Exact text:</strong> spacing and line breaks must match.
+    </p>
+  </>
+);
 
 /** The item form shared by draft review, manual authoring and editing. Every field is editable. */
 /** A language tab of a "solution only" draft, marked with what the check found out about its runner. */
@@ -379,7 +390,8 @@ export function ItemEditor({
               </Button>
             </div>
             {caseNotice}
-            {check?.largeCase && <LargeCaseOutcome report={check.largeCase} timeLimitMs={form.timeLimitMs} />}
+            {/* A draft kept from before there could be several has no `largeCases`. */}
+            <LargeCaseOutcomes reports={check?.largeCases ?? []} timeLimitMs={form.timeLimitMs} />
             {errors.testCases && (
               <div className="field-error" role="alert">
                 {errors.testCases}
@@ -549,7 +561,7 @@ export function ItemEditor({
                 )}
               </Field>
             </div>
-            <SelectField label="Output comparison" value={form.compare} onChange={(v) => set('compare', v)} options={COMPARE_OPTIONS} />
+            <SelectField label="Output comparison" value={form.compare} onChange={(v) => set('compare', v)} options={COMPARE_OPTIONS} info={COMPARE_HELP} />
           </>
         )}
       </aside>

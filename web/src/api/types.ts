@@ -119,6 +119,8 @@ export interface Limits {
   maxGeneratedTestCases: number;
   /** The largest input a generated large test case may have. */
   maxLargeInputBytes: number;
+  /** Upper bound of `largeTestCases` in a generation. */
+  maxLargeTestCases: number;
   maxStylePresets: number;
   maxStyleNameChars: number;
   maxStyleInstructionsChars: number;
@@ -271,7 +273,7 @@ export interface CheckedCase {
 
 /** What running the reference solution of an unsaved problem on its test cases found. */
 export interface ItemCheckResponse {
-  /** As for a draft; every case is run, and `largeCase` is always `null`. */
+  /** As for a draft; every case is run, and `largeCases` is always `[]`. */
   check: DraftCheck;
   /** One entry per test case, in order. */
   cases: CheckedCase[];
@@ -513,8 +515,8 @@ export interface DraftRequest {
   previousDraft?: ItemDraft | null;
   /** Omitted → the default preset; `null` → built-in conventions only; an id → that preset. */
   styleId?: string | null;
-  /** Also build a large test case. Ignored for a reading. */
-  largeTestCase?: boolean;
+  /** Also build that many large test cases, 0 to `limits.maxLargeTestCases`. Ignored for a reading. */
+  largeTestCases?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
 }
@@ -536,12 +538,12 @@ export interface DraftCheck {
   error: string | null;
   /** One entry per harness language of a `function` problem, in language order; `[]` otherwise and when nothing was attempted. */
   runners: RunnerCheck[];
-  /** What became of the large test case; `null` unless the request asked for one. */
-  largeCase: LargeCaseReport | null;
+  /** What became of each large test case asked for, in order; `[]` when none was. */
+  largeCases: LargeCaseReport[];
 }
 
 /**
- * The large test case of a generation: its input printed by a generator
+ * One large test case of a generation: its input printed by a generator
  * program the model wrote, its expected output by the reference solution.
  * `failed` and `skipped` add nothing; `error` then says why.
  */
@@ -550,6 +552,7 @@ export interface LargeCaseReport {
   error: string | null;
   /** Where the case is in `draft.testCases` or `cases`; `null` unless `added`. */
   index: number | null;
+  /** `null` for a generator the model did not write. */
   name: string | null;
   /** `null` when that point was not reached. */
   inputBytes: number | null;
@@ -607,7 +610,7 @@ export interface VariantRequest {
   styleId?: string | null;
   /** Omitted → the variant keeps the original's interface. */
   interfaceHint?: ProblemInterface;
-  largeTestCase?: boolean;
+  largeTestCases?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
 }
@@ -617,8 +620,8 @@ export interface AiTestCasesRequest {
   /** Language of the reference solution. For a `function` problem it must have a harness. */
   language?: string;
   instruction?: string | null;
-  /** Also build a large test case, in addition to the `count` cases. */
-  largeTestCase?: boolean;
+  /** Also build that many large test cases, in addition to the `count` cases. */
+  largeTestCases?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
 }
@@ -628,7 +631,7 @@ export interface ProposedTestCase {
   rationale: string;
   stdin: string;
   expectedStdout: string;
-  /** `null` for the large test case, whose input the model has not seen. */
+  /** `null` for a large test case, whose input the model has not seen. */
   predictedStdout: string | null;
   isSample: boolean;
   verified: boolean;
@@ -641,8 +644,8 @@ export interface AiTestCasesResponse {
   verification: { attempted: boolean; engine: string | null; error: string | null };
   /** Proposed cases left out because their input repeated an existing or an earlier proposed one. */
   duplicatesDropped: number;
-  /** `null` unless the request asked for a large test case. */
-  largeCase: LargeCaseReport | null;
+  /** One entry per large test case asked for, in order; `[]` when none was. */
+  largeCases: LargeCaseReport[];
   usage: GenerationUsage;
   cases: ProposedTestCase[];
 }
@@ -861,8 +864,10 @@ export interface Preferences {
   hideTestCases: boolean;
   /** How many test cases to ask for by default when generating them: 1 to `limits.maxGeneratedTestCases`. */
   generatedTestCases: number;
-  /** Whether to ask for a large test case by default when generating. */
+  /** Whether to ask for large test cases by default when generating. */
   largeTestCase: boolean;
+  /** How many large test cases to ask for when they are asked for: 1 to `limits.maxLargeTestCases`. */
+  largeTestCaseCount: number;
   editor: EditorPreferences;
 }
 
@@ -871,6 +876,7 @@ export interface PreferencesUpdate {
   hideTestCases?: boolean;
   generatedTestCases?: number;
   largeTestCase?: boolean;
+  largeTestCaseCount?: number;
   editor?: Partial<EditorPreferences>;
 }
 

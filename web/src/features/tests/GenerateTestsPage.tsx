@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
-import { qk, useItem, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
+import { qk, useItem, useLargeTestCaseCount, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
 import type { AiTestCasesResponse, Item, ProposedTestCase } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
@@ -24,7 +24,7 @@ import { useGeneration } from '../capture/useGeneration';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { Output } from '../solve/ResultPanel';
-import { LargeCaseOutcome } from './LargeCaseOutcome';
+import { LargeCaseOutcomes } from './LargeCaseOutcome';
 
 export default function GenerateTestsPage() {
   const { id = '' } = useParams();
@@ -124,9 +124,10 @@ function Generator({ item }: { item: Item }) {
   const preferences = usePreferences();
   const [chosenCount, setCount] = useState<number | null>(null);
   const count = Math.min(maxCount, Math.max(1, chosenCount ?? preferences.generatedTestCases));
-  // So does the choice of a large test case, which needs a judge to be built.
+  // So does the choice of large test cases, which need a judge to be built; how many is the preference's.
   const [chosenLarge, setLarge] = useState<boolean | null>(null);
   const large = judgeOn && (chosenLarge ?? preferences.largeTestCase);
+  const largeCount = useLargeTestCaseCount();
   const [language, setLanguage] = useState(() => {
     const preferred = storedSolution?.language ?? 'python';
     return languageOptions.some((o) => o.value === preferred) ? preferred : (languageOptions[0]?.value ?? 'python');
@@ -164,7 +165,7 @@ function Generator({ item }: { item: Item }) {
 
   const generate = async () => {
     if (noRunner) return;
-    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCase: large, ...provider.request }, signal));
+    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCases: large ? largeCount : 0, ...provider.request }, signal));
     if (!res) return;
     setProposal(res);
     setProposalNo((n) => n + 1);
@@ -233,6 +234,8 @@ function Generator({ item }: { item: Item }) {
     });
 
   const kept = keep.filter(Boolean).length;
+  // Where the large cases that were added are among the proposed ones.
+  const largeAt = new Set(proposal?.largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [c.index] : [])));
   const mismatches = proposal?.cases.filter((c) => c.predictionMatched === false).length ?? 0;
   const failures = proposal?.cases.filter((c) => c.error).length ?? 0;
   const verifiedCount = proposal?.cases.filter((c) => c.verified).length ?? 0;
@@ -307,7 +310,13 @@ function Generator({ item }: { item: Item }) {
                 <SelectField label="Reference solution in" value={language} onChange={setLanguage} options={languageOptions} disabled={generation.running || noRunner} />
                 {models.length > 1 && <SelectField label="Model" value={provider.value ?? ''} onChange={setProviderChoice} options={models} disabled={generation.running} />}
               </div>
-              <Checkbox checked={large} onChange={setLarge} disabled={generation.running || !judgeOn} label="Add a large test case" hint={judgeOn ? undefined : 'Needs a judge engine.'} />
+              <Checkbox
+                checked={large}
+                onChange={setLarge}
+                disabled={generation.running || !judgeOn}
+                label={largeCount === 1 ? 'Add a large test case' : `Add ${largeCount} large test cases`}
+                hint={judgeOn ? undefined : 'Needs a judge engine.'}
+              />
               <TextAreaField
                 label="Anything to focus on? (optional)"
                 value={instruction}
@@ -339,7 +348,7 @@ function Generator({ item }: { item: Item }) {
               {judgeOn ? 'The solution is run on each proposed input, which adds to the wait.' : 'This can take up to a couple of minutes.'}
             </GeneratingPanel>
           )}
-          {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed — nothing was changed" onRetry={() => void generate()} />}
+          {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed" onRetry={() => void generate()} />}
 
           {allRepeats && proposal && !generation.running && (
             <>
@@ -347,7 +356,7 @@ function Generator({ item }: { item: Item }) {
                 {proposal.duplicatesDropped === 1 ? 'The one proposal repeated an existing case.' : `All ${proposal.duplicatesDropped} proposals repeated existing cases.`}
                 <UsageLine usage={proposal.usage} newTab />
               </p>
-              {proposal.largeCase && <LargeCaseOutcome key={proposalNo} report={proposal.largeCase} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />}
+              <LargeCaseOutcomes key={proposalNo} reports={proposal.largeCases} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />
             </>
           )}
 
@@ -438,12 +447,12 @@ function Generator({ item }: { item: Item }) {
                 </Button>
               </div>
 
-              {proposal.largeCase && <LargeCaseOutcome key={proposalNo} report={proposal.largeCase} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />}
+              <LargeCaseOutcomes key={proposalNo} reports={proposal.largeCases} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />
 
               <ol className="proposal-list">
                 {proposal.cases.map((c, i) => {
                   const isOpen = open.has(i);
-                  const isLarge = proposal.largeCase?.status === 'added' && proposal.largeCase.index === i;
+                  const isLarge = largeAt.has(i);
                   return (
                     <li key={i} className={cx('proposal-case card', !keep[i] && 'is-off', c.predictionMatched === false && 'is-flagged', c.error && 'is-failed')}>
                       <div className="proposal-row">

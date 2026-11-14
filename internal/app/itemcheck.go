@@ -67,7 +67,7 @@ func (a *App) CheckItem(ctx context.Context, in domain.ItemInput) (ItemCheckResu
 	case p.ReferenceSolution == nil:
 		setOutcomes(&d, "not_run", "there is no reference solution")
 	}
-	out := ItemCheckResult{Check: a.checkDraft(ctx, &d, itemCheckBounds, false, nil), Cases: make([]CaseOutcome, len(d.TestCases))}
+	out := ItemCheckResult{Check: a.checkDraft(ctx, &d, itemCheckBounds, 0, nil), Cases: make([]CaseOutcome, len(d.TestCases))}
 	for i, tc := range d.TestCases {
 		out.Cases[i] = tc.outcome
 	}

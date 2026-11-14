@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DraftCheck, LargeCaseReport, VerifyResult } from '../api/types';
 import { describeDraftCheck, describeLargeCase, runnerChecks, summariseVerify } from './checks';
 
-const check = (change: Partial<DraftCheck> = {}): DraftCheck => ({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: [], largeCase: null, ...change });
+const check = (change: Partial<DraftCheck> = {}): DraftCheck => ({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: [], largeCases: [], ...change });
 
 describe('describeDraftCheck', () => {
   it('says how many test cases the solution passes', () => {
@@ -109,9 +109,11 @@ describe('describeLargeCase', () => {
   });
 
   it('gives the reason when nothing was added', () => {
-    const none = { ...added, index: null, name: null, inputBytes: null, timeMs: null };
-    expect(describeLargeCase({ ...none, status: 'failed', error: 'the generator ran out of time' }, 2000)).toEqual({ tone: 'warn', text: 'Large case not added. The generator ran out of time.' });
-    expect(describeLargeCase({ ...none, status: 'skipped', error: 'there is no judge engine' })).toEqual({ tone: 'neutral', text: 'Large case not added. There is no judge engine.' });
-    expect(describeLargeCase({ ...none, status: 'skipped', error: null }).text).toBe('Large case not added');
+    const none = { ...added, index: null, inputBytes: null, timeMs: null };
+    expect(describeLargeCase({ ...none, status: 'failed', error: 'the generator ran out of time' }, 2000)).toEqual({ tone: 'warn', text: 'Large case “30,000 values in runs of three” not added. The generator ran out of time.' });
+    // A generator the model did not write has no name.
+    expect(describeLargeCase({ ...none, name: null, status: 'failed', error: 'the model wrote fewer generators than asked for' })).toEqual({ tone: 'warn', text: 'Large case not added. The model wrote fewer generators than asked for.' });
+    expect(describeLargeCase({ ...none, name: null, status: 'skipped', error: 'there is no judge engine' })).toEqual({ tone: 'neutral', text: 'Large case not added. There is no judge engine.' });
+    expect(describeLargeCase({ ...none, name: null, status: 'skipped', error: null }).text).toBe('Large case not added');
   });
 });

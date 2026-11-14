@@ -260,18 +260,39 @@ const problemRules = `- For a problem, include sample test cases matching the ex
 - starterCode and harness are lists of {language, ...} entries.
 `
 
-// LargeCaseRules ask for the generator of one large test case. maxBytes is
-// the cap on what it may print.
-func largeCaseRules(maxBytes int) string {
-	return fmt.Sprintf(`- Also write "largeCase": a generator of one large test case. It is a complete program, in a language
-  the judge runs (preferably the reference solution's), that reads nothing and prints the stdin of one
-  test case: as large as the constraints allow but at most %d bytes, in the shape that makes a solution
-  of the wrong complexity run out of time (worst-case values and structure, not just a big n). It must
-  be deterministic (a fixed seed; no clock or system randomness) and every value it prints must satisfy
-  every constraint in the statement. For a function problem it prints what the harness suffix reads.
-  "name" says what the input is. The server runs it and takes the expected output from the reference
-  solution, so do not predict the output.
-`, maxBytes)
+// LargeCases asks a generation for generators of large test cases.
+type LargeCases struct {
+	Count    int // how many; 0 asks for none
+	MaxBytes int // the most each generator may print
+}
+
+// largeCaseRules ask for l.Count generators of large test cases.
+func largeCaseRules(l LargeCases) string {
+	what, each, it := "a list holding one generator of a large test case", "It is", "it"
+	if l.Count > 1 {
+		what, each, it = fmt.Sprintf("a list of exactly %d generators of large test cases", l.Count), "Each is", "each"
+	}
+	rules := fmt.Sprintf(`- Also write "largeCases": %s. %s a complete program, in a
+  language the judge runs (preferably the reference solution's), that reads nothing and prints the stdin
+  of one test case: as large as the constraints allow but at most %d bytes. It must be deterministic (a
+  fixed seed; no clock or system randomness), and every value it prints must satisfy every constraint in
+  the statement. For a function problem it prints what the harness suffix reads. "name" says what the
+  input is. The server runs %s and takes the expected output from the reference solution, so do not
+  predict the output.
+`, what, each, l.MaxBytes, it)
+	if l.Count == 1 {
+		return rules + `- Make what it prints the input most likely to expose a solution of the wrong complexity, or one
+  that is only correct on small values: the worst-case values and structure for the obvious slower
+  approach, not just the largest size.
+`
+	}
+	return rules + fmt.Sprintf(`- Make the %d generators differ in the shape of what they print, not only in their seed: each aims at
+  a different way a solution of the wrong complexity, or one that is only correct on small values, fails
+  at scale. For example: the largest size with arbitrary values; the structure that is the worst case
+  for the obvious slower approach; values at the extremes of their range; a degenerate input (all equal,
+  already sorted, one long run). If the input stays small however large its values are (a single n up
+  to 10^12, say), still make the %d inputs different from each other.
+`, l.Count, l.Count)
 }
 
 // OmittedCasesKey is the key under which a previous draft lists the test
@@ -303,17 +324,16 @@ type DraftPrompt struct {
 	Instruction   string
 	PreviousDraft string // JSON, or ""
 	Toolchains    []Toolchain
-	// LargeCaseBytes, when positive, asks for a large test case of at most
-	// that many bytes.
-	LargeCaseBytes int
+	// Large asks for generators of large test cases as well.
+	Large LargeCases
 }
 
-// largeSection is the large-case rule, or "".
-func largeSection(maxBytes int) string {
-	if maxBytes <= 0 {
+// largeSection is the large-case rules, or "".
+func largeSection(l LargeCases) string {
+	if l.Count <= 0 {
 		return ""
 	}
-	return largeCaseRules(maxBytes)
+	return largeCaseRules(l)
 }
 
 // Build returns the system and user prompts.
@@ -331,7 +351,7 @@ func (p DraftPrompt) Build() (system, user string) {
 - Starter code languages: those the user's text or instruction names; if they name none, those the
   style preset names; if neither does, python and cpp. Use exactly that set.
 ` + assumptionRules + `
-` + problemRules + largeSection(p.LargeCaseBytes) + `
+` + problemRules + largeSection(p.Large) + `
 ` + jsonOnly
 
 	var b strings.Builder
@@ -375,8 +395,8 @@ type VariantPrompt struct {
 	Instruction   string
 	PreviousDraft string // JSON, or ""
 	Toolchains    []Toolchain
-	// LargeCaseBytes is as for DraftPrompt.
-	LargeCaseBytes int
+	// Large is as for DraftPrompt.
+	Large LargeCases
 }
 
 // Build returns the system and user prompts.
@@ -396,7 +416,7 @@ func (p VariantPrompt) Build() (system, user string) {
 - Never copy the original's tests: sample test cases are for the NEW problem.
 - Starter code languages: those the instruction names; if it names none, those the original has; if
   it has none, those the style preset names; if neither does, python and cpp.
-` + problemRules + largeSection(p.LargeCaseBytes) + `
+` + problemRules + largeSection(p.Large) + `
 ` + jsonOnly
 
 	mode := p.Mode
@@ -432,9 +452,9 @@ type TestCasesPrompt struct {
 	ExistingSolution string
 	Instruction      string
 	Toolchains       []Toolchain
-	// LargeCaseBytes is as for DraftPrompt; the large case is in addition
-	// to Count.
-	LargeCaseBytes int
+	// Large is as for DraftPrompt; the large cases are in addition to
+	// Count.
+	Large LargeCases
 }
 
 // Build returns the system and user prompts.
@@ -459,7 +479,7 @@ func (p TestCasesPrompt) Build() (system, user string) {
 - Mark one or two simple cases as samples (isSample: true) only if the problem has fewer than two
   sample cases already; otherwise mark none.
 - Java programs use "public class Main"; Kotlin programs use a top-level "fun main()".
-` + largeSection(p.LargeCaseBytes) + `
+` + largeSection(p.Large) + `
 ` + jsonOnly
 	kind := "a reference solution"
 	if p.Function {

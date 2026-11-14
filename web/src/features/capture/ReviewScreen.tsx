@@ -92,6 +92,8 @@ function CheckProgress({ total, startedAt, onCancel }: { total: number; startedA
 export function ReviewScreen(props: ReviewScreenProps) {
   const [instruction, setInstruction] = useState('');
   const [originalOpen, setOriginalOpen] = useState(false);
+  // The revision form stays folded until it is wanted: the draft is what the screen is for.
+  const [reviseOpen, setReviseOpen] = useState(false);
   const busy = props.revising || props.saving;
   const limits = useLimits();
   const toast = useToast();
@@ -174,42 +176,59 @@ export function ReviewScreen(props: ReviewScreenProps) {
       )}
 
       {props.aiDrafted && props.aiEnabled && (
-        <form
-          className="revise"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const text = instruction.trim();
-            if (busy) return;
-            if (!text) {
-              // Nothing to ask for yet: put the cursor where it is typed.
-              e.currentTarget.querySelector<HTMLInputElement>('#revise-instruction')?.focus();
-              return;
-            }
-            props.onRevise(text);
-          }}
-        >
-          <label htmlFor="revise-instruction" className="revise-label">
+        <section className="revise">
+          <button type="button" className="revise-toggle" aria-expanded={reviseOpen} aria-controls="revise-form" onClick={() => setReviseOpen((v) => !v)}>
+            <ExpandChevron open={reviseOpen} />
             <RefreshCw size={14} aria-hidden="true" />
             Ask for a revision
-          </label>
-          <input
-            name="instruction"
-            id="revise-instruction"
-            className="input"
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            placeholder="e.g. use 1-based indices · make it harder · shorten the statement…"
-            maxLength={limits?.maxInstructionChars}
-            disabled={busy}
-            autoComplete="off"
-          />
-          <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
-          <ModelPicker id="revise-model" settings={props.aiSettings} value={props.providerChoice} onChange={props.onProviderChange} disabled={busy} />
-          <Button type="submit" disabled={busy}>
-            Revise draft
-          </Button>
-          <p className="revise-hint">The AI reworks the draft as it stands now, including your edits, and returns a new version to review.</p>
-        </form>
+          </button>
+          <Collapse open={reviseOpen}>
+            <form
+              id="revise-form"
+              className="revise-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const text = instruction.trim();
+                if (busy) return;
+                if (!text) {
+                  // Nothing to ask for yet: put the cursor where it is typed.
+                  e.currentTarget.querySelector<HTMLTextAreaElement>('#revise-instruction')?.focus();
+                  return;
+                }
+                props.onRevise(text);
+              }}
+            >
+              <textarea
+                name="instruction"
+                id="revise-instruction"
+                className="input textarea"
+                rows={2}
+                aria-label="What to change"
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter starts a new line here, so the shortcut sends it.
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="e.g. use 1-based indices · make it harder · shorten the statement…"
+                maxLength={limits?.maxInstructionChars}
+                disabled={busy}
+                autoComplete="off"
+              />
+              <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
+              <ModelPicker id="revise-model" settings={props.aiSettings} value={props.providerChoice} onChange={props.onProviderChange} disabled={busy} />
+              <div className="revise-actions">
+                <Button type="submit" disabled={busy} title={`${MOD}+Enter`}>
+                  Revise draft
+                </Button>
+                <p className="revise-hint">The AI reworks the draft as it stands now, including your edits, and returns a new version to review.</p>
+              </div>
+            </form>
+          </Collapse>
+        </section>
       )}
 
       <Collapse open={props.revising}>
@@ -220,7 +239,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
         </div>
       </Collapse>
       <Collapse open={props.reviseError != null}>
-        <div className="review-slot">{props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed — your draft is unchanged" />}</div>
+        <div className="review-slot">{props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed" />}</div>
       </Collapse>
 
       {props.originalText && (

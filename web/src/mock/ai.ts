@@ -748,11 +748,11 @@ export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): Draf
   const reference = draft.problem.referenceSolution;
   const judge = db.options.judge;
   if (judge === 'none' || !reference || cases.length === 0) {
-    return { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total: cases.length, error: null, runners: [], largeCase: null };
+    return { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total: cases.length, error: null, runners: [], largeCases: [] };
   }
   // Every harness is tried, whatever becomes of the reference solution.
   const runners = checkRunners(draft, judge === 'down');
-  const unchecked = (attempted: boolean, error: string | null): DraftCheck => ({ attempted, engine: 'judge0', passed: 0, total: cases.length, error, runners, largeCase: null });
+  const unchecked = (attempted: boolean, error: string | null): DraftCheck => ({ attempted, engine: 'judge0', passed: 0, total: cases.length, error, runners, largeCases: [] });
   if (judge === 'down') return unchecked(true, 'judge engine unreachable: dial tcp: connection refused');
   const runner = draft.problem.harness[reference.language];
   if (draft.problem.interface === 'function' && !runner) {
@@ -776,7 +776,7 @@ export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): Draf
       ? wrongOutput(failed, last)
       : null,
     runners,
-    largeCase: null,
+    largeCases: [],
   };
 }
 
@@ -1123,7 +1123,7 @@ export function proposeTestCases(
       error: judge === 'down' ? 'judge engine unreachable: dial tcp: connection refused' : null,
     },
     duplicatesDropped: dropped,
-    largeCase: null,
+    largeCases: [],
     cases: cases.slice(0, cases.length - dropped),
   };
 }
@@ -1161,11 +1161,11 @@ export function checkProblem(
   const all = (outcome: CheckedCase): CheckedCase[] => cases.map(() => ({ ...outcome }));
   if (judge === 'none' || !reference || total === 0) {
     const error = judge === 'none' ? 'there is no judge engine' : 'there is no reference solution';
-    return { check: { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total, error: null, runners: [], largeCase: null }, cases: all({ outcome: 'not_run', error }) };
+    return { check: { attempted: false, engine: judge === 'none' ? null : 'judge0', passed: 0, total, error: null, runners: [], largeCases: [] }, cases: all({ outcome: 'not_run', error }) };
   }
   const draft = { problem, testCases: [], type: 'problem', title: '', summary: '', body: '', difficulty: null, tags: [], assumptions: [] } satisfies ItemDraft;
   const runners = checkRunners(draft, judge === 'down');
-  const stopped = (error: string, outcome: CheckedCase) => ({ check: { attempted: true, engine: 'judge0', passed: 0, total, error, runners, largeCase: null }, cases: all(outcome) });
+  const stopped = (error: string, outcome: CheckedCase) => ({ check: { attempted: true, engine: 'judge0', passed: 0, total, error, runners, largeCases: [] }, cases: all(outcome) });
   if (judge === 'down') return stopped('judge engine unreachable: dial tcp: connection refused', { outcome: 'not_run', error: 'the judge engine could not be reached' });
   const runner = problem.harness[reference.language];
   if (problem.interface === 'function' && !runner) {
@@ -1192,5 +1192,5 @@ export function checkProblem(
         : outcomes[first]!.outcome === 'failed'
           ? `${cases[first]!.name || `case ${first + 1}`}: ${outcomes[first]!.error}`
           : `the check ran out of time after ${first} of ${total} test cases`;
-  return { check: { attempted: true, engine: 'judge0', passed: outcomes.filter((o) => o.outcome === 'passed').length, total, error, runners, largeCase: null }, cases: outcomes };
+  return { check: { attempted: true, engine: 'judge0', passed: outcomes.filter((o) => o.outcome === 'passed').length, total, error, runners, largeCases: [] }, cases: outcomes };
 }

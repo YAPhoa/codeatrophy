@@ -855,23 +855,246 @@
   background: var(--accent-soft);
 }
 
-.generating-pulse {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  animation: pulse 1.6s ease-in-out infinite;
+/* The mark of a generation in progress: a quill writing on a scroll, a
+   strip of paper between two rolls that stand a little wider than it. Five
+   lines share one timeline, each a step behind the one before: a line is
+   written on the bottom row, moves up a row at each step and goes under the
+   top roll, so the scroll fills once and then winds on for as long as the
+   wait lasts. The quill follows the end of the line being written. */
+.generating-scroll {
+  --edge: color-mix(in srgb, var(--accent) 45%, transparent);
+  position: relative;
+  width: 30px;
+  height: 40px;
+  /* Room for the rolls on both sides, and for the quill past the right one. */
+  margin: 0 var(--space-3) 0 var(--space-1);
+  border-inline: 1px solid var(--edge);
+  background: var(--surface);
   flex: none;
 }
 
-@keyframes pulse {
-  50% {
-    opacity: 0.55;
-    transform: scale(0.92);
+.generating-scroll::before,
+.generating-scroll::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset-inline: calc(var(--space-1) * -1 - 1px);
+  height: 7px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  /* The turn of the paper at each end of a roll. */
+  background:
+    linear-gradient(var(--edge), var(--edge)) 3px 0 / 1px 100% no-repeat,
+    linear-gradient(var(--edge), var(--edge)) calc(100% - 3px) 0 / 1px 100% no-repeat,
+    var(--surface);
+}
+
+.generating-scroll::before {
+  top: 0;
+}
+
+.generating-scroll::after {
+  bottom: 0;
+}
+
+.generating-lines {
+  --pitch: 6px;
+  --line: 18px;
+  --step: 0.8s;
+  position: absolute;
+  top: calc(50% - (var(--pitch) * 3 + 2px) / 2);
+  left: 5px;
+  width: var(--line);
+  height: calc(var(--pitch) * 3 + 2px);
+}
+
+.generating-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+  animation: generating-row calc(var(--step) * 5) var(--ease-out) infinite backwards;
+}
+
+.generating-ink {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  animation: generating-write calc(var(--step) * 5) var(--ease-in-out) infinite backwards;
+  animation-delay: inherit;
+}
+
+/* The widths here are the stops of the quill in generating-quill below. */
+.generating-line:nth-child(1) {
+  width: 100%;
+}
+
+.generating-line:nth-child(2) {
+  width: 72%;
+  animation-delay: var(--step);
+}
+
+.generating-line:nth-child(3) {
+  width: 89%;
+  animation-delay: calc(var(--step) * 2);
+}
+
+.generating-line:nth-child(4) {
+  width: 56%;
+  animation-delay: calc(var(--step) * 3);
+}
+
+.generating-line:nth-child(5) {
+  width: 94%;
+  animation-delay: calc(var(--step) * 4);
+}
+
+/* The tip of the quill is at (2, 25) of its 16 by 26 drawing: it rests on
+   the bottom row, and the quill leans and the hand turns about it. */
+.generating-quill {
+  position: absolute;
+  top: calc(var(--pitch) * 3 + 1px - 25px);
+  left: -2px;
+  width: 16px;
+  height: 26px;
+  z-index: 2;
+  color: var(--accent);
+  animation: generating-quill calc(var(--step) * 5) var(--ease-in-out) infinite;
+}
+
+.generating-quill svg {
+  display: block;
+  overflow: visible;
+  transform-origin: 2px 25px;
+  rotate: 22deg;
+  animation: generating-scribble var(--step) linear infinite;
+}
+
+.generating-quill-rib {
+  stroke: var(--surface);
+}
+
+@keyframes generating-row {
+  0%,
+  16% {
+    transform: translateY(calc(var(--pitch) * 3));
+    opacity: 1;
+  }
+  20%,
+  36% {
+    transform: translateY(calc(var(--pitch) * 2));
+  }
+  40%,
+  56% {
+    transform: translateY(var(--pitch));
+  }
+  60%,
+  76% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  80%,
+  100% {
+    transform: translateY(calc(var(--pitch) * -1));
+    opacity: 0;
+  }
+}
+
+@keyframes generating-write {
+  0% {
+    transform: translateX(-101%);
+  }
+  14%,
+  90% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-101%);
+  }
+}
+
+/* Along each of the five lines in turn, as far as that line goes, then back. */
+@keyframes generating-quill {
+  0%,
+  20%,
+  40%,
+  60%,
+  80%,
+  100% {
+    transform: translateX(0);
+  }
+  14% {
+    transform: translateX(var(--line));
+  }
+  34% {
+    transform: translateX(calc(var(--line) * 0.72));
+  }
+  54% {
+    transform: translateX(calc(var(--line) * 0.89));
+  }
+  74% {
+    transform: translateX(calc(var(--line) * 0.56));
+  }
+  94% {
+    transform: translateX(calc(var(--line) * 0.94));
+  }
+}
+
+/* One line's worth: the hand wavers while it writes, then lifts to go back. */
+@keyframes generating-scribble {
+  0%,
+  70% {
+    transform: translateY(0) rotate(0deg);
+  }
+  9%,
+  26%,
+  44%,
+  61% {
+    transform: translateY(0) rotate(-7deg);
+  }
+  18%,
+  35%,
+  53% {
+    transform: translateY(0) rotate(4deg);
+  }
+  85% {
+    transform: translateY(-3px) rotate(-10deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+/* Reduced motion: a written scroll with the quill at rest on its last line;
+   the counter beside it still shows that time is passing. */
+@media (prefers-reduced-motion: reduce) {
+  .generating-line,
+  .generating-ink,
+  .generating-quill,
+  .generating-quill svg {
+    animation: none;
+  }
+
+  .generating-line:nth-child(2) {
+    transform: translateY(var(--pitch));
+  }
+
+  .generating-line:nth-child(3) {
+    transform: translateY(calc(var(--pitch) * 2));
+  }
+
+  .generating-line:nth-child(4) {
+    transform: translateY(calc(var(--pitch) * 3));
+  }
+
+  .generating-line:nth-child(5) {
+    opacity: 0;
+  }
+
+  .generating-quill {
+    transform: translateX(calc(var(--line) * 0.56));
   }
 }
 
@@ -1113,34 +1336,53 @@ a.usage-line:hover {
   overflow-wrap: anywhere;
 }
 
+/* Asking for a revision: folded to its title until it is wanted, then one
+   control under another. */
 .revise {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
-/* With a model picker the row has one more control before the button. */
-@media (min-width: 701px) {
-  .revise:has(.model-picker) {
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  }
-}
-
-.revise-label {
-  display: inline-flex;
+.revise-toggle {
+  display: flex;
   align-items: center;
   gap: var(--space-1-5);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: inherit;
   font-weight: 600;
-  white-space: nowrap;
+  text-align: left;
+}
+
+.revise-toggle:hover {
+  background: var(--surface-2);
+}
+
+.revise-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4) var(--space-4);
+}
+
+/* In a column the pickers have the room to show a whole name. */
+.revise-form .style-picker .select {
+  max-width: 100%;
+}
+
+.revise-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .revise-hint {
-  grid-column: 2 / -1;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
@@ -1453,7 +1695,7 @@ fieldset.stack legend {
   color: var(--accent-text);
 }
 
-.next-card h3 {
+.next-card :is(h2, h3) {
   font-size: var(--text-lg);
   font-weight: 600;
 }
@@ -1510,14 +1752,6 @@ fieldset.stack legend {
   .next-cards,
   .mode-cards {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .revise {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .revise-hint {
-    grid-column: 1;
   }
 
   .saved-banner {
@@ -1663,6 +1897,18 @@ fieldset.stack legend {
   align-items: center;
   gap: var(--space-2);
   min-height: 28px;
+}
+
+/* A problem's Variants tab: its family, then the offer of another variant. */
+.variants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.variants .related-origin,
+.variants .related-list {
+  margin-top: 0;
 }
 
 .related-empty {
@@ -2512,7 +2758,13 @@ button.case-chip:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* The large test case of a generation: what became of it, and its generator on request. */
+/* The large test cases of a generation: what became of each, and its generator on request. */
+.large-cases {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .large-case {
   display: flex;
   flex-direction: column;

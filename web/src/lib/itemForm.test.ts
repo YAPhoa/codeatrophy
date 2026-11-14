@@ -115,11 +115,14 @@ describe('formFromDraft', () => {
     expect(formFromDraft(functionDraft)).toMatchObject({ interface: 'function', harness: { python: runner } });
   });
 
-  it('marks the large test case the generation added', () => {
-    const big: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true }] };
+  it('marks every large test case the generation added', () => {
+    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true });
+    const big: ItemDraft = { ...draft, testCases: [...draft.testCases, large('Large', '9\n'), large('Larger', '10\n')] };
     const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 2, timeMs: 5, generator: null };
-    expect(formFromDraft(big, {}, report).testCases.map((t) => t.large === true)).toEqual([false, true]);
-    expect(formFromDraft(big, {}, { ...report, status: 'failed', index: null }).testCases.some((t) => t.large)).toBe(false);
+    const failed: LargeCaseReport = { ...report, status: 'failed', error: 'the generator crashed', index: null };
+    expect(formFromDraft(big, {}, [report, { ...report, index: 2, name: 'Larger' }]).testCases.map((t) => t.large === true)).toEqual([false, true, true]);
+    expect(formFromDraft(big, {}, [report, failed]).testCases.map((t) => t.large === true)).toEqual([false, true, false]);
+    expect(formFromDraft(big, {}, [failed]).testCases.some((t) => t.large)).toBe(false);
     expect(formFromDraft(big).testCases.some((t) => t.large)).toBe(false);
   });
 
@@ -146,11 +149,12 @@ describe('draftFromForm', () => {
     expect(draftFromForm({ ...formFromDraft(functionDraft), interface: 'program' }, []).problem).toMatchObject({ interface: 'program', harness: {} });
   });
 
-  it('leaves the large test case, and any test data too large to show a model, out of a revision', () => {
+  it('leaves the large test cases, and any test data too large to show a model, out of a revision', () => {
     const form = formFromDraft(draft);
     const cases = [
       ...form.testCases,
       { ...form.testCases[0]!, key: 'big', name: 'Generated', stdin: '7\n', large: true },
+      { ...form.testCases[0]!, key: 'bigger', name: 'Generated too', stdin: '8\n', large: true },
       { ...form.testCases[0]!, key: 'pasted', name: 'Pasted', stdin: '1 '.repeat(40_000) },
       { ...form.testCases[0]!, key: 'output', name: 'Long output', expectedStdout: '0\n'.repeat(20_000) },
     ];
@@ -303,6 +307,7 @@ const limits: Limits = {
   maxPreviousDraftBytes: 2097152,
   maxGeneratedTestCases: 30,
   maxLargeInputBytes: 1048576,
+  maxLargeTestCases: 5,
   maxStylePresets: 20,
   maxStyleNameChars: 60,
   maxStyleInstructionsChars: 2000,
@@ -469,9 +474,9 @@ describe('upgradeForm', () => {
 describe('checking a draft again', () => {
   const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 9, timeMs: 5, generator: null };
   const twoCases: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true }] };
-  const form = formFromDraft(twoCases, {}, report);
+  const form = formFromDraft(twoCases, {}, [report]);
   const answer = {
-    check: { attempted: true, engine: 'judge0', passed: 1, total: 2, error: 'Example 1: expected 2', runners: [], largeCase: null },
+    check: { attempted: true, engine: 'judge0', passed: 1, total: 2, error: 'Example 1: expected 2', runners: [], largeCases: [] },
     cases: [
       { outcome: 'wrong' as const, error: null },
       { outcome: 'passed' as const, error: null },
@@ -485,12 +490,12 @@ describe('checking a draft again', () => {
     expect(body.testCases[1]).not.toHaveProperty('large');
   });
 
-  it('marks each case from the answer and keeps the report of the large case', () => {
-    const session = { form, check: { ...answer.check, passed: 2, error: null, largeCase: report }, checked: checkedState(form), other: 'kept' };
+  it('marks each case from the answer and keeps the reports of the large cases', () => {
+    const session = { form, check: { ...answer.check, passed: 2, error: null, largeCases: [report] }, checked: checkedState(form), other: 'kept' };
     const next = withCheck(session, checkedState(form), answer)!;
     expect(next.form!.testCases.map((t) => t.verified)).toEqual([false, true]);
     expect(next.form!.testCases.map((t) => t.outcome?.outcome)).toEqual(['wrong', 'passed']);
-    expect(next.check).toEqual({ ...answer.check, largeCase: report });
+    expect(next.check).toEqual({ ...answer.check, largeCases: [report] });
     expect(next.checked).toBe(checkedState(next.form!));
     expect(next.other).toBe('kept');
   });

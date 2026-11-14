@@ -25,7 +25,7 @@ import { useToast } from '../../ui/Toast';
 import { TagChips } from '../item/controls';
 import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
-import { Related } from '../item/Related';
+import { Variants } from '../item/Related';
 import { SaveSolutionDialog } from '../solutions/SaveSolutionDialog';
 import { savedWithCode } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
@@ -35,7 +35,7 @@ import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
 
 // The open tabs are part of the address (`?tab=notes&panel=result&pane=code`), so a link or a reload lands on the same view.
-const LEFT_TABS = ['description', 'notes', 'submissions'] as const;
+const LEFT_TABS = ['description', 'notes', 'submissions', 'variants'] as const;
 const DRAWER_TABS = ['tests', 'result', 'custom'] as const;
 const NARROW_PANES = ['problem', 'code'] as const;
 type DrawerTab = (typeof DRAWER_TABS)[number];
@@ -393,7 +393,6 @@ export function SolveView({ item }: { item: Item }) {
       ) : (
         <Markdown source={item.body} />
       )}
-      <Related item={item} />
     </div>
   );
 
@@ -409,6 +408,7 @@ export function SolveView({ item }: { item: Item }) {
             { value: 'description', label: 'Description' },
             { value: 'notes', label: 'Notes', count: item.notes.trim() ? 1 : null },
             { value: 'submissions', label: 'Submissions' },
+            { value: 'variants', label: 'Variants', count: item.variantCount || null },
           ]}
         />
         <span className="spacer" />
@@ -425,6 +425,7 @@ export function SolveView({ item }: { item: Item }) {
       <div className="pane-body" {...tabPanelProps('left', leftTab)} tabIndex={0}>
         {leftTab === 'description' && description}
         {leftTab === 'notes' && <Notes item={item} />}
+        {leftTab === 'variants' && <Variants item={item} />}
         {leftTab === 'submissions' && (
           <HistoryList
             itemId={item.id}

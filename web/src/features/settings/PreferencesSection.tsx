@@ -125,7 +125,9 @@ export function PreferencesSection() {
   const { editor } = shown;
   const setEditor = (change: Partial<EditorPreferences>) => save({ editor: change });
   const theme = useThemePreference();
-  const maxGenerated = useLimits()?.maxGeneratedTestCases ?? 30;
+  const limits = useLimits();
+  const maxGenerated = limits?.maxGeneratedTestCases ?? 30;
+  const maxLarge = limits?.maxLargeTestCases ?? 5;
 
   return (
     <section className="settings-section" aria-labelledby="preferences-title">
@@ -186,8 +188,18 @@ export function PreferencesSection() {
           className="prefs-check-row"
           checked={shown.largeTestCase}
           onChange={(largeTestCase) => save({ largeTestCase })}
-          label="Generate a large test case by default"
-          hint="One case at the size limits, so a slow solution fails."
+          label="Generate large test cases by default"
+          hint="Cases at the size limits, so a slow solution fails."
+        />
+        <StepperRow
+          label="Large test cases to generate"
+          hint="How many, whenever large test cases are asked for."
+          value={Math.min(maxLarge, Math.max(1, shown.largeTestCaseCount))}
+          onChange={(largeTestCaseCount) => save({ largeTestCaseCount })}
+          min={1}
+          max={maxLarge}
+          decreaseLabel="Fewer large test cases"
+          increaseLabel="More large test cases"
         />
       </div>
 

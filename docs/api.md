@@ -154,6 +154,7 @@ to show.
     "maxPreviousDraftBytes": 2097152,
     "maxGeneratedTestCases": 30,
     "maxLargeInputBytes": 1048576,
+    "maxLargeTestCases": 5,
     "maxStylePresets": 20,
     "maxStyleNameChars": 60,
     "maxStyleInstructionsChars": 2000,
@@ -178,7 +179,8 @@ to show.
   `maxTestDataBytes` to each of a test case's `stdin` and `expectedStdout`;
   `maxGeneratedTestCases` is the upper bound of `count` in
   `POST /items/{id}/ai/testcases`; `maxLargeInputBytes` is the largest input
-  a [large test case](#large-test-case) may have. A source URL must be `http`
+  a [large test case](#large-test-cases) may have and `maxLargeTestCases` the
+  most of them one generation may ask for. A source URL must be `http`
   or `https`.
   `maxTestDataBytes` also bounds the custom `stdin` of a run.
   `maxRequestBytes` bounds any JSON request body (`413` beyond it);
@@ -460,7 +462,7 @@ is about to save.
 
 ```json
 {
-  "check": { "attempted": true, "engine": "judge0", "passed": 6, "total": 6, "error": null, "runners": [], "largeCase": null },
+  "check": { "attempted": true, "engine": "judge0", "passed": 6, "total": 6, "error": null, "runners": [], "largeCases": [] },
   "cases": [ { "outcome": "passed", "error": null } ]
 }
 ```
@@ -479,7 +481,7 @@ minutes. `cases` has one entry per test case, in order, with its `outcome`:
 `error` is `null` for `passed` and `wrong`. A client can offer to drop the
 `wrong` and `failed` cases; when every case has one of those outcomes the
 reference solution or the runner is the likelier culprit. Expected outputs
-are never changed. `largeCase` is always `null`. Without a judge engine, a reference solution or a test case the
+are never changed. `largeCases` is always `[]`. Without a judge engine, a reference solution or a test case the
 answer is `attempted: false`, as for a draft, not an error. A body with a
 `type` other than `problem`, or without `problem`, is `422`.
 
@@ -901,8 +903,9 @@ Turn rough input into a complete item draft.
   `instruction` this asks for a revision rather than a fresh draft.
 - `styleId` — optional; which [style preset](#style-presets) to write in.
 - `instruction` — at most 2000 characters.
-- `largeTestCase` — boolean, default `false`: also build a
-  [large test case](#large-test-case). Ignored for a reading.
+- `largeTestCases` — integer 0–`limits.maxLargeTestCases`, default `0`: also
+  build that many [large test cases](#large-test-cases). Ignored for a
+  reading.
 - `providerId` — optional; the [provider](#ai) to use instead of the default.
 
 Response:
@@ -937,7 +940,7 @@ Response:
   "check": {
     "attempted": true, "engine": "judge0", "passed": 1, "total": 1, "error": null,
     "runners": [{ "language": "python", "status": "ok", "error": null }],
-    "largeCase": null
+    "largeCases": []
   },
   "usage": {
     "logId": "...", "model": "claude-haiku-5-5", "durationMs": 48200,
@@ -999,8 +1002,8 @@ check's time. Starter code is therefore written to run as it stands, with a
 placeholder result. `runners` is `[]` for a `program` problem and whenever
 `attempted` is `false`.
 
-`check.largeCase` reports on the [large test case](#large-test-case): `null`
-unless the request asked for one.
+`check.largeCases` reports on the [large test cases](#large-test-cases): one
+entry for each the request asked for, `[]` when it asked for none.
 
 `ItemDraft` maps directly onto `ItemInput` (the client adds `rawInput: text`
 and sets each test case's `origin` to `ai`). `problem` is `null` and
@@ -1022,8 +1025,8 @@ the same idea on, or a reading reworked for a different angle.
 `styleId` is optional and selects a [style preset](#style-presets).
 `providerId` is optional and names the [provider](#ai) to use instead of the
 default.
-`largeTestCase` (boolean, default `false`) asks for a
-[large test case](#large-test-case), as for a draft.
+`largeTestCases` (integer 0–`limits.maxLargeTestCases`, default `0`) asks
+for [large test cases](#large-test-cases), as for a draft.
 `instruction` is at most 2000 characters. `previousDraft` is an optional
 `ItemDraft` returned by an earlier call to this endpoint; with `instruction`
 it asks for a revision of that variant rather than a fresh one.
@@ -1054,12 +1057,13 @@ cases of the original are never copied, since they do not apply.
 Propose test cases for an existing problem.
 
 ```json
-{ "count": 8, "language": "python", "instruction": null, "largeTestCase": false }
+{ "count": 8, "language": "python", "instruction": null, "largeTestCases": 0 }
 ```
 
 - `count` — 1–30, default 8.
-- `largeTestCase` — boolean, default `false`: also build a
-  [large test case](#large-test-case), in addition to the `count` cases.
+- `largeTestCases` — integer 0–`limits.maxLargeTestCases`, default `0`: also
+  build that many [large test cases](#large-test-cases), in addition to the
+  `count` cases.
 - `language` — language for the reference solution; default `python`. If the
   item already has a reference solution it is given to the model as context.
   For a `function` problem the language must have a harness (`422`), and the
@@ -1075,7 +1079,7 @@ Response:
   "referenceSolution": { "language": "python", "source": "..." },
   "verification": { "attempted": true, "engine": "judge0", "error": null },
   "duplicatesDropped": 0,
-  "largeCase": null,
+  "largeCases": [],
   "usage": { "logId": "...", "model": "claude-haiku-5-5", "durationMs": 21800, "inputTokens": 3900, "outputTokens": 1650, "reasoningTokens": null, "cacheReadTokens": 0, "cacheWriteTokens": 0 },
   "cases": [
     {
@@ -1118,79 +1122,109 @@ The client saves accepted cases with `POST /items/{id}/testcases/bulk`,
 passing `origin: "ai"`, each case's `verified` flag, and the
 `referenceSolution`.
 
-`largeCase` reports on the [large test case](#large-test-case): `null`
-unless the request asked for one.
+`largeCases` reports on the [large test cases](#large-test-cases): one entry
+for each the request asked for, `[]` when it asked for none.
 
-### Large test case
+### Large test cases
 
 A model can write small inputs by hand but not one near a problem's upper
-bounds, and without such a case a solution of the wrong complexity passes.
-With `largeTestCase: true` on a generation, the model also writes a
-**generator**: a complete program in one of the judge's languages that reads
-nothing and prints the input of one test case — as large as the statement's
-constraints allow, up to `limits.maxLargeInputBytes`, in the shape that makes
-a slow solution run out of time. It must be deterministic (a fixed seed, no
-clock) and its output must satisfy every constraint in the statement.
+bounds, and without such cases a solution of the wrong complexity passes.
+With `largeTestCases: n` on a generation (`n` from 1 to
+`limits.maxLargeTestCases`), the model also writes `n` **generators**: each a
+complete program in one of the judge's languages that reads nothing and
+prints the input of one test case — as large as the statement's constraints
+allow, up to `limits.maxLargeInputBytes`. Each must be deterministic (a fixed
+seed, no clock) and its output must satisfy every constraint in the
+statement.
 
-The server runs the generator in the judge engine, as a plain program with
+One large input catches one kind of slow solution, which is why several are
+worth asking for. The generators are asked to differ in the shape of what
+they print, not only in a seed: each aims at a different way a solution of
+the wrong complexity, or one that is only correct on small values, fails at
+scale — the largest size with arbitrary values, the structure that is the
+worst case for the obvious slower approach, values at the extremes of their
+range, a degenerate input (all equal, already sorted, one long run). A
+problem whose input stays small however large its values are (a single
+`n` up to 10^12) still gets `n` distinct inputs.
+
+The server runs each generator in the judge engine, as a plain program with
 limits of its own, takes what it printed as the case's `stdin`, and runs the
-reference solution on that for the expected output. The case is then an
-ordinary test case: it is appended as the last element of `draft.testCases`
-(for a draft or a variant) or of `cases` (for test generation), never a
-sample, with `verified: true`. In `cases` its `predictedStdout` and
-`predictionMatched` are `null`; the model has not seen the input. Only the
-reference solution vouches for the expected output, so it is worth as much as
-the smaller, hand-checked cases make the reference solution worth.
+reference solution on that for the expected output. Each case is then an
+ordinary test case: they are appended, in the order the model gave them, as
+the last elements of `draft.testCases` (for a draft or a variant) or of
+`cases` (for test generation), never a sample, with `verified: true`. In
+`cases` their `predictedStdout` and `predictionMatched` are `null`; the model
+has not seen the input. Only the reference solution vouches for the expected
+output, so it is worth as much as the smaller, hand-checked cases make the
+reference solution worth.
 
-`largeCase` says what happened:
+`largeCases` says what happened, with one entry for each large case asked
+for, in the model's order:
 
 ```json
-{
-  "status": "added",
-  "error": null,
-  "index": 8,
-  "name": "30,000 values in runs of three",
-  "inputBytes": 183412,
-  "timeMs": 141,
-  "generator": { "language": "python", "source": "..." }
-}
+[
+  {
+    "status": "added",
+    "error": null,
+    "index": 8,
+    "name": "30,000 values in runs of three",
+    "inputBytes": 183412,
+    "timeMs": 141,
+    "generator": { "language": "python", "source": "..." }
+  },
+  {
+    "status": "failed",
+    "error": "the generator crashed: IndexError: list index out of range",
+    "index": null,
+    "name": "A single strictly decreasing run",
+    "inputBytes": null,
+    "timeMs": null,
+    "generator": { "language": "python", "source": "..." }
+  }
+]
 ```
 
 - `status` — `added`; `failed` when the model gave no usable generator (none
-  at all, or one in a language the judge does not run), the generator did not
-  compile, crashed, ran out of time, printed nothing, printed more than
-  `limits.maxLargeInputBytes` or something that is not UTF-8, when the
-  reference solution failed or exceeded the problem's time or memory limit on
-  the input, or when the input repeats an existing case; `skipped` when there
-  is no judge engine or no reference solution, the engine could not be
-  reached or failed during a run, the request was cancelled, or — in a draft —
-  the check was not attempted, the reference solution did not pass the other
-  test cases, or the check's time ran out. `error` gives the reason in plain
-  words for `failed` and `skipped`, and nothing is added. A failed large case
-  never fails the request or the other cases.
+  at all, fewer than were asked for, or one in a language the judge does not
+  run), the generator did not compile, crashed, ran out of time, printed
+  nothing, printed more than `limits.maxLargeInputBytes` or something that is
+  not UTF-8, when the reference solution failed or exceeded the problem's
+  time or memory limit on the input or cannot run at all, or when the input
+  repeats an existing case or the input an earlier generator of the same
+  request printed; `skipped` when there is no judge engine or
+  no reference solution, the engine could not be reached or failed during a
+  run, the request was cancelled, or — in a draft — the check was not
+  attempted, the reference solution did not pass the other test cases, or the
+  check's time ran out. `error` gives the reason in plain words for `failed`
+  and `skipped`, and that case is not added. A large case that fails never
+  fails the request, the other test cases or the other large cases.
 - `index` — where the case is in `draft.testCases` or `cases`; `null` unless
   `added`.
 - `name` — the case's name, written by the model to say what the input is
-  (`Large input` if it gave none).
+  (`Large input` if it gave none; `null` for a generator the model did not
+  write).
 - `inputBytes`, `timeMs` — the size of the generated input and how long the
   reference solution took on it, to set against the problem's time limit;
   `null` when that point was not reached.
 - `generator` — the program, for inspection; `null` if the model gave none.
   It is not stored with the test case.
 
-In a draft the large case is part of the [check](#post-aidraft): it runs
+Generators the model wrote beyond the number asked for are ignored.
+
+In a draft the large cases are part of the [check](#post-aidraft): they run
 after the other test cases and before the runners, within the same time
-bound, and it counts in `check.passed` and `check.total` when it was added.
+bound, and each one added counts in `check.passed` and `check.total`.
 
 Large test data is never sent to a model. Wherever a prompt lists test cases
 — the existing cases in test generation, the cases of a `previousDraft` in a
 revision — a case whose input or expected output is larger than a few
 kilobytes is described by its name and size only. A revision therefore does
-not carry a large case over: with `largeTestCase: true` it builds a new one,
-and without it the revised draft has none. A client should leave the large
-case out of the `previousDraft` it sends, which also keeps that request
-within `limits.maxPreviousDraftBytes`; one that is sent anyway is dropped
-before that limit is applied, not refused.
+not carry such a case over: with `largeTestCases` it builds new ones, and
+without it the revised draft has none. A client should leave the large cases
+of the earlier response out of the `previousDraft` it sends, whatever their
+size, which also keeps that request within `limits.maxPreviousDraftBytes`;
+a case of more than a few kilobytes that is sent anyway is dropped before
+that limit is applied, not refused.
 
 ## AI settings
 
@@ -1616,6 +1650,7 @@ on them — they are for clients to honour.
   "hideTestCases": true,
   "generatedTestCases": 8,
   "largeTestCase": false,
+  "largeTestCaseCount": 3,
   "editor": {
     "autocomplete": true,
     "closeBrackets": true,
@@ -1633,7 +1668,8 @@ Every key is always present; the values above are the defaults.
 | --- | --- | --- |
 | `hideTestCases` | boolean | When `true`, show how many test cases a problem has and how many a run used, but keep the content of non-sample cases (in the test list and in submission results) out of sight until the user asks to reveal it. Sample cases are part of the statement and stay visible |
 | `generatedTestCases` | integer 1–`limits.maxGeneratedTestCases` | How many test cases to ask for by default when generating them: the initial value of the count a client sends as `count` to `POST /items/{id}/ai/testcases` |
-| `largeTestCase` | boolean | Whether to ask for a [large test case](#large-test-case) by default: the value a client sends as `largeTestCase` to `POST /ai/draft` and `POST /items/{id}/ai/variant`, and the initial value of that choice for `POST /items/{id}/ai/testcases` |
+| `largeTestCase` | boolean | Whether to ask for [large test cases](#large-test-cases) by default: whether a client sends a non-zero `largeTestCases` to `POST /ai/draft` and `POST /items/{id}/ai/variant`, and the initial value of that choice for `POST /items/{id}/ai/testcases` |
+| `largeTestCaseCount` | integer 1–`limits.maxLargeTestCases` | How many large test cases to ask for when they are asked for: the value a client sends as `largeTestCases` |
 | `editor.autocomplete` | boolean | Offer code completion while typing |
 | `editor.closeBrackets` | boolean | Insert the closing bracket or quote automatically |
 | `editor.matchBrackets` | boolean | Highlight the bracket matching the one at the cursor |

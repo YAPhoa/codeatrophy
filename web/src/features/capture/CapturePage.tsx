@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
-import { useCollections, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
+import { useCollections, useLargeTestCaseCount, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
 import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { finePointer } from '../../lib/pointer';
@@ -72,8 +72,9 @@ export default function CapturePage() {
   const generation = useGeneration();
   const saver = useSaveDraft(clearSession);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  // Whether to ask for a large test case is the user's standing choice; a revision asks again.
-  const largeTestCase = usePreferences().largeTestCase;
+  // Whether to ask for large test cases, and how many, is the user's standing choice; a revision asks again.
+  const largeCount = useLargeTestCaseCount();
+  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
 
   const presetCollection = searchParams.get('collection');
   const defaults = (): Partial<ItemFormState> => ({ collectionIds: presetCollection ? [presetCollection] : [] });
@@ -128,10 +129,10 @@ export default function CapturePage() {
     }
     verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCase, ...provider.request }, signal),
+      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCases, ...provider.request }, signal),
     );
     if (!res) return;
-    const drafted = formFromDraft(res.draft, defaults(), res.check?.largeCase);
+    const drafted = formFromDraft(res.draft, defaults(), res.check?.largeCases);
     patch({
       stage: 'review',
       form: drafted,
@@ -155,11 +156,11 @@ export default function CapturePage() {
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCase, ...provider.request }, signal);
+      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCases, ...provider.request }, signal);
     });
     if (!res) return;
     // Keep what the model does not produce: where the item is filed and where it came from.
-    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCase), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
+    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCases), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
     patch({
       form: revised,
       assumptions: res.draft.assumptions,
@@ -356,7 +357,7 @@ export default function CapturePage() {
         <GeneratingPanel title="Drafting…" startedAt={generation.startedAt} onCancel={generation.cancel} />
       ) : (
         <>
-          {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed — your input is untouched" onRetry={() => void draft()} />}
+          {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed" onRetry={() => void draft()} />}
           <div className="capture-actions">
             {aiEnabled ? (
               <>

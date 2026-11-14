@@ -20,6 +20,8 @@ interface PopoverProps {
   open: boolean;
   onClose: () => void;
   align?: 'start' | 'end';
+  /** Where it goes when there is room on both sides of the anchor. Under it unless told otherwise. */
+  side?: 'below' | 'above';
   /** Make the popover at least as wide as its anchor. */
   matchWidth?: boolean;
   className?: string;
@@ -33,9 +35,9 @@ interface PopoverProps {
 
 /**
  * A floating panel positioned under (or, when there is no room, above) its
- * anchor. Closes on Escape, on a click outside, and when focus leaves it.
+ * anchor, or the other way round with `side="above"`. Closes on Escape, on a click outside, and when focus leaves it.
  */
-export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth, className, role, label, id, children, noAutoFocus }: PopoverProps) {
+export function Popover({ anchorRef, open, onClose, align = 'start', side = 'below', matchWidth, className, role, label, id, children, noAutoFocus }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; minWidth?: number; maxHeight: number; origin: string } | null>(null);
   const attach = useCallback((node: HTMLDivElement | null) => {
@@ -60,7 +62,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
     const below = vh - a.bottom - gap - margin;
     const above = a.top - gap - margin;
     const natural = el.scrollHeight;
-    const openUp = natural > below && above > below;
+    const openUp = side === 'above' ? natural <= above || above > below : natural > below && above > below;
     const maxHeight = Math.max(120, openUp ? above : below);
     const height = Math.min(natural, maxHeight);
     let left = align === 'end' ? a.right - width : a.left;
@@ -69,7 +71,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', matchWidth,
     // It grows out of the corner nearest its anchor.
     const origin = `${align === 'end' ? 'right' : 'left'} ${openUp ? 'bottom' : 'top'}`;
     setPos({ top, left, minWidth: matchWidth ? a.width : undefined, maxHeight, origin });
-  }, [anchorRef, align, matchWidth]);
+  }, [anchorRef, align, side, matchWidth]);
 
   useLayoutEffect(() => {
     if (!open) {

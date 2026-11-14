@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { PenLine, Sparkles } from 'lucide-react';
 import { ApiError, api } from '../../api/client';
-import { useCollections, useItem, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
+import { useCollections, useItem, useLargeTestCaseCount, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
 import type { AppliedStyle, DraftCheck, GenerationUsage, Item, VariantMode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { useHotkeys } from '../../lib/hotkeys';
@@ -75,7 +75,9 @@ function VariantFlow({ original }: { original: Item }) {
   const collectionActions = useCollectionActions();
   const confirm = useConfirm();
   const generation = useGeneration();
-  const largeTestCase = usePreferences().largeTestCase;
+  // As many large test cases as the preferences say, or none; a revision asks again.
+  const largeCount = useLargeTestCaseCount();
+  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
 
   const requested = searchParams.get('mode');
   const [session, setSession, clearSession] = useStoredState<VariantSession>(`capture:variant:${original.id}`, () => ({
@@ -108,10 +110,10 @@ function VariantFlow({ original }: { original: Item }) {
   const generate = async () => {
     verify.cancel();
     const res = await generation.run((signal) =>
-      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice, largeTestCase, ...provider.request }, signal),
+      api.ai.variant(original.id, { mode: session.mode, instruction: session.instruction.trim() || null, styleId: styleChoice, largeTestCases, ...provider.request }, signal),
     );
     if (!res) return;
-    const drafted = formFromDraft(res.draft, inherited, res.check?.largeCase);
+    const drafted = formFromDraft(res.draft, inherited, res.check?.largeCases);
     patch({
       stage: 'review',
       form: drafted,
@@ -136,10 +138,10 @@ function VariantFlow({ original }: { original: Item }) {
       if (problem) throw new ApiError(413, 'too_large', problem);
       // The form's own choice of interface is the one a revision keeps.
       const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint, largeTestCase, ...provider.request }, signal);
+      return api.ai.variant(original.id, { mode: session.mode, instruction, previousDraft, styleId: styleChoice, ...hint, largeTestCases, ...provider.request }, signal);
     });
     if (!res) return;
-    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCase), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
+    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCases), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
     patch({
       form: revised,
       assumptions: res.draft.assumptions,
@@ -302,7 +304,7 @@ function VariantFlow({ original }: { original: Item }) {
         <GeneratingPanel title="Drafting the variant…" startedAt={generation.startedAt} onCancel={generation.cancel} />
       ) : (
         <>
-          {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed — your choices are kept" onRetry={() => void generate()} />}
+          {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed" onRetry={() => void generate()} />}
           <div className="capture-actions">
             {aiEnabled && (
               <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void generate()} disabled={stylesQuery.isPending}>

@@ -1,23 +1,85 @@
-// The large test case of a generation (docs/api.md, "Large test case"). A
-// real server runs a generator program the model wrote and then the
-// reference solution on what it printed; the mock prints a believable input
-// of a few hundred kilobytes itself, the same one every time.
+// The large test cases of a generation (docs/api.md, "Large test cases"). A
+// real server runs the generator programs the model wrote and then the
+// reference solution on what each printed; the mock prints believable inputs
+// of a few hundred kilobytes itself, one shape per case asked for, the same
+// every time.
 
 import type { LargeCaseReport, ProblemInterface, SourceCode } from '../api/types';
 import type { MockDb } from './db';
 import { byteLength } from './db';
 import { hash32 } from './util';
 
-/** In the input text or instruction: the generator crashes and no large case is added. */
+/** In the input text or instruction: every generator crashes and no large case is added. */
 export const LARGE_FAIL_MARKER = 'MOCK:LARGE-FAIL';
-/** In the input text or instruction: the large case is skipped, as when the check's time runs out. */
+/** In the input text or instruction: the large cases are skipped, as when the check's time runs out. */
 export const LARGE_SKIP_MARKER = 'MOCK:LARGE-SKIP';
+/** In the input text or instruction: the model wrote one generator fewer than asked for, so the last case is not added. */
+export const LARGE_SHORT_MARKER = 'MOCK:LARGE-SHORT';
 
 const COUNT = 30_000;
 const BOUND = 1_000_000_000;
 
-/** What the model wrote; deterministic, and within what Python 3.8 runs. */
-function generatorFor(face: ProblemInterface): SourceCode {
+/** A pseudo-random value in [0, 1) at each call; a small linear congruential generator, as Python's is not reproduced. */
+function lcg(seed: number): () => number {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+const between = (next: () => number, low: number, high: number) => low + Math.floor(next() * (high - low + 1));
+
+/**
+ * What a generator prints, one per large case asked for and each a different
+ * way for a slow solution to fail: the name the model gives it, the values,
+ * and the Python line that builds them.
+ */
+interface Shape {
+  name: string;
+  values: (seed: number) => number[];
+  python: string;
+}
+
+const SHAPES: readonly Shape[] = [
+  {
+    name: `${COUNT.toLocaleString('en')} values across the full range`,
+    values: (seed) => {
+      const next = lcg(seed);
+      return Array.from({ length: COUNT }, () => between(next, -BOUND, BOUND));
+    },
+    python: `values = [random.randint(-${BOUND}, ${BOUND}) for _ in range(n)]`,
+  },
+  {
+    name: `${COUNT.toLocaleString('en')} values in descending order`,
+    values: (seed) => {
+      const next = lcg(seed);
+      return Array.from({ length: COUNT }, () => between(next, -BOUND, BOUND)).sort((a, b) => b - a);
+    },
+    python: `values = sorted((random.randint(-${BOUND}, ${BOUND}) for _ in range(n)), reverse=True)`,
+  },
+  {
+    name: `${COUNT.toLocaleString('en')} copies of the largest value`,
+    values: () => Array.from({ length: COUNT }, () => BOUND),
+    python: `values = [${BOUND}] * n`,
+  },
+  {
+    name: `${COUNT.toLocaleString('en')} values alternating between the extremes`,
+    values: () => Array.from({ length: COUNT }, (_, i) => (i % 2 === 0 ? BOUND : -BOUND)),
+    python: `values = [${BOUND} if i % 2 == 0 else -${BOUND} for i in range(n)]`,
+  },
+  {
+    name: `${COUNT.toLocaleString('en')} negative values`,
+    values: (seed) => {
+      const next = lcg(seed);
+      return Array.from({ length: COUNT }, () => between(next, -BOUND, -1));
+    },
+    python: `values = [random.randint(-${BOUND}, -1) for _ in range(n)]`,
+  },
+];
+
+/** What the model wrote for one shape; deterministic, and within what Python 3.8 runs. */
+function generatorFor(shape: Shape, face: ProblemInterface, seed: number): SourceCode {
   const print =
     face === 'function'
       ? ['print("[" + ",".join(map(str, values)) + "]")']
@@ -28,24 +90,13 @@ function generatorFor(face: ProblemInterface): SourceCode {
       'import random',
       '',
       '# A fixed seed: the same input on every run.',
-      'random.seed(20240611)',
+      `random.seed(${seed})`,
       `n = ${COUNT}`,
-      `values = [random.randint(-${BOUND}, ${BOUND}) for _ in range(n)]`,
+      shape.python,
       ...print,
       '',
     ].join('\n'),
   };
-}
-
-function values(seed: number): number[] {
-  // A small linear congruential generator; Python's is not reproduced.
-  let state = seed >>> 0 || 1;
-  const out: number[] = [];
-  for (let i = 0; i < COUNT; i++) {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    out.push(Math.floor((state / 0x1_0000_0000) * (2 * BOUND + 1)) - BOUND);
-  }
-  return out;
 }
 
 function maxSubarray(list: readonly number[]): number {
@@ -66,56 +117,67 @@ export interface LargeCase {
 }
 
 export interface LargeCaseRequest {
+  /** How many large cases were asked for, 1 or more. */
+  count: number;
   /** What the problem is about, for the seed; any text that tells problems apart. */
   title: string;
   face: ProblemInterface;
   timeLimitMs: number;
   referenceSolution: SourceCode | null;
-  /** Inputs the case must not repeat. */
+  /** Inputs the cases must not repeat. */
   existing: readonly string[];
-  /** Where the case will go if it is added. */
+  /** Where the first case will go if it is added; the others follow it. */
   index: number;
-  /** Why the reference solution cannot be run at all, as the check found out; `null` if it can. */
+  /** Why the large cases are not tried, as the check found out; `null` if they are. */
   blocked: string | null;
   /** The texts of the request, to look for the markers in. */
   texts: readonly (string | null)[];
-  /** In a draft the large case runs within the check's time bound. */
+  /** In a draft the large cases run within the check's time bound. */
   operation: 'draft' | 'testcases';
 }
 
 const asked = (marker: string, texts: readonly (string | null)[]) => texts.some((t) => t?.includes(marker));
 
-/** Build the large case of one generation, or say why there is none. */
-export function buildLargeCase(db: MockDb, req: LargeCaseRequest): LargeCase {
-  const generator = generatorFor(req.face);
-  const none = (status: 'failed' | 'skipped', error: string, extra: Partial<LargeCaseReport> = {}): LargeCase => ({
-    report: { status, error, index: null, name: null, inputBytes: null, timeMs: null, generator, ...extra },
-    stdin: null,
-    expectedStdout: null,
-  });
-  const judge = db.options.judge;
-  if (judge === 'none') return none('skipped', 'there is no judge engine');
-  if (judge === 'down') return none('skipped', 'the judge engine could not be reached');
-  if (!req.referenceSolution) return none('skipped', 'there is no reference solution');
-  if (asked(LARGE_SKIP_MARKER, req.texts)) {
-    return none('skipped', req.operation === 'draft' ? 'the check ran out of time before the large case' : 'the judge engine stopped responding before the large case');
-  }
-  if (asked(LARGE_FAIL_MARKER, req.texts)) {
-    return none('failed', 'the generator crashed: IndexError: list index out of range (line 6)');
-  }
-  if (req.blocked) return none('failed', req.blocked);
+/** Build the large cases of one generation, one entry per case asked for, each added or saying why not. */
+export function buildLargeCases(db: MockDb, req: LargeCaseRequest): LargeCase[] {
+  const short = asked(LARGE_SHORT_MARKER, req.texts);
+  const seen = [...req.existing];
+  let added = 0;
+  return Array.from({ length: req.count }, (_, i): LargeCase => {
+    const none = (status: 'failed' | 'skipped', error: string, extra: Partial<LargeCaseReport> = {}): LargeCase => ({
+      report: { status, error, index: null, name: null, inputBytes: null, timeMs: null, generator: null, ...extra },
+      stdin: null,
+      expectedStdout: null,
+    });
+    if (short && i === req.count - 1) return none('failed', 'the model wrote fewer generators than asked for');
+    const shape = SHAPES[i % SHAPES.length]!;
+    const seed = 20240611 + i;
+    const written = { name: shape.name, generator: generatorFor(shape, req.face, seed) };
+    const judge = db.options.judge;
+    if (judge === 'none') return none('skipped', 'there is no judge engine', written);
+    if (judge === 'down') return none('skipped', 'the judge engine could not be reached', written);
+    if (!req.referenceSolution) return none('skipped', 'there is no reference solution', written);
+    if (asked(LARGE_SKIP_MARKER, req.texts)) {
+      return none('skipped', req.operation === 'draft' ? 'the check ran out of time before the large cases' : 'the judge engine stopped responding before the large cases', written);
+    }
+    if (asked(LARGE_FAIL_MARKER, req.texts)) {
+      return none('failed', 'the generator crashed: IndexError: list index out of range (line 6)', written);
+    }
+    if (req.blocked) return none('skipped', req.blocked, written);
 
-  const list = values(hash32(req.title));
-  const stdin = req.face === 'function' ? `${JSON.stringify(list)}\n` : `${COUNT}\n${list.join(' ')}\n`;
-  if (req.existing.includes(stdin)) return none('failed', 'the generated input repeats an existing case');
-  const inputBytes = byteLength(stdin);
-  // A believable running time, well inside the limit.
-  const timeMs = Math.min(req.timeLimitMs - 1, 120 + (hash32(stdin.slice(0, 64)) % 160));
-  return {
-    report: { status: 'added', error: null, index: req.index, name: `${COUNT.toLocaleString('en')} values across the full range`, inputBytes, timeMs, generator },
-    stdin,
-    expectedStdout: `${maxSubarray(list)}\n`,
-  };
+    const list = shape.values(hash32(`${req.title}#${i}`));
+    const stdin = req.face === 'function' ? `${JSON.stringify(list)}\n` : `${COUNT}\n${list.join(' ')}\n`;
+    if (seen.includes(stdin)) return none('failed', 'the generated input repeats an existing case', written);
+    seen.push(stdin);
+    const inputBytes = byteLength(stdin);
+    // A believable running time, well inside the limit.
+    const timeMs = Math.min(req.timeLimitMs - 1, 120 + (hash32(stdin.slice(0, 64) + i) % 160));
+    return {
+      report: { status: 'added', error: null, index: req.index + added++, name: shape.name, inputBytes, timeMs, generator: written.generator },
+      stdin,
+      expectedStdout: `${maxSubarray(list)}\n`,
+    };
+  });
 }
 
 /** Whether a test case's data is large enough that a prompt names it by its size only. */

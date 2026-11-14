@@ -96,10 +96,14 @@ For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
 disagrees with its last example, and `MOCK:RUNNER` a "solution only" draft
 with one runner that does not compile. `MOCK:REPEAT` in the instruction of a
 test generation leaves two proposals out as repeats, `MOCK:REPEAT-ALL` all of
-them. A request with `largeTestCase` gets a large test case of about 300 KB on
-one line, the same every time; `MOCK:LARGE-FAIL` in the input text or
-instruction reports it as failed (the generator crashed), `MOCK:LARGE-SKIP` as
-skipped, and without a judge, or with `judge-down`, it is skipped as well.
+them. A request with `largeTestCases: n` gets `n` large test cases of about
+300 KB on one line each, each a different input with a name of its own, the
+same every time; `MOCK:LARGE-FAIL` in the input text or instruction reports
+every one as failed (the generator crashed), `MOCK:LARGE-SKIP` as skipped, and
+`MOCK:LARGE-SHORT` adds all but the last, which is reported as failed with no
+name or generator (the model wrote one generator fewer than asked for).
+Without a judge, with `judge-down`, or in a draft whose reference solution
+fails its other cases (`MOCK:MISMATCH`), they are skipped as well.
 Results of a run cut each stream at 64 KiB, as the server does.
 "Verify all" on a draft (`POST /items/check`) reports a case as `wrong` when
 its input or expected output contains `MOCK:WA` and as `failed` when it
@@ -131,10 +135,10 @@ the flows the product stands on: capture → draft → revise → save; the codi
 workspace with a judged submission, a hidden failing case and its panes; the
 runner rows and folded regions of the solve editor;
 keeping an accepted submission as a solution and making it the reference;
-preferences taking effect; the large test case, from its preference to the
+preferences taking effect; large test cases, from their preferences to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
 (key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
-editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; and filing selected items
+editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; and filing selected items
 into a collection.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a

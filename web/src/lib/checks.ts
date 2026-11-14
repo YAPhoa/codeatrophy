@@ -39,15 +39,16 @@ export function runnerChecks(check: DraftCheck | null, stale = false): ReadonlyM
 }
 
 /**
- * What became of the large test case of a generation. When it was added, its
+ * What became of one large test case of a generation. When it was added, its
  * name and size, and the reference solution's time against the time limit —
  * a warning once that is more than half of it.
  */
 export function describeLargeCase(report: LargeCaseReport, timeLimitMs?: number): CheckLine {
+  const named = report.name ? `Large case “${report.name}”` : 'Large case';
   if (report.status !== 'added') {
-    return { tone: report.status === 'failed' ? 'warn' : 'neutral', text: report.error ? `Large case not added. ${sentence(report.error)}` : 'Large case not added' };
+    return { tone: report.status === 'failed' ? 'warn' : 'neutral', text: report.error ? `${named} not added. ${sentence(report.error)}` : `${named} not added` };
   }
-  const parts = [report.name ? `Large case “${report.name}” added` : 'Large case added'];
+  const parts = [`${named} added`];
   if (report.inputBytes != null) parts.push(formatBytes(report.inputBytes));
   if (report.timeMs != null) parts.push(`reference solution ${formatMs(report.timeMs)}${timeLimitMs ? ` of ${formatMs(timeLimitMs)}` : ''}`);
   const slow = report.timeMs != null && timeLimitMs != null && report.timeMs > timeLimitMs / 2;

@@ -16,8 +16,21 @@ export function GeneratingPanel({ title, startedAt, onCancel, children }: { titl
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
     <div className="generating">
-      <div className="generating-pulse" aria-hidden="true">
-        <Sparkles size={18} />
+      <div className="generating-scroll" aria-hidden="true">
+        <div className="generating-lines">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <span key={i} className="generating-line">
+              <span className="generating-ink" />
+            </span>
+          ))}
+          <span className="generating-quill">
+            <svg viewBox="0 0 16 26" width="16" height="26">
+              <path fill="currentColor" d="M5.2 19.6C3 14 5 6.2 13.4.8c2.4 4.2 2.2 7.8.8 10.8L12 11.2l1.2 2.2c-.6 1-1.3 1.9-2.1 2.8l-1.9-.4.8 1.6c-.8.9-1.7 1.8-2.7 2.6z" />
+              <path fill="currentColor" d="M1.5 25.5 5.7 19.1 7.1 20z" />
+              <path className="generating-quill-rib" fill="none" strokeWidth=".8" strokeLinecap="round" d="M6.5 18.6q2.7-8.1 6.4-15.6" />
+            </svg>
+          </span>
+        </div>
       </div>
       <div className="grow">
         {/* Only the title is a live region: the counter beside it changes every second and would be read out each time. */}

@@ -35,7 +35,7 @@ export interface FormTestCase {
   origin: TestOrigin;
   /** Carried from a draft whose reference solution printed this output; cleared when the case is edited. */
   verified: boolean;
-  /** The large test case the generation built; a revision does not carry it over. */
+  /** One of the large test cases the generation built; a revision does not carry it over. */
   large?: boolean;
   /** What "Verify all" found for this case, while the form is as it was checked. */
   outcome?: CheckedCase;
@@ -108,9 +108,9 @@ export function normalizeTags(tags: readonly string[]): string[] {
   return Array.from(new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))).sort();
 }
 
-/** `largeCase` says which of the draft's test cases is the large one, if any. */
-export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}, largeCase: LargeCaseReport | null = null): ItemFormState {
-  const largeAt = largeCase?.status === 'added' ? largeCase.index : null;
+/** `largeCases` says which of the draft's test cases are large ones, if any. */
+export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}, largeCases: readonly LargeCaseReport[] = []): ItemFormState {
+  const largeAt = new Set(largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [c.index] : [])));
   return {
     ...emptyForm(draft.type),
     ...defaults,
@@ -126,7 +126,7 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
     interface: draft.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(draft.problem?.starterCode ?? {}) },
     harness: structuredClone(draft.problem?.harness ?? {}),
-    testCases: draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...(i === largeAt ? { large: true } : {}) })),
+    testCases: draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...(largeAt.has(i) ? { large: true } : {}) })),
     referenceSolution: draft.problem?.referenceSolution ? { ...draft.problem.referenceSolution } : null,
   };
 }
@@ -457,8 +457,8 @@ export interface CheckedDraft {
  * is applied when it arrives: each case's verified mark by position, and the
  * check. Each case also keeps its outcome. `sent` is the `checkedState` of the form that was checked; when the
  * form has moved on from it the answer is stale and `null` is returned. The
- * large test case belongs to the generation, not to the check, so its report
- * is kept.
+ * large test cases belong to the generation, not to the check, so their
+ * reports are kept.
  */
 export function withCheck<S extends CheckedDraft>(draft: S, sent: string, answer: ItemCheckResponse): S | null {
   if (!draft.form) return null;
@@ -471,7 +471,7 @@ export function withCheck<S extends CheckedDraft>(draft: S, sent: string, answer
       return { ...t, verified: outcome.outcome === 'passed', outcome };
     }),
   };
-  return { ...draft, form, check: { ...answer.check, largeCase: draft.check?.largeCase ?? null }, checked: checkedState(form) };
+  return { ...draft, form, check: { ...answer.check, largeCases: draft.check?.largeCases ?? [] }, checked: checkedState(form) };
 }
 
 /**

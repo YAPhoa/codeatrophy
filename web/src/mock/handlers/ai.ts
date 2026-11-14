@@ -6,7 +6,7 @@ import type { MockDb, StoredAiProvider } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
 import type { Handler, Req } from '../http';
 import { aiUnavailable, invalid, isRecord, objectBody, ok, upstream, Validator } from '../http';
-import { buildLargeCase, largeForPrompt, promptCase } from '../largeCase';
+import { buildLargeCases, largeForPrompt, promptCase } from '../largeCase';
 import { isLanguage, sleep } from '../util';
 import { resolveStyle } from './styles';
 
@@ -35,12 +35,12 @@ function parsePreviousDraft(raw: Record<string, unknown>, v: Validator): unknown
   return value;
 }
 
-/** Whether a large test case is asked for; default `false`. */
-function parseLargeTestCase(raw: Record<string, unknown>, v: Validator): boolean {
-  const value = raw.largeTestCase ?? false;
-  if (typeof value !== 'boolean') {
-    v.add('largeTestCase', 'must be a boolean');
-    return false;
+/** How many large test cases are asked for; default `0`. */
+function parseLargeTestCases(raw: Record<string, unknown>, v: Validator): number {
+  const value = raw.largeTestCases ?? 0;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > LIMITS.maxLargeTestCases) {
+    v.add('largeTestCases', `must be between 0 and ${LIMITS.maxLargeTestCases}`);
+    return 0;
   }
   return value;
 }
@@ -152,43 +152,45 @@ function said(text: string, instruction: string | null, previousDraft: unknown, 
 }
 
 /**
- * Append the large test case to a checked draft, as the check's last step
- * before the runners: it counts in the check when it was added.
+ * Append the large test cases to a checked draft, as the check's last step
+ * before the runners: each counts in the check when it was added.
  */
-function addLargeCase(db: MockDb, draft: ItemDraft, check: DraftCheck, texts: (string | null)[]): void {
+function addLargeCases(db: MockDb, draft: ItemDraft, check: DraftCheck, count: number, texts: (string | null)[]): void {
   const problem = draft.problem;
   if (!problem) return;
-  const built = buildLargeCase(db, {
+  const built = buildLargeCases(db, {
+    count,
     title: draft.title,
     face: problem.interface,
     timeLimitMs: problem.timeLimitMs,
     referenceSolution: problem.referenceSolution,
     existing: draft.testCases.map((c) => c.stdin),
     index: draft.testCases.length,
-    blocked: check.attempted && check.error !== null && check.passed === 0 ? 'the reference solution did not run on the other cases' : null,
+    blocked: check.attempted && check.passed < check.total ? 'the reference solution did not pass the other test cases' : null,
     texts,
     operation: 'draft',
   });
-  if (built.stdin !== null && built.expectedStdout !== null) {
-    draft.testCases.push({ name: built.report.name ?? 'Large case', stdin: built.stdin, expectedStdout: built.expectedStdout, isSample: false, verified: true });
+  for (const one of built) {
+    if (one.stdin === null || one.expectedStdout === null) continue;
+    draft.testCases.push({ name: one.report.name ?? 'Large input', stdin: one.stdin, expectedStdout: one.expectedStdout, isSample: false, verified: true });
     if (check.attempted) {
       check.passed++;
       check.total++;
     }
   }
-  check.largeCase = built.report;
+  check.largeCases = built.map((one) => one.report);
 }
 
 /** The response of a draft or variant call: the draft in the chosen style, with its reference solution and runners checked. */
-function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: boolean, ...texts: (string | null)[]) {
+function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: number, ...texts: (string | null)[]) {
   const styled = applyStyle(result, style);
   // After the style, which decides the languages that are left to break and to check.
   const draft = asks(RUNNER_MARKER, ...texts) ? breakRunner(styled) : styled;
   const check = checkDraft(db, draft, asks(MISMATCH_MARKER, ...texts));
   // A new draft is logged under the title that came back. What the model
-  // wrote does not include the large case, which the server builds.
+  // wrote does not include the large cases, which the server builds.
   const usage = spend(db, call, draft, call.title ?? (draft.title || null));
-  if (large && check) addLargeCase(db, draft, check, texts);
+  if (large > 0 && check) addLargeCases(db, draft, check, large, texts);
   return ok({ draft, style: applied(style), check, usage });
 }
 
@@ -211,7 +213,7 @@ async function draft(db: MockDb, req: Req) {
   }
   const instruction = parseInstruction(raw, v);
   const previousDraft = parsePreviousDraft(raw, v);
-  const large = parseLargeTestCase(raw, v);
+  const large = parseLargeTestCases(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
@@ -237,7 +239,7 @@ async function variant(db: MockDb, req: Req) {
   if (interfaceHint !== null && interfaceHint !== 'program' && interfaceHint !== 'function') {
     v.add('interfaceHint', 'must be program or function');
   } else if (interfaceHint !== null && item.type === 'reading') v.add('interfaceHint', 'does not apply to a reading');
-  const large = parseLargeTestCase(raw, v);
+  const large = parseLargeTestCases(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
@@ -270,7 +272,7 @@ async function testCases(db: MockDb, req: Req) {
     v.add('language', 'has no harness on this problem');
   }
   const instruction = parseInstruction(raw, v);
-  const large = parseLargeTestCase(raw, v);
+  const large = parseLargeTestCases(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const provider = providerFor(db, named);
@@ -291,8 +293,9 @@ async function testCases(db: MockDb, req: Req) {
   // The model answers with the solution and the cases; running them is the server's part.
   const answered = { referenceSolution: proposal.referenceSolution, cases: proposal.cases.map((c) => ({ name: c.name, rationale: c.rationale, stdin: c.stdin, predictedStdout: c.predictedStdout })) };
   const usage = spend(db, call, answered);
-  if (large) {
-    const built = buildLargeCase(db, {
+  if (large > 0) {
+    const built = buildLargeCases(db, {
+      count: large,
       title: item.title,
       face: item.problem?.interface ?? 'program',
       timeLimitMs: item.problem?.timeLimitMs ?? 2000,
@@ -303,13 +306,14 @@ async function testCases(db: MockDb, req: Req) {
       texts: [instruction],
       operation: 'testcases',
     });
-    if (built.stdin !== null && built.expectedStdout !== null) {
+    for (const one of built) {
+      if (one.stdin === null || one.expectedStdout === null) continue;
       // The model has not seen the input, so there is no prediction to compare.
       proposal.cases.push({
-        name: built.report.name ?? 'Large case',
+        name: one.report.name ?? 'Large input',
         rationale: 'As large as the constraints allow; a solution of the wrong complexity runs out of time.',
-        stdin: built.stdin,
-        expectedStdout: built.expectedStdout,
+        stdin: one.stdin,
+        expectedStdout: one.expectedStdout,
         predictedStdout: null,
         isSample: false,
         verified: true,
@@ -317,7 +321,7 @@ async function testCases(db: MockDb, req: Req) {
         error: null,
       });
     }
-    proposal.largeCase = built.report;
+    proposal.largeCases = built.map((one) => one.report);
   }
   return ok({ ...proposal, usage });
 }

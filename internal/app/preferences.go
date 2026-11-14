@@ -40,6 +40,7 @@ var preferenceSchema = []prefDef{
 	{path: "hideTestCases", kind: prefBool, def: true},
 	{path: "generatedTestCases", kind: prefInt, def: DefaultGeneratedCases, min: 1, max: MaxGeneratedCases},
 	{path: "largeTestCase", kind: prefBool, def: false},
+	{path: "largeTestCaseCount", kind: prefInt, def: DefaultLargeTestCases, min: 1, max: MaxLargeTestCases},
 	{path: "editor.autocomplete", kind: prefBool, def: true},
 	{path: "editor.closeBrackets", kind: prefBool, def: true},
 	{path: "editor.matchBrackets", kind: prefBool, def: true},

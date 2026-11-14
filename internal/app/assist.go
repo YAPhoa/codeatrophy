@@ -91,8 +91,8 @@ type DraftCheck struct {
 	Total     int           `json:"total"`
 	Error     *string       `json:"error"`
 	Runners   []RunnerCheck `json:"runners"`
-	// LargeCase is nil unless the request asked for a large test case.
-	LargeCase *LargeCaseReport `json:"largeCase"`
+	// LargeCases has one report per large test case asked for.
+	LargeCases []*LargeCaseReport `json:"largeCases"`
 }
 
 // ItemDraft is a proposed item, mapping onto ItemInput.
@@ -127,8 +127,8 @@ type DraftInput struct {
 	StyleID       domain.Opt[string] `json:"styleId"`
 	// ProviderID names the provider to use instead of the default.
 	ProviderID domain.Opt[string] `json:"providerId"`
-	// LargeTestCase asks for a large test case as well.
-	LargeTestCase bool `json:"largeTestCase"`
+	// LargeTestCases asks for that many large test cases as well.
+	LargeTestCases int `json:"largeTestCases"`
 }
 
 func styleOf(p *domain.StylePreset) (*ai.Style, *domain.StyleRef) {
@@ -183,6 +183,9 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if msg != "" {
 		fe.Add("previousDraft", msg)
 	}
+	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+		fe.Add("largeTestCases", msg)
+	}
 	if err := errValidation(fe); err != nil {
 		return DraftResponse{}, err
 	}
@@ -195,11 +198,14 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 		return DraftResponse{}, err
 	}
 	style, ref := styleOf(preset)
-	large := in.LargeTestCase && hint != "reading"
+	large := in.LargeTestCases
+	if hint == "reading" {
+		large = 0
+	}
 	system, user := ai.DraftPrompt{Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
-		PreviousDraft: prev, Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(large)}.Build()
+		PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
 	var draft ItemDraft
-	var gen *ai.ModelLargeCase
+	var gens []*ai.ModelLargeCase
 	subject := &logSubject{}
 	usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
 		System:     system,
@@ -207,7 +213,7 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 		Schema:     ai.DraftSchema(large),
 		SchemaName: "item_draft",
 	}, func(raw json.RawMessage) (err error) {
-		if draft, gen, err = a.parseDraft(raw, hint, iface); err == nil {
+		if draft, gens, err = a.parseDraft(raw, hint, iface); err == nil {
 			subject.Title = &draft.Title
 		}
 		return err
@@ -215,7 +221,7 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gen), Usage: usage}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
 }
 
 // previousDraft re-encodes an optional previous ItemDraft compactly for the
@@ -245,14 +251,14 @@ func previousDraft(raw json.RawMessage) (string, string) {
 // repaired (the draft is reviewed by the user before saving); structural
 // problems are upstream errors. iface, unless "auto", is the interface a
 // problem gets whatever the model chose.
-// The generator of a large test case, if the model wrote one, is returned
-// apart: it is not part of the draft.
-func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, *ai.ModelLargeCase, error) {
+// The generators of large test cases the model wrote are returned apart:
+// they are not part of the draft.
+func (a *App) parseDraft(raw json.RawMessage, hint, iface string) (ItemDraft, []*ai.ModelLargeCase, error) {
 	d, m, err := a.decodeDraft(raw, hint, iface)
 	if err != nil || d.Type != domain.TypeProblem {
 		return d, nil, err
 	}
-	return d, m.LargeCase, nil
+	return d, m.LargeCases, nil
 }
 
 func (a *App) decodeDraft(raw json.RawMessage, hint, iface string) (ItemDraft, ai.ModelDraft, error) {
@@ -401,13 +407,13 @@ func withFutureAnnotations(prefix string) string {
 
 // VariantInput is the body of POST /items/{id}/ai/variant.
 type VariantInput struct {
-	Mode          string             `json:"mode"`
-	InterfaceHint string             `json:"interfaceHint"`
-	Instruction   domain.Opt[string] `json:"instruction"`
-	PreviousDraft json.RawMessage    `json:"previousDraft"`
-	StyleID       domain.Opt[string] `json:"styleId"`
-	ProviderID    domain.Opt[string] `json:"providerId"`
-	LargeTestCase bool               `json:"largeTestCase"`
+	Mode           string             `json:"mode"`
+	InterfaceHint  string             `json:"interfaceHint"`
+	Instruction    domain.Opt[string] `json:"instruction"`
+	PreviousDraft  json.RawMessage    `json:"previousDraft"`
+	StyleID        domain.Opt[string] `json:"styleId"`
+	ProviderID     domain.Opt[string] `json:"providerId"`
+	LargeTestCases int                `json:"largeTestCases"`
 }
 
 // Variant drafts a new item derived from an existing one. Nothing is saved.
@@ -426,6 +432,9 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	prev, msg := previousDraft(in.PreviousDraft)
 	if msg != "" {
 		return DraftResponse{}, errField("previousDraft", msg)
+	}
+	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+		return DraftResponse{}, errField("largeTestCases", msg)
 	}
 	it, err := a.GetItem(ctx, itemID)
 	if err != nil {
@@ -496,37 +505,40 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
 	style, ref := styleOf(preset)
-	large := in.LargeTestCase && it.Type == domain.TypeProblem
+	large := in.LargeTestCases
+	if it.Type != domain.TypeProblem {
+		large = 0
+	}
 	system, user := ai.VariantPrompt{Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
-		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(large)}.Build()
+		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
 	forced := iface
 	if forced == "" {
 		forced = "auto"
 	}
 	var draft ItemDraft
-	var gen *ai.ModelLargeCase
+	var gens []*ai.ModelLargeCase
 	usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
 		Schema:     ai.DraftSchema(large),
 		SchemaName: "item_draft",
 	}, func(raw json.RawMessage) (err error) {
-		draft, gen, err = a.parseDraft(raw, string(it.Type), forced)
+		draft, gens, err = a.parseDraft(raw, string(it.Type), forced)
 		return err
 	})
 	if err != nil {
 		return DraftResponse{}, err
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gen), Usage: usage}, nil
+	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
 }
 
 // GenerateTestCasesInput is the body of POST /items/{id}/ai/testcases.
 type GenerateTestCasesInput struct {
-	LargeTestCase bool               `json:"largeTestCase"`
-	Count         domain.Opt[int]    `json:"count"`
-	Language      string             `json:"language"`
-	Instruction   domain.Opt[string] `json:"instruction"`
-	ProviderID    domain.Opt[string] `json:"providerId"`
+	LargeTestCases int                `json:"largeTestCases"`
+	Count          domain.Opt[int]    `json:"count"`
+	Language       string             `json:"language"`
+	Instruction    domain.Opt[string] `json:"instruction"`
+	ProviderID     domain.Opt[string] `json:"providerId"`
 }
 
 // GeneratedCase is one proposed test case.
@@ -535,7 +547,7 @@ type GeneratedCase struct {
 	Rationale       string  `json:"rationale"`
 	Stdin           string  `json:"stdin"`
 	ExpectedStdout  string  `json:"expectedStdout"`
-	PredictedStdout *string `json:"predictedStdout"` // nil for the large case
+	PredictedStdout *string `json:"predictedStdout"` // nil for a large case
 
 	IsSample          bool    `json:"isSample"`
 	Verified          bool    `json:"verified"`
@@ -558,9 +570,9 @@ type GenerateTestCasesResponse struct {
 	// an earlier proposal, already had.
 	DuplicatesDropped int   `json:"duplicatesDropped"`
 	Usage             Usage `json:"usage"`
-	// LargeCase is nil unless the request asked for a large test case.
-	LargeCase *LargeCaseReport `json:"largeCase"`
-	Cases     []GeneratedCase  `json:"cases"`
+	// LargeCases has one report per large test case asked for.
+	LargeCases []*LargeCaseReport `json:"largeCases"`
+	Cases      []GeneratedCase    `json:"cases"`
 }
 
 // GenerateTestCases asks the model for a reference solution and inputs, then
@@ -573,6 +585,9 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	}
 	if count < 1 || count > MaxGeneratedCases {
 		return GenerateTestCasesResponse{}, errField("count", fmt.Sprintf("must be between 1 and %d", MaxGeneratedCases))
+	}
+	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+		return GenerateTestCasesResponse{}, errField("largeTestCases", msg)
 	}
 	lang := in.Language
 	if lang == "" {
@@ -619,17 +634,17 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	}
 	system, user := ai.TestCasesPrompt{Problem: string(problemJSON), Function: function, Count: count, Language: lang,
 		ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
-		Toolchains: a.toolchains(ctx), LargeCaseBytes: largeBytes(in.LargeTestCase)}.Build()
-	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}}
-	var gen *ai.ModelLargeCase
+		Toolchains: a.toolchains(ctx), Large: largeAsk(in.LargeTestCases)}.Build()
+	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}, LargeCases: []*LargeCaseReport{}}
+	var gens []*ai.ModelLargeCase
 	out.Usage, err = a.generate(ctx, "testcases", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 		System:     system,
 		User:       user,
-		Schema:     ai.TestCasesSchema(lang, function, in.LargeTestCase),
+		Schema:     ai.TestCasesSchema(lang, function, in.LargeTestCases),
 		SchemaName: "test_cases",
 	}, func(raw json.RawMessage) error {
 		var err error
-		gen, err = a.parseTestCases(raw, lang, count, existingCases.Items, &out)
+		gens, err = a.parseTestCases(raw, lang, count, existingCases.Items, &out)
 		return err
 	})
 	if err != nil {
@@ -638,7 +653,7 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	if len(out.Cases) > 0 {
 		a.verifyGenerated(ctx, it, h, &out)
 	}
-	if in.LargeTestCase {
+	if in.LargeTestCases > 0 {
 		// After the proposed cases, never repeating them or the stored ones.
 		var known []namedInput
 		for _, c := range existingCases.Items {
@@ -648,30 +663,25 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 			known = append(known, namedInput{c.Name, c.Stdin})
 		}
 		ref := out.ReferenceSolution
-		report, lc := a.buildLargeCase(ctx, it.Problem, gen, &ref, known)
-		if lc != nil {
+		reports, built := a.buildLargeCases(ctx, it.Problem, gens, in.LargeTestCases, &ref, known)
+		for i, lc := range built {
+			if lc == nil {
+				continue
+			}
 			out.Cases = append(out.Cases, GeneratedCase{Name: lc.Name, Rationale: lc.Rationale, Stdin: lc.Stdin,
 				ExpectedStdout: lc.Expected, Verified: true})
-			i := len(out.Cases) - 1
-			report.Index = &i
+			at := len(out.Cases) - 1
+			reports[i].Index = &at
 		}
-		out.LargeCase = report
+		out.LargeCases = reports
 	}
 	return out, nil
-}
-
-// largeBytes is the cap a prompt states for a requested large case, or 0.
-func largeBytes(asked bool) int {
-	if !asked {
-		return 0
-	}
-	return MaxLargeInputBytes
 }
 
 // parseTestCases decodes the model's test cases into out, leaving out those
 // whose stdin repeats an existing case or an earlier proposal.
 func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existing []domain.TestCase,
-	out *GenerateTestCasesResponse) (*ai.ModelLargeCase, error) {
+	out *GenerateTestCasesResponse) ([]*ai.ModelLargeCase, error) {
 	var m ai.ModelTestCases
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, &Error{Code: CodeUpstream, Message: "the AI provider returned test cases that do not match the schema"}
@@ -707,10 +717,10 @@ func (a *App) parseTestCases(raw json.RawMessage, lang string, count int, existi
 			Stdin: c.Stdin, PredictedStdout: &predicted, ExpectedStdout: c.PredictedStdout, IsSample: c.IsSample,
 		})
 	}
-	if len(out.Cases) == 0 && out.DuplicatesDropped == 0 && m.LargeCase == nil {
+	if len(out.Cases) == 0 && out.DuplicatesDropped == 0 && len(m.LargeCases) == 0 {
 		return nil, &Error{Code: CodeUpstream, Message: "the AI provider proposed no usable test cases"}
 	}
-	return m.LargeCase, nil
+	return m.LargeCases, nil
 }
 
 // sameInput is what two test inputs are compared by: trailing whitespace
@@ -859,28 +869,26 @@ type checkBounds struct {
 // reported in the check. Nothing in the draft other than the flags is
 // changed. Both parts share one time bound, the reference solution first.
 //
-// With large, the large test case is built after the other cases and
-// before the runners, in the same time bound; the 10-case cap does not
-// apply to it. Added, it is the draft's last test case and counts in
-// passed and total.
-func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large bool, gen *ai.ModelLargeCase) *DraftCheck {
+// With large > 0, that many large test cases are built from gens after
+// the other cases and before the runners, in the same time bound; the
+// 10-case cap does not apply to them. Each one added is appended to the
+// draft's test cases, in the model's order, and counts in passed and total.
+func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large int, gens []*ai.ModelLargeCase) *DraftCheck {
 	if d.Type != domain.TypeProblem || d.Problem == nil {
 		return nil
 	}
-	c := &DraftCheck{Total: len(d.TestCases), Runners: []RunnerCheck{}}
+	c := &DraftCheck{Total: len(d.TestCases), Runners: []RunnerCheck{}, LargeCases: []*LargeCaseReport{}}
 	ref := d.Problem.ReferenceSolution
 	if a.engine == nil || ref == nil || len(d.TestCases) == 0 {
-		if large {
-			// Nothing runs when the check is not attempted.
-			reason := "the draft has no test case to check the reference solution on"
-			switch {
-			case a.engine == nil:
-				reason = "no judge engine is configured"
-			case ref == nil:
-				reason = "there is no reference solution to compute the expected output"
-			}
-			c.LargeCase = newLargeCaseReport(gen).fail("skipped", "%s", reason)
+		// Nothing runs when the check is not attempted.
+		reason := "the draft has no test case to check the reference solution on"
+		switch {
+		case a.engine == nil:
+			reason = "no judge engine is configured"
+		case ref == nil:
+			reason = "there is no reference solution to compute the expected output"
 		}
+		c.LargeCases = failAll(newLargeCaseReports(gens, large), "skipped", reason)
 		return c
 	}
 	name := a.engine.Name()
@@ -891,25 +899,28 @@ func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large
 	if msg != "" {
 		c.Error = &msg
 	}
-	if large && refFailed {
-		// Its expected output would come from a reference solution that
-		// just failed: it would be marked verified and probably be wrong.
-		c.LargeCase = newLargeCaseReport(gen).fail("skipped", "the reference solution did not pass the other test cases")
-	} else if large {
+	if large > 0 && refFailed {
+		// Their expected output would come from a reference solution that
+		// just failed: they would be marked verified and probably be wrong.
+		c.LargeCases = failAll(newLargeCaseReports(gens, large), "skipped", "the reference solution did not pass the other test cases")
+	} else if large > 0 {
 		known := make([]namedInput, len(d.TestCases))
 		for i, tc := range d.TestCases {
 			known[i] = namedInput{tc.Name, tc.Stdin}
 		}
-		report, lc := a.buildLargeCase(ctx, d.Problem.spec(), gen, ref, known)
-		if lc != nil {
+		reports, built := a.buildLargeCases(ctx, d.Problem.spec(), gens, large, ref, known)
+		for i, lc := range built {
+			if lc == nil {
+				continue
+			}
 			d.TestCases = append(d.TestCases, DraftTestCase{Name: lc.Name, Stdin: lc.Stdin, ExpectedStdout: lc.Expected,
 				Verified: true})
-			i := len(d.TestCases) - 1
-			report.Index = &i
+			at := len(d.TestCases) - 1
+			reports[i].Index = &at
 			c.Passed++
 			c.Total++
 		}
-		c.LargeCase = report
+		c.LargeCases = reports
 	}
 	if d.Problem.Interface == domain.InterfaceFunction {
 		c.Runners = a.checkRunners(ctx, d)

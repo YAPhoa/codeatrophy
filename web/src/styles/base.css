@@ -191,9 +191,10 @@ textarea.mono {
 }
 
 /* Reduced motion: transitions and one-shot animations jump to their end
-   state without waiting out a stagger delay, looping ones (spinners, the
-   generating pulse) stop after a single pass instead of running forever at
-   full speed, and smooth scrolling (the reader's outline links) jumps. */
+   state without waiting out a stagger delay, looping ones (spinners) stop
+   after a single pass instead of running forever at full speed, and smooth
+   scrolling (the reader's outline links) jumps. The generating panel's scroll
+   has its own still state in features.css. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

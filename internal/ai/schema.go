@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"fmt"
 	"slices"
 
 	"codeatrophy/internal/domain"
@@ -61,20 +62,24 @@ func languageIDs() []string {
 	return out
 }
 
-// largeCaseSchema is the generator of a large test case, asked for only
-// when a generation wants one.
-func largeCaseSchema() map[string]any {
-	return nullable(obj(map[string]any{
+// largeCasesSchema is the list of generators of large test cases, asked
+// for only when a generation wants n of them (n > 0).
+func largeCasesSchema(n int) map[string]any {
+	desc := "Exactly 1 generator of a large test case"
+	if n > 1 {
+		desc = fmt.Sprintf("Exactly %d generators of large test cases, each printing a different shape of input", n)
+	}
+	return array(obj(map[string]any{
 		"name":      str("What the input is, e.g. \"30,000 values in runs of three\""),
-		"rationale": str("Why this input makes a slow solution run out of time, one sentence"),
+		"rationale": str("Which slow or wrong solution this input exposes, one sentence"),
 		"language":  enum("Language id of the generator; one the judge runs", languageIDs()...),
 		"source":    str("Complete program that reads nothing and prints the stdin of one large test case"),
-	}))
+	}), desc)
 }
 
-// DraftSchema is the output schema for drafts and variants; with large it
-// also asks for the generator of a large test case.
-func DraftSchema(large bool) map[string]any {
+// DraftSchema is the output schema for drafts and variants; with large > 0
+// it also asks for that many generators of large test cases.
+func DraftSchema(large int) map[string]any {
 	starter := obj(map[string]any{
 		"language": enum("Language id", languageIDs()...),
 		"source":   str("Program problem: starter code that reads the input. Function problem: the stub the solver fills in"),
@@ -114,13 +119,13 @@ func DraftSchema(large bool) map[string]any {
 		"testCases":   array(testCase, "Sample test cases (empty for readings)"),
 		"assumptions": array(str(""), "What the user should check: inferred or invented content, most important first"),
 	}
-	if large {
-		props["largeCase"] = largeCaseSchema()
+	if large > 0 {
+		props["largeCases"] = largeCasesSchema(large)
 	}
 	return obj(props)
 }
 
-// ModelLargeCase is the generator of a large test case a model wrote.
+// ModelLargeCase is a generator of a large test case a model wrote.
 type ModelLargeCase struct {
 	Name      string `json:"name"`
 	Rationale string `json:"rationale"`
@@ -161,14 +166,14 @@ type ModelDraft struct {
 		ExpectedStdout string `json:"expectedStdout"`
 		IsSample       bool   `json:"isSample"`
 	} `json:"testCases"`
-	Assumptions []string        `json:"assumptions"`
-	LargeCase   *ModelLargeCase `json:"largeCase"`
+	Assumptions []string          `json:"assumptions"`
+	LargeCases  []*ModelLargeCase `json:"largeCases"`
 }
 
 // TestCasesSchema is the output schema for test-case generation. The
 // reference solution must be in the requested language; for a function
-// problem it is only the solution part.
-func TestCasesSchema(language string, function, large bool) map[string]any {
+// problem it is only the solution part. large is as for DraftSchema.
+func TestCasesSchema(language string, function bool, large int) map[string]any {
 	source := "Complete program reading stdin and writing stdout"
 	if function {
 		source = "Only the solution part, filling in the stub; the harness turns it into a program"
@@ -186,8 +191,8 @@ func TestCasesSchema(language string, function, large bool) map[string]any {
 			"isSample":        boolean("Whether to show it with the statement"),
 		}), "Proposed test cases"),
 	}
-	if large {
-		props["largeCase"] = largeCaseSchema()
+	if large > 0 {
+		props["largeCases"] = largeCasesSchema(large)
 	}
 	return obj(props)
 }
@@ -205,7 +210,7 @@ type ModelTestCases struct {
 		PredictedStdout string `json:"predictedStdout"`
 		IsSample        bool   `json:"isSample"`
 	} `json:"cases"`
-	LargeCase *ModelLargeCase `json:"largeCase"`
+	LargeCases []*ModelLargeCase `json:"largeCases"`
 }
 
 // PingSchema is the output schema of a connection test.

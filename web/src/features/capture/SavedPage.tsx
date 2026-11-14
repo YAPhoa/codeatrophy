@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router';
-import { ArrowRight, CheckCircle2, EyeOff, FlaskConical, GitBranch, Plus } from 'lucide-react';
+import { ArrowRight, CheckCircle2, EyeOff, FlaskConical, Plus } from 'lucide-react';
 import { useItem, useMeta } from '../../api/queries';
 import type { Item, SourceCode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
@@ -10,7 +10,7 @@ import { LinkButton } from '../../ui/Button';
 import { ErrorState, PageLoading } from '../../ui/misc';
 import { DifficultyBadge, TagChips } from '../item/controls';
 import { TestButton, TestOutcome, useSolutionTest } from '../solutions/SolutionTest';
-import { VARIANT_MODES } from './variantModes';
+import { VariantCard } from './VariantCard';
 
 /**
  * The reference solution that was saved with the problem — the AI's own, for
@@ -111,33 +111,7 @@ export default function SavedPage() {
               </div>
             </section>
 
-            <section className="next-card" aria-labelledby="next-variant">
-              <div className="next-card-icon" aria-hidden="true">
-                <GitBranch size={18} />
-              </div>
-              <h3 id="next-variant">Want another one like it?</h3>
-              {aiEnabled ? (
-                <>
-                  <p>Get a fresh problem built on the same idea, so you practise the technique rather than remember this answer. Pick a direction:</p>
-                  <div className="variant-quick">
-                    {VARIANT_MODES.map((m) => (
-                      <Link key={m.mode} to={`/items/${it.id}/variant?mode=${m.mode}`} className="variant-quick-item">
-                        <strong>{m.label}</strong>
-                        <span>{m.short}</span>
-                      </Link>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p>A variant is a related problem — the same technique in a new setting, easier, harder, or with a twist — saved alongside this one. With AI set up, one is drafted for you.</p>
-                  <div className="next-card-actions">
-                    <LinkButton to={`/items/${it.id}/variant`}>Write a variant by hand</LinkButton>
-                    <Link to="/settings/ai">Set up AI</Link>
-                  </div>
-                </>
-              )}
-            </section>
+            <VariantCard item={it} aiEnabled={aiEnabled} />
           </div>
         </>
       )}

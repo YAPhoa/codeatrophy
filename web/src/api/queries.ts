@@ -126,6 +126,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   hideTestCases: true,
   generatedTestCases: 8,
   largeTestCase: false,
+  largeTestCaseCount: 3,
   editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
 };
 
@@ -136,6 +137,16 @@ export const DEFAULT_PREFERENCES: Preferences = {
 export function usePreferences(): Preferences {
   const query = useQuery({ queryKey: qk.preferences, queryFn: ({ signal }) => api.preferences.get(signal), staleTime: 60_000, select: withDefaults });
   return query.data ?? DEFAULT_PREFERENCES;
+}
+
+/**
+ * How many large test cases to ask for when they are asked for: the
+ * preference, within the server's bound.
+ */
+export function useLargeTestCaseCount(): number {
+  const count = usePreferences().largeTestCaseCount;
+  const max = useLimits()?.maxLargeTestCases ?? DEFAULT_PREFERENCES.largeTestCaseCount;
+  return Math.min(max, Math.max(1, count));
 }
 
 /** A server that does not know a preference yet leaves it out; its default then applies. */

@@ -259,15 +259,15 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxSourceUrlChars", "maxSourceNoteChars", "maxTags", "maxTagChars", "maxCollectionNameChars",
 		"maxCollectionDescriptionChars", "timeLimitMs", "memoryLimitKb", "maxTestCasesPerItem", "maxTestDataBytes",
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
-		"maxLargeInputBytes", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
+		"maxLargeInputBytes", "maxLargeTestCases", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxAiProviders", "maxAiProviderNameChars", "minAiTimeoutSeconds", "maxAiTimeoutSeconds", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
 		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 40 {
-		t.Errorf("limits has %d keys, want 40", len(lim))
+	if len(lim) != 41 {
+		t.Errorf("limits has %d keys, want 41", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -469,12 +469,12 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 		t.Error("upstream error code")
 	}
 
-	// A large test case is reported only when asked for (here: a reading,
-	// so there is no check at all).
+	// Large test cases are reported in the check (here: a reading, so
+	// there is no check at all).
 	if v, ok := d["check"]; !ok || v != nil {
 		t.Errorf("check of a reading: %v", d["check"])
 	}
-	c.expect("POST", api+"/ai/draft", `{"text":"x","largeTestCase":"yes"}`, 422)
+	c.expect("POST", api+"/ai/draft", `{"text":"x","largeTestCases":"yes"}`, 422)
 
 	// The usage of a generation, and the AI log.
 	u := d["usage"].(map[string]any)
@@ -550,10 +550,22 @@ func TestAIRoutesTakeAProvider(t *testing.T) {
 		if k := lastKey(); k != "sk-ant-def-1111" {
 			t.Errorf("%s without providerId used %q", r.path, k)
 		}
-		c.expect("POST", r.path, `{`+r.body+`,"providerId":"`+other["id"].(string)+`"}`, 200)
+		res := c.expect("POST", r.path, `{`+r.body+`,"providerId":"`+other["id"].(string)+`"}`, 200)
 		if k := lastKey(); k != "sk-ant-other-2222" {
 			t.Errorf("%s with providerId used %q", r.path, k)
 		}
+		// Large test cases: none asked for is an empty list, never null,
+		// and the count is bounded.
+		if strings.HasSuffix(r.path, "/testcases") && !strings.Contains(string(res.body), `"largeCases":[]`) {
+			t.Errorf("%s: %s", r.path, res.body)
+		}
+		for _, n := range []string{"-1", "6", "1.5", "true"} {
+			res := c.expect("POST", r.path, `{`+r.body+`,"largeTestCases":`+n+`}`, 422)
+			if e := res.json(t)["error"].(map[string]any); e["fields"].(map[string]any)["largeTestCases"] == nil {
+				t.Errorf("%s with largeTestCases %s: %s", r.path, n, res.body)
+			}
+		}
+		c.expect("POST", r.path, `{`+r.body+`,"largeTestCases":5}`, 200)
 		for _, bad := range []string{`"nope"`, `5`, `["x"]`} {
 			res := c.expect("POST", r.path, `{`+r.body+`,"providerId":`+bad+`}`, 422)
 			if e := res.json(t)["error"].(map[string]any); e["code"] != "validation_failed" || e["fields"].(map[string]any)["providerId"] == nil {
@@ -588,9 +600,11 @@ func TestSubmissionsEndpoints(t *testing.T) {
 	}
 	c.expect("POST", api+"/items/"+id+"/submissions", `{"language":"python","source":"`+strings.Repeat("x", 2000)+`"}`, 422)
 	c.expect("POST", api+"/items/"+id+"/testcases/verify", `{}`, 422) // no reference solution
-	chk := c.expect("POST", api+"/items/check", `{"type":"problem","title":"x","problem":{"referenceSolution":{"language":"python","source":"sum"}},
-		"testCases":[{"stdin":"1 2","expectedStdout":"3"},{"stdin":"2 2","expectedStdout":"5"}]}`, 200).json(t)
-	if ch := chk["check"].(map[string]any); ch["passed"] != float64(1) || ch["total"] != float64(2) || ch["largeCase"] != nil {
+	chk0 := c.expect("POST", api+"/items/check", `{"type":"problem","title":"x","problem":{"referenceSolution":{"language":"python","source":"sum"}},
+		"testCases":[{"stdin":"1 2","expectedStdout":"3"},{"stdin":"2 2","expectedStdout":"5"}]}`, 200)
+	chk := chk0.json(t)
+	if ch := chk["check"].(map[string]any); ch["passed"] != float64(1) || ch["total"] != float64(2) ||
+		!strings.Contains(string(chk0.body), `"largeCases":[]`) {
 		t.Errorf("item check: %v", chk)
 	}
 	if v := chk["cases"].([]any); len(v) != 2 || v[0].(map[string]any)["outcome"] != "passed" ||
