@@ -890,7 +890,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
   color: var(--text-3);
   font-size: var(--text-sm);
 }
@@ -974,10 +974,6 @@
 /* The Edit page puts the bar straight in .page, with no gap from a parent. */
 .page > .review-bar {
   margin-bottom: var(--space-5);
-}
-
-.review-bar .steps {
-  margin-bottom: var(--space-1);
 }
 
 .assumptions {
