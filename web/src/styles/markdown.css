@@ -2,8 +2,8 @@
    and previews; `.md-longform` is tuned for reading articles. */
 
 .md {
-  font-size: 14.5px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.6;
   color: var(--text);
   overflow-wrap: break-word;
   min-width: 0;
@@ -217,8 +217,8 @@
 /* Long-form reading */
 
 .md-longform {
-  font-size: 16.5px;
-  line-height: 1.72;
+  font-size: 17px;
+  line-height: 1.7;
 }
 
 .md-longform p,

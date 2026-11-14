@@ -1987,14 +1987,14 @@ button.case-chip:hover {
 
 .reader-layout {
   display: grid;
-  grid-template-columns: minmax(0, 720px) 220px;
+  grid-template-columns: minmax(0, 640px) 220px;
   justify-content: center;
   gap: 48px;
   padding: 40px 32px 96px;
 }
 
 .reader.has-notes .reader-layout {
-  grid-template-columns: minmax(0, 720px);
+  grid-template-columns: minmax(0, 640px);
 }
 
 .reader.has-notes .reader-outline {
@@ -2100,7 +2100,7 @@ button.case-chip:hover {
 
 @media (max-width: 1100px) {
   .reader-layout {
-    grid-template-columns: minmax(0, 720px);
+    grid-template-columns: minmax(0, 640px);
     padding: 28px 20px 72px;
   }
 
@@ -2280,7 +2280,6 @@ button.case-chip:hover {
 
 .generate .page-sub {
   margin-bottom: var(--space-5);
-  max-width: 78ch;
 }
 
 .generate-form {
@@ -2739,7 +2738,7 @@ button.case-chip:hover {
 .settings-lead {
   color: var(--text-2);
   line-height: 1.55;
-  max-width: 82ch;
+  max-width: 60ch;
 }
 
 .key-status {

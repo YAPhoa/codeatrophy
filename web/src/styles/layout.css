@@ -453,6 +453,7 @@ button.nav-twisty:hover {
 }
 
 .page-sub {
+  max-width: 60ch;
   margin-top: var(--space-1);
   color: var(--text-2);
   line-height: 1.5;
