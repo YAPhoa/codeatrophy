@@ -177,7 +177,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
 
       {props.aiDrafted && props.aiEnabled && (
         <section className="revise">
-          <button type="button" className="revise-toggle" aria-expanded={reviseOpen} aria-controls="revise-form" onClick={() => setReviseOpen((v) => !v)}>
+          <button type="button" className="revise-toggle" aria-expanded={reviseOpen} aria-controls={reviseOpen ? 'revise-form' : undefined} onClick={() => setReviseOpen((v) => !v)}>
             <ExpandChevron open={reviseOpen} />
             <RefreshCw size={14} aria-hidden="true" />
             Ask for a revision
@@ -270,7 +270,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
 
       <div className="review-foot">
         <span className="muted">
-          Nothing is in your library until you save. <Kbd>{MOD}</Kbd> <Kbd>S</Kbd>
+          Nothing is in your library until you save. <Kbd>{MOD}</Kbd>&nbsp;<Kbd>S</Kbd>
         </span>
         <span className="spacer" />
         <Button variant="primary" icon={<Save size={14} />} onClick={props.onSave} busy={props.saving} disabled={props.revising}>

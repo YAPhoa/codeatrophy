@@ -365,7 +365,7 @@ export default function CapturePage() {
                   Draft with AI
                 </Button>
                 <span className="muted capture-kbd">
-                  <Kbd>{MOD}</Kbd> <Kbd>Enter</Kbd>
+                  <Kbd>{MOD}</Kbd>&nbsp;<Kbd>Enter</Kbd>
                 </span>
                 <span className="spacer" />
                 <Button variant="ghost" icon={<PenLine size={14} />} onClick={writeByHand}>
