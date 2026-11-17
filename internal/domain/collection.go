@@ -67,12 +67,16 @@ type Stats struct {
 	Submissions SubmissionStats `json:"submissions"`
 }
 
-// ItemStats break the item count down by enum.
+// ItemStats break the item count down by enum. Favorites and Uncollected
+// equal the totals of an item list filtered by favorite=true, or by
+// uncollected alone.
 type ItemStats struct {
 	Total        int            `json:"total"`
 	ByType       map[string]int `json:"byType"`
 	ByStatus     map[string]int `json:"byStatus"`
 	ByDifficulty map[string]int `json:"byDifficulty"`
+	Favorites    int            `json:"favorites"`
+	Uncollected  int            `json:"uncollected"`
 }
 
 // SubmissionStats count submissions.

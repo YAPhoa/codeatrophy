@@ -38,6 +38,7 @@ func Run(t *testing.T, open Opener) {
 		{"Collections", testCollections},
 		{"TestCases", testTestCases},
 		{"TagsStatsSettings", testTagsStatsSettings},
+		{"StatsMatchListFilters", testStatsMatchListFilters},
 		{"SubmissionResultsAndUnfinished", testSubmissionResultsAndUnfinished},
 		{"Submissions", testSubmissions},
 		{"ArbitraryText", testArbitraryText},
@@ -665,6 +666,97 @@ func testTestCases(t *testing.T, db store.Store) {
 	if n := len(Read(t, db, func(tx store.Tx) ([]domain.TestCase, error) { return tx.ListTestCases("p") })); n != 0 {
 		t.Errorf("%d cases left", n)
 	}
+}
+
+// testStatsMatchListFilters checks that the favorite and uncollected counts
+// of Stats are the totals of the list filtered by favorite=true and by
+// uncollected alone, so the two definitions cannot drift apart.
+func testStatsMatchListFilters(t *testing.T, db store.Store) {
+	check := func(step string, favorites, uncollected int) {
+		t.Helper()
+		yes := true
+		var s domain.Stats
+		var fav, unc int
+		if err := db.Read(context.Background(), func(tx store.Tx) error {
+			var err error
+			if s, err = tx.Stats(); err != nil {
+				return err
+			}
+			if _, fav, err = tx.ListItems(store.ItemFilter{Favorite: &yes, Limit: 1}); err != nil {
+				return err
+			}
+			_, unc, err = tx.ListItems(store.ItemFilter{Uncollected: true, Limit: 1})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if s.Items.Favorites != fav || s.Items.Uncollected != unc {
+			t.Errorf("%s: stats favorites=%d uncollected=%d, list totals %d and %d",
+				step, s.Items.Favorites, s.Items.Uncollected, fav, unc)
+		}
+		if s.Items.Favorites != favorites || s.Items.Uncollected != uncollected {
+			t.Errorf("%s: favorites=%d uncollected=%d, want %d and %d",
+				step, s.Items.Favorites, s.Items.Uncollected, favorites, uncollected)
+		}
+	}
+	check("empty", 0, 0)
+
+	parent, child := "top", "nested"
+	Write(t, db, func(tx store.Tx) error {
+		for _, c := range []domain.Collection{
+			{ID: parent, Name: "Top", CreatedAt: now, UpdatedAt: now},
+			{ID: child, Name: "Nested", ParentID: &parent, CreatedAt: now, UpdatedAt: now},
+			{ID: "empty", Name: "Empty", CreatedAt: now, UpdatedAt: now},
+		} {
+			if err := tx.InsertCollection(&c); err != nil {
+				return err
+			}
+		}
+		base := "fu"
+		items := []domain.Item{
+			Item("fu", "Favorite, uncollected", domain.TypeProblem),
+			Item("ft", "Favorite, in top", domain.TypeReading),
+			Item("fn", "Favorite, only in nested", domain.TypeProblem),
+			Item("nu", "Plain, uncollected", domain.TypeReading),
+			Item("nn", "Plain, only in nested", domain.TypeProblem),
+			Item("nb", "Plain, in both", domain.TypeProblem),
+			Item("vu", "Favorite variant, uncollected", domain.TypeProblem),
+		}
+		for _, i := range []int{0, 1, 2, 6} {
+			items[i].Favorite = true
+		}
+		items[3].Status = domain.StatusDone
+		items[6].VariantOf = &base
+		for i := range items {
+			if err := tx.InsertItem(&items[i]); err != nil {
+				return err
+			}
+		}
+		if err := tx.SetCollectionItemIDs(parent, []string{"ft", "nb"}); err != nil {
+			return err
+		}
+		return tx.SetCollectionItemIDs(child, []string{"fn", "nn", "nb"})
+	})
+	// Favorites: fu, ft, fn, vu. Uncollected: fu, nu, vu.
+	check("seeded", 4, 3)
+
+	Write(t, db, func(tx store.Tx) error {
+		if _, err := tx.RemoveCollectionItem(child, "fn"); err != nil {
+			return err
+		}
+		it, err := tx.GetItem("nu")
+		if err != nil {
+			return err
+		}
+		it.Favorite = true
+		return tx.UpdateItem(&it)
+	})
+	// Favorites gain nu; fn leaves its only collection.
+	check("after changes", 5, 4)
+
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteCollection(child) })
+	// Deleting the nested collection leaves nn uncollected; nb stays in top.
+	check("after deleting a collection", 5, 5)
 }
 
 func testTagsStatsSettings(t *testing.T, db store.Store) {

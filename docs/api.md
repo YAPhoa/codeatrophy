@@ -219,7 +219,9 @@ to show.
     "total": 42,
     "byType": { "problem": 30, "reading": 12 },
     "byStatus": { "todo": 20, "in_progress": 5, "done": 17 },
-    "byDifficulty": { "easy": 10, "medium": 15, "hard": 5, "none": 12 }
+    "byDifficulty": { "easy": 10, "medium": 15, "hard": 5, "none": 12 },
+    "favorites": 7,
+    "uncollected": 9
   },
   "collections": 6,
   "tags": 18,
@@ -228,6 +230,9 @@ to show.
 ```
 
 All enum keys are always present, with `0` when empty.
+`items.favorites` and `items.uncollected` are the counts the library's
+Favorites and Uncollected views show: each equals the `total` of `GET /items`
+with only `favorite=true`, or only `uncollected=true`, as the filter.
 `submissions.total` counts every submission; `submissions.accepted` counts
 only `submit`-mode submissions whose verdict is `accepted` — a `run` whose
 sample cases all pass is not counted.

@@ -596,6 +596,12 @@ func (t *tx) Stats() (domain.Stats, error) {
 		}); err != nil {
 		return s, err
 	}
+	// The conditions ListItems applies for its Favorite and Uncollected filters.
+	if err := t.queryRow(`SELECT COALESCE(SUM(i.favorite = 1), 0),
+		COALESCE(SUM(NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id)), 0) FROM items i`).
+		Scan(&s.Items.Favorites, &s.Items.Uncollected); err != nil {
+		return s, err
+	}
 	if err := t.queryRow(`SELECT COUNT(*) FROM collections`).Scan(&s.Collections); err != nil {
 		return s, err
 	}

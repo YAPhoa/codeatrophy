@@ -693,6 +693,33 @@ func TestExportImportEndpoints(t *testing.T) {
 	}
 }
 
+func TestStatsFavoritesAndUncollected(t *testing.T) {
+	c := newServer(t)
+	counts := func() (float64, float64) {
+		items := c.expect("GET", api+"/stats", "", 200).json(t)["items"].(map[string]any)
+		fav, unc := items["favorites"].(float64), items["uncollected"].(float64)
+		if total := c.expect("GET", api+"/items?favorite=true", "", 200).json(t)["total"]; total != fav {
+			t.Errorf("favorites = %v, GET /items?favorite=true total = %v", fav, total)
+		}
+		if total := c.expect("GET", api+"/items?uncollected=true", "", 200).json(t)["total"]; total != unc {
+			t.Errorf("uncollected = %v, GET /items?uncollected=true total = %v", unc, total)
+		}
+		return fav, unc
+	}
+	if fav, unc := counts(); fav != 0 || unc != 0 {
+		t.Errorf("empty library: favorites=%v uncollected=%v", fav, unc)
+	}
+	top := c.expect("POST", api+"/collections", `{"name":"Top"}`, 201).json(t)["id"].(string)
+	nested := c.expect("POST", api+"/collections", `{"name":"Nested","parentId":"`+top+`"}`, 201).json(t)["id"].(string)
+	c.expect("POST", api+"/items", `{"type":"reading","title":"A","favorite":true}`, 201)
+	c.expect("POST", api+"/items", `{"type":"reading","title":"B","favorite":true,"collectionIds":["`+nested+`"]}`, 201)
+	c.expect("POST", api+"/items", `{"type":"reading","title":"C"}`, 201)
+	c.expect("POST", api+"/items", `{"type":"reading","title":"D","collectionIds":["`+top+`"]}`, 201)
+	if fav, unc := counts(); fav != 2 || unc != 2 {
+		t.Errorf("favorites=%v uncollected=%v, want 2 and 2", fav, unc)
+	}
+}
+
 func TestCollectionsAndTagsEndpoints(t *testing.T) {
 	c := newServer(t)
 	a := c.expect("POST", api+"/collections", `{"name":"A"}`, 201).json(t)["id"].(string)
