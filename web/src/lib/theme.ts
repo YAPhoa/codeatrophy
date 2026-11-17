@@ -20,7 +20,7 @@ export function resolveTheme(pref: ThemePreference): 'light' | 'dark' {
 }
 
 /** The page background (`--bg`) of each theme, for the browser's own chrome. */
-const THEME_COLOR = { light: '#f5f5f2', dark: '#111214' } as const;
+const THEME_COLOR = { light: '#f3f6f4', dark: '#0f141c' } as const;
 
 function apply(): void {
   const theme = resolveTheme(getThemePreference());

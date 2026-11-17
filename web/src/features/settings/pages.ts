@@ -1,6 +1,7 @@
 /*
  * The pages of Settings, in the order of the navigation: what people come
- * for most first, then the status of the services the server runs with.
+ * for most first, then the status of the services the server runs with,
+ * then moving the library in and out as bundles.
  * Each has its own address, `/settings/<slug>`.
  */
 
@@ -11,6 +12,8 @@ export const SETTINGS_PAGES = [
   { slug: 'preferences', label: 'Preferences' },
   { slug: 'judge', label: 'Judge' },
   { slug: 'mcp', label: 'MCP server' },
+  { slug: 'import', label: 'Import' },
+  { slug: 'export', label: 'Export' },
 ] as const;
 
 export type SettingsSlug = (typeof SETTINGS_PAGES)[number]['slug'];
@@ -39,4 +42,12 @@ export function settingsLanding(hash: string): string {
   const section = hash.replace(/^#/, '');
   const slug = findSettingsPage(section)?.slug ?? movedSettingsPage(section) ?? SETTINGS_PAGES[0].slug;
   return settingsPath(slug);
+}
+
+/**
+ * The new address of a page that moved into Settings (`/import`, `/export`),
+ * keeping the query string and fragment of the old one, which say what to export.
+ */
+export function movedIntoSettings(slug: SettingsSlug, location: { search: string; hash: string }): string {
+  return `${settingsPath(slug)}${location.search}${location.hash}`;
 }

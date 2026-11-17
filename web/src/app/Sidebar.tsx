@@ -24,7 +24,6 @@ import {
   Sun,
   Tags,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
@@ -39,6 +38,7 @@ import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
 import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
 import { Kbd } from '../ui/misc';
+import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
 
@@ -174,7 +174,7 @@ function CollectionTreeNode({
               onSelect: () => actions.shift(c, 1),
             },
             'separator',
-            { label: 'Export…', icon: <Download size={14} />, to: `/export?collection=${c.id}` },
+            { label: 'Export…', icon: <Download size={14} />, to: `/settings/export?collection=${c.id}` },
             { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => actions.remove(c) },
           ]}
         />
@@ -251,9 +251,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     return (
       <aside className="sidebar is-rail" aria-label="Navigation">
         <Link to="/" className="rail-brand" aria-label="Codeatrophy: all items" title="Codeatrophy">
-          <span className="brand-mark" aria-hidden="true">
-            <Code2 size={16} strokeWidth={2.6} />
-          </span>
+          <Logo size={32} className="brand-mark" />
         </Link>
         <IconButton label={`Expand navigation (${MOD}+B)`} size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
         <Link to={newHref} className="rail-item rail-new" aria-label="New item" title="New item (C)">
@@ -269,8 +267,6 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <RailEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
           <span className="rail-sep" aria-hidden="true" />
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} />
-          <RailEntry to="/import" icon={<Upload size={16} />} label="Import" active={location.pathname === '/import'} />
-          <RailEntry to="/export" icon={<Download size={16} />} label="Export" active={location.pathname === '/export'} />
           <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />
         </nav>
         <div className="rail-foot">
@@ -293,9 +289,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     <aside className={cx('sidebar', open && 'is-open')} aria-label="Navigation">
       <div className="sidebar-head">
         <Link to="/" className="brand" translate="no">
-          <span className="brand-mark" aria-hidden="true">
-            <Code2 size={16} strokeWidth={2.6} />
-          </span>
+          <Logo size={32} className="brand-mark" />
           Codeatrophy
         </Link>
         <IconButton className="sidebar-minimise" label={`Minimise navigation (${MOD}+B)`} size="sm" icon={<PanelLeftClose size={16} />} onClick={onToggleMinimised} />
@@ -327,10 +321,10 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
             <NavEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={onLibrary && type === 'reading' && !fav && !uncollected} />
           </li>
           <li>
-            <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
+            <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={onLibrary && fav} />
           </li>
           <li>
-            <NavEntry to="/?uncollected=true" icon={<Inbox size={16} />} label="Uncollected" active={onLibrary && uncollected} />
+            <NavEntry to="/?uncollected=true" icon={<Inbox size={16} />} label="Uncollected" count={s?.items.uncollected} active={onLibrary && uncollected} />
           </li>
         </ul>
 
@@ -359,12 +353,6 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         <ul className="nav-group" aria-labelledby="nav-manage">
           <li>
             <NavEntry to="/tags" icon={<Tags size={16} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} />
-          </li>
-          <li>
-            <NavEntry to="/import" icon={<Upload size={16} />} label="Import" active={location.pathname === '/import'} />
-          </li>
-          <li>
-            <NavEntry to="/export" icon={<Download size={16} />} label="Export" active={location.pathname === '/export'} />
           </li>
           <li>
             <NavEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />

@@ -78,6 +78,45 @@ export function defaultOrder(sort: ItemSort): SortOrder {
 }
 
 /**
+ * The two directions of a sort, named for what they mean for its field, the
+ * default first; `null` for sorts that have no direction (a collection's own
+ * order, relevance). Items without a difficulty come last either way.
+ */
+export function sortDirections(sort: ItemSort): { order: SortOrder; label: string }[] | null {
+  switch (sort) {
+    case 'updated':
+    case 'created':
+      return [
+        { order: 'desc', label: 'Newest first' },
+        { order: 'asc', label: 'Oldest first' },
+      ];
+    case 'title':
+      return [
+        { order: 'asc', label: 'A → Z' },
+        { order: 'desc', label: 'Z → A' },
+      ];
+    case 'difficulty':
+      return [
+        { order: 'asc', label: 'Easiest first' },
+        { order: 'desc', label: 'Hardest first' },
+      ];
+    case 'position':
+    case 'relevance':
+      return null;
+  }
+}
+
+/**
+ * What a library view lists, as its filter box names it: a Problems or
+ * Readings view, or items anywhere else (all items, Favorites, Uncollected,
+ * a collection), whatever the type filter says there.
+ */
+export function viewNoun(f: LibraryFilters, collectionId: string | null): 'problems' | 'readings' | 'items' {
+  if (collectionId || f.favorite || f.uncollected) return 'items';
+  return f.type === 'problem' ? 'problems' : f.type === 'reading' ? 'readings' : 'items';
+}
+
+/**
  * The sort actually used for a view. `relevance` needs a search query and
  * `position` needs a single (non-recursive) collection; when a remembered
  * choice is no longer valid the view falls back to its default.
@@ -122,6 +161,19 @@ export function activeFilterCount(f: LibraryFilters): number {
     (f.favorite ? 1 : 0) +
     (f.uncollected ? 1 : 0)
   );
+}
+
+/**
+ * Filters set in the library's filter bar. The type, Favorites and
+ * Uncollected are views picked in the sidebar, so the bar neither counts nor
+ * clears them.
+ */
+export function barFilterCount(f: LibraryFilters): number {
+  return (f.q.trim() ? 1 : 0) + (f.status.length ? 1 : 0) + (f.difficulty.length ? 1 : 0) + (f.tags.length ? 1 : 0);
+}
+
+export function clearBarFilters(f: LibraryFilters): LibraryFilters {
+  return { ...f, q: '', status: [], difficulty: [], tags: [] };
 }
 
 /** Manual ordering only makes sense when the list is the whole collection in its own order. */

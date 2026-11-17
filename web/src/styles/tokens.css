@@ -5,10 +5,14 @@
    control heights in layout.css. */
 
 :root {
-  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', 'Liberation Sans', Arial,
-    sans-serif;
+  --font-sans: 'IBM Plex Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans',
+    'Liberation Sans', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono',
     'DejaVu Sans Mono', monospace;
+  /* The wordmark beside the logo. Only "Codeatrophy" is set in it, so base.css
+     loads one weight under a name of its own, which the code font stack above
+     can never pick up. */
+  --font-brand: 'Codeatrophy Wordmark', var(--font-mono);
 
   --text-2xs: 11px;
   --text-xs: 12px;
@@ -41,6 +45,8 @@
   --radius-lg: 10px;
 
   --sidebar-width: 252px;
+  /* The widest a page grows (.page-wide: the library, the editors). */
+  --page-wide: 1400px;
   --rail-width: 48px;
   --control-h: 32px;
   --control-h-sm: 28px;
@@ -60,24 +66,24 @@
 
   color-scheme: light;
 
-  --bg: #f5f5f2;
+  --bg: #f3f6f4;
   --surface: #ffffff;
-  --surface-2: #f1f1ed;
-  --surface-3: #e7e7e2;
-  --border: #dfdfd9;
-  --border-strong: #c2c2ba;
-  --text: #1b1c1f;
-  --text-2: #4d5057;
-  --text-3: #686b73;
-  --accent: #3451c6;
-  --accent-hover: #2942a8;
-  --accent-soft: #e8ecfb;
-  --accent-text: #2c47b4;
+  --surface-2: #e9eeeb;
+  --surface-3: #e0e7e3;
+  --border: #d3dbd6;
+  --border-strong: #bfc9c3;
+  --text: #16211d;
+  --text-2: #3f4c47;
+  --text-3: #55635d;
+  --accent: #076c4b;
+  --accent-hover: #06593e;
+  --accent-soft: rgb(7 108 75 / 12%);
+  --accent-text: #066144;
   --on-accent: #ffffff;
-  --focus: #3451c6;
+  --focus: #076c4b;
 
-  --ok: #19743a;
-  --ok-soft: #e2f3e6;
+  --ok: #076c4b;
+  --ok-soft: rgb(7 108 75 / 12%);
   --warn: #855600;
   --warn-soft: #faefd2;
   --warn-border: #e6cf8f;
@@ -103,31 +109,41 @@
   --syn-type: #8f4a00;
   --syn-var: #1b1c1f;
   --syn-meta: #9a3168;
-  --editor-active-line: #f4f4f0;
-  --editor-selection: #cfd9fb;
+  --editor-active-line: #ebf0ed;
+  --editor-selection: #c8dfd7;
+
+  /* The pixel-art logo (ui/Logo.tsx). The fade steps grow fainter away from
+     the solid brace; they are tuned for the sidebar (--surface-2). The glow
+     only shows on dark, and its opacity is set in the SVGs. */
+  --logo-solid: var(--accent);
+  --logo-fade-1: #469078;
+  --logo-fade-2: #71a996;
+  --logo-fade-3: #95beb0;
+  --logo-fade-4: #bad3c9;
+  --logo-glow: transparent;
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #111214;
-  --surface: #18191c;
-  --surface-2: #1f2024;
-  --surface-3: #2a2b31;
-  --border: #2b2d33;
-  --border-strong: #43464e;
-  --text: #e4e5e8;
-  --text-2: #a9adb6;
-  --text-3: #969aa4;
-  --accent: #8ea3ff;
-  --accent-hover: #a7b8ff;
-  --accent-soft: #212945;
-  --accent-text: #a3b4ff;
-  --on-accent: #0e1223;
-  --focus: #8ea3ff;
+  --bg: #0f141c;
+  --surface: #131a24;
+  --surface-2: #151c27;
+  --surface-3: #1f2937;
+  --border: #26303f;
+  --border-strong: #34415a;
+  --text: #e4ebf0;
+  --text-2: #b4c0ca;
+  --text-3: #8e9dab;
+  --accent: #10de98;
+  --accent-hover: #45e5af;
+  --accent-soft: rgb(16 222 152 / 14%);
+  --accent-text: #36e3a8;
+  --on-accent: #06241a;
+  --focus: #10de98;
 
-  --ok: #5cc777;
-  --ok-soft: #15301d;
+  --ok: #10de98;
+  --ok-soft: rgb(16 222 152 / 14%);
   --warn: #e2b354;
   --warn-soft: #33290f;
   --warn-border: #6a5720;
@@ -153,6 +169,13 @@
   --syn-type: #efc66f;
   --syn-var: #e4e5e8;
   --syn-meta: #f29bc3;
-  --editor-active-line: #1d1e22;
-  --editor-selection: #2c3a6e;
+  --editor-active-line: #171f2b;
+  --editor-selection: #0f493c;
+
+  --logo-solid: var(--accent);
+  --logo-fade-1: #158068;
+  --logo-fade-2: #126456;
+  --logo-fade-3: #114d48;
+  --logo-fade-4: #12363a;
+  --logo-glow: #04d282;
 }

@@ -1,5 +1,7 @@
 import { NavLink, Navigate, useLocation, useParams } from 'react-router';
 import { useMeta } from '../../api/queries';
+import { ExportSection } from '../share/ExportPage';
+import { ImportSection } from '../share/ImportPage';
 import { NotFoundPage } from '../../app/NotFoundPage';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { cx } from '../../ui/Button';
@@ -56,8 +58,11 @@ function SettingsCategory({ slug, label }: { slug: SettingsSlug; label: string }
           {slug === 'preferences' && <PreferencesSection />}
           {slug === 'judge' && <JudgeSection meta={meta} />}
           {slug === 'mcp' && <McpSection meta={meta} />}
+          {slug === 'import' && <ImportSection />}
+          {slug === 'export' && <ExportSection />}
         </div>
       </div>
     </div>
   );
 }
+

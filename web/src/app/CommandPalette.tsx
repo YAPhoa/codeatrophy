@@ -58,8 +58,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       { key: 'new', icon: <Plus size={16} />, label: 'Capture a new item', hint: 'C', ...go(newHref) },
       { key: 'lib', icon: <Library size={16} />, label: 'Go to library', ...go('/') },
       { key: 'tags', icon: <Tags size={16} />, label: 'Manage tags', ...go('/tags') },
-      { key: 'import', icon: <Upload size={16} />, label: 'Import a bundle', ...go('/import') },
-      { key: 'export', icon: <Download size={16} />, label: 'Export', ...go('/export') },
+      { key: 'import', icon: <Upload size={16} />, label: 'Import a bundle', ...go('/settings/import') },
+      { key: 'export', icon: <Download size={16} />, label: 'Export', ...go('/settings/export') },
       { key: 'settings', icon: <Settings size={16} />, label: 'Settings', ...go('/settings') },
       {
         key: 'theme',

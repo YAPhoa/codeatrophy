@@ -4,7 +4,6 @@ import { Download, PackageCheck } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCollections, useItemQuery, useLimits, useStats } from '../../api/queries';
 import type { ExportScope } from '../../api/types';
-import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { saveBlob } from '../../lib/download';
 import { formatBytes, plural } from '../../lib/format';
 import { buildTree, descendantIds, flattenTree } from '../../lib/tree';
@@ -12,7 +11,6 @@ import { useUrlMirror, useUrlState } from '../../lib/urlState';
 import { Button, cx } from '../../ui/Button';
 import { Checkbox, SelectField, TextAreaField, TextField } from '../../ui/Field';
 import { Callout, ErrorCallout } from '../../ui/misc';
-import { ShareTabs } from './ShareTabs';
 
 const SHOWN_TITLES = 8;
 
@@ -21,8 +19,7 @@ const parseOn = (raw: string | null): boolean => raw !== '0';
 const formatOn = (value: boolean): string | null => (value ? null : '0');
 
 /** Export the whole library, one collection subtree, or a selection of items as a bundle. */
-export default function ExportPage() {
-  useDocumentTitle('Export');
+export function ExportSection() {
   const [searchParams] = useSearchParams();
   const { data: collections = [] } = useCollections();
   const stats = useStats();
@@ -94,10 +91,11 @@ export default function ExportPage() {
   };
 
   return (
-    <div className="page page-narrow share">
-      <ShareTabs active="export" />
-      <h1 className="page-title">Export a bundle</h1>
-      <p className="page-sub">
+    <section className="settings-section" aria-labelledby="export-title">
+      <h1 id="export-title" className="page-title">
+        Export a bundle
+      </h1>
+      <p className="settings-lead">
         A bundle is a zip of plain Markdown, JSON and source files that any Codeatrophy instance can import. It carries content only:{' '}
         <strong>your status, favorites, notes and submissions are never included</strong>.
       </p>
@@ -209,6 +207,6 @@ export default function ExportPage() {
           </Button>
         </div>
       </form>
-    </div>
+    </section>
   );
 }

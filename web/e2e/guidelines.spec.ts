@@ -136,7 +136,7 @@ test('deep links: an export of selected items survives in the address', async ({
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('button', { name: 'More actions' }).click();
   await page.getByRole('menuitem', { name: 'Export this item…' }).click();
-  await expect(page).toHaveURL(/\/export\?.*item=/);
+  await expect(page).toHaveURL(/\/settings\/export\?.*item=/);
   await expect(page.getByRole('radio', { name: /Selected items/ })).toBeChecked();
   await expect(page.locator('.export-items')).toContainText('Two Sum');
 
@@ -404,8 +404,7 @@ test('focus: a menu row reached with the keyboard has a ring, so it differs from
   const menu = page.getByRole('menu', { name: 'Sort by' });
   await expect(menu).toBeVisible();
   // The sort in effect is a checked choice, and the menu opens on it.
-  const current = menu.getByRole('menuitemradio', { checked: true });
-  await expect(current).toHaveCount(1);
+  const current = menu.getByRole('menuitemradio', { name: 'Last updated', checked: true });
   await expect(current).toBeFocused();
   await expect(current).toHaveCSS('outline-style', 'solid');
   await page.keyboard.press('ArrowDown');
@@ -441,4 +440,27 @@ test('toasts: a toast stays while the pointer is on it, so its Undo cannot slip 
   await page.mouse.move(5, 5);
   await page.clock.runFor(15_000);
   await expect(page.locator('.toast')).toHaveCount(0);
+});
+
+test('menus: a choice in effect is marked by a check, not by a background', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('button', { name: /^Sort/ }).click();
+  const menu = page.getByRole('menu', { name: 'Sort by' });
+  const current = menu.getByRole('menuitemradio', { name: 'Last updated' });
+  await expect(current).toHaveAttribute('aria-checked', 'true');
+  // Choices without icons of their own carry the check in the icon column.
+  await expect(current.locator('.menu-item-icon .menu-item-check')).toHaveCount(1);
+  await expect(menu.getByRole('menuitemradio', { name: 'Title' }).locator('.menu-item-check')).toHaveCount(0);
+  await expect(menu).not.toContainText('current');
+  const plain = await menu.getByRole('menuitemradio', { name: 'Title' }).evaluate((el) => getComputedStyle(el).backgroundColor);
+  await expect(current).toHaveCSS('background-color', plain);
+  await page.keyboard.press('Escape');
+
+  // Choices with icons keep them, and the check goes at the end.
+  await page.getByRole('button', { name: /^Theme/ }).click();
+  const theme = page.getByRole('menuitemradio', { name: 'Match system' });
+  await expect(theme).toHaveAttribute('aria-checked', 'true');
+  await expect(theme.locator('.menu-item-icon svg')).toHaveCount(1);
+  await expect(theme.locator('.menu-item-icon .menu-item-check')).toHaveCount(0);
+  await expect(theme.locator('.menu-item-end .menu-item-check')).toHaveCount(1);
 });

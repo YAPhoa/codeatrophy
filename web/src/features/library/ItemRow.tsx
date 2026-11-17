@@ -2,7 +2,7 @@ import { memo, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react
 import { Link } from 'react-router';
 import { GitBranch, GripVertical } from 'lucide-react';
 import type { ItemSummary } from '../../api/types';
-import { plural, relativeTime, absoluteTime } from '../../lib/format';
+import { isFailedVerdict, plural, relativeTime, absoluteTime } from '../../lib/format';
 import { cx } from '../../ui/Button';
 import { DifficultyBadge, FavoriteButton, StatusControl, TagChips, TypeIcon, VerdictBadge } from '../item/controls';
 
@@ -62,31 +62,36 @@ export const ItemRow = memo(function ItemRow({ item, index, selected, current, r
         <TypeIcon type={item.type} />
       </span>
       <span className="item-main">
-        <Link to={`/items/${item.id}`} className="item-title" tabIndex={tab} draggable={false}>
-          {item.title}
-        </Link>
-        {(item.variantOf || item.variantCount > 0) && (
-          <span className="item-variant" title={item.variantOf ? 'A variant of another item' : `Has ${plural(item.variantCount, 'variant')}`}>
-            <GitBranch size={12} aria-hidden="true" />
-            {item.variantCount > 0 && <span>{item.variantCount}</span>}
-            <span className="sr-only">{item.variantOf ? 'Variant of another item' : `${item.variantCount} variants`}</span>
+        <span className="item-head">
+          <Link to={`/items/${item.id}`} className="item-title" tabIndex={tab} draggable={false}>
+            {item.title}
+          </Link>
+          {(item.variantOf || item.variantCount > 0) && (
+            <span className="item-variant" title={item.variantOf ? 'A variant of another item' : `Has ${plural(item.variantCount, 'variant')}`}>
+              <GitBranch size={12} aria-hidden="true" />
+              {item.variantCount > 0 && <span>{item.variantCount}</span>}
+              <span className="sr-only">{item.variantOf ? 'Variant of another item' : `${item.variantCount} variants`}</span>
+            </span>
+          )}
+        </span>
+        {item.summary && <span className="item-summary">{item.summary}</span>}
+        {item.tags.length > 0 && (
+          <span className="item-tags">
+            <TagChips tags={item.tags} max={2} />
           </span>
         )}
-        {item.summary && <span className="item-summary">{item.summary}</span>}
-      </span>
-      <span className="item-cell item-tags">
-        <TagChips tags={item.tags} max={2} />
       </span>
       <span className="item-cell item-diff">
         <DifficultyBadge difficulty={item.difficulty} />
       </span>
       <span className="item-cell item-result">
-        {item.type === 'problem' &&
-          (item.lastVerdict ? (
-            <VerdictBadge verdict={item.lastVerdict} short />
-          ) : (
-            <span className="muted">{item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test')}</span>
-          ))}
+        {/* The status icon already says when a problem is solved, so only a failed last verdict is shown. */}
+        {item.type === 'problem' && (
+          <>
+            {item.lastVerdict && isFailedVerdict(item.lastVerdict) && <VerdictBadge verdict={item.lastVerdict} short />}
+            <span className="item-tests muted">{item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test')}</span>
+          </>
+        )}
       </span>
       <time className="item-cell item-updated" dateTime={item.updatedAt} title={`Updated ${absoluteTime(item.updatedAt)}`}>
         {relativeTime(item.updatedAt)}

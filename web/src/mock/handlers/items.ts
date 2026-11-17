@@ -674,6 +674,8 @@ function stats(db: MockDb) {
       byType: { problem: 0, reading: 0 },
       byStatus: { todo: 0, in_progress: 0, done: 0 },
       byDifficulty: { easy: 0, medium: 0, hard: 0, none: 0 },
+      favorites: 0,
+      uncollected: 0,
     },
     collections: db.collections.length,
     tags: new Set([...db.items.values()].flatMap((i) => i.tags)).size,
@@ -683,10 +685,14 @@ function stats(db: MockDb) {
       accepted: db.submissions.filter((s) => s.mode === 'submit' && s.verdict === 'accepted').length,
     },
   };
+  // The same tests as the `favorite` and `uncollected` filters of the item list.
+  const collected = new Set(db.collections.flatMap((c) => c.itemIds));
   for (const item of db.items.values()) {
     out.items.byType[item.type]++;
     out.items.byStatus[item.status]++;
     out.items.byDifficulty[item.difficulty ?? 'none']++;
+    if (item.favorite) out.items.favorites++;
+    if (!collected.has(item.id)) out.items.uncollected++;
   }
   return ok(out);
 }

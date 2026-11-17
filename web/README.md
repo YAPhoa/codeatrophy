@@ -138,8 +138,8 @@ keeping an accepted submission as a solution and making it the reference;
 preferences taking effect; large test cases, from their preferences to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
 (key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
-editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; and filing selected items
-into a collection.
+editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; filing selected items
+into a collection; the library's views, row verdicts and sort menu; and Import and Export as pages of Settings, reached from their old addresses too.
 It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
 backend, AI provider or judge, and it fails on any page error or request to a
 third-party origin. It is separate from `npm test`.

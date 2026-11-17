@@ -5,12 +5,10 @@ import { CheckCircle2, FileArchive, Upload } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateLibrary, useMeta } from '../../api/queries';
 import type { ImportItemState, ImportPreview, ImportResult, ImportStrategy } from '../../api/types';
-import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { absoluteTime, describeChanges, formatBytes, plural, type Tone } from '../../lib/format';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { Badge, Callout, ErrorCallout, Spinner } from '../../ui/misc';
 import { TypeIcon } from '../item/controls';
-import { ShareTabs } from './ShareTabs';
 
 const STATE_LABEL: Record<ImportItemState, string> = { new: 'New', changed: 'Changed', unchanged: 'Unchanged' };
 const STATE_TONE: Record<ImportItemState, Tone> = { new: 'ok', changed: 'warn', unchanged: 'neutral' };
@@ -38,8 +36,7 @@ const STRATEGIES: { value: ImportStrategy; title: string; text: string }[] = [
  * is new, changed and unchanged, then the import itself with the chosen
  * strategy for changed items.
  */
-export default function ImportPage() {
-  useDocumentTitle('Import');
+export function ImportSection() {
   const qc = useQueryClient();
   const meta = useMeta().data;
   const maxBytes = meta?.limits.maxImportBytes ?? Infinity;
@@ -107,10 +104,11 @@ export default function ImportPage() {
   const visibleItems = preview ? (showUnchanged ? preview.items : preview.items.filter((i) => i.state !== 'unchanged')) : [];
 
   return (
-    <div className="page page-narrow share">
-      <ShareTabs active="import" />
-      <h1 className="page-title">Import a bundle</h1>
-      <p className="page-sub">
+    <section className="settings-section" aria-labelledby="import-title">
+      <h1 id="import-title" className="page-title">
+        Import a bundle
+      </h1>
+      <p className="settings-lead">
         Bring in a <code translate="no">.codeatrophy.zip</code> exported from this or another instance. You see exactly what would change before anything is written, and an import is applied completely or not at
         all.
       </p>
@@ -344,7 +342,7 @@ export default function ImportPage() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

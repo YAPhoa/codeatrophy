@@ -2,5 +2,5 @@
 export function exportItemsPath(itemIds: readonly string[]): string {
   const params = new URLSearchParams();
   for (const id of itemIds) params.append('item', id);
-  return `/export?${params.toString()}`;
+  return `/settings/export?${params.toString()}`;
 }

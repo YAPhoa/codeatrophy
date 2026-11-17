@@ -8,7 +8,7 @@ import type { ItemStatus, ItemSummary } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { DRAG_ITEMS } from '../../app/Sidebar';
-import { activeFilterCount, canReorder, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
+import { activeFilterCount, barFilterCount, canReorder, clearBarFilters, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
 import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
 import { useNewItemHref } from '../../lib/newItem';
@@ -295,6 +295,7 @@ export function LibraryPage() {
   useDocumentTitle(title);
 
   const filterCount = activeFilterCount(filters);
+  const barFilters = barFilterCount(filters);
   const libraryEmpty = stats.data?.items.total === 0;
   const allSelected = items.length > 0 && items.every((i) => selection.has(i.id));
   const newHref = useNewItemHref();
@@ -367,14 +368,11 @@ export function LibraryPage() {
                 onSelect: () => collectionActions.shift(collection, 1),
               },
               'separator',
-              { label: 'Export this collection…', icon: <Download size={14} />, to: `/export?collection=${collection.id}` },
+              { label: 'Export this collection…', icon: <Download size={14} />, to: `/settings/export?collection=${collection.id}` },
               { label: 'Delete collection', icon: <Trash2 size={14} />, danger: true, onSelect: () => collectionActions.remove(collection) },
             ]}
           />
         )}
-        <LinkButton to={newHref} variant="primary" icon={<Plus size={16} />}>
-          New item
-        </LinkButton>
       </header>
 
       {libraryEmpty && filterCount === 0 && !collection ? (
@@ -386,7 +384,7 @@ export function LibraryPage() {
               <LinkButton to="/new" variant="primary" icon={<Plus size={16} />}>
                 Capture your first item
               </LinkButton>
-              <LinkButton to="/import" icon={<Upload size={16} />}>
+              <LinkButton to="/settings/import" icon={<Upload size={16} />}>
                 Import a bundle
               </LinkButton>
             </>
@@ -419,11 +417,11 @@ export function LibraryPage() {
           ) : query.isError ? (
             <ErrorState error={query.error} onRetry={() => void query.refetch()} />
           ) : items.length === 0 ? (
-            filterCount > 0 ? (
+            barFilters > 0 ? (
               <EmptyState
                 icon={<SearchX size={20} />}
                 title="No items match"
-                actions={<Button onClick={() => setFilters({ ...filters, q: '', type: null, status: [], difficulty: [], tags: [], favorite: false, uncollected: false })}>Clear filters</Button>}
+                actions={<Button onClick={() => setFilters(clearBarFilters(filters))}>Clear filters</Button>}
               >
                 Try fewer filters or a different search.
               </EmptyState>
@@ -449,23 +447,26 @@ export function LibraryPage() {
             )
           ) : (
             <div className={cx('item-list-wrap', query.isPlaceholderData && 'is-stale')}>
-              <div className="item-list-head">
-                <span className="item-cell item-check">
-                  <input
-                    type="checkbox"
-                    aria-label={allSelected ? 'Deselect all' : 'Select all shown'}
-                    checked={allSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = !allSelected && selection.size > 0;
-                    }}
-                    onChange={() => setSelection(allSelected ? new Set() : new Set(items.map((i) => i.id)))}
-                  />
-                </span>
-                <span className="item-head-label">
-                  {reorderable ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
-                </span>
-                {query.isFetching && <Spinner size={14} label="Refreshing…" />}
-              </div>
+              {/* The page title already gives the count, so the row shows only to select all, while filtered, or to explain manual order. */}
+              {(selection.size > 0 || barFilters > 0 || reorderable) && (
+                <div className="item-list-head">
+                  <span className="item-cell item-check">
+                    <input
+                      type="checkbox"
+                      aria-label={allSelected ? 'Deselect all' : 'Select all shown'}
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !allSelected && selection.size > 0;
+                      }}
+                      onChange={() => setSelection(allSelected ? new Set() : new Set(items.map((i) => i.id)))}
+                    />
+                  </span>
+                  <span className="item-head-label">
+                    {reorderable ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
+                  </span>
+                  {query.isFetching && <Spinner size={14} label="Refreshing…" />}
+                </div>
+              )}
               <ul className={cx('item-list', reorderable && 'is-reorderable')} ref={listRef} onKeyDown={onListKeyDown} aria-label={`${title}: items`}>
                 {items.map((item, i) => (
                   <ItemRow

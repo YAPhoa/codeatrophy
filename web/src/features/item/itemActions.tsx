@@ -33,6 +33,8 @@ export function useItemActions(item: Item) {
           qc.setQueryData(qk.item(item.id), updated);
           void qc.invalidateQueries({ queryKey: qk.collections });
           void qc.invalidateQueries({ queryKey: qk.itemLists });
+          // The Uncollected count may have moved.
+          void qc.invalidateQueries({ queryKey: qk.stats });
         })
         .catch((e) => {
           toast.error(e);

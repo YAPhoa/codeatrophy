@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, withUnit } from './format';
+import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, isFailedVerdict, withUnit } from './format';
+import type { Verdict } from '../api/types';
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
@@ -107,5 +108,14 @@ describe('withUnit', () => {
   it('groups digits and keeps the unit on the same line', () => {
     expect(withUnit(10000, 'ms')).toBe(`${(10000).toLocaleString()}\u00a0ms`);
     expect(withUnit('1.5', 'MB')).toBe('1.5\u00a0MB');
+  });
+});
+
+describe('isFailedVerdict', () => {
+  it('is true for every verdict that says the code failed, and only for those', () => {
+    const failed: Verdict[] = ['wrong_answer', 'time_limit_exceeded', 'memory_limit_exceeded', 'runtime_error', 'compile_error', 'internal_error'];
+    for (const v of failed) expect(isFailedVerdict(v)).toBe(true);
+    expect(isFailedVerdict('accepted')).toBe(false);
+    expect(isFailedVerdict('executed')).toBe(false);
   });
 });

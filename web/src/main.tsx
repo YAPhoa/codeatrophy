@@ -8,6 +8,9 @@ import { routes } from './App';
 import { initTheme } from './lib/theme';
 import { ConfirmProvider } from './ui/Dialog';
 import { ToastProvider } from './ui/Toast';
+// IBM Plex Sans for the interface (--font-sans), bundled so every machine shows it.
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource-variable/ibm-plex-sans/wght-italic.css';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/ui.css';

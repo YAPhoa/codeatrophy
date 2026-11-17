@@ -62,9 +62,10 @@
   align-items: center;
   gap: var(--space-2);
   color: var(--text);
-  font-size: var(--text-lg);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--font-brand);
+  font-size: var(--text-xl);
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
 
 .brand:hover {
@@ -73,13 +74,13 @@
 
 .brand-mark {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--on-accent);
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+
+.brand-mark svg {
+  display: block;
 }
 
 .sidebar-close {
@@ -190,11 +191,13 @@
   text-decoration: none;
 }
 
+/* Inset to line up with the navigation's icons below (8px of scroll padding
+   plus 8px inside each row) and, on the right, with its counts. */
 .sidebar-actions {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1-5);
-  padding: var(--space-1-5) var(--space-3) var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-4) var(--space-3);
 }
 
 .sidebar-new {
@@ -429,11 +432,17 @@ button.nav-twisty:hover {
 .page {
   max-width: 1040px;
   margin: 0 auto;
-  padding: var(--space-6) var(--space-8) var(--space-16);
+  padding: var(--space-12) var(--space-8) var(--space-16);
+}
+
+/* Under an item's bar (test cases, solutions) the bar is the top edge, so
+   the page starts closer to it. */
+.workspace-scroll > .page {
+  padding-top: var(--space-6);
 }
 
 .page-wide {
-  max-width: 1320px;
+  max-width: var(--page-wide);
 }
 
 .page-narrow {
@@ -658,7 +667,9 @@ button.nav-twisty:hover {
 
   .topbar-brand {
     color: var(--text);
-    font-weight: 700;
+    font-family: var(--font-brand);
+    font-weight: 800;
+    letter-spacing: -0.03em;
   }
 
   .sidebar {
@@ -712,7 +723,8 @@ button.nav-twisty:hover {
       visibility 0s;
   }
 
-  .page {
+  .page,
+  .workspace-scroll > .page {
     padding: 16px 16px 48px;
   }
 

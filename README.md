@@ -274,7 +274,7 @@ docker compose start app
 ```
 
 `codeatrophy db copy` into a SQLite file is a backend-neutral backup too.
-For moving content between instances, use bundles (Export / Import in the UI)
+For moving content between instances, use bundles (Settings → Export / Import)
 instead; they carry content only, not your progress, notes or settings. A
 bundle that holds a solution-only problem uses bundle format version 2,
 which an older Codeatrophy refuses to import; upgrade it first.
@@ -376,3 +376,9 @@ service's users.
 Judge0 is separate software under its own license (GPL-3.0). Codeatrophy runs
 it as an independent service, reached over HTTP; none of its code is included
 in this project.
+
+The web UI bundles two fonts under the SIL Open Font License 1.1: IBM Plex Sans
+(Copyright 2019 IBM Corp.), installed from the `@fontsource-variable/ibm-plex-sans`
+package, and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors),
+cut down to ASCII for the wordmark, with its license in
+[`web/src/assets/fonts/JetBrainsMono-OFL.txt`](web/src/assets/fonts/JetBrainsMono-OFL.txt).

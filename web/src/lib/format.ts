@@ -45,6 +45,15 @@ export function verdictTone(v: Verdict): Tone {
   return 'danger';
 }
 
+/**
+ * Whether a verdict says the code failed: wrong output, a limit, a crash, a
+ * compile error or a judge error. `accepted` and the neutral `executed` do not.
+ */
+export function isFailedVerdict(v: Verdict): boolean {
+  const tone = verdictTone(v);
+  return tone === 'danger' || tone === 'warn';
+}
+
 export function difficultyTone(d: Difficulty): Tone {
   return d === 'easy' ? 'ok' : d === 'medium' ? 'warn' : 'danger';
 }

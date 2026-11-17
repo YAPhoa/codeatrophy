@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { ArrowDownAZ, ArrowUpAZ, ChevronDown, Search, Star, X } from 'lucide-react';
+import { ChevronDown, Search, X } from 'lucide-react';
 import type { Difficulty, ItemSort, ItemStatus, Tag } from '../../api/types';
 import { DIFFICULTY_LABEL, STATUS_LABEL } from '../../lib/format';
-import { activeFilterCount, defaultOrder, effectiveSort, toggleIn, type LibraryFilters } from '../../lib/filters';
+import { barFilterCount, clearBarFilters, defaultOrder, effectiveSort, sortDirections, toggleIn, viewNoun, type LibraryFilters } from '../../lib/filters';
 import { Button, IconButton, cx } from '../../ui/Button';
-import { Segmented } from '../../ui/Field';
-import { MenuButton, Popover } from '../../ui/Popover';
+import { MenuButton, Popover, type MenuEntry } from '../../ui/Popover';
 import { StatusIcon } from '../item/controls';
 
 interface FilterBarProps {
@@ -51,7 +50,7 @@ function FilterButton({ label, count, children }: { label: string; count: number
   );
 }
 
-/** Search box plus the filter and sort controls of the library. */
+/** Search box plus the filter and sort controls of the library. The type and Favorites are picked in the sidebar. */
 export function FilterBar({ filters, onChange, tags, collectionId, searchRef, children }: FilterBarProps) {
   // The search text is debounced into the URL so typing does not fire a request per keystroke.
   const [text, setText] = useState(filters.q);
@@ -90,7 +89,22 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
     'title',
     'difficulty',
   ];
-  const active = activeFilterCount(filters);
+  const active = barFilterCount(filters);
+  const directions = sortDirections(sort);
+  const direction = directions?.find((d) => d.order === order);
+  const sortItems: MenuEntry[] = sorts.map((s) => ({
+    label: SORT_LABEL[s],
+    selected: s === sort,
+    onSelect: () => onChange({ ...filters, sort: s, order: null }),
+  }));
+  if (directions) {
+    sortItems.push(
+      'separator',
+      ...directions.map((d) => ({ label: d.label, selected: d.order === order, onSelect: () => onChange({ ...filters, sort, order: d.order }) })),
+    );
+  }
+  // Names the view so the box is not taken for the search of the whole library (Ctrl+K).
+  const noun = viewNoun(filters, collectionId);
 
   return (
     <div className="filterbar" role="search" aria-label="Filter items">
@@ -103,8 +117,8 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           type="search"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Search titles, text and tags…"
-          aria-label="Search items"
+          placeholder={`Filter ${noun}…`}
+          aria-label={`Filter ${noun}`}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               if (text) setText('');
@@ -114,18 +128,6 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         />
         {text && <IconButton size="sm" label="Clear search" icon={<X size={14} />} onClick={() => setText('')} />}
       </div>
-
-      <Segmented
-        size="sm"
-        label="Type"
-        value={filters.type ?? 'all'}
-        onChange={(v) => onChange({ ...filters, type: v === 'all' ? null : v })}
-        options={[
-          { value: 'all', label: 'All' },
-          { value: 'problem', label: 'Problems' },
-          { value: 'reading', label: 'Readings' },
-        ]}
-      />
 
       <FilterButton label="Status" count={filters.status.length}>
         {() => (
@@ -192,16 +194,6 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         )}
       </FilterButton>
 
-      <Button
-        size="sm"
-        className={cx('filter-btn', filters.favorite && 'is-active')}
-        aria-pressed={filters.favorite}
-        icon={<Star size={14} fill={filters.favorite ? 'currentColor' : 'none'} />}
-        onClick={() => onChange({ ...filters, favorite: !filters.favorite })}
-      >
-        Favorites
-      </Button>
-
       {children}
 
       {active > 0 && (
@@ -212,7 +204,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           onClick={() => {
             setText('');
             lastPushed.current = '';
-            onChange({ ...filters, q: '', type: null, status: [], difficulty: [], tags: [], favorite: false, uncollected: false });
+            onChange(clearBarFilters(filters));
           }}
         >
           Clear filters
@@ -223,26 +215,15 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
 
       <MenuButton
         size="sm"
-        variant="ghost"
+        className="filter-btn"
         align="end"
         menuLabel="Sort by"
-        title="Sort"
-        items={sorts.map((s) => ({
-          label: SORT_LABEL[s],
-          selected: s === sort,
-          onSelect: () => onChange({ ...filters, sort: s, order: null }),
-        }))}
+        title={direction ? `Sort: ${SORT_LABEL[sort]}, ${direction.label.replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase())}` : 'Sort'}
+        items={sortItems}
       >
         <span className="muted">Sort:</span> {SORT_LABEL[sort]}
+        <ChevronDown size={12} aria-hidden="true" />
       </MenuButton>
-      {sort !== 'position' && sort !== 'relevance' && (
-        <IconButton
-          size="sm"
-          label={order === 'asc' ? 'Ascending, switch to descending' : 'Descending, switch to ascending'}
-          icon={order === 'asc' ? <ArrowDownAZ size={16} /> : <ArrowUpAZ size={16} />}
-          onClick={() => onChange({ ...filters, sort, order: order === 'asc' ? 'desc' : 'asc' })}
-        />
-      )}
     </div>
   );
 }

@@ -146,6 +146,10 @@ export interface Stats {
     byType: Record<ItemType, number>;
     byStatus: Record<ItemStatus, number>;
     byDifficulty: Record<Difficulty | 'none', number>;
+    /** What the Favorites view lists: `GET /items?favorite=true`. */
+    favorites: number;
+    /** What the Uncollected view lists: `GET /items?uncollected=true`. */
+    uncollected: number;
   };
   collections: number;
   tags: number;

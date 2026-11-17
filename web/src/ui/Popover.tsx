@@ -170,7 +170,8 @@ export type MenuEntry =
       checked?: boolean;
       /**
        * Render as one choice of several (a radio item): `true` on the choice
-       * in effect, `false` on the others. It is marked "current", and choosing
+       * in effect, `false` on the others. It is marked with a check, in the
+       * icon's place or, when the choices carry icons, at the end; choosing
        * closes the menu.
        */
       selected?: boolean;
@@ -261,16 +262,18 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
             }
             const checkable = item.checked !== undefined;
             const choice = item.selected !== undefined;
+            // aria-checked already says what is on; the check mark is for the eye.
+            const mark = <Check size={14} className="menu-item-check" aria-hidden="true" />;
+            const markInGutter = checkable || (choice && !item.icon);
             const content = (
               <>
                 <span className="menu-item-icon" aria-hidden="true">
-                  {checkable ? item.checked ? <Check size={14} /> : null : item.icon}
+                  {markInGutter ? (item.checked || item.selected ? mark : null) : item.icon}
                 </span>
                 <span className="grow">{item.label}</span>
-                {/* For a choice, aria-checked already says which one is in effect. */}
-                {item.selected ? (
-                  <span className="menu-item-hint" aria-hidden="true">
-                    current
+                {choice && !markInGutter ? (
+                  <span className="menu-item-end" aria-hidden="true">
+                    {item.selected && mark}
                   </span>
                 ) : (
                   item.hint && <span className="menu-item-hint">{item.hint}</span>

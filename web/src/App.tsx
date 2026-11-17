@@ -1,7 +1,8 @@
-import { Navigate, Route, createRoutesFromElements } from 'react-router';
+import { Navigate, Route, createRoutesFromElements, useLocation } from 'react-router';
 import { Shell } from './app/Shell';
 import { NotFoundPage, RouteError } from './app/NotFoundPage';
 import { LibraryPage } from './features/library/LibraryPage';
+import { movedIntoSettings, type SettingsSlug } from './features/settings/pages';
 import { lazyScreen } from './lib/newBuild';
 
 // Everything but the library is loaded on demand: the editor and Markdown
@@ -15,9 +16,13 @@ const TestsPage = lazyScreen(() => import('./features/tests/TestsPage'));
 const GenerateTestsPage = lazyScreen(() => import('./features/tests/GenerateTestsPage'));
 const SolutionsPage = lazyScreen(() => import('./features/solutions/SolutionsPage'));
 const TagsPage = lazyScreen(() => import('./features/tags/TagsPage'));
-const ExportPage = lazyScreen(() => import('./features/share/ExportPage'));
-const ImportPage = lazyScreen(() => import('./features/share/ImportPage'));
 const SettingsPage = lazyScreen(() => import('./features/settings/SettingsPage'));
+
+/** A page that moved into Settings: its old address leads there, query string included. */
+function MovedIntoSettings({ slug }: { slug: SettingsSlug }) {
+  const location = useLocation();
+  return <Navigate to={movedIntoSettings(slug, location)} replace />;
+}
 
 export const routes = createRoutesFromElements(
   <Route element={<Shell />} errorElement={<RouteError />}>
@@ -32,9 +37,9 @@ export const routes = createRoutesFromElements(
     <Route path="items/:id/solutions" element={<SolutionsPage />} />
     <Route path="items/:id/variant" element={<VariantPage />} />
     <Route path="tags" element={<TagsPage />} />
-    <Route path="export" element={<ExportPage />} />
-    <Route path="import" element={<ImportPage />} />
-    <Route path="share" element={<Navigate to="/export" replace />} />
+    <Route path="export" element={<MovedIntoSettings slug="export" />} />
+    <Route path="import" element={<MovedIntoSettings slug="import" />} />
+    <Route path="share" element={<Navigate to="/settings/export" replace />} />
     <Route path="settings" element={<SettingsPage />} />
     <Route path="settings/:section" element={<SettingsPage />} />
     <Route path="*" element={<NotFoundPage />} />

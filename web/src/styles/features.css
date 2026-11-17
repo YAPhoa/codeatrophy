@@ -177,7 +177,9 @@
   flex-wrap: wrap;
   gap: var(--space-1-5);
   min-height: 38px;
-  margin-bottom: var(--space-3);
+  /* 24px from the filter bar's controls, which sit 5px inside its 38px, to
+     the list; the selection bar keeps the same height so the list stays put. */
+  margin-bottom: calc(var(--space-6) - (38px - var(--control-h-sm)) / 2);
 }
 
 .filter-search {
@@ -291,7 +293,7 @@
 
 .item-row {
   display: grid;
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) minmax(0, 210px) 72px 116px 84px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px;
   align-items: center;
   column-gap: var(--space-0-5);
   min-height: 40px;
@@ -304,7 +306,7 @@
 }
 
 .item-list.is-reorderable .item-row {
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) minmax(0, 210px) 72px 116px 84px 22px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 22px;
 }
 
 .item-row:last-child {
@@ -371,6 +373,19 @@
   gap: var(--space-2);
   min-width: 0;
   padding: 0 var(--space-3) 0 var(--space-1);
+  /* Its width, not the window's, decides whether a summary has room. */
+  container-type: inline-size;
+}
+
+/* The title and its variant mark keep their width while anything else in
+   the cell can give way; only a title longer than the cell truncates. */
+.item-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .item-title {
@@ -404,14 +419,33 @@
   text-overflow: ellipsis;
 }
 
+/* Too narrow for a summary to say anything: leave the room to the title and tags. */
+@container (max-width: 440px) {
+  .item-summary {
+    display: none;
+  }
+}
+
+/* The tags share the title's cell, so they take whatever room the summary
+   does not need. The summary only gets what is left over (basis 0), so it
+   truncates first; then the tags give way. */
 .item-tags {
+  display: flex;
+  flex: 0 1 auto;
   justify-content: flex-end;
+  align-self: center;
+  min-width: 0;
+  max-width: 50%;
+  margin-left: auto;
   overflow: hidden;
 }
 
+/* One line of chips: a chip that does not fit wraps onto a second line,
+   which is hidden, rather than being cut in half. */
 .item-tags .tagchips {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  height: 24px;
   overflow: hidden;
 }
 
@@ -425,10 +459,32 @@
   outline-offset: -2px;
 }
 
-.item-diff,
-.item-result {
+.item-diff {
   justify-content: flex-end;
   font-size: var(--text-sm);
+}
+
+/* Two fixed slots, so a failed verdict starts at the same place on every row
+   whatever the test count, and the counts line up under each other. */
+.item-result {
+  display: grid;
+  grid-template-columns: 100px 56px;
+  column-gap: var(--space-2);
+  /* Keeps a failed verdict clear of the difficulty badge before it. */
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.item-result .badge {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.item-tests {
+  grid-column: 2;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
 }
 
 .item-updated {
@@ -452,21 +508,6 @@
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 1180px) {
-  .item-row,
-  .item-list.is-reorderable .item-row {
-    grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 116px 84px;
-  }
-
-  .item-list.is-reorderable .item-row {
-    grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 116px 84px 22px;
-  }
-
-  .item-tags {
-    display: none;
-  }
-}
-
 @media (max-width: 700px) {
   .item-row,
   .item-list.is-reorderable .item-row {
@@ -477,7 +518,8 @@
   .item-result,
   .item-updated,
   .item-grip,
-  .item-summary {
+  .item-summary,
+  .item-tags {
     display: none;
   }
 
@@ -2937,15 +2979,6 @@ button.case-chip:hover {
 }
 
 /* ---- Import / export ---- */
-
-.share-tabs {
-  margin-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
-}
-
-.share .page-sub {
-  margin-bottom: var(--space-5);
-}
 
 .share-form {
   gap: var(--space-5);

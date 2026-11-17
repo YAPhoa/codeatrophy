@@ -1,3 +1,12 @@
+/* JetBrains Mono ExtraBold, cut down to printable ASCII, for the wordmark
+   (--font-brand). Licence: assets/fonts/JetBrainsMono-OFL.txt. */
+@font-face {
+  font-family: 'Codeatrophy Wordmark';
+  src: url('../assets/fonts/JetBrainsMono-ExtraBold-ascii.woff2') format('woff2');
+  font-weight: 800;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {

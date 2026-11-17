@@ -164,11 +164,11 @@ test('new item: starts as the type being browsed, and takes the tags the draft s
 
   // From the readings, a new item is a reading; the preset is used once and leaves the URL.
   await nav.getByRole('link', { name: /Readings/ }).click();
-  await page.getByRole('main').getByRole('link', { name: 'New item' }).click();
+  await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Reading' })).toBeChecked();
   await expect(page).not.toHaveURL(/type=/);
 
-  // From the problems, a problem — by any of the ways in.
+  // From the problems, a problem.
   await nav.getByRole('link', { name: /Problems/ }).click();
   await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Problem' })).toBeChecked();
@@ -176,7 +176,7 @@ test('new item: starts as the type being browsed, and takes the tags the draft s
   // From the unfiltered library the last choice is left alone.
   await kind.getByText('Auto-detect').click();
   await nav.getByRole('link', { name: 'All items' }).click();
-  await page.getByRole('main').getByRole('link', { name: 'New item' }).click();
+  await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Auto-detect' })).toBeChecked();
 
   // The tags the draft suggests are on the form, and on the saved item.
@@ -899,4 +899,101 @@ test('organise: selected items are filed into a new collection', async ({ page }
   await expect(page.getByRole('heading', { name: /Smoke test picks/ })).toContainText('2');
   await expect(page.getByRole('link', { name: 'Coin Change' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Edit Distance' })).toBeVisible();
+});
+
+test('library: the filter box names the view, a row shows only a failed verdict, and the sidebar counts every view', async ({ page }) => {
+  await open(page, '/');
+  const nav = page.getByRole('complementary', { name: 'Navigation' });
+  const filter = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
+  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
+  await expect(filter).toHaveAccessibleName('Filter items');
+
+  // The test count is always there; a verdict only when the last one failed.
+  const rows = page.locator('.item-row');
+  const lru = rows.filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) });
+  await expect(lru.locator('.item-result')).toHaveText(/Compile error\s*4 tests/);
+  await expect(page.locator('.item-result', { hasText: /Accepted|Executed/ })).toHaveCount(0);
+  await expect(page.locator('.item-result', { hasText: 'no tests' }).first()).toBeVisible();
+
+  // Favorites and Uncollected are counted like the other views, and follow changes.
+  const count = (name: string) => nav.getByRole('link', { name: new RegExp(`^${name}`) }).locator('.nav-count');
+  await expect(count('Favorites')).toHaveText('5');
+  await expect(count('Uncollected')).toHaveText('4');
+  await lru.getByRole('button', { name: /favorite/i }).click();
+  await expect(count('Favorites')).toHaveText('6');
+
+  await nav.getByRole('link', { name: /^Problems/ }).click();
+  await expect(filter).toHaveAttribute('placeholder', 'Filter problems…');
+  await expect(filter).toHaveAccessibleName('Filter problems');
+  await nav.getByRole('link', { name: /^Readings/ }).click();
+  await expect(filter).toHaveAttribute('placeholder', 'Filter readings…');
+  await nav.getByRole('link', { name: /^Favorites/ }).click();
+  await expect(rows).toHaveCount(6);
+  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
+  await nav.getByRole('link', { name: /^Uncollected/ }).click();
+  await expect(rows).toHaveCount(4);
+  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
+});
+
+test('library: the sort menu holds the directions, named for the field, and a direction keeps the field', async ({ page }) => {
+  await open(page, '/');
+  const sort = page.getByRole('button', { name: /^Sort/ });
+  const menu = page.getByRole('menu', { name: 'Sort by' });
+  const choice = (name: string) => menu.getByRole('menuitemradio', { name, exact: true });
+  await expect(page.getByRole('button', { name: /scending/ })).toHaveCount(0);
+
+  await sort.click();
+  await expect(choice('Newest first')).toHaveAttribute('aria-checked', 'true');
+  await expect(choice('Oldest first')).toHaveAttribute('aria-checked', 'false');
+  await choice('Title').click();
+  await expect(sort).toHaveText(/Sort:\s*Title/);
+  await sort.click();
+  await expect(choice('A → Z')).toHaveAttribute('aria-checked', 'true');
+  await choice('Z → A').click();
+  await expect(page).toHaveURL(/sort=title&order=desc/);
+  await expect(sort).toHaveText(/Sort:\s*Title/);
+  await expect(page.locator('.item-title').first()).toHaveText('Write-Ahead Logging and fsync');
+
+  await sort.click();
+  await choice('Difficulty').click();
+  await sort.click();
+  await expect(choice('Easiest first')).toHaveAttribute('aria-checked', 'true');
+  await choice('Hardest first').click();
+  await expect(page.locator('.item-row').first().locator('.item-diff')).toHaveText('Hard');
+
+  // A collection's own order has no direction.
+  await page.getByRole('link', { name: 'Interview prep' }).click();
+  await sort.click();
+  await expect(choice('Manual order')).toHaveAttribute('aria-checked', 'true');
+  await expect(menu.getByRole('menuitemradio')).toHaveText(['Manual order', 'Last updated', 'Date added', 'Title', 'Difficulty']);
+});
+
+test('settings: Import and Export are pages of Settings, and their old addresses lead there', async ({ page }) => {
+  await open(page, '/');
+  const sidebar = page.getByRole('complementary', { name: 'Navigation' });
+  await expect(sidebar.getByRole('link', { name: 'Import', exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('link', { name: 'Export', exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Actions for Interview prep' }).click();
+  await page.getByRole('menuitem', { name: 'Export…' }).click();
+  await expect(page).toHaveURL(/\/settings\/export\?collection=/);
+  const collection = new URL(page.url()).searchParams.get('collection')!;
+  const nav = page.getByRole('navigation', { name: 'Settings' });
+  await expect(nav.getByRole('link', { name: 'Export' })).toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveTitle(/^Export · Settings/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Export a bundle');
+  await expect(page.getByLabel('Collection', { exact: true })).toHaveValue(collection);
+
+  await nav.getByRole('link', { name: 'Import' }).click();
+  await expect(page).toHaveURL(/\/settings\/import$/);
+  await expect(nav.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import a bundle');
+
+  // A bookmark of the old page arrives, with what it asked to export.
+  await open(page, `/export?collection=${collection}&solutions=0`);
+  await expect(page).toHaveURL(new RegExp(`/settings/export\\?collection=${collection}&solutions=0`));
+  await expect(page.getByLabel('Collection', { exact: true })).toHaveValue(collection);
+  await expect(page.getByRole('checkbox', { name: 'Saved solutions' })).not.toBeChecked();
+  await open(page, '/import');
+  await expect(page).toHaveURL(/\/settings\/import\?mock=fast$/);
 });

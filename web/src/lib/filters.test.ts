@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, activeFilterCount, canReorder, effectiveSort, filtersToSearch, parseFilters, toListParams, toggleIn } from './filters';
+import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, effectiveSort, filtersToSearch, parseFilters, sortDirections, toListParams, toggleIn, viewNoun } from './filters';
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs));
 
@@ -100,8 +100,54 @@ describe('helpers', () => {
     expect(activeFilterCount(parse('q=a&type=problem&status=todo&status=done&tag=x&favorite=true'))).toBe(5);
   });
 
+  it('leaves the sidebar view out of the filter bar', () => {
+    const f = parse('q=a&type=problem&status=todo&difficulty=easy&tag=x&favorite=true&uncollected=true&sort=title');
+    expect(barFilterCount(f)).toBe(4);
+    expect(barFilterCount(parse('type=reading&favorite=true&uncollected=true'))).toBe(0);
+    const cleared = clearBarFilters(f);
+    expect(barFilterCount(cleared)).toBe(0);
+    expect(cleared).toMatchObject({ type: 'problem', favorite: true, uncollected: true, sort: 'title' });
+  });
+
   it('toggles membership', () => {
     expect(toggleIn(['a', 'b'], 'a')).toEqual(['b']);
     expect(toggleIn(['a'], 'b')).toEqual(['a', 'b']);
+  });
+});
+
+describe('sortDirections', () => {
+  it('names the directions for the field, the default first', () => {
+    for (const sort of ['updated', 'created'] as const) {
+      expect(sortDirections(sort)).toEqual([
+        { order: 'desc', label: 'Newest first' },
+        { order: 'asc', label: 'Oldest first' },
+      ]);
+      expect(sortDirections(sort)![0]!.order).toBe(defaultOrder(sort));
+    }
+    expect(sortDirections('title')).toEqual([
+      { order: 'asc', label: 'A → Z' },
+      { order: 'desc', label: 'Z → A' },
+    ]);
+    // Ascending difficulty is easy before hard.
+    expect(sortDirections('difficulty')).toEqual([
+      { order: 'asc', label: 'Easiest first' },
+      { order: 'desc', label: 'Hardest first' },
+    ]);
+  });
+
+  it('has none for manual order and relevance', () => {
+    expect(sortDirections('position')).toBeNull();
+    expect(sortDirections('relevance')).toBeNull();
+  });
+});
+
+describe('viewNoun', () => {
+  it('names problems and readings only in their own views', () => {
+    expect(viewNoun(parse('type=problem'), null)).toBe('problems');
+    expect(viewNoun(parse('type=reading'), null)).toBe('readings');
+    expect(viewNoun(parse(''), null)).toBe('items');
+    expect(viewNoun(parse('favorite=true'), null)).toBe('items');
+    expect(viewNoun(parse('uncollected=true&type=problem'), null)).toBe('items');
+    expect(viewNoun(parse('type=reading'), 'c1')).toBe('items');
   });
 });

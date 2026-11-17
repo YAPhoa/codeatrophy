@@ -680,6 +680,21 @@ button.chip:hover {
   font-size: var(--text-sm);
 }
 
+/* The mark on a choice in effect or a checked item. It alone marks the
+   choice: the row's background is left to hover and focus. */
+.menu-item-check {
+  color: var(--accent-text);
+}
+
+/* Choices that carry their own icon keep the check at the end, in a slot of
+   fixed width so the labels line up. */
+.menu-item-end {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  flex: none;
+}
+
 .menu-sep {
   height: 1px;
   margin: var(--space-1) -4px;
@@ -1543,10 +1558,19 @@ button.chip:hover {
   flex: none;
 }
 
+/* The − and + buttons step the value, so the browser's own spin arrows, which
+   would sit over the number, are hidden. The arrow keys still step it. */
 .stepper-input {
   width: 58px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+
+.stepper-input::-webkit-inner-spin-button,
+.stepper-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 .stepper-unit {

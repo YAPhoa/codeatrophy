@@ -164,6 +164,30 @@ describe('meta and stats', () => {
     expect(stats.submissions.total).toBeGreaterThan(10);
   });
 
+  it('counts favorites and uncollected items as the item list filters them', async () => {
+    const counts = async () => (await api.stats()).items;
+    const listed = async () => ({
+      favorites: (await api.items.list({ favorite: true, limit: 1 })).total,
+      uncollected: (await api.items.list({ uncollected: true, limit: 1 })).total,
+    });
+    const before = await counts();
+    expect(before.favorites).toBeGreaterThan(0);
+    expect(before.uncollected).toBeGreaterThan(0);
+    expect({ favorites: before.favorites, uncollected: before.uncollected }).toEqual(await listed());
+
+    const loose = (await api.items.list({ uncollected: true, favorite: false, limit: 1 })).items[0]!;
+    await api.items.update(loose.id, { favorite: true });
+    const [collection] = (await api.collections.list()).items;
+    await api.collections.addItems(collection!.id, [loose.id]);
+    const after = await counts();
+    expect(after.favorites).toBe(before.favorites + 1);
+    expect(after.uncollected).toBe(before.uncollected - 1);
+    expect({ favorites: after.favorites, uncollected: after.uncollected }).toEqual(await listed());
+
+    start({ library: 'empty' });
+    expect(await counts()).toMatchObject({ favorites: 0, uncollected: 0 });
+  });
+
   it('counts only submit-mode submissions as accepted', async () => {
     const before = (await api.stats()).submissions;
     const source = 'print("ok")';

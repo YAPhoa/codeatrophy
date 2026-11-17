@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_PAGES, findSettingsPage, movedSettingsPage, settingsLanding } from './pages';
+import { SETTINGS_PAGES, findSettingsPage, movedIntoSettings, movedSettingsPage, settingsLanding } from './pages';
 
 describe('settingsLanding', () => {
   it('opens the first page for /settings on its own', () => {
@@ -35,5 +35,13 @@ describe('findSettingsPage', () => {
     expect(findSettingsPage('styles')?.label).toBe('Writing styles');
     expect(findSettingsPage('Styles')).toBeUndefined();
     expect(findSettingsPage(undefined)).toBeUndefined();
+  });
+});
+
+describe('movedIntoSettings', () => {
+  it('keeps the query string and fragment of the old address', () => {
+    expect(movedIntoSettings('export', { search: '?collection=c1&solutions=0', hash: '' })).toBe('/settings/export?collection=c1&solutions=0');
+    expect(movedIntoSettings('export', { search: '?item=a&item=b', hash: '#top' })).toBe('/settings/export?item=a&item=b#top');
+    expect(movedIntoSettings('import', { search: '', hash: '' })).toBe('/settings/import');
   });
 });
