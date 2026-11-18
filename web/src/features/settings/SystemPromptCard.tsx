@@ -56,7 +56,7 @@ const SYSTEM_PROMPT: PromptKind<SystemPrompt> = {
   id: SYSTEM_PROMPT_ID,
   title: 'System prompt',
   section: 'Authoring conventions',
-  hint: 'The conventions every draft and variant starts from. Styles are added after them.',
+  hint: 'Baseline conventions for every draft and variant. The selected writing style is added after.',
   queryKey: qk.systemPrompt,
   useQuery: useSystemPrompt,
   put: (custom) => api.settings.putSystemPrompt(custom),
@@ -216,17 +216,21 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
   };
 
   return (
-    <div id={kind.id} className="card card-pad sysprompt" role="group" aria-labelledby={titleId}>
-      <div className="sysprompt-head">
-        <h2 id={titleId} className="prefs-group-title" tabIndex={-1}>
-          {kind.title}
-        </h2>
-        {data?.isCustom && (
-          <Badge tone="accent" title={kind.customTitle}>
-            Custom
-          </Badge>
-        )}
-        <span className="spacer" />
+    <div id={kind.id} className="sysprompt" role="group" aria-labelledby={titleId}>
+      <div className="styles-head">
+        <div className="grow">
+          <div className="row">
+            <h2 id={titleId} className="prefs-group-title" tabIndex={-1}>
+              {kind.title}
+            </h2>
+            {data?.isCustom && (
+              <Badge tone="accent" title={kind.customTitle}>
+                Custom
+              </Badge>
+            )}
+          </div>
+          <p className="field-hint">{kind.hint}</p>
+        </div>
         {data?.isCustom && draft === null && (
           <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => void reset()}>
             Reset to built-in
@@ -243,14 +247,13 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
           </>
         )}
       </div>
-      <p className="field-hint">{kind.hint}</p>
 
       {prompt.isPending ? (
         <PageLoading />
       ) : prompt.isError ? (
         <ErrorState compact error={prompt.error} onRetry={() => void prompt.refetch()} />
       ) : (
-        <>
+        <div className="card card-pad sysprompt-body">
           <div className="sysprompt-section">
             <div className="sysprompt-section-head">
               <h3 id={sectionId} className="sysprompt-section-title">
@@ -318,7 +321,7 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
               </pre>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );

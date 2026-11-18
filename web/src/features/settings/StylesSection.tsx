@@ -218,8 +218,8 @@ export function StylesSection() {
         </h1>
       </div>
       <p className="settings-lead">
-        A style is a short note on how drafts are written: the statement layout, the tone, which starter languages to include. Assistants connected over MCP follow it too. It cannot
-        change an item’s fields or the stdin/stdout format.
+        Brief instructions for how drafts are written: statement layout, tone, and starter languages. Assistants connected over MCP follow them too. Styles can’t change an item’s
+        fields or the stdin/stdout format.
       </p>
 
       {full && (
@@ -258,7 +258,7 @@ export function StylesSection() {
                 <SaveStatus state={choice.state} />
               </div>
               <p id="default-style-hint" className="field-hint">
-                Used for new drafts unless you pick another when drafting.
+                Used for new drafts unless you choose a different one when drafting.
               </p>
             </div>
             <Button
