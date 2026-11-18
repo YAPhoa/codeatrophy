@@ -15,6 +15,8 @@ interface Entry {
   icon: ReactNode;
   label: string;
   hint?: string;
+  /** Other words a command is found by, besides its label. */
+  keywords?: string;
   run: () => void;
   /** Where the entry goes, when it is a destination: lets it be opened in a new tab. */
   to?: string;
@@ -27,6 +29,13 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => window.clearTimeout(t);
   }, [value, ms]);
   return v;
+}
+
+/** A run of entries, under a label when it has one. */
+interface Section {
+  key: string;
+  label?: string;
+  entries: Entry[];
 }
 
 /** Quick switcher: type to find items and collections, or run a command. */
@@ -51,11 +60,11 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     return () => opener?.focus?.();
   }, []);
 
-  const entries = useMemo<Entry[]>(() => {
+  const sections = useMemo<Section[]>(() => {
     const go = (to: string) => ({ to, run: () => navigate(to) });
     const needle = text.trim().toLowerCase();
     const commands: Entry[] = [
-      { key: 'new', icon: <Plus size={16} />, label: 'Capture a new item', hint: 'C', ...go(newHref) },
+      { key: 'new', icon: <Plus size={16} />, label: 'New item', hint: 'C', keywords: 'capture', ...go(newHref) },
       { key: 'lib', icon: <Library size={16} />, label: 'Go to library', ...go('/') },
       { key: 'tags', icon: <Tags size={16} />, label: 'Manage tags', ...go('/tags') },
       { key: 'import', icon: <Upload size={16} />, label: 'Import a bundle', ...go('/settings/import') },
@@ -65,9 +74,10 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         key: 'theme',
         icon: resolveTheme(getThemePreference()) === 'dark' ? <Sun size={16} /> : <Moon size={16} />,
         label: resolveTheme(getThemePreference()) === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+        keywords: 'theme light dark',
         run: () => setThemePreference(resolveTheme(getThemePreference()) === 'dark' ? 'light' : 'dark'),
       },
-    ].filter((c) => needle === '' || c.label.toLowerCase().includes(needle));
+    ].filter((c) => `${c.label} ${c.keywords ?? ''}`.toLowerCase().includes(needle));
 
     const itemEntries: Entry[] = ((needle ? items.data : recent.data)?.items ?? []).map((it) => ({
       key: `item-${it.id}`,
@@ -88,8 +98,16 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       ? [{ key: 'search-all', icon: <Search size={16} />, label: `Search the library for “${text.trim()}”`, ...go(`/?q=${encodeURIComponent(text.trim())}`) }]
       : [];
 
-    return needle ? [...itemEntries, ...collectionEntries, ...searchAll, ...commands] : [...commands.slice(0, 1), ...itemEntries, ...commands.slice(1)];
+    // With nothing typed, only New item and the recent items; the other commands wait to be typed.
+    if (!needle)
+      return [
+        { key: 'commands', entries: commands.filter((c) => c.key === 'new') },
+        { key: 'recent', label: 'Recent', entries: itemEntries },
+      ].filter((s) => s.entries.length > 0);
+    return [{ key: 'results', entries: [...itemEntries, ...collectionEntries, ...searchAll, ...commands] }];
   }, [text, items.data, recent.data, collections.data, navigate, newHref]);
+
+  const entries = useMemo(() => sections.flatMap((s) => s.entries), [sections]);
 
   useEffect(() => setActive(0), [text]);
 
@@ -112,6 +130,38 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       {entry.hint && <span className="palette-hint">{entry.hint}</span>}
     </>
   );
+
+  const option = (entry: Entry) => {
+    const i = entries.indexOf(entry);
+    return (
+      <li
+        key={entry.key}
+        id={`palette-${entry.key}`}
+        role="option"
+        aria-selected={i === active}
+        className={cx('palette-item', i === active && 'is-active')}
+        onMouseMove={() => setActive(i)}
+        onClick={() => run(entry)}
+      >
+        {entry.to !== undefined ? (
+          <Link
+            to={entry.to}
+            tabIndex={-1}
+            className="palette-link"
+            onClick={(e) => {
+              // A plain click is the option's own; with a modifier the browser opens the link in a new tab.
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) e.stopPropagation();
+              else e.preventDefault();
+            }}
+          >
+            {body(entry)}
+          </Link>
+        ) : (
+          body(entry)
+        )}
+      </li>
+    );
+  };
 
   return createPortal(
     <div
@@ -156,36 +206,21 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           {items.isFetching && q.length > 0 && <Spinner size={14} label="Searching…" />}
         </div>
         <ul id="palette-list" role="listbox" aria-label="Results" className="palette-list" ref={listRef}>
-          {entries.map((entry, i) => (
-            <li
-              key={entry.key}
-              id={`palette-${entry.key}`}
-              role="option"
-              aria-selected={i === active}
-              className={cx('palette-item', i === active && 'is-active')}
-              onMouseMove={() => setActive(i)}
-              onClick={() => run(entry)}
-            >
-              {entry.to !== undefined ? (
-                <Link
-                  to={entry.to}
-                  tabIndex={-1}
-                  className="palette-link"
-                  onClick={(e) => {
-                    // A plain click is the option's own; with a modifier the browser opens the link in a new tab.
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) e.stopPropagation();
-                    else e.preventDefault();
-                  }}
-                >
-                  {body(entry)}
-                </Link>
-              ) : (
-                body(entry)
-              )}
-            </li>
-          ))}
+          {sections.map((section) =>
+            section.label ? (
+              <li key={section.key} role="group" aria-labelledby={`palette-group-${section.key}`} className="palette-group">
+                <div id={`palette-group-${section.key}`} role="presentation" className="palette-group-label">
+                  {section.label}
+                </div>
+                <ul role="none">{section.entries.map(option)}</ul>
+              </li>
+            ) : (
+              section.entries.map(option)
+            ),
+          )}
           {entries.length === 0 && <li className="palette-empty">Nothing matches.</li>}
         </ul>
+        {text.trim() === '' && <p className="palette-footer">Type to find items, collections and commands</p>}
       </div>
     </div>,
     document.body,

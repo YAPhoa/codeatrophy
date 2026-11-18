@@ -1,10 +1,51 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Check, PenLine, Sparkles, Square } from 'lucide-react';
 import type { AppliedStyle, GenerationUsage } from '../../api/types';
 import { aiLogPath } from '../../lib/aiLog';
 import { describeUsage, plural } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
+
+/**
+ * The lines of the generating mark. Each token is [width, tick]: its width in
+ * pixels and the tick (0 to 9) of its line's step on which it arrives. The
+ * caret's keyframes in features.css follow these numbers.
+ */
+const MARK_LINES: [number, number][][] = [
+  [[5, 1], [3, 2], [8, 4], [4, 6]],
+  [[7, 1], [4, 3], [6, 6]],
+  [[3, 1], [9, 2], [5, 5], [3, 6]],
+  [[6, 2], [6, 4], [4, 7]],
+  [[4, 1], [8, 3], [3, 4], [5, 7]],
+];
+
+/** Each token with its x position: tokens sit 2px apart. */
+const MARK_ROWS = MARK_LINES.map((tokens) => {
+  let x = 0;
+  return tokens.map(([width, tick]) => {
+    const token = { x, width, tick };
+    x += width + 2;
+    return token;
+  });
+});
+
+/** The mark of a generation in progress: tokens streaming in behind a caret. */
+function GeneratingMark() {
+  return (
+    <svg className="generating-mark" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true">
+      <g transform="translate(1 25)">
+        {MARK_ROWS.map((tokens, i) => (
+          <g key={i} className="generating-row" style={{ '--i': i } as CSSProperties}>
+            {tokens.map((t) => (
+              <rect key={t.x} className="generating-token" x={t.x} width={t.width} height="3" style={{ '--k': t.tick } as CSSProperties} />
+            ))}
+          </g>
+        ))}
+      </g>
+      <rect className="generating-caret" width="3" height="7" />
+    </svg>
+  );
+}
 
 /** In-progress state of a long AI call: what is happening, for how long, and a way out. */
 export function GeneratingPanel({ title, startedAt, onCancel, children }: { title: string; startedAt: number | null; onCancel: () => void; children?: ReactNode }) {
@@ -16,22 +57,7 @@ export function GeneratingPanel({ title, startedAt, onCancel, children }: { titl
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
     <div className="generating">
-      <div className="generating-scroll" aria-hidden="true">
-        <div className="generating-lines">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <span key={i} className="generating-line">
-              <span className="generating-ink" />
-            </span>
-          ))}
-          <span className="generating-quill">
-            <svg viewBox="0 0 16 26" width="16" height="26">
-              <path fill="currentColor" d="M5.2 19.6C3 14 5 6.2 13.4.8c2.4 4.2 2.2 7.8.8 10.8L12 11.2l1.2 2.2c-.6 1-1.3 1.9-2.1 2.8l-1.9-.4.8 1.6c-.8.9-1.7 1.8-2.7 2.6z" />
-              <path fill="currentColor" d="M1.5 25.5 5.7 19.1 7.1 20z" />
-              <path className="generating-quill-rib" fill="none" strokeWidth=".8" strokeLinecap="round" d="M6.5 18.6q2.7-8.1 6.4-15.6" />
-            </svg>
-          </span>
-        </div>
-      </div>
+      <GeneratingMark />
       <div className="grow">
         {/* Only the title is a live region: the counter beside it changes every second and would be read out each time. */}
         <div className="generating-title">

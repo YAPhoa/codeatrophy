@@ -248,6 +248,57 @@ test('solve: the editor has the room, and a failing submission shows which case 
   await expect(page.getByRole('tabpanel').getByText('Wrong answer').first()).toBeVisible();
 });
 
+test('solve: the history lists submissions under column names, and runs are not kept there', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+  await page.getByRole('tab', { name: /Submissions/ }).click();
+  const history = page.getByRole('tabpanel', { name: 'Submissions' });
+  const head = history.locator('.history-head');
+  for (const name of ['Status', 'Language', 'Passed', 'Runtime', 'Memory', 'Submitted']) await expect(head.getByText(name, { exact: true })).toBeVisible();
+  // The seed has a run and two submissions here; only the submissions are listed, each row naming its numbers.
+  const rows = history.locator('.history-row');
+  await expect(rows).toHaveCount(2);
+  await expect(history.getByRole('button', { name: /^Wrong answer Python Passed \d+\/\d+ Runtime \d+ ms Memory [\d.]+ MB/ })).toBeVisible();
+
+  // A run shows its result, and stays out of the history.
+  await writeCode(page, 'import sys\n\nprint(len(sys.stdin.readline()))\n');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const result = page.getByRole('status').filter({ hasText: /passed/ });
+  await expect(result).toContainText(/Ran \d+ sample cases?: .*passed/);
+  await expect(rows).toHaveCount(2);
+
+  // A submission is added at the top.
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(result).toContainText(/Ran \d+ test cases: .*passed/);
+  await page.getByRole('dialog', { name: 'Save as a solution' }).getByRole('button', { name: 'Not now' }).click();
+  await expect(rows).toHaveCount(3);
+  await expect(rows.first()).toContainText('Accepted');
+  await expect(rows.first()).toContainText('just now');
+});
+
+test('solve: the custom input of a problem survives a reload', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'Show tests and results' }).click();
+  await page.getByRole('tab', { name: 'Custom input' }).click();
+  const input = page.getByLabel('Standard input for one run');
+  await input.fill('4\n2 7 11 15\n9\n');
+  // It is stored shortly after typing stops.
+  const stored = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('codeatrophy:stdin:')).map((k) => localStorage.getItem(k)));
+  await expect.poll(stored).toEqual(['4\n2 7 11 15\n9\n']);
+
+  // The mock starts afresh on a reload; what the browser keeps does not.
+  await page.reload();
+  await expect(page.getByLabel('Standard input for one run')).toHaveValue('4\n2 7 11 15\n9\n');
+
+  // It is kept per problem.
+  await page.getByRole('button', { name: /^Expand navigation/ }).click();
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+  await page.getByRole('tab', { name: 'Custom input' }).click();
+  await expect(page.getByLabel('Standard input for one run')).toHaveValue('');
+});
+
 test('solutions: an accepted submission is kept, and can become the reference', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
@@ -300,11 +351,18 @@ test('preferences: hidden test cases and editor options follow the settings', as
   await page.getByRole('button', { name: /^Tests/ }).click();
   await expect(page.getByText(/\d+ test cases · \d+ shown as examples/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reveal all' })).toBeVisible();
+  // A revealed case can be hidden again: a Hide button takes the place of its "hidden" tag.
+  const caseList = page.locator('.tcases');
+  const revealOne = caseList.getByRole('button', { name: /^Reveal case \d+$/ }).first();
+  const n = (await revealOne.getAttribute('aria-label'))!.replace('Reveal case ', '');
+  await revealOne.click();
+  await caseList.getByRole('button', { name: `Hide case ${n}` }).click();
+  await expect(caseList.getByRole('button', { name: `Reveal case ${n}` })).toBeVisible();
   const editorLine = page.locator('.editor-host .cm-line').first();
   await expect(editorLine).toHaveCSS('font-size', '14px');
 
   await page.getByRole('button', { name: /^Expand navigation/ }).click();
-  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('list', { name: 'Manage' }).getByRole('link', { name: 'Settings' }).click();
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Preferences' }).click();
   await page.getByRole('checkbox', { name: 'Hide test cases by default' }).uncheck();
   await page.getByRole('button', { name: 'Larger font' }).click();
@@ -424,6 +482,7 @@ test('large test cases: asked for on the generate form, then kept and managed on
   // On the Test cases page they stay out of sight too; renaming, marking and moving still work.
   await expect(page).toHaveURL(/\/tests$/);
   await page.getByRole('button', { name: 'Show test cases' }).first().click();
+  await expect(page.getByRole('button', { name: 'Hide test cases' })).toBeVisible();
   await page.locator('.case-row').last().locator('.case-row-main').click();
   const editor = page.getByRole('group', { name: 'Selected test case' });
   await expect(editor.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
@@ -435,6 +494,9 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(page.getByText('Test case saved')).toBeVisible();
   const row = page.locator('.case-row').filter({ hasText: 'Big input' });
   await expect(row.getByText('sample', { exact: true })).toBeVisible();
+  // A saved sample has no Delete: it is part of the statement.
+  await expect(editor.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(editor.getByText('Untick Sample to delete it')).toBeVisible();
   await row.getByRole('button', { name: 'Move Big input up' }).click();
   await expect(page.locator('.case-row').nth(-2)).toContainText('Big input');
   await expect(editor.getByText(/Too large to show or edit/)).toBeVisible();
@@ -901,7 +963,7 @@ test('organise: selected items are filed into a new collection', async ({ page }
   await expect(page.getByRole('link', { name: 'Edit Distance' })).toBeVisible();
 });
 
-test('library: the filter box names the view, a row shows only a failed verdict, and the sidebar counts every view', async ({ page }) => {
+test('library: the filter box names the view, a row shows only a failed verdict and a cut description in full on hover, and the sidebar counts every view', async ({ page }) => {
   await open(page, '/');
   const nav = page.getByRole('complementary', { name: 'Navigation' });
   const filter = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
@@ -915,10 +977,17 @@ test('library: the filter box names the view, a row shows only a failed verdict,
   await expect(page.locator('.item-result', { hasText: /Accepted|Executed/ })).toHaveCount(0);
   await expect(page.locator('.item-result', { hasText: 'no tests' }).first()).toBeVisible();
 
-  // Favorites and Uncollected are counted like the other views, and follow changes.
+  // A description cut off by the row shows in full on hover; one that fits gets no tooltip.
+  const cut = rows.filter({ has: page.getByRole('link', { name: 'Sliding-window rate limiter', exact: true }) }).locator('.item-summary');
+  await cut.hover();
+  await expect(cut).toHaveAttribute('title', 'Allow at most K requests per user in any window of W seconds.');
+  const fits = rows.filter({ has: page.getByRole('link', { name: 'Merge k Sorted Lists', exact: true }) }).locator('.item-summary');
+  await fits.hover();
+  await expect(fits).not.toHaveAttribute('title', /./);
+
+  // Favorites is counted like the other views, and follows changes. Uncollected is not in the sidebar for now.
   const count = (name: string) => nav.getByRole('link', { name: new RegExp(`^${name}`) }).locator('.nav-count');
   await expect(count('Favorites')).toHaveText('5');
-  await expect(count('Uncollected')).toHaveText('4');
   await lru.getByRole('button', { name: /favorite/i }).click();
   await expect(count('Favorites')).toHaveText('6');
 
@@ -930,9 +999,7 @@ test('library: the filter box names the view, a row shows only a failed verdict,
   await nav.getByRole('link', { name: /^Favorites/ }).click();
   await expect(rows).toHaveCount(6);
   await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
-  await nav.getByRole('link', { name: /^Uncollected/ }).click();
-  await expect(rows).toHaveCount(4);
-  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
+  await expect(nav.getByRole('link', { name: /^Uncollected/ })).toHaveCount(0);
 });
 
 test('library: the sort menu holds the directions, named for the field, and a direction keeps the field', async ({ page }) => {

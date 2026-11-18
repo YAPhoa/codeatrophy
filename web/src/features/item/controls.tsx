@@ -4,10 +4,11 @@ import { BookOpen, CheckCircle2, Circle, CircleDot, Code2, FolderPlus, Folders, 
 import type { Collection, Difficulty, ItemStatus, ItemType, Verdict } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { useQuickUpdate } from '../../api/queries';
-import { DIFFICULTY_LABEL, STATUS_LABEL, VERDICT_BRIEF, VERDICT_LABEL, difficultyTone, verdictTone } from '../../lib/format';
+import { DIFFICULTY_LABEL, STATUS_LABEL, VERDICT_BRIEF, VERDICT_LABEL, verdictTone } from '../../lib/format';
 import { buildTree, flattenTree } from '../../lib/tree';
 import { Button, cx, type ButtonSize } from '../../ui/Button';
 import { MenuButton, Popover } from '../../ui/Popover';
+import { IconSwap } from '../../ui/Animated';
 import { Badge } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 
@@ -25,9 +26,15 @@ export function TypeIcon({ type, size = 15 }: { type: ItemType; size?: number })
   );
 }
 
+/** Neutral, with a coloured dot beside the word: the status colours stay for verdicts and progress. */
 export function DifficultyBadge({ difficulty }: { difficulty: Difficulty | null }) {
   if (!difficulty) return null;
-  return <Badge tone={difficultyTone(difficulty)}>{DIFFICULTY_LABEL[difficulty]}</Badge>;
+  return (
+    <Badge className="badge-difficulty">
+      <span className={`difficulty-dot is-${difficulty}`} aria-hidden="true" />
+      {DIFFICULTY_LABEL[difficulty]}
+    </Badge>
+  );
 }
 
 export function VerdictBadge({ verdict, short }: { verdict: Verdict; short?: boolean }) {
@@ -56,7 +63,11 @@ export function StatusControl({ item, compact, size = 'md' }: { item: ItemRef; c
       label={compact ? `Status of ${item.title}: ${STATUS_LABEL[item.status]}. Change` : undefined}
       title={`Status: ${STATUS_LABEL[item.status]}`}
       menuLabel="Set status"
-      icon={<StatusIcon status={item.status} />}
+      icon={
+        <IconSwap swapKey={item.status}>
+          <StatusIcon status={item.status} />
+        </IconSwap>
+      }
       items={ITEM_STATUSES.map((s) => ({
         label: STATUS_LABEL[s],
         icon: <StatusIcon status={s} size={14} />,
@@ -82,7 +93,12 @@ export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: Bu
       aria-pressed={item.favorite}
       aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
       title={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
-      icon={<Star size={16} fill={item.favorite ? 'currentColor' : 'none'} />}
+      icon={
+        // A small pop on becoming a favorite; a plain fade on leaving.
+        <IconSwap swapKey={item.favorite} plain className={cx('fav-icon', item.favorite && 'is-on')}>
+          <Star size={16} fill={item.favorite ? 'currentColor' : 'none'} className={cx(item.favorite && 'fav-star-on')} />
+        </IconSwap>
+      }
       onClick={(e) => {
         e.stopPropagation();
         update.mutate({ id: item.id, change: { favorite: !item.favorite } }, { onError: (err) => toast.error(err) });
@@ -91,21 +107,54 @@ export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: Bu
   );
 }
 
-export function TagChips({ tags, max }: { tags: readonly string[]; max?: number }) {
+interface TagChipsProps {
+  tags: readonly string[];
+  max?: number;
+  tabIndex?: number;
+  /** Makes the "+N" chip a button that shows the rest elsewhere: whether that is open, and its id. */
+  more?: { expanded: boolean; controls: string; onToggle: () => void };
+}
+
+export function TagChips({ tags, max, tabIndex, more }: TagChipsProps) {
   const shown = max != null ? tags.slice(0, max) : tags;
   const rest = tags.length - shown.length;
+  const hidden = tags.slice(shown.length).join(', ');
   return (
     <span className="tagchips">
       {shown.map((t) => (
-        <Link key={t} to={`/?tag=${encodeURIComponent(t)}`} className="chip chip-tag" title={`Show items tagged ${t}`} onClick={(e) => e.stopPropagation()}>
+        <Link
+          key={t}
+          to={`/?tag=${encodeURIComponent(t)}`}
+          className="chip chip-tag"
+          title={`Show items tagged ${t}`}
+          tabIndex={tabIndex}
+          onClick={(e) => e.stopPropagation()}
+        >
           <span className="truncate">{t}</span>
         </Link>
       ))}
-      {rest > 0 && (
-        <span className="chip" title={tags.slice(shown.length).join(', ')}>
-          +{rest}
-        </span>
-      )}
+      {rest > 0 &&
+        (more ? (
+          <button
+            type="button"
+            className="chip chip-more"
+            title={hidden}
+            aria-label={`${rest} more ${rest === 1 ? 'tag' : 'tags'}`}
+            aria-expanded={more.expanded}
+            aria-controls={more.controls}
+            tabIndex={tabIndex}
+            onClick={(e) => {
+              e.stopPropagation();
+              more.onToggle();
+            }}
+          >
+            +{rest}
+          </button>
+        ) : (
+          <span className="chip" title={hidden}>
+            +{rest}
+          </span>
+        ))}
     </span>
   );
 }

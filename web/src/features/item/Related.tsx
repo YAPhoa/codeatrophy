@@ -2,7 +2,8 @@ import { Link } from 'react-router';
 import { CornerLeftUp, GitBranch } from 'lucide-react';
 import { useItem, useItemQuery, useMeta } from '../../api/queries';
 import type { Item } from '../../api/types';
-import { LinkButton } from '../../ui/Button';
+import { useLoadingShown } from '../../lib/motion';
+import { LinkButton, cx } from '../../ui/Button';
 import { VariantCard } from '../capture/VariantCard';
 import { DifficultyBadge, StatusIcon } from './controls';
 
@@ -22,6 +23,7 @@ function Origin({ item }: { item: Item }) {
 /** The items derived from this one, oldest first. */
 function Derived({ item }: { item: Item }) {
   const variants = useItemQuery({ variantOf: item.id, sort: 'created', limit: 50 }, item.variantCount > 0);
+  const loadingShown = useLoadingShown(variants.isPending);
   if (item.variantCount === 0) return null;
   return (
     <ul className="related-list">
@@ -34,7 +36,7 @@ function Derived({ item }: { item: Item }) {
           <DifficultyBadge difficulty={v.difficulty} />
         </li>
       ))}
-      {variants.isPending && <li className="muted">Loading…</li>}
+      {variants.isPending && <li className={cx('muted', 'loading-delay', !loadingShown && 'is-pending')}>Loading…</li>}
     </ul>
   );
 }

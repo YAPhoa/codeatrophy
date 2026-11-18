@@ -59,6 +59,7 @@ type MetaLimits struct {
 	MaxStylePresets            int   `json:"maxStylePresets"`
 	MaxStyleNameChars          int   `json:"maxStyleNameChars"`
 	MaxStyleInstructionsChars  int   `json:"maxStyleInstructionsChars"`
+	MaxSystemPromptChars       int   `json:"maxSystemPromptChars"`
 	MaxModelIDChars            int   `json:"maxModelIdChars"`
 	MaxAPIKeyChars             int   `json:"maxApiKeyChars"`
 	MaxAIProviders             int   `json:"maxAiProviders"`
@@ -123,6 +124,7 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 			MaxStylePresets:            domain.MaxStylePresets,
 			MaxStyleNameChars:          domain.MaxStyleNameChars,
 			MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,
+			MaxSystemPromptChars:       domain.MaxSystemPromptChars,
 			MaxModelIDChars:            domain.MaxModelIDChars,
 			MaxAPIKeyChars:             domain.MaxAPIKeyChars,
 			MaxAIProviders:             domain.MaxAIProviders,

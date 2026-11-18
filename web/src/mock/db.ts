@@ -38,8 +38,10 @@ export interface MockOptions {
   mcp?: 'open' | 'token' | 'off';
   /** `seed`: a realistic library; `empty`: a brand-new instance. */
   library?: 'seed' | 'empty';
-  /** `normal`: realistic latency; `fast`: short delays; `instant`: none at all. */
-  speed?: 'normal' | 'fast' | 'instant';
+  /** `normal`: realistic latency; `fast`: short delays; `slow`: a second for every plain request; `instant`: none at all. */
+  speed?: 'normal' | 'fast' | 'slow' | 'instant';
+  /** Reads whose path starts with one of these segments (`stats`, `items`, …) take a second longer. */
+  slowPaths?: string[];
   /** `seed`: the seed library's style presets; `none`: start with no presets. */
   styles?: 'seed' | 'none';
   /** Whether the operator configured a public URL, reported as `mcp.url`. Default `false`. */
@@ -210,6 +212,7 @@ export const LIMITS: Limits = {
   maxStylePresets: 20,
   maxStyleNameChars: 60,
   maxStyleInstructionsChars: 2000,
+  maxSystemPromptChars: 20000,
   maxModelIdChars: 200,
   maxApiKeyChars: 1000,
   maxAiProviders: 20,
@@ -256,17 +259,21 @@ export const DEFAULT_PREFERENCES: Preferences = {
 
 type DelayKind = 'default' | 'aiDraft' | 'aiTests' | 'aiTest' | 'bundle' | 'verifyCase' | 'judgeQueue' | 'judgeCase';
 
-const DELAYS: Record<'normal' | 'fast', Record<DelayKind, [number, number]>> = {
-  normal: {
-    default: [80, 250],
-    aiDraft: [2500, 4000],
-    aiTests: [3000, 5000],
-    aiTest: [500, 900],
-    bundle: [300, 600],
-    verifyCase: [150, 250],
-    judgeQueue: [300, 300],
-    judgeCase: [350, 350],
-  },
+const NORMAL_DELAYS: Record<DelayKind, [number, number]> = {
+  default: [80, 250],
+  aiDraft: [2500, 4000],
+  aiTests: [3000, 5000],
+  aiTest: [500, 900],
+  bundle: [300, 600],
+  verifyCase: [150, 250],
+  judgeQueue: [300, 300],
+  judgeCase: [350, 350],
+};
+
+const DELAYS: Record<'normal' | 'fast' | 'slow', Record<DelayKind, [number, number]>> = {
+  normal: NORMAL_DELAYS,
+  // A slow server or network: what shows while a screen waits for its data.
+  slow: { ...NORMAL_DELAYS, default: [1000, 1000] },
   fast: {
     default: [10, 30],
     aiDraft: [500, 700],
@@ -298,6 +305,10 @@ export class MockDb {
   /** The AI activity log, oldest first. Nothing is removed unless the user asks. */
   aiLog: StoredLogEntry[] = [];
   styles: StylePreset[] = [];
+  /** The custom system prompt; `null` means the built-in conventions. */
+  systemPrompt: string | null = null;
+  /** The custom test case prompt; `null` means the built-in test-case rules. */
+  testCasePrompt: string | null = null;
   preferences: Preferences;
 
   private seq = 0;
@@ -309,6 +320,7 @@ export class MockDb {
       mcp: options.mcp ?? 'open',
       library: options.library ?? 'seed',
       speed: options.speed ?? 'normal',
+      slowPaths: options.slowPaths ?? [],
       styles: options.styles ?? 'seed',
       publicUrl: options.publicUrl ?? false,
       aiSource: options.aiSource ?? 'settings',
@@ -611,6 +623,14 @@ export class MockDb {
         ? { ...structuredClone(item.problem), referenceSolution: this.referenceView(item.id) }
         : null,
     };
+  }
+
+  /**
+   * Remove an item's completed runs. Only the latest run is kept; one still
+   * being judged is left for the next run to remove.
+   */
+  deleteCompletedRuns(itemId: string): void {
+    this.submissions = this.submissions.filter((s) => s.itemId !== itemId || s.mode !== 'run' || s.status !== 'completed');
   }
 
   deleteItem(id: string): void {

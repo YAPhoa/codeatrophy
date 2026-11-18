@@ -230,11 +230,13 @@ func TestPartialExportsCompareAndPreserve(t *testing.T) {
 		len(cases) != 2 || !cases[0].IsSample || cases[1].IsSample {
 		t.Errorf("local solution and hidden cases must survive: %+v, %d cases", got.Problem, len(cases))
 	}
-	// A full bundle replaces the test cases entirely.
+	// A full bundle replaces the test cases entirely. Replacing in the source
+	// keeps its sample, so the bundle carries the sample and the new case.
 	must(src.app.BulkTestCases(src.ctx, p.ID, decodeInto[app.BulkTestCasesInput](t, `{"cases":[{"stdin":"9 9","expectedStdout":"18"}],"replace":true}`)))
 	res = must(dst.app.Import(dst.ctx, src.export(t, `{"scope":"all"}`), "overwrite"))
-	if res.Updated != 1 || len(must(dst.app.ListTestCases(dst.ctx, p.ID)).Items) != 1 {
-		t.Errorf("full overwrite: %+v", res)
+	after := must(dst.app.ListTestCases(dst.ctx, p.ID)).Items
+	if res.Updated != 1 || len(after) != 2 || !after[0].IsSample || after[1].Stdin != "9 9" {
+		t.Errorf("full overwrite: %+v, %+v", res, after)
 	}
 }
 

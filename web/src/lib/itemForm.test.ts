@@ -311,6 +311,7 @@ const limits: Limits = {
   maxStylePresets: 20,
   maxStyleNameChars: 60,
   maxStyleInstructionsChars: 2000,
+  maxSystemPromptChars: 20000,
   maxModelIdChars: 200,
   maxApiKeyChars: 1000,
   maxAiProviders: 20,

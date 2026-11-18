@@ -167,9 +167,21 @@ func styleFor(ctx context.Context, a *app.App, p *domain.StylePreset) *ai.Style 
 	return &ai.Style{Name: p.Name, Instructions: p.Instructions}
 }
 
-// guide renders the standalone authoring guide with the default preset.
+// guide renders the standalone authoring guide with the custom system
+// prompt (if any) and the default preset.
 func guide(ctx context.Context, a *app.App, p *domain.StylePreset) string {
-	return ai.AuthoringGuide(styleFor(ctx, a, p))
+	return ai.AuthoringGuide(conventionsFor(ctx, a), styleFor(ctx, a, p))
+}
+
+// conventionsFor returns the user's custom system prompt, or "" for the
+// built-in conventions. It goes into the authoring guide only: no tool reads
+// or sets it.
+func conventionsFor(ctx context.Context, a *app.App) string {
+	c, err := a.Conventions(ctx)
+	if err != nil {
+		return ""
+	}
+	return c
 }
 
 // result encodes v as both structured content and text.

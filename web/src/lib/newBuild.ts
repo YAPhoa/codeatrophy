@@ -71,15 +71,24 @@ export async function reloadForNewBuild(env: BuildEnv = browser): Promise<boolea
 
 type Load<P> = () => Promise<{ default: ComponentType<P> }>;
 
+/** A screen loaded on demand, which can be asked to load ahead of being shown. */
+export type Screen<P> = LazyExoticComponent<ComponentType<P>> & {
+  /** Start loading the screen's file, say when the pointer rests on a link to it. A failure is left to the render. */
+  preload(): void;
+};
+
 /** A screen loaded on demand. If its file is gone because the server was upgraded, the page reloads. */
-export function lazyScreen<P>(load: Load<P>): LazyExoticComponent<ComponentType<P>> {
-  return lazy(() =>
+export function lazyScreen<P>(load: Load<P>): Screen<P> {
+  const screen = lazy(() =>
     load().catch(async (error: unknown) => {
       // The page is on its way out; the screen stays pending until it is.
       if (await reloadForNewBuild()) return new Promise<never>(() => {});
       throw error;
     }),
-  );
+  ) as Screen<P>;
+  // The browser loads a module once, so the render that follows finds it loaded.
+  screen.preload = () => void load().catch(() => undefined);
+  return screen;
 }
 
 /** A part of a screen loaded on demand. If its file is gone because the server was upgraded, `stale` stands in for it. */

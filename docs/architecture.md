@@ -466,8 +466,30 @@ that structure — section order, how formats and constraints are written, the
 stdin/stdout convention. Users can add their own standing instructions as
 named **style presets**, mark one as the default, and choose one each time
 they draft, revise or create a variant. The chosen preset is appended to the
-built-in conventions; it can shape layout and tone but cannot override the
+conventions; it can shape layout and tone but cannot override the
 schema or the rules judging depends on.
+
+The conventions themselves come in two kinds of part (`internal/ai/conventions.go`).
+The *editable* parts are about the prose: statement sections, readings,
+titles, tags, what makes a good test set. The *fixed* parts are what the app
+depends on: stdin/stdout judging, the two interfaces and the harness
+protocol, the folded input region, comparison, limits, language ids and
+versions, expected outputs from a reference solution. A user may replace
+all the editable parts with one text of their own, a **custom system
+prompt**, kept as an instance setting. A prompt then carries that text,
+then the fixed parts gathered under their own heading, then the style
+preset; without one it carries the built-in conventions with the two kinds
+interleaved, unchanged, which a golden test pins. The rules each request
+adds (drafting or variant rules, large test cases, the JSON-only answer)
+and the schema are never editable. Test generation uses no conventions:
+it has rules of its own (`internal/ai/testcaserules.go`), split the same
+way. Their editable part, the test-design guidance (the reference solution
+and how inputs are chosen and covered), may be replaced by a separate
+**custom test case prompt**; the fixed part keeps the harness contract, the
+judge's versions, the input-size cap, predicted outputs, samples, the Java
+and Kotlin entry points, large test cases and the JSON-only answer, and
+restates any such rule the editable wording carried. Without a custom text
+the test-generation prompt is unchanged, which the same golden test pins.
 
 ### Prompt-injection posture
 
@@ -492,14 +514,19 @@ The design limits what such text can achieve rather than trying to detect it:
   open another. The system prompt tells the model that only tags with this
   request's nonce delimit data. Tag-like text inside a block is also defanged.
   MCP prompts and the authoring guide use the same scheme.
-- **The one user-controlled slot in the system prompt is small and local.**
+- **The user-controlled slots in the system prompt are bounded and local.**
   Style presets have hard, non-configurable caps on length and count, reject
   control characters (and any line break in a name), and can only be created
   through the instance's own settings — never by importing a bundle and never
   over MCP. The one exception is the three built-in presets a new instance
   starts with: they ship with the app (seeded once, by a database migration,
   into an empty preset list) and are then ordinary presets the user can edit
-  or delete. Shared content therefore cannot plant standing instructions.
+  or delete. The custom system prompt and the custom test case prompt are
+  each one text with the same character rules and a cap of 20000 code
+  points, set the same way only; tag-like
+  text in it is defanged, the envelope's nonce avoids it like any other
+  untrusted text, and the fixed rules that follow it say they win. Shared
+  content therefore cannot plant standing instructions.
   Per-request instructions are length-capped as well.
 
 A default preset, rather than "last used", decides what applies when a caller
@@ -572,7 +599,10 @@ Design points:
   set) are published to MCP clients as server instructions and prompts, so an
   item written by a connected assistant looks like one drafted in the UI. The
   user's style presets are readable over MCP, and the default one is part of
-  that guidance, but presets cannot be changed from there.
+  that guidance, but presets cannot be changed from there. A custom system
+  prompt replaces the editable conventions in that guidance too; no tool
+  reads or sets it. A custom test case prompt is for the app's own test
+  generation and is not part of the guidance.
 - **Built for incremental edits.** Tools return compact results, support
   partial updates and targeted text replacement inside long Markdown bodies,
   and carry the item `revision` so an assistant never silently overwrites a

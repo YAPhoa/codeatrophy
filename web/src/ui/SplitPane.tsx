@@ -11,6 +11,8 @@ interface SplitPaneProps {
   initial?: number;
   min?: number;
   max?: number;
+  /** The largest the first pane may grow, in pixels: past it the divider stops, rather than opening empty space. */
+  maxFirstPx?: number;
   /** Remember the position under this key. */
   storageKey?: string;
   label: string;
@@ -25,7 +27,7 @@ interface SplitPaneProps {
 }
 
 /** Two panes with a draggable, keyboard-adjustable divider. */
-export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, max = 0.8, storageKey, label, className, collapsed = null, bar }: SplitPaneProps) {
+export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, max = 0.8, maxFirstPx, storageKey, label, className, collapsed = null, bar }: SplitPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ratio, setRatio] = useState(() => {
     const stored = storageKey ? readJson<number | null>(`split:${storageKey}`, null) : null;
@@ -37,7 +39,14 @@ export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, 
     if (storageKey) writeJson(`split:${storageKey}`, ratio);
   }, [ratio, storageKey]);
 
-  const clamp = useCallback((r: number) => Math.max(min, Math.min(max, r)), [min, max]);
+  // The upper bound as a fraction of the space there is now.
+  const upper = useCallback(() => {
+    const el = containerRef.current;
+    if (!maxFirstPx || !el) return max;
+    const size = direction === 'horizontal' ? el.clientWidth : el.clientHeight;
+    return size > 0 ? Math.max(min, Math.min(max, maxFirstPx / size)) : max;
+  }, [direction, maxFirstPx, min, max]);
+  const clamp = useCallback((r: number) => Math.max(min, Math.min(upper(), r)), [min, upper]);
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!dragging.current || !containerRef.current) return;
@@ -65,7 +74,12 @@ export function SplitPane({ direction, first, second, initial = 0.5, min = 0.2, 
   return (
     <div ref={containerRef} className={cx('split', `split-${direction}`, className)}>
       {collapsed === 'first' && bar}
-      <div className={cx('split-pane', collapsed === 'second' && 'split-pane-rest')} style={collapsed ? undefined : { flexBasis: basis }} hidden={collapsed === 'first'}>
+      <div
+        className={cx('split-pane', collapsed === 'second' && 'split-pane-rest')}
+        // The pixel cap also holds when the window grows past the remembered ratio.
+        style={collapsed ? undefined : { flexBasis: basis, ...(maxFirstPx ? { [direction === 'horizontal' ? 'maxWidth' : 'maxHeight']: maxFirstPx } : {}) }}
+        hidden={collapsed === 'first'}
+      >
         {first}
       </div>
       <div

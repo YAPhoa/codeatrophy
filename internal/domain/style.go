@@ -15,6 +15,9 @@ const (
 	MaxStyleNameChars             = 60
 	MaxStyleInstructionsChars     = 2000
 	MaxGenerationInstructionChars = 2000
+	// MaxSystemPromptChars bounds a custom system prompt, the user's
+	// replacement for the editable authoring conventions.
+	MaxSystemPromptChars = 20000
 )
 
 // StylePreset is a named set of the user's standing writing instructions.
@@ -98,6 +101,13 @@ func ValidateStylePreset(p *StylePreset) FieldErrors {
 		errs.Add("instructions", msg)
 	}
 	return errs
+}
+
+// ValidateSystemPrompt trims and checks a custom system prompt: 1 to
+// MaxSystemPromptChars code points, without control characters other than
+// newline and tab. It never truncates.
+func ValidateSystemPrompt(s string) (string, string) {
+	return checkText(s, 1, MaxSystemPromptChars)
 }
 
 // ValidateGenerationInstruction checks a per-request instruction.

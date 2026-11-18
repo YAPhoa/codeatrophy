@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, FolderMinus, FolderPlus, Star, StarOff, Tag, Trash2, X } from 'lucide-react';
+import { Download, FolderMinus, FolderPlus, MoreHorizontal, Star, StarOff, Tag, Trash2, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateLibrary, useCollections, useTags } from '../../api/queries';
 import type { BulkAction, Collection, ItemSummary } from '../../api/types';
@@ -9,7 +8,7 @@ import { ITEM_STATUSES } from '../../api/types';
 import { exportItemsPath } from '../../lib/exportLink';
 import { STATUS_LABEL, plural } from '../../lib/format';
 import { buildTree, flattenTree } from '../../lib/tree';
-import { Button, IconButton } from '../../ui/Button';
+import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
 import { MenuButton } from '../../ui/Popover';
@@ -23,16 +22,16 @@ interface BulkBarProps {
   /** The collection being viewed, if any (enables "remove from this collection"). */
   collection: Collection | null;
   onClear: () => void;
+  className?: string;
 }
 
 type DialogState = { kind: 'addTags' | 'removeTags' } | { kind: 'collection' } | null;
 
 /** Actions on the current selection. Replaces the filter bar while items are selected. */
-export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
+export function BulkBar({ selected, collection, onClear, className }: BulkBarProps) {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
-  const navigate = useNavigate();
   const { data: allTags = [] } = useTags();
   const { data: collections = [] } = useCollections();
   const collectionActions = useCollectionActions();
@@ -73,14 +72,14 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
   };
 
   return (
-    <div className="bulkbar" role="toolbar" aria-label="Actions for selected items">
+    <div className={cx('bulkbar', className)} role="toolbar" aria-label="Actions for selected items">
       <IconButton size="sm" label="Clear selection" icon={<X size={14} />} onClick={onClear} />
       <strong className="bulk-count" aria-live="polite">
         {n} selected
       </strong>
       <MenuButton
         size="sm"
-        menuLabel="Set status"
+        menuLabel="Mark as"
         disabled={busy}
         items={ITEM_STATUSES.map((s) => ({
           label: STATUS_LABEL[s],
@@ -88,7 +87,7 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
           onSelect: () => void run({ action: 'setStatus', status: s }, `Marked {n} as ${STATUS_LABEL[s].toLowerCase()}`),
         }))}
       >
-        Status
+        Mark as
       </MenuButton>
       <Button
         size="sm"
@@ -134,19 +133,25 @@ export function BulkBar({ selected, collection, onClear }: BulkBarProps) {
       >
         Add to collection
       </Button>
-      {collection && (
-        <Button
-          size="sm"
-          disabled={busy}
-          icon={<FolderMinus size={14} />}
-          onClick={() => void run({ action: 'removeFromCollection', collectionId: collection.id }, `Removed {n} from “${collection.name}”`, true)}
-        >
-          Remove from this collection
-        </Button>
-      )}
-      <Button size="sm" disabled={busy} icon={<Download size={14} />} onClick={() => navigate(exportItemsPath(ids))}>
-        Export
-      </Button>
+      {/* The less common actions, so the bar fits on one line at narrow widths too. */}
+      <MenuButton
+        size="sm"
+        disabled={busy}
+        icon={<MoreHorizontal size={14} />}
+        label="More actions"
+        items={[
+          ...(collection
+            ? [
+                {
+                  label: 'Remove from this collection',
+                  icon: <FolderMinus size={14} />,
+                  onSelect: () => void run({ action: 'removeFromCollection', collectionId: collection.id }, `Removed {n} from “${collection.name}”`, true),
+                },
+              ]
+            : []),
+          { label: 'Export…', icon: <Download size={14} />, to: exportItemsPath(ids) },
+        ]}
+      />
       <span className="spacer" />
       <Button size="sm" variant="ghost" className="bulk-delete" disabled={busy} icon={<Trash2 size={14} />} onClick={() => void remove()}>
         Delete

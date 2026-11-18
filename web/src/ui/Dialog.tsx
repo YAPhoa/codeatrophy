@@ -109,7 +109,7 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
   return createPortal(
     <div
       ref={exitOnRemove}
-      className="dialog-backdrop"
+      className={cx('dialog-backdrop', size === 'sm' && 'is-small')}
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // Focus stays in the dialog, for when the click does not close it.

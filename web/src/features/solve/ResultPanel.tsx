@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { BookmarkCheck, BookmarkPlus, Check, Clock, Cpu, Eye, EyeOff, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
+import { BookmarkCheck, BookmarkPlus, Check, CircleCheck, Clock, Cpu, Eye, EyeOff, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
 import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
@@ -163,6 +163,15 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
   const custom = s.mode === 'run' && s.results.length > 0 && s.results.every((r) => r.testCaseId === null);
   const finished = s.results.length;
   const tone = s.verdict ? verdictTone(s.verdict) : 'neutral';
+  // Judged while on screen: this very submission was seen running, so its
+  // verdict is news. A past one, or one opened already finished, is not.
+  const [judged, setJudged] = useState({ id: s.id, done, fresh: false });
+  let fresh = judged.fresh;
+  if (judged.id !== s.id || judged.done !== done) {
+    fresh = judged.id === s.id && !judged.done && done && !historic;
+    setJudged({ id: s.id, done, fresh });
+  }
+  const celebrate = fresh && s.verdict === 'accepted';
   const saveSolution = savedAsSolution ? (
     <span className="result-saved">
       <BookmarkCheck size={14} aria-hidden="true" />
@@ -201,7 +210,7 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
         </div>
       )}
 
-      <div className={cx('result-head', `tone-${tone}`)} role="status" aria-live="polite">
+      <div className={cx('result-head', `tone-${tone}`, celebrate && 'is-fresh')} role="status" aria-live="polite">
         {!done ? (
           <>
             <Loader2 size={18} className="spin" aria-hidden="true" />
@@ -221,6 +230,11 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
           </>
         ) : (
           <>
+            {s.verdict === 'accepted' && (
+              <span className="result-check" aria-hidden="true">
+                <CircleCheck size={18} />
+              </span>
+            )}
             <div className="result-verdict">{s.verdict ? VERDICT_LABEL[s.verdict] : 'Finished'}</div>
             {!custom && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' && (
               <span className="result-count">{describeRun(s.mode, s.totalCount, s.passedCount)}</span>

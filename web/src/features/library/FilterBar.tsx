@@ -3,6 +3,7 @@ import { ChevronDown, Search, X } from 'lucide-react';
 import type { Difficulty, ItemSort, ItemStatus, Tag } from '../../api/types';
 import { DIFFICULTY_LABEL, STATUS_LABEL } from '../../lib/format';
 import { barFilterCount, clearBarFilters, defaultOrder, effectiveSort, sortDirections, toggleIn, viewNoun, type LibraryFilters } from '../../lib/filters';
+import { IconSwap, NumberChange } from '../../ui/Animated';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { MenuButton, Popover, type MenuEntry } from '../../ui/Popover';
 import { StatusIcon } from '../item/controls';
@@ -15,6 +16,7 @@ interface FilterBarProps {
   searchRef: RefObject<HTMLInputElement | null>;
   /** Extra view-specific controls, placed after the standard filters. */
   children?: ReactNode;
+  className?: string;
 }
 
 const SORT_LABEL: Record<ItemSort, string> = {
@@ -40,8 +42,10 @@ function FilterButton({ label, count, children }: { label: string; count: number
         onClick={() => setOpen((v) => !v)}
       >
         {label}
-        {count > 0 && <span className="filter-count">{count}</span>}
-        <ChevronDown size={12} aria-hidden="true" />
+        {/* The count takes the chevron's place, so the button keeps its width when a filter is set. */}
+        <IconSwap swapKey={count > 0} className="filter-slot">
+          {count > 0 ? <span className="filter-count">{count > 9 ? '9+' : <NumberChange value={count} />}</span> : <ChevronDown size={12} aria-hidden="true" />}
+        </IconSwap>
       </Button>
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} role="dialog" label={label} className="popover-panel filter-pop">
         {children(() => setOpen(false))}
@@ -51,7 +55,7 @@ function FilterButton({ label, count, children }: { label: string; count: number
 }
 
 /** Search box plus the filter and sort controls of the library. The type and Favorites are picked in the sidebar. */
-export function FilterBar({ filters, onChange, tags, collectionId, searchRef, children }: FilterBarProps) {
+export function FilterBar({ filters, onChange, tags, collectionId, searchRef, children, className }: FilterBarProps) {
   // The search text is debounced into the URL so typing does not fire a request per keystroke.
   const [text, setText] = useState(filters.q);
   const lastPushed = useRef(filters.q);
@@ -107,7 +111,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
   const noun = viewNoun(filters, collectionId);
 
   return (
-    <div className="filterbar" role="search" aria-label="Filter items">
+    <div className={cx('filterbar', className)} role="search" aria-label="Filter items">
       <div className="filter-search">
         <Search size={14} aria-hidden="true" />
         <input
@@ -196,20 +200,22 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
 
       {children}
 
-      {active > 0 && (
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<X size={14} />}
-          onClick={() => {
-            setText('');
-            lastPushed.current = '';
-            onChange(clearBarFilters(filters));
-          }}
-        >
-          Clear filters
-        </Button>
-      )}
+      {/* Kept in place while hidden, so its appearing cannot wrap the bar. */}
+      <Button
+        size="sm"
+        variant="ghost"
+        icon={<X size={14} />}
+        className={cx('filter-clear', active === 0 && 'is-idle')}
+        tabIndex={active > 0 ? undefined : -1}
+        aria-hidden={active > 0 ? undefined : true}
+        onClick={() => {
+          setText('');
+          lastPushed.current = '';
+          onChange(clearBarFilters(filters));
+        }}
+      >
+        Clear filters
+      </Button>
 
       <span className="spacer" />
 

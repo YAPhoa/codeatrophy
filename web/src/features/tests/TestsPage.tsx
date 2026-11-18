@@ -460,10 +460,17 @@ function TestsManager({ item }: { item: Item }) {
               {cases.length === 0 ? 'none yet' : `${plural(cases.filter((c) => c.isSample).length, 'sample')} · ${cases.filter((c) => !c.isSample).length} hidden · ${cases.filter((c) => c.verified).length} verified`}
             </span>
             <span className="spacer" />
-            {concealing && (
+            {concealing ? (
               <Button icon={<Eye size={14} />} onClick={reveal} title="Show the inputs and expected outputs of hidden cases">
                 Show test cases
               </Button>
+            ) : (
+              hideCases &&
+              revealed && (
+                <Button icon={<EyeOff size={14} />} onClick={() => setRevealed(false)} title="Hide the inputs and expected outputs of hidden cases again">
+                  Hide test cases
+                </Button>
+              )
             )}
             <Button
               icon={<ShieldCheck size={14} />}
@@ -649,9 +656,14 @@ function TestsManager({ item }: { item: Item }) {
                         </Button>
                       )}
                       <span className="spacer" />
-                      <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => void deleteCase()} disabled={busy}>
-                        {selectedId === NEW ? 'Cancel' : 'Delete'}
-                      </Button>
+                      {/* A sample is part of the statement, so it is not deleted by accident: untick Sample first. */}
+                      {selected?.isSample && draft.isSample ? (
+                        <span className="muted">Untick Sample to delete it</span>
+                      ) : (
+                        <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => void deleteCase()} disabled={busy}>
+                          {selectedId === NEW ? 'Cancel' : 'Delete'}
+                        </Button>
+                      )}
                     </div>
                   </form>
                 ) : (

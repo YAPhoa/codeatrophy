@@ -8,7 +8,7 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
     title: 'Anywhere',
     rows: [
       [[MOD, 'K'], 'Search items and run commands'],
-      [['C'], 'Capture a new item'],
+      [['C'], 'New item'],
       [['?'], 'Show this list'],
     ],
   },
@@ -19,6 +19,7 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
       [['J'], 'Next item'],
       [['K'], 'Previous item'],
       [['Enter'], 'Open the focused item'],
+      [['D'], 'Show or hide details'],
       [['X'], 'Select or deselect'],
       [['F'], 'Toggle favorite'],
       [['S'], 'Cycle status'],

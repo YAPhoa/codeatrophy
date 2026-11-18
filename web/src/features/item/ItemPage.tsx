@@ -1,8 +1,9 @@
+import { useEffect } from 'react';
 import { useParams } from 'react-router';
 import { FileQuestion } from 'lucide-react';
 import { isApiError } from '../../api/client';
-import { useItem } from '../../api/queries';
-import { useDeclareWorkspace } from '../../app/shellLayout';
+import { useItem, useTestCases } from '../../api/queries';
+import { rememberItemKind, useDeclareWorkspace } from '../../app/shellLayout';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { LinkButton } from '../../ui/Button';
 import { EmptyState, ErrorState, PageLoading } from '../../ui/misc';
@@ -27,8 +28,15 @@ export default function ItemPage() {
   useDocumentTitle(item.data?.title);
   // A problem opens in the coding workspace, where the navigation steps aside; a reading does not.
   useDeclareWorkspace(item.data ? item.data.type === 'problem' : null);
+  const type = item.data?.type;
+  useEffect(() => {
+    if (type) rememberItemKind(id, type === 'reading');
+  }, [id, type]);
 
-  if (item.isPending) return <PageLoading />;
+  // A problem's workspace opens with its test cases (the drawer, the Run
+  // hint), so it waits for them too and appears whole, behind one indicator.
+  const cases = useTestCases(id, type === 'problem');
+  if (item.isPending || (type === 'problem' && cases.isPending)) return <PageLoading />;
   if (item.isError) {
     if (isApiError(item.error) && item.error.code === 'not_found') return <ItemMissing />;
     return (

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import type { StylePreset } from '../api/types';
 import { headingSlugs, slugify } from '../ui/markdownPlugins';
-import { clearCode, initialCode, loadCode, pickLanguage, rememberLanguage, saveCode } from './codeStore';
+import { MAX_STORED_INPUT_BYTES, clearCode, initialCode, loadCode, loadCustomInput, pickLanguage, rememberLanguage, saveCode, saveCustomInput } from './codeStore';
 import { describeError, errorLine, sentence } from './errors';
 import { describeChanges, formatBytes, formatMemoryKb, formatMs, plural, readingMinutes, relativeTime } from './format';
 import { languageLabel, sortLanguages } from './languages';
@@ -67,6 +67,19 @@ describe('codeStore', () => {
     rememberLanguage('i1', 'ruby');
     expect(pickLanguage('i1', ['python'], {})).toBe('python');
     expect(pickLanguage('i1', [], {})).toBeNull();
+  });
+
+  it('keeps the custom input per item, unless it is empty or too large', () => {
+    expect(loadCustomInput('i1')).toBe('');
+    saveCustomInput('i1', '3\n1 2 3\n');
+    saveCustomInput('i2', 'other');
+    expect(loadCustomInput('i1')).toBe('3\n1 2 3\n');
+    expect(loadCustomInput('i2')).toBe('other');
+    // Too large to keep: the older input does not come back in its place.
+    saveCustomInput('i1', 'é'.repeat(MAX_STORED_INPUT_BYTES / 2 + 1));
+    expect(loadCustomInput('i1')).toBe('');
+    saveCustomInput('i2', '');
+    expect(globalThis.localStorage.length).toBe(0);
   });
 
   it('does not throw when storage is unavailable', () => {

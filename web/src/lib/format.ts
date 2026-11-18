@@ -54,10 +54,6 @@ export function isFailedVerdict(v: Verdict): boolean {
   return tone === 'danger' || tone === 'warn';
 }
 
-export function difficultyTone(d: Difficulty): Tone {
-  return d === 'easy' ? 'ok' : d === 'medium' ? 'warn' : 'danger';
-}
-
 export const ORIGIN_LABEL: Record<TestOrigin, string> = { manual: 'Manual', ai: 'AI', import: 'Imported' };
 
 // Dates and numbers follow the browser's locale. Relative times are words

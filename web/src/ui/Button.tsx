@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { Link, type LinkProps } from 'react-router';
 
-export type ButtonVariant = 'default' | 'primary' | 'ghost' | 'danger';
+export type ButtonVariant = 'default' | 'primary' | 'soft' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md';
 
 interface CommonProps {

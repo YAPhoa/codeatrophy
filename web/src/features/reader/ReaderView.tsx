@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeft, ExternalLink, MoreHorizontal, NotebookPen, Pencil, X } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
+import { slideFrom, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
 import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
@@ -40,24 +41,59 @@ function useOutline(containerRef: React.RefObject<HTMLElement | null>, source: s
     return () => mo.disconnect();
   }, [containerRef, source]);
 
+  // The heading last chosen in the outline. It stays marked until the reader
+  // scrolls by hand: near the end of the page a heading cannot scroll up to
+  // the top, so the scroll position alone would mark an earlier one.
+  const chosen = useRef<string | null>(null);
+
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || headings.length === 0) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActive(visible[0].target.id);
-      },
-      { rootMargin: '0px 0px -70% 0px' },
-    );
-    for (const h of headings) {
-      const node = document.getElementById(h.id);
-      if (node) io.observe(node);
-    }
-    return () => io.disconnect();
+    const scroller = containerRef.current?.closest<HTMLElement>('.reader-scroll');
+    if (!scroller || headings.length === 0) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const nodes = headings.map((h) => document.getElementById(h.id)).filter((n): n is HTMLElement => n !== null);
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (!first || !last) return;
+      if (chosen.current && nodes.some((n) => n.id === chosen.current)) {
+        setActive(chosen.current);
+        return;
+      }
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
+        setActive(last.id);
+        return;
+      }
+      const box = scroller.getBoundingClientRect();
+      // The last heading in the top third of the pane is the one being read.
+      const read = nodes.filter((n) => n.getBoundingClientRect().top - box.top <= box.height * 0.3);
+      setActive((read[read.length - 1] ?? first).id);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    const byHand = () => {
+      chosen.current = null;
+    };
+    const hand = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const;
+    update();
+    scroller.addEventListener('scroll', schedule, { passive: true });
+    for (const t of hand) scroller.addEventListener(t, byHand, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener('scroll', schedule);
+      for (const t of hand) scroller.removeEventListener(t, byHand);
+      window.removeEventListener('resize', schedule);
+    };
   }, [containerRef, headings]);
 
-  return { headings, active };
+  const choose = (id: string) => {
+    chosen.current = id;
+    setActive(id);
+  };
+
+  return { headings, active, choose };
 }
 
 /** A reading: long-form text in a comfortable column, with an outline and private notes alongside. */
@@ -66,16 +102,26 @@ export function ReaderView({ item }: { item: Item }) {
   const actions = useItemActions(item);
   const collectionActions = useCollectionActions();
   const articleRef = useRef<HTMLElement>(null);
-  const { headings, active } = useOutline(articleRef, item.body);
+  const { headings, active, choose } = useOutline(articleRef, item.body);
   const [notesOpen, setNotesOpenState] = useState(() => readJson('reader:notes', false) || item.notes.trim() !== '');
+  // Where the text column was drawn before the notes opened or closed, so it
+  // can ease from there to its new place instead of jumping.
+  const columnWas = useRef<DOMRect | null>(null);
   const setNotesOpen = (v: boolean) => {
+    columnWas.current = articleRef.current?.getBoundingClientRect() ?? null;
     setNotesOpenState(v);
     writeJson('reader:notes', v);
   };
-  const minTop = Math.min(...headings.map((h) => h.level), 3);
+  const notes = usePresence(notesOpen, '--duration-medium');
+  const notesToggled = useChangeCount(notesOpen) > 0;
+  useLayoutEffect(() => {
+    const from = columnWas.current;
+    columnWas.current = null;
+    if (from && articleRef.current) slideFrom(articleRef.current, from);
+  }, [notesOpen]);
 
   return (
-    <div className={cx('reader', notesOpen && 'has-notes')}>
+    <div className={cx('reader', notesOpen && 'has-notes', notesToggled && !notesOpen && 'notes-closed')}>
       <header className="reader-bar">
         <Link to={libraryHref()} className="btn btn-ghost btn-icon" aria-label="Back to the library" title="Back to the library">
           <ArrowLeft size={16} />
@@ -134,25 +180,16 @@ export function ReaderView({ item }: { item: Item }) {
               <Related item={item} />
             </article>
 
-            {headings.length > 2 && (
-              <nav className="reader-outline" aria-label="On this page">
-                <h2>On this page</h2>
-                <ul>
-                  {headings.map((h) => (
-                    <li key={h.id} style={{ paddingLeft: (h.level - minTop) * 12 }}>
-                      <a href={`#${h.id}`} className={cx(active === h.id && 'is-active')} aria-current={active === h.id ? 'location' : undefined}>
-                        {h.text}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            )}
+            {headings.length > 2 && <Outline headings={headings} active={active} onChoose={choose} />}
           </div>
         </div>
 
-        {notesOpen && (
-          <aside className="reader-notes" aria-label="Private notes">
+        {notes.mounted && (
+          <aside
+            className={cx('reader-notes', notesToggled && notesOpen && 'is-opening', notes.closing && 'is-closing')}
+            aria-label="Private notes"
+            inert={notes.closing}
+          >
             <div className="reader-notes-head">
               <h2>Notes</h2>
               <IconButton size="sm" label="Close notes" icon={<X size={14} />} onClick={() => setNotesOpen(false)} />
@@ -162,6 +199,29 @@ export function ReaderView({ item }: { item: Item }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** The outline's marker slides to the heading being read (see `useSlidingIndicator`). */
+const OUTLINE_ACTIVE = 'a.is-active';
+const OUTLINE_MARKER = { pseudo: '::before', axis: 'y' } as const;
+
+function Outline({ headings, active, onChoose }: { headings: Heading[]; active: string | null; onChoose: (id: string) => void }) {
+  const ref = useSlidingIndicator<HTMLElement>(OUTLINE_ACTIVE, OUTLINE_MARKER);
+  const minTop = Math.min(...headings.map((h) => h.level), 3);
+  return (
+    <nav ref={ref} className="reader-outline" aria-label="On this page">
+      <h2>On this page</h2>
+      <ul>
+        {headings.map((h) => (
+          <li key={h.id} style={{ paddingLeft: (h.level - minTop) * 12 }}>
+            <a href={`#${h.id}`} onClick={() => onChoose(h.id)} className={cx(active === h.id && 'is-active')} aria-current={active === h.id ? 'location' : undefined}>
+              {h.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 

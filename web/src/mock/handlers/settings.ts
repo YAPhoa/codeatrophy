@@ -1,10 +1,11 @@
-// Settings endpoints: the AI providers and the user's preferences.
+// Settings endpoints: the AI providers, the system prompt, the test case prompt and the user's preferences.
 
-import type { AiModelsResponse, AiProviderKind, AiTestResponse } from '../../api/types';
+import type { AiModelsResponse, AiProviderKind, AiTestResponse, SystemPrompt, TestCasePrompt } from '../../api/types';
 import type { MockDb, StoredAiProvider } from '../db';
-import { AI_KIND_IDS, AI_KINDS, atMostChars, charCount, keyNeeded, LIMITS, noUsage, sameOrigin } from '../db';
+import { AI_KIND_IDS, AI_KINDS, atMostChars, charCount, keyNeeded, LIMITS, noUsage, normaliseText, sameOrigin } from '../db';
 import type { Handler, Req } from '../http';
 import { badRequest, conflict, created, enumParam, invalid, isRecord, noContent, notFound, objectBody, ok, pagination, Validator } from '../http';
+import { BUILT_IN_CONVENTIONS, BUILT_IN_TEST_GUIDANCE, DRAFT_RULES, FIXED_CONVENTIONS, FIXED_TEST_CASE_RULES, VARIANT_RULES } from '../seed/systemPrompt';
 import { sleep, uuid } from '../util';
 
 const isKind = (value: unknown): value is AiProviderKind => AI_KIND_IDS.includes(value as AiProviderKind);
@@ -421,6 +422,58 @@ function putPreferences(db: MockDb, req: Req) {
   return ok(structuredClone(db.preferences));
 }
 
+// Every C0/C1 control character except tab and newline.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
+
+function systemPrompt(db: MockDb): SystemPrompt {
+  return {
+    builtIn: BUILT_IN_CONVENTIONS,
+    custom: db.systemPrompt,
+    isCustom: db.systemPrompt !== null,
+    fixed: FIXED_CONVENTIONS,
+    draftRules: DRAFT_RULES,
+    variantRules: VARIANT_RULES,
+  };
+}
+
+/**
+ * Validates a custom prompt text as the server does, and returns what to
+ * store: the text, or `null` when it is the built-in text unchanged.
+ */
+function customPromptText(req: Req, builtIn: string): string | null {
+  const raw = objectBody(req);
+  const v = new Validator();
+  const value = raw.custom;
+  let text = '';
+  if (typeof value !== 'string') v.add('custom', 'is required; reset to the built-in text with DELETE');
+  else {
+    text = normaliseText(value).trim();
+    const length = charCount(text);
+    if (CONTROL.test(text)) v.add('custom', 'must not contain control characters other than newline and tab');
+    else if (length < 1) v.add('custom', 'is required');
+    else if (length > LIMITS.maxSystemPromptChars) v.add('custom', `must be at most ${LIMITS.maxSystemPromptChars} characters`);
+  }
+  v.check();
+  return text === builtIn ? null : text;
+}
+
+/** Saves a custom system prompt; the built-in text unchanged removes it. */
+function putSystemPrompt(db: MockDb, req: Req) {
+  db.systemPrompt = customPromptText(req, BUILT_IN_CONVENTIONS);
+  return ok(systemPrompt(db));
+}
+
+function testCasePrompt(db: MockDb): TestCasePrompt {
+  return { builtIn: BUILT_IN_TEST_GUIDANCE, custom: db.testCasePrompt, isCustom: db.testCasePrompt !== null, fixed: FIXED_TEST_CASE_RULES };
+}
+
+/** Saves a custom test case prompt, under the same rules. */
+function putTestCasePrompt(db: MockDb, req: Req) {
+  db.testCasePrompt = customPromptText(req, BUILT_IN_TEST_GUIDANCE);
+  return ok(testCasePrompt(db));
+}
+
 export function settingsRoutes(db: MockDb): [string, string, Handler][] {
   return [
     ['GET', '/settings/ai', () => ok(db.aiSettings())],
@@ -433,6 +486,26 @@ export function settingsRoutes(db: MockDb): [string, string, Handler][] {
     ['GET', '/settings/ai/log', (req) => listLog(db, req)],
     ['GET', '/settings/ai/log/:id', (req) => getLogEntry(db, req)],
     ['DELETE', '/settings/ai/log', (req) => clearLog(db, req)],
+    ['GET', '/settings/ai/system-prompt', () => ok(systemPrompt(db))],
+    ['PUT', '/settings/ai/system-prompt', (req) => putSystemPrompt(db, req)],
+    [
+      'DELETE',
+      '/settings/ai/system-prompt',
+      () => {
+        db.systemPrompt = null;
+        return noContent();
+      },
+    ],
+    ['GET', '/settings/ai/testcase-prompt', () => ok(testCasePrompt(db))],
+    ['PUT', '/settings/ai/testcase-prompt', (req) => putTestCasePrompt(db, req)],
+    [
+      'DELETE',
+      '/settings/ai/testcase-prompt',
+      () => {
+        db.testCasePrompt = null;
+        return noContent();
+      },
+    ],
     ['GET', '/settings/preferences', () => ok(structuredClone(db.preferences))],
     ['PUT', '/settings/preferences', (req) => putPreferences(db, req)],
   ];

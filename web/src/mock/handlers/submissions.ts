@@ -128,6 +128,7 @@ function createSubmission(db: MockDb, req: Req) {
     createdAt: db.now(),
     finishedAt: null,
   };
+  if (mode === 'run') db.deleteCompletedRuns(item.id);
   db.submissions.push(submission);
   if (item.status === 'todo') item.status = 'in_progress';
 

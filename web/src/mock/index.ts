@@ -38,6 +38,8 @@ export interface MockServer {
    * save that carries the old `expectedRevision` gets a `409`.
    */
   externalEdit(itemId: string): void;
+  /** Every request received so far, as `METHOD /path?query` (without `/api/v1`), oldest first. */
+  requests: string[];
 }
 
 const API_PREFIX = '/api/v1';
@@ -142,10 +144,20 @@ export function createMockServer(options: MockOptions = {}): MockServer {
     return toResponse(await route.handler(req));
   }
 
+  /** The extra second a read takes under a `slow-<segment>` flag. */
+  function slowRead(input: string, init: RequestInit): number {
+    if ((init.method ?? 'GET').toUpperCase() !== 'GET') return 0;
+    const segment = new URL(input, 'http://mock.local').pathname.slice(API_PREFIX.length + 1).split('/')[0] ?? '';
+    return db.options.slowPaths.includes(segment) ? 1000 : 0;
+  }
+
+  const requests: string[] = [];
+
   async function mockFetch(input: string, init: RequestInit = {}): Promise<Response> {
     const signal = init.signal ?? undefined;
+    requests.push(`${(init.method ?? 'GET').toUpperCase()} ${input.replace(API_PREFIX, '')}`);
     // Latency first, so that a cancelled request never reaches the handler.
-    await sleep(db.delay(), signal);
+    await sleep(db.delay() + slowRead(input, init), signal);
     let response: Response;
     try {
       response = await handle(input, init);
@@ -163,6 +175,7 @@ export function createMockServer(options: MockOptions = {}): MockServer {
   return {
     fetch: mockFetch,
     db,
+    requests,
     externalEdit(itemId: string) {
       const item = db.getItem(itemId);
       if (!item.title.endsWith(' (edited elsewhere)')) item.title = `${item.title} (edited elsewhere)`.slice(0, 200);
@@ -186,6 +199,7 @@ const FLAGS = [
   'no-styles',
   'show-tests',
   'fast',
+  'slow',
   'instant',
 ] as const;
 const STORAGE_KEY = 'codeatrophy:mock';
@@ -199,7 +213,8 @@ export function optionsFromFlags(flags: readonly string[]): MockOptions {
     mcp: has('mcp-off') ? 'off' : has('mcp-token') ? 'token' : 'open',
     library: has('empty') ? 'empty' : 'seed',
     styles: has('no-styles') ? 'none' : 'seed',
-    speed: has('instant') ? 'instant' : has('fast') ? 'fast' : 'normal',
+    speed: has('instant') ? 'instant' : has('fast') ? 'fast' : has('slow') ? 'slow' : 'normal',
+    slowPaths: flags.filter((f) => f.startsWith('slow-')).map((f) => f.slice('slow-'.length)),
     publicUrl: has('mcp-url'),
     aiSource: has('ai-env') ? 'environment' : 'settings',
     forbidden: has('forbidden') ? 'host' : has('forbidden-writes') ? 'origin' : false,
@@ -232,7 +247,7 @@ export function installMock(): void {
   } catch {
     // Storage can be unavailable (private mode); the flags then last until reload.
   }
-  const unknown = flags.filter((f) => !(FLAGS as readonly string[]).includes(f));
+  const unknown = flags.filter((f) => !(FLAGS as readonly string[]).includes(f) && !f.startsWith('slow-'));
   if (unknown.length > 0) console.warn(`[mock] unknown scenario flag(s): ${unknown.join(', ')}. Known: ${FLAGS.join(', ')}`);
 
   const server = createMockServer(optionsFromFlags(flags));
@@ -241,6 +256,6 @@ export function installMock(): void {
   console.info(
     `[mock] Using the in-memory API mock (${flags.length > 0 ? `flags: ${flags.join(', ')}` : 'default scenario'}). ` +
       'State resets on reload. Scenarios: ?mock=' +
-      FLAGS.join(','),
+      [...FLAGS, 'slow-<path>'].join(','),
   );
 }

@@ -668,6 +668,7 @@ function bulk(db: MockDb, req: Req) {
 }
 
 function stats(db: MockDb) {
+  const submits = db.submissions.filter((s) => s.mode === 'submit');
   const out: Stats = {
     items: {
       total: db.items.size,
@@ -679,10 +680,10 @@ function stats(db: MockDb) {
     },
     collections: db.collections.length,
     tags: new Set([...db.items.values()].flatMap((i) => i.tags)).size,
+    // Runs are not attempts at the problem, so only submits count.
     submissions: {
-      total: db.submissions.length,
-      // Runs against the samples are not attempts at the problem.
-      accepted: db.submissions.filter((s) => s.mode === 'submit' && s.verdict === 'accepted').length,
+      total: submits.length,
+      accepted: submits.filter((s) => s.verdict === 'accepted').length,
     },
   };
   // The same tests as the `favorite` and `uncollected` filters of the item list.

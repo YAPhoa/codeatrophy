@@ -259,15 +259,15 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxSourceUrlChars", "maxSourceNoteChars", "maxTags", "maxTagChars", "maxCollectionNameChars",
 		"maxCollectionDescriptionChars", "timeLimitMs", "memoryLimitKb", "maxTestCasesPerItem", "maxTestDataBytes",
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
-		"maxLargeInputBytes", "maxLargeTestCases", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxModelIdChars", "maxApiKeyChars",
+		"maxLargeInputBytes", "maxLargeTestCases", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxSystemPromptChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxAiProviders", "maxAiProviderNameChars", "minAiTimeoutSeconds", "maxAiTimeoutSeconds", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
 		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 41 {
-		t.Errorf("limits has %d keys, want 41", len(lim))
+	if len(lim) != 42 {
+		t.Errorf("limits has %d keys, want 42", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -877,6 +877,63 @@ func TestPreferencesEndpoints(t *testing.T) {
 	// Nothing from a rejected request is saved.
 	if got := c.expect("GET", api+"/settings/preferences", "", 200).json(t); got["editor"].(map[string]any)["tabSize"] != float64(2) {
 		t.Errorf("a rejected PUT changed something: %v", got)
+	}
+}
+
+func TestSystemPromptEndpoints(t *testing.T) {
+	c := newServer(t)
+	path := api + "/settings/ai/system-prompt"
+	def := c.expect("GET", path, "", 200).json(t)
+	if def["isCustom"] != false || def["custom"] != nil || !strings.HasPrefix(def["builtIn"].(string), "# Codeatrophy authoring conventions") ||
+		!strings.HasPrefix(def["fixed"].(string), "# Fixed rules") || def["draftRules"] == "" || def["variantRules"] == "" {
+		t.Errorf("built-in: %v", def)
+	}
+	got := c.expect("PUT", path, `{"custom":" My rules \n"}`, 200).json(t)
+	if got["isCustom"] != true || got["custom"] != "My rules" || got["builtIn"] != def["builtIn"] {
+		t.Errorf("set: %v", got)
+	}
+	for _, bad := range []string{`{}`, `{"custom":null}`, `{"custom":""}`, `{"custom":"a\u0000b"}`, `{"custom":1}`,
+		`{"custom":"` + strings.Repeat("x", 20001) + `"}`} {
+		if r := c.do("PUT", path, bad); r.status != 422 && r.status != 400 {
+			t.Errorf("%.40s: %d", bad, r.status)
+		}
+	}
+	if got := c.expect("GET", path, "", 200).json(t); got["custom"] != "My rules" {
+		t.Errorf("a rejected PUT changed something: %v", got)
+	}
+	c.expect("DELETE", path, "", 204)
+	if got := c.expect("GET", path, "", 200).json(t); got["isCustom"] != false || got["custom"] != nil {
+		t.Errorf("after reset: %v", got)
+	}
+}
+
+func TestTestCasePromptEndpoints(t *testing.T) {
+	c := newServer(t)
+	path := api + "/settings/ai/testcase-prompt"
+	def := c.expect("GET", path, "", 200).json(t)
+	if def["isCustom"] != false || def["custom"] != nil || !strings.HasPrefix(def["builtIn"].(string), "- For a program problem") ||
+		!strings.HasPrefix(def["fixed"].(string), "# Fixed rules") {
+		t.Errorf("built-in: %v", def)
+	}
+	got := c.expect("PUT", path, `{"custom":" My tests \n"}`, 200).json(t)
+	if got["isCustom"] != true || got["custom"] != "My tests" || got["builtIn"] != def["builtIn"] || got["fixed"] != def["fixed"] {
+		t.Errorf("set: %v", got)
+	}
+	if sp := c.expect("GET", api+"/settings/ai/system-prompt", "", 200).json(t); sp["isCustom"] != false {
+		t.Errorf("the system prompt changed: %v", sp)
+	}
+	for _, bad := range []string{`{}`, `{"custom":null}`, `{"custom":""}`, `{"custom":"a\u0000b"}`, `{"custom":1}`,
+		`{"custom":"` + strings.Repeat("x", 20001) + `"}`} {
+		if r := c.do("PUT", path, bad); r.status != 422 && r.status != 400 {
+			t.Errorf("%.40s: %d", bad, r.status)
+		}
+	}
+	if got := c.expect("GET", path, "", 200).json(t); got["custom"] != "My tests" {
+		t.Errorf("a rejected PUT changed something: %v", got)
+	}
+	c.expect("DELETE", path, "", 204)
+	if got := c.expect("GET", path, "", 200).json(t); got["isCustom"] != false || got["custom"] != nil {
+		t.Errorf("after reset: %v", got)
 	}
 }
 

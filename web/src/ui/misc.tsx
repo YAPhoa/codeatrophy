@@ -4,7 +4,8 @@ import { AlertTriangle, Check, Copy, Info, Loader2, RotateCw, XCircle } from 'lu
 import type { Tone } from '../lib/format';
 import { describeError } from '../lib/errors';
 import { Button, cx } from './Button';
-import { useSlidingIndicator } from '../lib/motion';
+import { useLoadingShown, useSlidingIndicator } from '../lib/motion';
+import { IconSwap, MorphText } from './Animated';
 
 export function Badge({ tone = 'neutral', children, title, className }: { tone?: Tone; children: ReactNode; title?: string; className?: string }) {
   return (
@@ -27,9 +28,11 @@ export function Spinner({ size = 16, label }: { size?: number; label?: string })
   );
 }
 
+/** A screen or region that is loading. Hidden for its first moments (`useLoadingShown`), so a quick load shows nothing. */
 export function PageLoading({ label = 'Loading…' }: { label?: string }) {
+  const shown = useLoadingShown();
   return (
-    <div className="page-state" role="status">
+    <div className={cx('page-state', 'loading-delay', !shown && 'is-pending')} role="status">
       <Loader2 size={20} className="spin" aria-hidden="true" />
       <span>{label}</span>
     </div>
@@ -177,10 +180,11 @@ export function CopyButton({ text, label = 'Copy', size = 'sm' }: { text: string
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
+  const shown = copied ? 'Copied' : label;
   return (
     <Button
       size={size}
-      icon={copied ? <Check size={14} /> : <Copy size={14} />}
+      className="copy-btn"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -200,7 +204,23 @@ export function CopyButton({ text, label = 'Copy', size = 'sm' }: { text: string
         timer.current = window.setTimeout(() => setCopied(false), 1600);
       }}
     >
-      <span aria-live="polite">{copied ? 'Copied' : label}</span>
+      {/* The button is as wide as its wider label all along, so nothing
+          beside it moves; the shown label morphs inside that width. */}
+      <span className="copy-btn-face" aria-hidden="true">
+        <span className="copy-btn-row">
+          <IconSwap swapKey={copied}>{copied ? <Check size={14} /> : <Copy size={14} />}</IconSwap>
+          <MorphText text={shown} />
+        </span>
+        {[label, 'Copied'].map((t) => (
+          <span key={t} className="copy-btn-row copy-btn-sizer">
+            <Check size={14} />
+            {t}
+          </span>
+        ))}
+      </span>
+      <span className="sr-only" aria-live="polite">
+        {shown}
+      </span>
     </Button>
   );
 }

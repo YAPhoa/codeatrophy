@@ -62,7 +62,10 @@ function bulkCases(db: MockDb, req: Req) {
       v.add('referenceSolution', 'must be null or { language, source } with a known language id');
     } else reference = { language: ref.language, source: normaliseText(ref.source) };
   }
-  const kept = raw.replace === true ? 0 : db.casesOf(item.id).length;
+  // Replacing keeps the sample cases: they are part of the statement.
+  const existing = db.casesOf(item.id);
+  const samples = existing.filter((c) => c.isSample).length;
+  const kept = raw.replace === true ? samples : existing.length;
   if (kept + inputs.length > LIMITS.maxTestCasesPerItem) v.add('cases', tooManyCases);
   v.check();
 
@@ -73,14 +76,15 @@ function bulkCases(db: MockDb, req: Req) {
   const before = db.referenceView(item.id);
   const referenceStored = reference !== null && db.writeReference(item.id, reference);
 
+  const removed = raw.replace === true && existing.length > samples;
   if (raw.replace === true) {
-    for (const c of db.casesOf(item.id)) db.truth.delete(c.id);
-    db.testCases = db.testCases.filter((c) => c.itemId !== item.id);
+    for (const c of existing) if (!c.isSample) db.truth.delete(c.id);
+    db.testCases = db.testCases.filter((c) => c.itemId !== item.id || c.isSample);
+    db.renumberCases(item.id);
   }
   for (const input of inputs) insertTestCase(db, item.id, input);
-  const hadCases = kept > 0 || raw.replace === true;
   if (referenceStored) db.recordSolutionChange(item, before);
-  else if (inputs.length > 0 || (raw.replace === true && hadCases)) db.touchCases(item);
+  else if (inputs.length > 0 || removed) db.touchCases(item);
   return ok({ items: db.casesOf(item.id).map((c) => ({ ...c })) });
 }
 

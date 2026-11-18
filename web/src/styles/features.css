@@ -67,6 +67,41 @@
   color: var(--star);
 }
 
+/* The filled star carries its own colour, so while it fades out after a
+   removal it stays the star's colour rather than the button's. */
+.fav-star-on {
+  color: var(--star);
+}
+
+.icon-swap.fav-icon.is-on > .icon-swap-icon.is-in {
+  animation: fav-pop var(--duration-medium) var(--ease-bounce);
+}
+
+.icon-swap.fav-icon.is-on > .icon-swap-out {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes fav-pop {
+  0% {
+    transform: scale(1);
+  }
+
+  30% {
+    transform: scale(0.8);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Becoming done draws the tick in, as a just-accepted verdict does. */
+.icon-swap-icon.is-in > .status-done path {
+  stroke-dasharray: 12;
+  animation: check-draw var(--duration-very-slow) var(--ease-out) var(--duration-micro) backwards;
+}
+
 .tagchips {
   display: inline-flex;
   flex-wrap: wrap;
@@ -222,9 +257,20 @@
   gap: 5px;
 }
 
+/* A fixed slot after the label holds the chevron or, while filtering, the
+   count, so a filter button keeps its width either way. */
+.filter-slot {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
 .filter-count {
   min-width: 16px;
-  padding: 0 var(--space-1);
+  padding: 0 1px;
+  letter-spacing: -0.03em;
   border-radius: 8px;
   background: var(--accent);
   color: var(--on-accent);
@@ -232,10 +278,15 @@
   font-weight: 700;
   line-height: 16px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .filter-pop {
   width: 240px;
+}
+
+.filter-clear.is-idle {
+  visibility: hidden;
 }
 
 .filter-check {
@@ -248,6 +299,13 @@
   margin-top: 0;
 }
 
+/* The bar taking over as a row is ticked, or as the selection is cleared:
+   it fades in where it stands, and the one it replaces simply goes. */
+.filterbar.is-swapped-in,
+.bulkbar.is-swapped-in {
+  animation: fade-in var(--duration-quick) var(--ease-out);
+}
+
 .bulkbar {
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--accent);
@@ -258,6 +316,7 @@
 .bulk-count {
   margin-right: var(--space-1-5);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .bulk-delete {
@@ -271,8 +330,87 @@
   overflow: hidden;
 }
 
+.item-list {
+  transition: opacity var(--duration-quick) var(--ease-in-out);
+}
+
 .item-list-wrap.is-stale .item-list {
   opacity: 0.6;
+}
+
+.item-list-body {
+  position: relative;
+}
+
+/* The first page loading: placeholder rows at the rows' own height, shown
+   only once the load is slow (.loading-delay). When the rows arrive they fade
+   in with a cross-blur, over the placeholders fading out on top. */
+.item-skeleton .item-row:hover {
+  background: none;
+}
+
+.item-skeleton.is-leaving {
+  position: absolute;
+  inset: 0 0 auto;
+  background: var(--surface);
+  pointer-events: none;
+  animation: skeleton-out var(--duration-slow) var(--ease-in-out) forwards;
+}
+
+.item-list.is-revealing {
+  animation: skeleton-in var(--duration-slow) var(--ease-in-out);
+}
+
+/* Rows that arrive before the skeleton was due to show simply fade in. */
+.item-list.is-arriving {
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
+@keyframes skeleton-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--blur-small));
+  }
+}
+
+@keyframes skeleton-out {
+  to {
+    opacity: 0;
+    filter: blur(var(--blur-small));
+  }
+}
+
+.skel {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  animation: skeleton-pulse 1s var(--ease-in-out) infinite;
+}
+
+.skel-box {
+  width: 14px;
+  height: 14px;
+}
+
+.skel-icon {
+  width: 16px;
+  height: 16px;
+  margin: 0 auto;
+  border-radius: 50%;
+}
+
+.skel-line {
+  height: 10px;
+}
+
+.skel-short {
+  width: 48px;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .item-list-head {
@@ -293,11 +431,13 @@
 
 .item-row {
   display: grid;
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 28px;
+  /* The line keeps its 40px (less the border) when the details open below it. */
+  grid-template-rows: minmax(39px, auto);
   align-items: center;
   column-gap: var(--space-0-5);
   min-height: 40px;
-  padding: 0 var(--space-3) 0 var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-1);
   border-bottom: 1px solid var(--border);
   position: relative;
   /* Rows off screen are not laid out, so a library loaded far down stays light. */
@@ -305,16 +445,22 @@
   contain-intrinsic-size: auto 40px;
 }
 
+/* An open row is always laid out, so its height is known wherever it is. */
+.item-row.is-open {
+  content-visibility: visible;
+}
+
 .item-list.is-reorderable .item-row {
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 22px;
+  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 28px 22px;
 }
 
 .item-row:last-child {
+  grid-template-rows: minmax(40px, auto);
   border-bottom: none;
 }
 
 .item-row:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .item-row.is-selected {
@@ -501,6 +647,54 @@
   cursor: grab;
 }
 
+.item-expand {
+  justify-content: center;
+}
+
+.item-expand-icon {
+  transition: transform var(--duration-quick) var(--ease-out);
+}
+
+.item-expand-icon.is-open {
+  transform: rotate(180deg);
+  transition-duration: var(--duration-fast);
+}
+
+/* The details: a second line under the row's, from the title to the end. */
+.item-row > .collapse {
+  grid-column: 5 / -1;
+}
+
+.item-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3) var(--space-1);
+  border-top: 1px solid var(--border);
+  cursor: default;
+}
+
+.item-details-summary {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.item-details-facts {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-1-5);
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.item-details-facts a {
+  color: var(--text-2);
+}
+
 .item-list-more {
   display: flex;
   justify-content: center;
@@ -511,7 +705,12 @@
 @media (max-width: 700px) {
   .item-row,
   .item-list.is-reorderable .item-row {
-    grid-template-columns: 32px 28px 28px minmax(0, 1fr) auto;
+    grid-template-columns: 32px 28px 28px minmax(0, 1fr) auto 28px;
+  }
+
+  /* The type icon is hidden, so the title is the fourth column. */
+  .item-row > .collapse {
+    grid-column: 4 / -1;
   }
 
   .item-type,
@@ -664,7 +863,7 @@
 }
 
 .runner-toggle:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .runner-parts {
@@ -897,246 +1096,247 @@
   background: var(--accent-soft);
 }
 
-/* The mark of a generation in progress: a quill writing on a scroll, a
-   strip of paper between two rolls that stand a little wider than it. Five
-   lines share one timeline, each a step behind the one before: a line is
-   written on the bottom row, moves up a row at each step and goes under the
-   top roll, so the scroll fills once and then winds on for as long as the
-   wait lasts. The quill follows the end of the line being written. */
-.generating-scroll {
-  --edge: color-mix(in srgb, var(--accent) 45%, transparent);
-  position: relative;
-  width: 30px;
-  height: 40px;
-  /* Room for the rolls on both sides, and for the quill past the right one. */
-  margin: 0 var(--space-3) 0 var(--space-1);
-  border-inline: 1px solid var(--edge);
-  background: var(--surface);
+/* The mark of a generation in progress: text arriving the way a model writes
+   it. Word-sized tokens appear a few ticks apart behind a block caret; when a
+   line is done the text moves up a row, dims, and the top line fades out.
+   Everything moves in whole pixels and in steps, like the pixel logo.
+   A tick is one frame; a line takes ten ticks and five lines make the loop.
+   Every line shares one timeline, each ten ticks behind the one before, and
+   every token shares one too, delayed by the tick it arrives on (--k, set in
+   parts.tsx). The delays are negative so the loop is in step from the start. */
+.generating-mark {
+  --tick: 80ms;
+  --cycle: calc(var(--tick) * 50);
   flex: none;
+  fill: var(--accent);
+  shape-rendering: crispEdges;
 }
 
-.generating-scroll::before,
-.generating-scroll::after {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  inset-inline: calc(var(--space-1) * -1 - 1px);
-  height: 7px;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-sm);
-  /* The turn of the paper at each end of a roll. */
-  background:
-    linear-gradient(var(--edge), var(--edge)) 3px 0 / 1px 100% no-repeat,
-    linear-gradient(var(--edge), var(--edge)) calc(100% - 3px) 0 / 1px 100% no-repeat,
-    var(--surface);
+.generating-row {
+  animation: generating-row var(--cycle) step-end infinite;
+  animation-delay: calc(var(--tick) * 10 * (var(--i) - 5));
 }
 
-.generating-scroll::before {
-  top: 0;
+.generating-token {
+  animation: generating-token var(--cycle) step-end infinite;
+  animation-delay: calc(var(--tick) * (10 * (var(--i) - 5) + var(--k)));
 }
 
-.generating-scroll::after {
-  bottom: 0;
+.generating-caret {
+  animation: generating-caret var(--cycle) step-end infinite;
 }
 
-.generating-lines {
-  --pitch: 6px;
-  --line: 18px;
-  --step: 0.8s;
-  position: absolute;
-  top: calc(50% - (var(--pitch) * 3 + 2px) / 2);
-  left: 5px;
-  width: var(--line);
-  height: calc(var(--pitch) * 3 + 2px);
-}
-
-.generating-line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 2px;
-  border-radius: 1px;
-  overflow: hidden;
-  animation: generating-row calc(var(--step) * 5) var(--ease-out) infinite backwards;
-}
-
-.generating-ink {
-  display: block;
-  height: 100%;
-  background: color-mix(in srgb, var(--accent) 50%, transparent);
-  animation: generating-write calc(var(--step) * 5) var(--ease-in-out) infinite backwards;
-  animation-delay: inherit;
-}
-
-/* The widths here are the stops of the quill in generating-quill below. */
-.generating-line:nth-child(1) {
-  width: 100%;
-}
-
-.generating-line:nth-child(2) {
-  width: 72%;
-  animation-delay: var(--step);
-}
-
-.generating-line:nth-child(3) {
-  width: 89%;
-  animation-delay: calc(var(--step) * 2);
-}
-
-.generating-line:nth-child(4) {
-  width: 56%;
-  animation-delay: calc(var(--step) * 3);
-}
-
-.generating-line:nth-child(5) {
-  width: 94%;
-  animation-delay: calc(var(--step) * 4);
-}
-
-/* The tip of the quill is at (2, 25) of its 16 by 26 drawing: it rests on
-   the bottom row, and the quill leans and the hand turns about it. */
-.generating-quill {
-  position: absolute;
-  top: calc(var(--pitch) * 3 + 1px - 25px);
-  left: -2px;
-  width: 16px;
-  height: 26px;
-  z-index: 2;
-  color: var(--accent);
-  animation: generating-quill calc(var(--step) * 5) var(--ease-in-out) infinite;
-}
-
-.generating-quill svg {
-  display: block;
-  overflow: visible;
-  transform-origin: 2px 25px;
-  rotate: 22deg;
-  animation: generating-scribble var(--step) linear infinite;
-}
-
-.generating-quill-rib {
-  stroke: var(--surface);
-}
-
+/* A line: written on the bottom row, then up a row at the end of each step. */
 @keyframes generating-row {
-  0%,
+  0% {
+    transform: translateY(0px);
+    opacity: 1;
+  }
   16% {
-    transform: translateY(calc(var(--pitch) * 3));
+    transform: translateY(-2px);
     opacity: 1;
   }
-  20%,
+  18% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+  20% {
+    transform: translateY(-7px);
+    opacity: 0.7;
+  }
   36% {
-    transform: translateY(calc(var(--pitch) * 2));
+    transform: translateY(-9px);
+    opacity: 0.7;
   }
-  40%,
+  38% {
+    transform: translateY(-11px);
+    opacity: 0.7;
+  }
+  40% {
+    transform: translateY(-14px);
+    opacity: 0.52;
+  }
   56% {
-    transform: translateY(var(--pitch));
+    transform: translateY(-16px);
+    opacity: 0.52;
   }
-  60%,
+  58% {
+    transform: translateY(-18px);
+    opacity: 0.52;
+  }
+  60% {
+    transform: translateY(-21px);
+    opacity: 0.38;
+  }
   76% {
-    transform: translateY(0);
-    opacity: 1;
+    transform: translateY(-23px);
+    opacity: 0.19;
   }
-  80%,
-  100% {
-    transform: translateY(calc(var(--pitch) * -1));
+  78% {
+    transform: translateY(-25px);
+    opacity: 0.1;
+  }
+  80% {
+    transform: translateY(-40px);
     opacity: 0;
   }
+  100% {
+    transform: translateY(0px);
+    opacity: 1;
+  }
 }
 
-@keyframes generating-write {
+/* A token is in place for four steps, then out until its line starts again. */
+@keyframes generating-token {
   0% {
-    transform: translateX(-101%);
+    opacity: 1;
   }
-  14%,
-  90% {
-    transform: translateX(0);
+  80% {
+    opacity: 0;
   }
   100% {
-    transform: translateX(-101%);
+    opacity: 1;
   }
 }
 
-/* Along each of the five lines in turn, as far as that line goes, then back. */
-@keyframes generating-quill {
-  0%,
-  20%,
-  40%,
-  60%,
-  80%,
-  100% {
-    transform: translateX(0);
+/* The caret sits one pixel after the newest token, rides up with the line as
+   the rows move, and drops to the start of the next. These positions follow
+   the token widths and ticks in parts.tsx: change them together. */
+@keyframes generating-caret {
+  0% {
+    transform: translate(1px, 23px);
   }
-  14% {
-    transform: translateX(var(--line));
+  2% {
+    transform: translate(7px, 23px);
   }
-  34% {
-    transform: translateX(calc(var(--line) * 0.72));
+  4% {
+    transform: translate(12px, 23px);
   }
-  54% {
-    transform: translateX(calc(var(--line) * 0.89));
+  8% {
+    transform: translate(22px, 23px);
+  }
+  12% {
+    transform: translate(28px, 23px);
+  }
+  16% {
+    transform: translate(28px, 21px);
+  }
+  18% {
+    transform: translate(28px, 19px);
+  }
+  20% {
+    transform: translate(1px, 23px);
+  }
+  22% {
+    transform: translate(9px, 23px);
+  }
+  26% {
+    transform: translate(15px, 23px);
+  }
+  32% {
+    transform: translate(23px, 23px);
+  }
+  36% {
+    transform: translate(23px, 21px);
+  }
+  38% {
+    transform: translate(23px, 19px);
+  }
+  40% {
+    transform: translate(1px, 23px);
+  }
+  42% {
+    transform: translate(5px, 23px);
+  }
+  44% {
+    transform: translate(16px, 23px);
+  }
+  50% {
+    transform: translate(23px, 23px);
+  }
+  52% {
+    transform: translate(28px, 23px);
+  }
+  56% {
+    transform: translate(28px, 21px);
+  }
+  58% {
+    transform: translate(28px, 19px);
+  }
+  60% {
+    transform: translate(1px, 23px);
+  }
+  64% {
+    transform: translate(8px, 23px);
+  }
+  68% {
+    transform: translate(16px, 23px);
   }
   74% {
-    transform: translateX(calc(var(--line) * 0.56));
+    transform: translate(22px, 23px);
+  }
+  76% {
+    transform: translate(22px, 21px);
+  }
+  78% {
+    transform: translate(22px, 19px);
+  }
+  80% {
+    transform: translate(1px, 23px);
+  }
+  82% {
+    transform: translate(6px, 23px);
+  }
+  86% {
+    transform: translate(16px, 23px);
+  }
+  88% {
+    transform: translate(21px, 23px);
   }
   94% {
-    transform: translateX(calc(var(--line) * 0.94));
+    transform: translate(28px, 23px);
   }
-}
-
-/* One line's worth: the hand wavers while it writes, then lifts to go back. */
-@keyframes generating-scribble {
-  0%,
-  70% {
-    transform: translateY(0) rotate(0deg);
+  96% {
+    transform: translate(28px, 21px);
   }
-  9%,
-  26%,
-  44%,
-  61% {
-    transform: translateY(0) rotate(-7deg);
-  }
-  18%,
-  35%,
-  53% {
-    transform: translateY(0) rotate(4deg);
-  }
-  85% {
-    transform: translateY(-3px) rotate(-10deg);
+  98% {
+    transform: translate(28px, 19px);
   }
   100% {
-    transform: translateY(0) rotate(0deg);
+    transform: translate(1px, 23px);
   }
 }
 
-/* Reduced motion: a written scroll with the quill at rest on its last line;
-   the counter beside it still shows that time is passing. */
+/* Reduced motion: a still frame with four lines written and the caret at the
+   end of the last; the counter beside it still shows that time is passing. */
 @media (prefers-reduced-motion: reduce) {
-  .generating-line,
-  .generating-ink,
-  .generating-quill,
-  .generating-quill svg {
+  .generating-row,
+  .generating-token,
+  .generating-caret {
     animation: none;
   }
 
-  .generating-line:nth-child(2) {
-    transform: translateY(var(--pitch));
-  }
-
-  .generating-line:nth-child(3) {
-    transform: translateY(calc(var(--pitch) * 2));
-  }
-
-  .generating-line:nth-child(4) {
-    transform: translateY(calc(var(--pitch) * 3));
-  }
-
-  .generating-line:nth-child(5) {
+  .generating-row:nth-child(2) {
     opacity: 0;
   }
 
-  .generating-quill {
-    transform: translateX(calc(var(--line) * 0.56));
+  .generating-row:nth-child(3) {
+    transform: translateY(-21px);
+    opacity: 0.38;
+  }
+
+  .generating-row:nth-child(4) {
+    transform: translateY(-14px);
+    opacity: 0.52;
+  }
+
+  .generating-row:nth-child(5) {
+    transform: translateY(-7px);
+    opacity: 0.7;
+  }
+
+  .generating-caret {
+    transform: translate(28px, 23px);
   }
 }
 
@@ -1405,7 +1605,7 @@ a.usage-line:hover {
 }
 
 .revise-toggle:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .revise-form {
@@ -2134,6 +2334,51 @@ fieldset.stack legend {
   letter-spacing: -0.01em;
 }
 
+.result-check {
+  display: inline-flex;
+  flex: none;
+}
+
+/* A submission just judged accepted: the check turns upright, settles and
+   draws its tick while the rest of the line eases in. Past submissions, and
+   one opened already judged, show the check at rest. */
+.result-head.is-fresh .result-check {
+  animation:
+    check-in var(--duration-very-slow) var(--ease-out) backwards,
+    check-settle var(--duration-very-slow) var(--ease-bounce) backwards;
+}
+
+.result-head.is-fresh .result-check path {
+  stroke-dasharray: 12;
+  animation: check-draw var(--duration-very-slow) var(--ease-out) var(--duration-micro) backwards;
+}
+
+.result-head.is-fresh > :not(.result-check) {
+  animation: result-in var(--duration-medium) var(--ease-out) backwards;
+}
+
+@keyframes check-in {
+  from {
+    opacity: 0;
+    rotate: 70deg;
+    filter: blur(var(--blur-large));
+  }
+}
+
+@keyframes check-settle {
+  from {
+    translate: 0 var(--distance-base);
+  }
+}
+
+@keyframes result-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--distance-micro));
+    filter: blur(var(--blur-small));
+  }
+}
+
 .result-head.tone-neutral .result-verdict {
   color: var(--text);
   font-size: var(--text-lg);
@@ -2201,7 +2446,7 @@ fieldset.stack legend {
 }
 
 button.case-chip:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .case-chip.tone-ok {
@@ -2296,19 +2541,26 @@ button.case-chip:hover {
 }
 
 .history {
-  display: flex;
-  flex-direction: column;
   margin: -6px -10px;
 }
 
-.history-row {
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The header and the rows share their columns. */
+.history-grid {
   display: grid;
-  grid-template-columns: minmax(96px, 1.4fr) 48px minmax(52px, 1fr) 34px 52px 70px;
+  grid-template-columns: minmax(100px, 1.4fr) minmax(56px, 1fr) 40px 52px 56px 70px;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1-5);
+  padding: 0 var(--space-3);
+}
+
+.history-row {
   width: 100%;
   min-height: 34px;
-  padding: 0 var(--space-3);
   border: none;
   border-radius: var(--radius-sm);
   background: none;
@@ -2317,7 +2569,7 @@ button.case-chip:hover {
 }
 
 .history-row:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .history-row.is-active {
@@ -2331,13 +2583,9 @@ button.case-chip:hover {
   text-overflow: ellipsis;
 }
 
-.history-mode {
-  color: var(--text-2);
-  font-size: var(--text-sm);
-}
-
 .history-count,
 .history-time,
+.history-memory,
 .history-when {
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
@@ -2356,16 +2604,6 @@ button.case-chip:hover {
 }
 
 @media (max-width: 700px) {
-  .history-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-  }
-
-  .history-mode,
-  .history-count,
-  .history-time {
-    display: none;
-  }
-
   /* The tabs take a row of their own, so status, favorite and the menu stay on screen. */
   .itembar {
     flex-wrap: wrap;
@@ -2404,10 +2642,13 @@ button.case-chip:hover {
   min-width: 0;
 }
 
+/* Clipped, so the notes panel sliding in from its edge never adds a scrollbar. */
 .reader-body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: clip;
 }
 
 .reader-scroll {
@@ -2418,20 +2659,28 @@ button.case-chip:hover {
   scroll-behavior: smooth;
 }
 
+/* The text column is 720px at most: about 85 characters a line at 17px. It
+   gives way first when the pane is too narrow for it and the outline. */
 .reader-layout {
   display: grid;
-  grid-template-columns: minmax(0, 640px) 220px;
+  grid-template-columns: minmax(0, 720px) 220px;
   justify-content: center;
   gap: var(--space-12);
   padding: var(--space-10) var(--space-8) 96px;
 }
 
 .reader.has-notes .reader-layout {
-  grid-template-columns: minmax(0, 640px);
+  grid-template-columns: minmax(0, 720px);
 }
 
 .reader.has-notes .reader-outline {
   display: none;
+}
+
+/* Back as the notes close: the outline fades in while the text column eases
+   over to make room for it (ReaderView slides the column). */
+.reader.notes-closed .reader-outline {
+  animation: fade-in var(--duration-slow) var(--ease-in-out);
 }
 
 .reader-head {
@@ -2509,6 +2758,40 @@ button.case-chip:hover {
   font-weight: 500;
 }
 
+/* One marker that slides to the entry being read (lib/motion.ts measures it
+   and plays the move on transform only). Until it is measured, the entry
+   draws its own. */
+.reader-outline[data-indicator]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: var(--indicator-h);
+  background: var(--accent);
+  transform: translate(var(--indicator-x), var(--indicator-y));
+  transform-origin: top;
+  pointer-events: none;
+}
+
+.reader-outline[data-indicator] a.is-active {
+  border-left-color: var(--border);
+}
+
+/* The heading an outline link jumps to lights up briefly, which shows where it
+   went even when the page cannot scroll any further. */
+.reader-layout :target {
+  border-radius: var(--radius-sm);
+  animation: target-flash 1.6s var(--ease-out);
+}
+
+@keyframes target-flash {
+  from {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 6px var(--accent-soft);
+  }
+}
+
 .reader-notes {
   display: flex;
   flex-direction: column;
@@ -2517,6 +2800,38 @@ button.case-chip:hover {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-left: 1px solid var(--border);
   background: var(--surface-2);
+}
+
+/* The panel slides in from its edge with a cross-blur. Closing, it leaves
+   the layout at once, so the text column can ease over while it fades out on
+   top. */
+.reader-notes.is-opening {
+  animation: notes-in var(--duration-slow) var(--ease-out);
+}
+
+.reader-notes.is-closing {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(380px, 38%);
+  animation: notes-out var(--duration-medium) var(--ease-out) forwards;
+}
+
+@keyframes notes-in {
+  from {
+    opacity: 0;
+    transform: translateX(10%);
+    filter: blur(var(--blur-small));
+  }
+}
+
+@keyframes notes-out {
+  to {
+    opacity: 0;
+    transform: translateX(10%);
+    filter: blur(var(--blur-small));
+  }
 }
 
 .reader-notes-head {
@@ -2533,7 +2848,7 @@ button.case-chip:hover {
 
 @media (max-width: 1100px) {
   .reader-layout {
-    grid-template-columns: minmax(0, 640px);
+    grid-template-columns: minmax(0, 720px);
     padding: 28px var(--space-5) 72px;
   }
 
@@ -2551,6 +2866,13 @@ button.case-chip:hover {
     flex: 0 0 42%;
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .reader-notes.is-closing {
+    top: auto;
+    left: 0;
+    width: auto;
+    height: 42%;
   }
 
   .reader-head h1 {
@@ -2647,7 +2969,7 @@ button.case-chip:hover {
 }
 
 .case-row:has(> .case-row-main:hover):not(.is-selected) {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .case-row.is-selected {
@@ -3122,9 +3444,10 @@ button.case-chip:hover {
   align-items: start;
 }
 
+/* Sticks where it starts (the page's top padding), so it never scrolls at all. */
 .settings-nav {
   position: sticky;
-  top: 16px;
+  top: var(--space-12);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -3243,7 +3566,6 @@ button.case-chip:hover {
   line-height: 1.55;
 }
 
-.style-list,
 .provider-list {
   display: flex;
   flex-direction: column;
@@ -3281,12 +3603,152 @@ button.case-chip:hover {
   color: var(--text-2);
 }
 
-.style-item,
 .provider-item {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+
+/* The default style: a radio group of cards, each one its radio's label. */
+.styles-default {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.styles-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.styles-head .row {
+  gap: var(--space-2);
+  min-height: 24px;
+}
+
+.styles-head .field-hint {
+  margin-top: 2px;
+}
+
+.style-choice {
+  position: relative;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.style-choice-name {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The name's label covers the whole card, so a click anywhere on it picks the style. */
+.style-choice-name::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+}
+
+/* Above the label's cover: the radio itself, and the actions, so editing never changes the choice. */
+.style-choice > input,
+.style-choice-action {
+  position: relative;
+  z-index: 1;
+  flex: none;
+}
+
+.style-choice > .style-choice-action {
+  margin: -4px -5px -4px 0;
+}
+
+.style-choice > .link-btn.style-choice-action {
+  margin: 1px 0 0;
+  font-size: var(--text-sm);
+}
+
+/* A prompt card (system prompt, test case prompt): the editable text, behind a confirm, and the fixed rules below. */
+.sysprompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  scroll-margin-top: var(--space-4);
+}
+
+.sysprompt-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.sysprompt-head h2:focus {
+  outline: none;
+}
+
+.sysprompt > .field-hint {
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.sysprompt-text {
+  max-height: 360px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+
+.sysprompt-text.is-fixed {
+  max-height: 240px;
+  color: var(--text-2);
+}
+
+.sysprompt-editor.textarea {
+  min-height: 360px;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+/* The editable text and the fixed rules: two parallel sections, each with a heading row. */
+.sysprompt-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.sysprompt-section-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  min-height: 28px;
+  font-size: var(--text-sm);
+}
+
+.sysprompt-section-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.sysprompt-section-head svg {
+  color: var(--text-3);
+}
+
+.sysprompt-section-head .btn {
+  margin-left: var(--space-1);
 }
 
 .style-text {
@@ -3429,7 +3891,7 @@ button.case-chip:hover {
 }
 
 button.log-row:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .log-head {
@@ -3624,7 +4086,6 @@ button.log-row:hover {
     display: none;
   }
 
-  .style-item,
   .provider-item {
     flex-wrap: wrap;
   }

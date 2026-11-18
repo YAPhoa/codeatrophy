@@ -124,6 +124,8 @@ export interface Limits {
   maxStylePresets: number;
   maxStyleNameChars: number;
   maxStyleInstructionsChars: number;
+  /** Length of a custom system prompt, in code points after trimming. */
+  maxSystemPromptChars: number;
   maxModelIdChars: number;
   maxApiKeyChars: number;
   /** Saved AI providers per instance; environment providers do not count. */
@@ -673,6 +675,37 @@ export interface StylePresetInput {
 }
 
 export type StylePresetPatch = Partial<StylePresetInput>;
+
+// ---- System prompt ---------------------------------------------------------
+
+/**
+ * The authoring conventions at the start of a draft's or variant's system
+ * prompt: the editable part (`builtIn`, or the user's `custom` text in its
+ * place) and the rules the app depends on, which always apply.
+ */
+export interface SystemPrompt {
+  builtIn: string;
+  custom: string | null;
+  isCustom: boolean;
+  /** The fixed rules, sent after the conventions. */
+  fixed: string;
+  /** The rules that end a draft's and a variant's system prompt. */
+  draftRules: string;
+  variantRules: string;
+}
+
+/**
+ * The rules of a test-case generation's system prompt, separate from the
+ * authoring conventions: the editable test-design guidance (`builtIn`, or
+ * the user's `custom` text in its place) and the rules the app depends on.
+ */
+export interface TestCasePrompt {
+  builtIn: string;
+  custom: string | null;
+  isCustom: boolean;
+  /** The fixed rules, sent after a custom text, ending with the JSON-only answer. */
+  fixed: string;
+}
 
 // ---- AI settings ----------------------------------------------------------
 

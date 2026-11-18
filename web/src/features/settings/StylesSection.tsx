@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { PenLine, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { PenLine, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { qk, useLimits, useStyles } from '../../api/queries';
 import type { StylePreset } from '../../api/types';
@@ -8,8 +8,10 @@ import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Checkbox, Field } from '../../ui/Field';
-import { Badge, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
+import { ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
+import { SaveStatus, type SaveState } from './PreferencesSection';
+import { SYSTEM_PROMPT_ID, SystemPromptCards } from './SystemPromptCard';
 
 const EXAMPLE_NAME = 'LeetCode style';
 const EXAMPLE_INSTRUCTIONS =
@@ -23,6 +25,71 @@ const length = (s: string) => Array.from(s.trim()).length;
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
 type Editing = { preset: StylePreset | null; name: string; instructions: string; isDefault: boolean } | null;
+
+/**
+ * The presets in the order they were first shown, new ones at the end. The
+ * server lists the default first; keeping the first order stops a card from
+ * jumping to the top when it is chosen, under the pointer or the arrow keys.
+ */
+function useStableOrder(list: StylePreset[]): StylePreset[] {
+  const order = useRef<string[]>([]);
+  const known = new Set(order.current);
+  const added = list.filter((s) => !known.has(s.id)).map((s) => s.id);
+  if (added.length > 0) order.current = [...order.current, ...added];
+  const rank = new Map(order.current.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+}
+
+/**
+ * Chooses the default style as the radios change. Choices made while one is
+ * being saved are sent after it, the latest only, so requests never overlap.
+ * `picked` is the choice on its way, for the radios to show; on a failure it
+ * is dropped and the radios show what the server has.
+ */
+function useDefaultChoice(onSettled: () => Promise<unknown>, onError: (e: unknown) => void) {
+  const queued = useRef<{ id: string | null } | null>(null);
+  const sending = useRef(false);
+  const [picked, setPicked] = useState<{ id: string | null } | null>(null);
+  const [state, setState] = useState<SaveState>({ status: 'idle' });
+
+  const send = async (id: string | null) => {
+    if (id !== null) {
+      await api.styles.update(id, { isDefault: true });
+      return;
+    }
+    // Built-in conventions: no preset is the default.
+    const { items } = await api.styles.list();
+    for (const s of items) if (s.isDefault) await api.styles.update(s.id, { isDefault: false });
+  };
+
+  const choose = (id: string | null) => {
+    queued.current = { id };
+    setPicked({ id });
+    if (sending.current) return;
+    sending.current = true;
+    setState({ status: 'saving' });
+    void (async () => {
+      let outcome: SaveState = { status: 'saved' };
+      while (queued.current) {
+        const next = queued.current;
+        queued.current = null;
+        try {
+          await send(next.id);
+        } catch (e) {
+          queued.current = null;
+          outcome = { status: 'idle' };
+          onError(e);
+        }
+      }
+      await onSettled();
+      setPicked(null);
+      sending.current = false;
+      setState(outcome);
+    })();
+  };
+
+  return { picked, state, choose };
+}
 
 /**
  * Style presets: the user's own standing instructions for how generated
@@ -48,9 +115,13 @@ export function StylesSection() {
     maxPresets: limits?.maxStylePresets ?? Infinity,
   };
 
-  const list = styles.data ?? [];
+  const list = useStableOrder(styles.data ?? []);
   const full = list.length >= bounds.maxPresets;
   const refresh = () => qc.invalidateQueries({ queryKey: qk.styles });
+  const choice = useDefaultChoice(refresh, (e) => toast.error(e));
+  const savedDefault = list.find((s) => s.isDefault)?.id ?? null;
+  const selected = choice.picked ? choice.picked.id : savedDefault;
+  const radioName = useId();
 
   const open = (preset: StylePreset | null, seed?: { name: string; instructions: string }) => {
     setError(null);
@@ -112,16 +183,6 @@ export function StylesSection() {
     }
   };
 
-  const setDefault = async (preset: StylePreset, isDefault: boolean) => {
-    try {
-      await api.styles.update(preset.id, { isDefault });
-      await refresh();
-      toast.success(isDefault ? `“${preset.name}” is now the default style` : 'No default style: drafts use the built-in conventions unless you pick one');
-    } catch (e) {
-      toast.error(e);
-    }
-  };
-
   const remove = async (preset: StylePreset) => {
     const ok = await confirm({
       title: `Delete the style “${preset.name}”?`,
@@ -130,13 +191,23 @@ export function StylesSection() {
       danger: true,
     });
     if (!ok) return;
+    setBusy(true);
     try {
       await api.styles.remove(preset.id);
       await refresh();
       toast.success(`Deleted “${preset.name}”`);
+      setEditing(null);
     } catch (e) {
       toast.error(e);
+    } finally {
+      setBusy(false);
     }
+  };
+
+  const showSystemPrompt = () => {
+    const card = document.getElementById(SYSTEM_PROMPT_ID);
+    card?.scrollIntoView({ block: 'start' });
+    card?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
   };
 
   return (
@@ -145,20 +216,10 @@ export function StylesSection() {
         <h1 id="styles-title" className="page-title">
           Writing styles
         </h1>
-        {list.length > 0 && (
-          <span className="muted">
-            {list.length} of {bounds.maxPresets}
-          </span>
-        )}
-        <span className="spacer" />
-        <Button icon={<Plus size={14} />} onClick={() => open(null)} disabled={full || styles.isPending}>
-          New style
-        </Button>
       </div>
       <p className="settings-lead">
-        A style is a short note on how drafts should be written, such as the statement layout, the tone or which starter languages to include. You can pick one when drafting, revising or
-        creating a variant, and assistants connected over MCP follow them too. A style cannot change an item’s fields or the stdin/stdout format problems are judged by. Styles are kept short
-        on purpose.
+        A style is a short note on how drafts are written: the statement layout, the tone, which starter languages to include. Assistants connected over MCP follow it too. It cannot
+        change an item’s fields or the stdin/stdout format.
       </p>
 
       {full && (
@@ -187,31 +248,76 @@ export function StylesSection() {
           </div>
         </div>
       ) : (
-        <ul className="style-list">
-          {list.map((s) => (
-            <li key={s.id} className={cx('card style-item', s.isDefault && 'is-default')}>
+        <div className="styles-default">
+          <div className="styles-head">
+            <div className="grow">
+              <div className="row">
+                <h2 id="default-style-title" className="prefs-group-title">
+                  Default style
+                </h2>
+                <SaveStatus state={choice.state} />
+              </div>
+              <p id="default-style-hint" className="field-hint">
+                Used for new drafts unless you pick another when drafting.
+              </p>
+            </div>
+            <Button
+              icon={<Plus size={14} />}
+              onClick={() => open(null)}
+              disabled={full}
+              title={full ? `You have ${bounds.maxPresets} styles, the most you can keep` : undefined}
+            >
+              New style
+            </Button>
+          </div>
+          <div role="radiogroup" aria-labelledby="default-style-title" aria-describedby="default-style-hint" className="choice-cards style-choices">
+            <div className={cx('choice-card style-choice', selected === null && 'is-selected')}>
+              <input
+                type="radio"
+                id={`${radioName}-builtin`}
+                name={radioName}
+                checked={selected === null}
+                onChange={() => choice.choose(null)}
+                aria-describedby={`${radioName}-builtin-text`}
+              />
               <div className="grow">
-                <div className="row">
-                  <strong>{s.name}</strong>
-                  {s.isDefault && (
-                    <Badge tone="accent" title="Preselected whenever you draft">
-                      default
-                    </Badge>
-                  )}
+                <label htmlFor={`${radioName}-builtin`} className="style-choice-name">
+                  Built-in conventions
+                </label>
+                <p id={`${radioName}-builtin-text`} className="style-text">
+                  No style applied. Drafts follow the standard format.
+                </p>
+              </div>
+              <button type="button" className="link-btn style-choice-action" onClick={showSystemPrompt}>
+                System prompt
+              </button>
+            </div>
+            {list.map((s) => (
+              <div key={s.id} className={cx('choice-card style-choice', selected === s.id && 'is-selected')}>
+                <input
+                  type="radio"
+                  id={`${radioName}-${s.id}`}
+                  name={radioName}
+                  checked={selected === s.id}
+                  onChange={() => choice.choose(s.id)}
+                  aria-describedby={`${radioName}-${s.id}-text`}
+                />
+                <div className="grow">
+                  <label htmlFor={`${radioName}-${s.id}`} className="style-choice-name">
+                    {s.name}
+                  </label>
+                  <p id={`${radioName}-${s.id}-text`} className="style-text">
+                    {s.instructions}
+                  </p>
                 </div>
-                <p className="style-text">{s.instructions}</p>
+                <IconButton size="sm" className="style-choice-action" label={`Edit ${s.name}`} icon={<Pencil size={14} />} onClick={() => open(s)} />
               </div>
-              <div className="style-actions">
-                <Button size="sm" variant="ghost" icon={<Star size={14} fill={s.isDefault ? 'currentColor' : 'none'} />} onClick={() => void setDefault(s, !s.isDefault)}>
-                  {s.isDefault ? 'Unset default' : 'Make default'}
-                </Button>
-                <IconButton size="sm" label={`Edit ${s.name}`} icon={<Pencil size={14} />} onClick={() => open(s)} />
-                <IconButton size="sm" label={`Delete ${s.name}`} icon={<Trash2 size={14} />} onClick={() => void remove(s)} />
-              </div>
-            </li>
-          ))}
-        </ul>
+            ))}
+          </div>
+        </div>
       )}
+
+      <SystemPromptCards />
 
       <Dialog
         open={editing !== null}
@@ -222,6 +328,14 @@ export function StylesSection() {
         locked={busy}
         footer={
           <>
+            {editing?.preset && (
+              <>
+                <Button variant="danger" icon={<Trash2 size={14} />} onClick={() => editing.preset && void remove(editing.preset)} disabled={busy}>
+                  Delete
+                </Button>
+                <span className="spacer" />
+              </>
+            )}
             <Button onClick={() => setEditing(null)} disabled={busy}>
               Cancel
             </Button>

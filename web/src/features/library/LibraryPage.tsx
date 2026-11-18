@@ -4,27 +4,107 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../../api/client';
 import { qk, useCollections, useItemPages, useMeta, useQuickUpdate, useStats, useTags } from '../../api/queries';
-import type { ItemStatus, ItemSummary } from '../../api/types';
+import type { Collection, ItemStatus, ItemSummary, Stats } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { DRAG_ITEMS } from '../../app/Sidebar';
 import { activeFilterCount, barFilterCount, canReorder, clearBarFilters, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
 import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
+import { exitDuration, useChangeCount, useLoadingShown } from '../../lib/motion';
+import { isBooting } from '../../lib/boot';
 import { useNewItemHref } from '../../lib/newItem';
 import { writeString } from '../../lib/storage';
 import { moveIndex, pathTo, placeAfter, siblingsOf } from '../../lib/tree';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { Checkbox } from '../../ui/Field';
 import { MenuButton } from '../../ui/Popover';
-import { EmptyState, ErrorState, PageLoading, Spinner } from '../../ui/misc';
+import { NumberChange } from '../../ui/Animated';
+import { EmptyState, ErrorState, Spinner } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { BulkBar } from './BulkBar';
 import { FilterBar } from './FilterBar';
-import { ItemRow } from './ItemRow';
+import { ItemRow, detailsId } from './ItemRow';
 
 const nextStatus = (s: ItemStatus): ItemStatus => ITEM_STATUSES[(ITEM_STATUSES.indexOf(s) + 1) % ITEM_STATUSES.length] ?? 'todo';
+
+/**
+ * How many items the view lists with no bar filter, from counts already
+ * loaded, or `null` where none matches the view exactly: a collection's count
+ * covers direct members only, so it does not fit "Include nested", and no
+ * count fits a view narrowed two ways (Favorites of one type, say).
+ */
+function unfilteredTotal(f: LibraryFilters, collection: Collection | null, stats: Stats | undefined): number | null {
+  if (collection) return f.recursive || f.type || f.favorite ? null : collection.itemCount;
+  if (!stats) return null;
+  const views = (f.type ? 1 : 0) + (f.favorite ? 1 : 0) + (f.uncollected ? 1 : 0);
+  if (views > 1) return null;
+  if (f.type) return stats.items.byType[f.type];
+  if (f.favorite) return stats.items.favorites;
+  if (f.uncollected) return stats.items.uncollected;
+  return stats.items.total;
+}
+
+/** How many placeholder rows a first load shows at most. */
+const SKELETON_ROWS = 8;
+const SKELETON_WIDTHS = ['46%', '62%', '38%', '55%', '70%', '42%', '58%', '50%'];
+
+/** Placeholder rows in the shape of the real ones, 40px each, while the first page loads. */
+function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) {
+  return (
+    <ul className={cx('item-list', 'item-skeleton', leaving && 'is-leaving')} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <li key={i} className="item-row">
+          <span className="item-cell item-check">
+            <span className="skel skel-box" />
+          </span>
+          <span className="item-cell">
+            <span className="skel skel-icon" />
+          </span>
+          <span className="item-cell">
+            <span className="skel skel-icon" />
+          </span>
+          <span className="item-cell item-type">
+            <span className="skel skel-icon" />
+          </span>
+          <span className="item-main">
+            <span className="skel skel-line" style={{ width: SKELETON_WIDTHS[i % SKELETON_WIDTHS.length] }} />
+          </span>
+          <span className="item-cell item-diff" />
+          <span className="item-cell item-result" />
+          <span className="item-cell item-updated">
+            <span className="skel skel-line skel-short" />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * How the rows that replace the skeleton arrive: over it, with a cross-blur,
+ * when it was on screen (`cross`); fading in on their own when it was still
+ * hidden (`fade`). A reload keeps the app hidden until the first rows are in
+ * (lib/boot.ts), and then they simply appear, as they do under reduced motion.
+ */
+function useSkeletonReveal(pending: boolean, skeletonShown: boolean): 'cross' | 'fade' | null {
+  const [state, setState] = useState<{ pending: boolean; seen: boolean; n: number; reveal: 'cross' | 'fade' | null }>({ pending, seen: false, n: 0, reveal: null });
+  let current = state;
+  if (pending && skeletonShown && !current.seen) current = { ...current, seen: true };
+  if (current.pending !== pending) {
+    const animate = !pending && exitDuration('--duration-slow') > 0 && !isBooting();
+    current = { pending, seen: false, n: current.n + 1, reveal: animate ? (current.seen ? 'cross' : 'fade') : null };
+  }
+  if (current !== state) setState(current);
+  const { n, reveal } = current;
+  useEffect(() => {
+    if (!reveal) return;
+    const t = window.setTimeout(() => setState((s) => (s.n === n ? { ...s, reveal: null } : s)), exitDuration(reveal === 'cross' ? '--duration-slow' : '--duration-fast'));
+    return () => window.clearTimeout(t);
+  }, [n, reveal]);
+  return reveal;
+}
 
 /** The library: every item, or one collection, with search, filters, sorting and bulk actions. */
 export function LibraryPage() {
@@ -59,6 +139,9 @@ export function LibraryPage() {
   }, [serverItems, orderOverride]);
   const total = paged.data?.pages[0]?.total ?? 0;
   const query = paged;
+  // The skeleton, like any loading indicator, shows only once the load is slow.
+  const skeletonShown = useLoadingShown(query.isPending);
+  const reveal = useSkeletonReveal(query.isPending, skeletonShown);
 
   useEffect(() => setOrderOverride(null), [collectionId, serverItems]);
 
@@ -121,6 +204,32 @@ export function LibraryPage() {
     row?.focus();
     row?.scrollIntoView({ block: 'nearest' });
   }, []);
+
+  // ---- Rows opened to show their details ----
+  // Kept by id, so a refetch or a reorder leaves them open; several can be.
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  // Read through a ref, so toggling one row does not hand every row a new callback.
+  const openRef = useRef(openIds);
+  useEffect(() => {
+    openRef.current = openIds;
+  }, [openIds]);
+  const toggleOpen = useCallback(
+    (index: number, force?: boolean) => {
+      const item = items[index];
+      if (!item) return;
+      const wasOpen = openRef.current.has(item.id);
+      const open = force ?? !wasOpen;
+      if (open === wasOpen) return;
+      // Closing takes the details out of reach, so focus inside them goes back to the row.
+      if (!open && document.getElementById(detailsId(item.id))?.contains(document.activeElement)) focusRow(index);
+      const next = new Set(openRef.current);
+      if (open) next.add(item.id);
+      else next.delete(item.id);
+      openRef.current = next;
+      setOpenIds(next);
+    },
+    [items, focusRow],
+  );
 
   // ---- Reordering inside a collection ----
   // The list shown may be one page of a long collection, while saving an
@@ -243,6 +352,12 @@ export function LibraryPage() {
     } else if (e.key === 'Enter' && onRow) {
       e.preventDefault();
       navigate(`/items/${item.id}`);
+    } else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && onRow) {
+      e.preventDefault();
+      toggleOpen(cursor, e.key === 'ArrowRight');
+    } else if (e.key === 'd') {
+      e.preventDefault();
+      toggleOpen(cursor);
     } else if (e.key === 'x' || (e.key === ' ' && onRow)) {
       e.preventDefault();
       onSelect(cursor, e);
@@ -281,9 +396,12 @@ export function LibraryPage() {
   const children = collection ? collections.filter((c) => c.parentId === collection.id).sort((a, b) => a.position - b.position) : [];
   const siblings = collection ? siblingsOf(collections, collection.id) : [];
   const siblingIndex = collection ? siblings.findIndex((c) => c.id === collection.id) : -1;
+  // A collection's name is not known until the collections load; its view is not titled "Library" meanwhile.
   const title = collection
     ? collection.name
-    : filters.uncollected
+    : collectionId
+      ? ''
+      : filters.uncollected
       ? 'Uncollected'
       : filters.favorite
         ? 'Favorites'
@@ -296,9 +414,13 @@ export function LibraryPage() {
 
   const filterCount = activeFilterCount(filters);
   const barFilters = barFilterCount(filters);
+  const viewTotal = unfilteredTotal(filters, collection, stats.data);
   const libraryEmpty = stats.data?.items.total === 0;
   const allSelected = items.length > 0 && items.every((i) => selection.has(i.id));
   const newHref = useNewItemHref();
+  const skeletonRows = Math.max(1, Math.min(viewTotal ?? SKELETON_ROWS, SKELETON_ROWS));
+  // The selection bar and the filter bar take turns; the one coming in fades in, after the first swap only.
+  const barSwapped = useChangeCount(selection.size > 0) > 0;
 
   if (collectionId && collectionsQuery.isSuccess && !collection) {
     return (
@@ -314,12 +436,11 @@ export function LibraryPage() {
     <div className="page page-wide library">
       <header className="page-header">
         <div className="grow">
-          {collection && (
+          {path.length > 1 && (
             <nav className="crumbs" aria-label="Collection path">
-              <Link to="/">Library</Link>
-              {path.slice(0, -1).map((c) => (
+              {path.slice(0, -1).map((c, i) => (
                 <span key={c.id} className="row row-tight">
-                  <ChevronRight size={12} aria-hidden="true" />
+                  {i > 0 && <ChevronRight size={12} aria-hidden="true" />}
                   <Link to={`/collections/${c.id}`}>{c.name}</Link>
                 </span>
               ))}
@@ -327,11 +448,13 @@ export function LibraryPage() {
             </nav>
           )}
           <h1 className="page-title">
-            {title}
+            {title || '\u00a0'}
             <span className="page-count">
               {query.isSuccess && (
                 <>
-                  <span aria-hidden="true">{total}</span>
+                  <span aria-hidden="true">
+                    <NumberChange value={total} />
+                  </span>
                   <span className="sr-only">, {plural(total, 'item')}</span>
                 </>
               )}
@@ -398,9 +521,16 @@ export function LibraryPage() {
       ) : (
         <>
           {selection.size > 0 ? (
-            <BulkBar selected={selectedItems} collection={collection} onClear={() => setSelection(new Set())} />
+            <BulkBar selected={selectedItems} collection={collection} onClear={() => setSelection(new Set())} className={cx(barSwapped && 'is-swapped-in')} />
           ) : (
-            <FilterBar filters={filters} onChange={setFilters} tags={tags} collectionId={collectionId} searchRef={searchRef}>
+            <FilterBar
+              filters={filters}
+              onChange={setFilters}
+              tags={tags}
+              collectionId={collectionId}
+              searchRef={searchRef}
+              className={cx(barSwapped && 'is-swapped-in')}
+            >
               {collection && children.length > 0 && (
                 <Checkbox
                   className="filter-check"
@@ -413,7 +543,17 @@ export function LibraryPage() {
           )}
 
           {query.isPending ? (
-            <PageLoading />
+            <div className={cx('item-list-wrap', 'loading-delay', !skeletonShown && 'is-pending')} role="status">
+              <div className="item-list-head">
+                <span className="item-cell item-check">
+                  <span className="skel skel-box" />
+                </span>
+                <span className="item-head-label">Loading…</span>
+              </div>
+              <div className="item-list-body">
+                <SkeletonRows count={skeletonRows} />
+              </div>
+            </div>
           ) : query.isError ? (
             <ErrorState error={query.error} onRetry={() => void query.refetch()} />
           ) : items.length === 0 ? (
@@ -447,45 +587,58 @@ export function LibraryPage() {
             )
           ) : (
             <div className={cx('item-list-wrap', query.isPlaceholderData && 'is-stale')}>
-              {/* The page title already gives the count, so the row shows only to select all, while filtered, or to explain manual order. */}
-              {(selection.size > 0 || barFilters > 0 || reorderable) && (
-                <div className="item-list-head">
-                  <span className="item-cell item-check">
-                    <input
-                      type="checkbox"
-                      aria-label={allSelected ? 'Deselect all' : 'Select all shown'}
-                      checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = !allSelected && selection.size > 0;
-                      }}
-                      onChange={() => setSelection(allSelected ? new Set() : new Set(items.map((i) => i.id)))}
-                    />
-                  </span>
-                  <span className="item-head-label">
-                    {reorderable ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange' : `${plural(total, 'item')}`}
-                  </span>
-                  {query.isFetching && <Spinner size={14} label="Refreshing…" />}
-                </div>
-              )}
-              <ul className={cx('item-list', reorderable && 'is-reorderable')} ref={listRef} onKeyDown={onListKeyDown} aria-label={`${title}: items`}>
-                {items.map((item, i) => (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    index={i}
-                    selected={selection.has(item.id)}
-                    current={i === cursor}
-                    reorderable={reorderable}
-                    dropEdge={drag && drag.over === i && drag.from !== i ? drag.edge : null}
-                    onSelect={onSelect}
-                    onFocusRow={setCursor}
-                    onDragStart={onDragStart}
-                    onDragOver={onDragOver}
-                    onDrop={onDrop}
-                    onDragEnd={onDragEnd}
+              {/* Always shown, so selecting a row or filtering never pushes the list down. */}
+              <div className="item-list-head">
+                <span className="item-cell item-check">
+                  <input
+                    type="checkbox"
+                    aria-label={allSelected ? 'Deselect all' : 'Select all shown'}
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allSelected && selection.size > 0;
+                    }}
+                    onChange={() => setSelection(allSelected ? new Set() : new Set(items.map((i) => i.id)))}
                   />
-                ))}
-              </ul>
+                </span>
+                <span className="item-head-label">
+                  {reorderable
+                    ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange'
+                    : barFilters > 0 && viewTotal != null && viewTotal >= total
+                      ? `${total} of ${viewTotal}`
+                      : plural(total, 'item')}
+                </span>
+                {query.isFetching && <Spinner size={14} label="Refreshing…" />}
+              </div>
+              <div className="item-list-body">
+                <ul
+                  className={cx('item-list', reorderable && 'is-reorderable', reveal === 'cross' && 'is-revealing', reveal === 'fade' && 'is-arriving')}
+                  ref={listRef}
+                  onKeyDown={onListKeyDown}
+                  aria-label={`${title}: items`}
+                >
+                  {items.map((item, i) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      index={i}
+                      selected={selection.has(item.id)}
+                      current={i === cursor}
+                      reorderable={reorderable}
+                      open={openIds.has(item.id)}
+                      collections={collections}
+                      dropEdge={drag && drag.over === i && drag.from !== i ? drag.edge : null}
+                      onSelect={onSelect}
+                      onToggleOpen={toggleOpen}
+                      onFocusRow={setCursor}
+                      onDragStart={onDragStart}
+                      onDragOver={onDragOver}
+                      onDrop={onDrop}
+                      onDragEnd={onDragEnd}
+                    />
+                  ))}
+                </ul>
+                {reveal === 'cross' && <SkeletonRows count={skeletonRows} leaving />}
+              </div>
               {paged.hasNextPage && (
                 <div className="item-list-more">
                   <Button busy={paged.isFetchingNextPage} onClick={() => void paged.fetchNextPage()}>

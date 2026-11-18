@@ -97,6 +97,9 @@ function Generator({ item }: { item: Item }) {
   const judgeOn = meta?.judge.enabled ?? false;
   const existing = useTestCases(item.id);
   const existingCount = existing.data?.length ?? item.testCaseCount;
+  // Replacing keeps the sample cases, so only the others can go.
+  const sampleCount = existing.data?.filter((c) => c.isSample).length ?? 0;
+  const replaceableCount = existingCount - sampleCount;
   const generation = useGeneration();
 
   // A "Solution only" problem takes a reference solution only in a language it has a runner for.
@@ -528,7 +531,7 @@ function Generator({ item }: { item: Item }) {
               )}
 
               <div className="proposal-save card card-pad">
-                {existingCount > 0 ? (
+                {replaceableCount > 0 ? (
                   <fieldset className="proposal-mode">
                     <legend className="field-label">This problem already has {plural(existingCount, 'test case')}</legend>
                     <label className="check">
@@ -538,7 +541,10 @@ function Generator({ item }: { item: Item }) {
                     <label className="check">
                       <input type="radio" name="replace" checked={replace} onChange={() => setReplace(true)} />
                       <span>
-                        Replace them <span className="muted">(the existing {plural(existingCount, 'case')} {existingCount === 1 ? 'is' : 'are'} deleted)</span>
+                        {sampleCount === 0 ? 'Replace them' : sampleCount === 1 ? 'Replace all but the sample' : `Replace all but the ${sampleCount} samples`}{' '}
+                        <span className="muted">
+                          ({sampleCount > 0 ? plural(replaceableCount, 'case') : `the existing ${plural(replaceableCount, 'case')}`} {replaceableCount === 1 ? 'is' : 'are'} deleted)
+                        </span>
                       </span>
                     </label>
                   </fieldset>

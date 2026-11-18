@@ -126,7 +126,8 @@ type SubmissionInput struct {
 	Stdin    domain.Opt[string] `json:"stdin"`
 }
 
-// CreateSubmission validates and queues a submission.
+// CreateSubmission validates and queues a submission. A run replaces the
+// problem's earlier completed runs: only submits are kept as history.
 func (a *App) CreateSubmission(ctx context.Context, itemID string, in SubmissionInput) (domain.Submission, error) {
 	mode := domain.SubmissionMode(in.Mode)
 	if in.Mode == "" {
@@ -212,6 +213,13 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 		cur, err := tx.GetItem(itemID)
 		if err != nil {
 			return notFoundAs(err, "item")
+		}
+		// Only the latest run of a problem is kept. Runs still being
+		// judged are left for the next run to remove.
+		if mode == domain.ModeRun {
+			if err := tx.DeleteCompletedRuns(itemID); err != nil {
+				return err
+			}
 		}
 		if err := tx.InsertSubmission(&sub); err != nil {
 			return err

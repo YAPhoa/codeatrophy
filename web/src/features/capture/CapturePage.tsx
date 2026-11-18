@@ -324,19 +324,18 @@ export default function CapturePage() {
               { value: 'reading' as const, label: 'Reading' },
             ]}
           />
-          {kind !== 'reading' && (
-            <Segmented
-              size="sm"
-              label="What you write"
-              value={writes}
-              onChange={(v) => patch({ interfaceHint: v })}
-              options={[
-                ...(aiEnabled ? [{ value: 'auto' as const, label: 'Auto', title: 'Let the AI choose' }] : []),
-                { value: 'function' as const, label: 'Solution only', title: 'You write a function or class; a hidden runner does the rest' },
-                { value: 'program' as const, label: 'Full program', title: 'You write the whole program, input and output included' },
-              ]}
-            />
-          )}
+          {/* Disabled rather than removed for a reading, so the controls after it do not move. */}
+          <Segmented
+            size="sm"
+            label="What you write"
+            value={writes}
+            onChange={(v) => patch({ interfaceHint: v })}
+            options={[
+              ...(aiEnabled ? [{ value: 'auto' as const, label: 'Auto', title: 'Let the AI choose' }] : []),
+              { value: 'function' as const, label: 'Solution only', title: 'You write a function or class; a hidden runner does the rest' },
+              { value: 'program' as const, label: 'Full program', title: 'You write the whole program, input and output included' },
+            ].map((o) => (kind === 'reading' ? { ...o, title: 'Only for problems', disabled: true } : o))}
+          />
           {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={(c) => patch({ styleChoice: c })} disabled={generation.running} />}
           {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={(id) => patch({ providerChoice: id })} disabled={generation.running} />}
           <span className="spacer" />

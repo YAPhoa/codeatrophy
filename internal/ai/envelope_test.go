@@ -128,7 +128,7 @@ func TestTestCasesPromptSlotsCannotBreakOut(t *testing.T) {
 
 func TestAuthoringGuideStyleCannotBreakOut(t *testing.T) {
 	for _, st := range []*Style{{Name: "n", Instructions: attack("INJECTED-guide", "")}, {Name: attack("INJECTED-name", ""), Instructions: "i"}} {
-		g := AuthoringGuide(st)
+		g := AuthoringGuide("", st)
 		marker := "INJECTED-guide"
 		if strings.Contains(st.Name, "INJECTED") {
 			marker = "INJECTED-name"

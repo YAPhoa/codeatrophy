@@ -23,7 +23,7 @@
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--surface-3);
   text-decoration: none;
 }
 
@@ -62,6 +62,18 @@
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+/* A secondary call to action: tinted, so it stands out without competing
+   with a page's primary button. */
+.btn-soft {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn-soft:hover:not(:disabled) {
+  background: var(--accent-soft-hover);
 }
 
 .btn-ghost {
@@ -253,6 +265,12 @@
 
 .input:hover:not(:disabled):not(:focus-visible) {
   border-color: var(--text-3);
+}
+
+/* Browsers count hovering a <label> as hovering its field; only the pointer on
+   the field itself lights the border. */
+:is(.field, .prefs-row):has(label:hover) .input:hover:not(:disabled):not(:focus-visible) {
+  border-color: var(--border-strong);
 }
 
 .input:focus-visible {
@@ -562,6 +580,31 @@ button.chip:hover {
   color: var(--accent-text);
 }
 
+/* The dot and its gap come out of the padding, so the badge is as wide as a plain one. */
+.badge-difficulty {
+  gap: 3px;
+  padding: 0 var(--space-1);
+}
+
+.difficulty-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.difficulty-dot.is-easy {
+  background: var(--ok);
+}
+
+.difficulty-dot.is-medium {
+  background: var(--warn);
+}
+
+.difficulty-dot.is-hard {
+  background: var(--danger);
+}
+
 .kbd {
   display: inline-flex;
   align-items: center;
@@ -841,6 +884,15 @@ button.chip:hover {
   max-width: 420px;
 }
 
+/* A short dialog (a confirm) opens where the command palette does. */
+.dialog-backdrop.is-small {
+  padding-top: var(--overlay-top);
+}
+
+.dialog-backdrop.is-small > .dialog {
+  max-height: calc(100dvh - var(--overlay-top) - var(--space-4));
+}
+
 .dialog-md {
   max-width: 560px;
 }
@@ -936,12 +988,16 @@ button.chip:hover {
 }
 
 .toast-slot.is-leaving {
-  overflow: hidden;
-  animation: toast-collapse var(--duration-medium) var(--ease-out) forwards;
+  animation: toast-collapse var(--duration-fast) var(--ease-out) var(--duration-fade-out) forwards;
 }
 
+/* Leaving is slower than arriving: the toast fades out at a steady pace (an
+   eased curve holds it, then drops it at the end, which reads as a pop), and
+   only then does its row close, so it is never clipped mid-fade. Toast.tsx removes it
+   once both have played. While its row closes the toast is already invisible
+   and inert, so it may overflow the shrinking row. */
 .toast-slot.is-leaving > .toast {
-  animation: toast-out var(--duration-quick) ease-in forwards;
+  animation: toast-out var(--duration-fade-out) linear forwards;
 }
 
 @keyframes toast-collapse {
@@ -954,7 +1010,6 @@ button.chip:hover {
 @keyframes toast-out {
   to {
     opacity: 0;
-    transform: translateY(6px);
   }
 }
 
@@ -963,19 +1018,30 @@ button.chip:hover {
   align-items: flex-start;
   gap: 9px;
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
   pointer-events: auto;
   line-height: 1.4;
-  animation: toast-in var(--duration-fast) var(--ease-out);
+  animation: toast-in var(--duration-fast) var(--ease-in-out);
 }
 
+/* Frosted glass: the page shows through, blurred, under a lit top edge. Where
+   backdrop-filter is missing the toast stays solid, so its text stays legible. */
+@supports (backdrop-filter: blur(1px)) {
+  .toast {
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%), var(--shadow-pop);
+  }
+}
+
+/* A plain fade: quick in, slow out (above). Not on --ease-out: with it the
+   toast is half there within a few frames and reads as a pop. */
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
   }
 }
 
@@ -986,6 +1052,11 @@ button.chip:hover {
 
 .toast-success .toast-icon {
   color: var(--ok);
+}
+
+.toast-success .toast-icon path {
+  stroke-dasharray: 12;
+  animation: check-draw var(--duration-very-slow) var(--ease-out) var(--duration-micro) backwards;
 }
 
 .toast-error {
@@ -1122,6 +1193,18 @@ button.chip:hover {
   gap: var(--space-2);
   padding: var(--space-16) var(--space-4);
   color: var(--text-3);
+}
+
+/* A loading indicator keeps its size but stays hidden for its first 400ms
+   (useLoadingShown, timed in script so reduced motion keeps the wait), so a
+   quick load shows none; a slow one fades it in. */
+.loading-delay {
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.loading-delay.is-pending {
+  visibility: hidden;
+  opacity: 0;
 }
 
 .empty {
@@ -1660,5 +1743,169 @@ details[open] > :not(summary) {
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+}
+
+/* ---- Changes in place ---- */
+
+/* A check that draws itself: the tick of the circle-check icon (its <path>,
+   about 11.3 units long) strokes in from its short arm, as by hand. Give the
+   path `stroke-dasharray: 12` along with the animation. */
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Two icons in one slot (ui/Animated.tsx, IconSwap): the old one blurs and
+   shrinks out while the new one comes in. */
+.icon-swap {
+  display: inline-grid;
+  flex: none;
+}
+
+.icon-swap > * {
+  display: inline-flex;
+  grid-area: 1 / 1;
+}
+
+.icon-swap-out {
+  animation: icon-swap-out var(--duration-fast) var(--ease-in-out) forwards;
+  pointer-events: none;
+}
+
+.icon-swap-icon.is-in {
+  animation: icon-swap-in var(--duration-fast) var(--ease-in-out);
+}
+
+@keyframes icon-swap-in {
+  from {
+    opacity: 0;
+    transform: scale(0.25);
+    filter: blur(var(--blur-small));
+  }
+}
+
+@keyframes icon-swap-out {
+  to {
+    opacity: 0;
+    transform: scale(0.25);
+    filter: blur(var(--blur-small));
+  }
+}
+
+.icon-swap.is-plain > .icon-swap-out {
+  animation: fade-out var(--duration-quick) var(--ease-out) forwards;
+}
+
+.icon-swap.is-plain > .icon-swap-icon.is-in {
+  animation: fade-in var(--duration-quick) var(--ease-out);
+}
+
+/* A label changing in place (MorphText): the differing letters share one
+   cell, cross-blurring while the cell's width eases between them. */
+.morph {
+  white-space: nowrap;
+}
+
+.morph-swap {
+  display: inline-grid;
+  justify-items: start;
+  vertical-align: bottom;
+}
+
+.morph-swap > span {
+  grid-area: 1 / 1;
+  white-space: pre;
+}
+
+/* A copy button: both labels are laid out in one cell, out of sight, so the
+   button keeps the wider one's width; the label shown morphs inside it. */
+.copy-btn-face {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.copy-btn .btn-label,
+.copy-btn-face,
+.copy-btn-row {
+  gap: inherit;
+}
+
+.copy-btn-row {
+  display: inline-flex;
+  align-items: center;
+  grid-area: 1 / 1;
+}
+
+.copy-btn-sizer {
+  visibility: hidden;
+}
+
+/* A count's changed digits (NumberChange): the old digit leaves and the new
+   one arrives a fraction of an em up or down, with the value. */
+.num-change {
+  font-variant-numeric: tabular-nums;
+}
+
+.num-slot {
+  position: relative;
+  display: inline-block;
+}
+
+.num-new {
+  display: inline-block;
+  animation: num-in var(--duration-medium) var(--ease-out);
+}
+
+.num-old {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  pointer-events: none;
+  animation: num-out var(--duration-medium) var(--ease-out) forwards;
+}
+
+@keyframes num-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(0.14em * var(--num-dir, 1)));
+    filter: blur(0.04em);
+  }
+}
+
+@keyframes num-out {
+  to {
+    opacity: 0;
+    transform: translateY(calc(-0.14em * var(--num-dir, 1)));
+    filter: blur(0.04em);
+  }
+}
+
+/* An invalid control, after a failed save (lib/focusInvalid.ts): a short
+   shake left and right, apart from the error styling so it can replay. */
+.is-shaking {
+  animation: shake calc(var(--duration-micro) * 4) linear;
+}
+
+/* Each leg eases out on its own: right, left, a smaller right, back. */
+@keyframes shake {
+  0% {
+    animation-timing-function: var(--ease-out);
+  }
+
+  25% {
+    transform: translateX(var(--distance-base));
+    animation-timing-function: var(--ease-out);
+  }
+
+  50% {
+    transform: translateX(calc(var(--distance-base) * -1));
+    animation-timing-function: var(--ease-out);
+  }
+
+  75% {
+    transform: translateX(var(--distance-small));
+    animation-timing-function: var(--ease-out);
   }
 }

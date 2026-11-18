@@ -198,6 +198,10 @@ func TestReadAndWriteTools(t *testing.T) {
 	if sub["verdict"] != "accepted" {
 		t.Errorf("get_submission: %v", sub)
 	}
+	sample, isErr := call(t, s, "run_code", map[string]any{"itemId": id, "language": "python", "source": "sum"})
+	if isErr || sample["mode"] != "run" || sample["status"] != "completed" || sample["verdict"] != "accepted" {
+		t.Errorf("run_code run: %v", sample)
+	}
 	full, _ := call(t, s, "get_item", map[string]any{"id": id, "include": []string{"testCases", "submissions"}})
 	if full["item"].(map[string]any)["status"] != "done" || len(full["testCases"].([]any)) != 2 || len(full["submissions"].([]any)) != 1 {
 		t.Errorf("get_item: %v", full)
@@ -503,5 +507,70 @@ func TestFunctionProblemTools(t *testing.T) {
 	if res, isErr := call(t, s, "update_item", map[string]any{"id": id, "problem": map[string]any{"interface": "program", "harness": map[string]any{}}}); isErr ||
 		res["problem"].(map[string]any)["interface"] != "program" {
 		t.Errorf("program: %v", res)
+	}
+}
+
+// The custom system prompt reaches the authoring guide (instructions,
+// resource and prompts) in place of the editable conventions, but no tool
+// reads or sets it. The custom test case prompt reaches none of them.
+func TestSystemPromptInGuideOnly(t *testing.T) {
+	f := newFixture(t, "")
+	if _, err := f.app.SetSystemPrompt(f.ctx, app.SystemPromptInput{Custom: domain.Some("CUSTOM-CONVENTIONS-MARKER")}); err != nil {
+		t.Fatal(err)
+	}
+	// The test case prompt is for the app's own test generation only.
+	if _, err := f.app.SetTestCasePrompt(f.ctx, app.TestCasePromptInput{Custom: domain.Some("CUSTOM-TESTCASE-MARKER")}); err != nil {
+		t.Fatal(err)
+	}
+	s := f.connect(t, "")
+	check := func(what, text string) {
+		t.Helper()
+		if !strings.Contains(text, "CUSTOM-CONVENTIONS-MARKER") || !strings.Contains(text, "# Fixed rules") ||
+			strings.Contains(text, "# Codeatrophy authoring conventions") || strings.Contains(text, "CUSTOM-TESTCASE-MARKER") {
+			t.Errorf("%s should carry the custom prompt and the fixed rules:\n%.400s", what, text)
+		}
+	}
+	check("instructions", s.InitializeResult().Instructions)
+	res, err := s.ReadResource(f.ctx, &mcp.ReadResourceParams{URI: mcpserver.GuideURI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("resource", res.Contents[0].Text)
+	it, _ := f.app.CreateItem(f.ctx, domain.ItemInput{Type: domain.Some(domain.TypeProblem), Title: domain.Some("Orig")})
+	for name, args := range map[string]map[string]string{
+		"draft_item": {"text": "x"}, "create_variant": {"itemId": it.ID}, "write_test_cases": {"itemId": it.ID},
+	} {
+		p, err := s.GetPrompt(f.ctx, &mcp.GetPromptParams{Name: name, Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(name, p.Messages[0].Content.(*mcp.TextContent).Text)
+	}
+
+	tools, err := s.ListTools(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		for _, word := range []string{"prompt", "convention", "system", "setting"} {
+			if strings.Contains(tool.Name, word) {
+				t.Errorf("no tool may expose the system prompt: %s", tool.Name)
+			}
+		}
+	}
+	for _, name := range []string{"get_overview", "list_style_presets"} {
+		out, _ := call(t, s, name, map[string]any{})
+		if b, _ := json.Marshal(out); strings.Contains(string(b), "CUSTOM-CONVENTIONS-MARKER") || strings.Contains(string(b), "CUSTOM-TESTCASE-MARKER") {
+			t.Errorf("%s returns a custom prompt", name)
+		}
+	}
+
+	// A reset is reflected on the next read.
+	if err := f.app.ResetSystemPrompt(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = s.ReadResource(f.ctx, &mcp.ReadResourceParams{URI: mcpserver.GuideURI})
+	if g := res.Contents[0].Text; strings.Contains(g, "CUSTOM-CONVENTIONS-MARKER") || !strings.Contains(g, "# Codeatrophy authoring conventions") {
+		t.Error("the guide should use the built-in conventions after a reset")
 	}
 }

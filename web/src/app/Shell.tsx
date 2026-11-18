@@ -3,7 +3,9 @@ import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router'
 import { Menu as MenuIcon, Plus, Search } from 'lucide-react';
 import { useMeta } from '../api/queries';
 import { CollectionActionsProvider } from '../features/collections/CollectionActions';
+import { isBooting } from '../lib/boot';
 import { useHotkeys } from '../lib/hotkeys';
+import { exitDuration } from '../lib/motion';
 import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { useMediaQuery } from '../lib/useMediaQuery';
@@ -11,7 +13,7 @@ import { cx } from '../ui/Button';
 import { IconButton, LinkButton } from '../ui/Button';
 import { ErrorState, PageLoading } from '../ui/misc';
 import { CommandPalette } from './CommandPalette';
-import { ShellLayoutContext, type ShellLayout } from './shellLayout';
+import { ShellLayoutContext, isRememberedReading, type ShellLayout } from './shellLayout';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Sidebar } from './Sidebar';
 
@@ -43,10 +45,12 @@ export function Shell() {
   const [declared, setDeclared] = useState<boolean | null>(null);
   const narrow = useMediaQuery('(max-width: 900px)');
 
-  // Until the page says otherwise, an item route is taken to be a workspace:
-  // most items are problems, and guessing avoids a layout jump once it loads.
-  const onWorkspaceRoute = WORKSPACE_ROUTES.some((pattern) => matchPath(pattern, location.pathname) !== null);
-  const workspace = onWorkspaceRoute && declared !== false;
+  // Until the page says otherwise, an item route is taken to be a workspace,
+  // unless the item is remembered to be a reading: most items are problems,
+  // and guessing avoids a layout jump once it loads.
+  const routeItem = WORKSPACE_ROUTES.map((pattern) => matchPath(pattern, location.pathname)).find((m) => m !== null)?.params.id;
+  const guess = useMemo(() => routeItem !== undefined && !isRememberedReading(routeItem), [routeItem]);
+  const workspace = routeItem !== undefined && (declared ?? guess);
   const navMinimised = !narrow && (workspace ? navPrefs.workspace : navPrefs.other);
 
   const toggleNav = useCallback(() => {
@@ -86,6 +90,16 @@ export function Shell() {
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
 
+  // A shell that first renders after the app was shown (a slow start, which
+  // showed "Connecting…" first) fades in whole, its page with it; see layout.css.
+  const [arriving, setArriving] = useState<boolean | null>(null);
+  if (!meta.isPending && arriving === null) setArriving(!isBooting());
+  useEffect(() => {
+    if (!arriving) return;
+    const t = window.setTimeout(() => setArriving(false), exitDuration());
+    return () => window.clearTimeout(t);
+  }, [arriving]);
+
   useHotkeys({
     'mod+k': (e) => {
       e.preventDefault();
@@ -120,7 +134,7 @@ export function Shell() {
   return (
     <ShellLayoutContext.Provider value={layout}>
       <CollectionActionsProvider>
-        <div className={cx('shell', navMinimised && 'is-rail')}>
+        <div className={cx('shell', navMinimised && 'is-rail', arriving && 'is-arriving')}>
         <a href="#main" className="skip-link">
           Skip to content
         </a>

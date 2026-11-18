@@ -1,22 +1,20 @@
 import { Navigate, Route, createRoutesFromElements, useLocation } from 'react-router';
 import { Shell } from './app/Shell';
+import {
+  CapturePage,
+  EditItemPage,
+  GenerateTestsPage,
+  ItemPage,
+  SavedPage,
+  SettingsPage,
+  SolutionsPage,
+  TagsPage,
+  TestsPage,
+  VariantPage,
+} from './app/screens';
 import { NotFoundPage, RouteError } from './app/NotFoundPage';
 import { LibraryPage } from './features/library/LibraryPage';
 import { movedIntoSettings, type SettingsSlug } from './features/settings/pages';
-import { lazyScreen } from './lib/newBuild';
-
-// Everything but the library is loaded on demand: the editor and Markdown
-// stacks are large and not needed to show the first screen.
-const CapturePage = lazyScreen(() => import('./features/capture/CapturePage'));
-const VariantPage = lazyScreen(() => import('./features/capture/VariantPage'));
-const SavedPage = lazyScreen(() => import('./features/capture/SavedPage'));
-const ItemPage = lazyScreen(() => import('./features/item/ItemPage'));
-const EditItemPage = lazyScreen(() => import('./features/item/EditItemPage'));
-const TestsPage = lazyScreen(() => import('./features/tests/TestsPage'));
-const GenerateTestsPage = lazyScreen(() => import('./features/tests/GenerateTestsPage'));
-const SolutionsPage = lazyScreen(() => import('./features/solutions/SolutionsPage'));
-const TagsPage = lazyScreen(() => import('./features/tags/TagsPage'));
-const SettingsPage = lazyScreen(() => import('./features/settings/SettingsPage'));
 
 /** A page that moved into Settings: its old address leads there, query string included. */
 function MovedIntoSettings({ slug }: { slug: SettingsSlug }) {

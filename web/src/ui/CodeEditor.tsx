@@ -8,8 +8,15 @@ import { ReloadNotice } from './ReloadNotice';
 
 export type { CodeEditorProps, EditorShortcut } from './CodeEditorImpl';
 
+const loadImpl = () => import('./CodeEditorImpl');
+
+/** Start loading CodeMirror ahead of a screen that shows an editor at once, so the editor is there when it opens. */
+export function preloadCodeEditor(): void {
+  loadImpl().catch(() => undefined);
+}
+
 const Impl = lazyPart(
-  () => import('./CodeEditorImpl'),
+  loadImpl,
   // The editor of the build this tab runs is gone; the text stays, read-only.
   (props: CodeEditorProps) => (
     <>

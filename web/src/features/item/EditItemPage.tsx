@@ -178,7 +178,7 @@ function EditForm({ initial }: { initial: Item }) {
         <span className="spacer" />
         {base.type === 'problem' && (
           <Link to={`/items/${base.id}/tests`} className="muted">
-            Test cases and solutions are edited separately
+            Update test cases and solutions
           </Link>
         )}
         <Button variant="ghost" onClick={() => navigate(`/items/${base.id}`)} disabled={saving}>

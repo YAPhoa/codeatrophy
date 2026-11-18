@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -317,8 +318,8 @@ func TestVerifyWithSolutionID(t *testing.T) {
 	}
 }
 
-// stats counts accepted submit-mode submissions only.
-func TestStatsCountsAcceptedSubmissionsOnly(t *testing.T) {
+// stats counts submit-mode submissions only, and of those the accepted.
+func TestStatsCountsSubmitsOnly(t *testing.T) {
 	e := newEnv(t)
 	it := e.problem(t, "")
 	if run := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run"}`); *run.Verdict != domain.VerdictAccepted {
@@ -327,7 +328,69 @@ func TestStatsCountsAcceptedSubmissionsOnly(t *testing.T) {
 	e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"submit"}`)
 	e.submit(t, it.ID, `{"language":"python","source":"crash","mode":"submit"}`)
 	st := must(e.app.Stats(e.ctx))
-	if st.Submissions.Total != 3 || st.Submissions.Accepted != 1 {
+	if st.Submissions.Total != 2 || st.Submissions.Accepted != 1 {
 		t.Errorf("submissions: %+v", st.Submissions)
+	}
+}
+
+// A run replaces the problem's earlier completed runs; submits, runs still
+// being judged and other problems' runs are kept.
+func TestOnlyTheLatestRunIsKept(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, "")
+	other := e.problem(t, "")
+	ids := func(itemID, mode string) []string {
+		var out []string
+		for _, s := range must(e.app.ListSubmissions(e.ctx, itemID, app.SubmissionQuery{Mode: mode})).Items {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	otherRun := e.submit(t, other.ID, `{"language":"python","source":"sum","mode":"run"}`)
+	first := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"submit"}`)
+	e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run"}`)
+	custom := e.submit(t, it.ID, `{"language":"python","source":"echo","mode":"run","stdin":"x"}`)
+	second := e.submit(t, it.ID, `{"language":"python","source":"crash","mode":"submit"}`)
+	if got := ids(it.ID, ""); !slices.Equal(got, []string{second.ID, custom.ID, first.ID}) {
+		t.Errorf("after two runs: %v", got)
+	}
+	// A submit does not prune the latest run.
+	if got := ids(it.ID, "run"); !slices.Equal(got, []string{custom.ID}) {
+		t.Errorf("runs: %v", got)
+	}
+	if got := ids(other.ID, ""); !slices.Equal(got, []string{otherRun.ID}) {
+		t.Errorf("another problem's runs: %v", got)
+	}
+
+	// A run still being judged is left alone; the next run removes it.
+	release := make(chan struct{})
+	e.engine.Handler = func(ctx context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		<-release
+		return judgetest.Script(req), nil
+	}
+	calls := e.engine.Calls()
+	pending := must(e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, `{"language":"python","source":"sum","mode":"run"}`)))
+	for deadline := time.Now().Add(5 * time.Second); e.engine.Calls() == calls && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	next := must(e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, `{"language":"python","source":"sum","mode":"run"}`)))
+	if got := ids(it.ID, "run"); !slices.Equal(got, []string{next.ID, pending.ID}) {
+		t.Errorf("with a run in progress: %v", got)
+	}
+	close(release)
+	ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
+	defer cancel()
+	for _, id := range []string{pending.ID, next.ID} {
+		if _, err := e.app.WaitSubmission(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.engine.Handler = nil
+	last := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run"}`)
+	if got := ids(it.ID, ""); !slices.Equal(got, []string{last.ID, second.ID, first.ID}) {
+		t.Errorf("after the runs finished: %v", got)
+	}
+	if st := must(e.app.Stats(e.ctx)); st.Submissions.Total != 2 {
+		t.Errorf("stats count runs: %+v", st.Submissions)
 	}
 }

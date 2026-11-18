@@ -616,7 +616,7 @@ func (t *tx) Stats() (domain.Stats, error) {
 	if err := t.queryRow(`SELECT COUNT(DISTINCT tag) FROM item_tags`).Scan(&s.Tags); err != nil {
 		return s, err
 	}
-	if err := t.queryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE verdict = 'accepted' AND mode = 'submit') FROM submissions`).
+	if err := t.queryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE verdict = 'accepted') FROM submissions WHERE mode = 'submit'`).
 		Scan(&s.Submissions.Total, &s.Submissions.Accepted); err != nil {
 		return s, err
 	}

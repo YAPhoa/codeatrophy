@@ -96,7 +96,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  max-width: 980px;
 }
 
 .tcases-head {
@@ -113,7 +112,42 @@
 .tcases-note {
   color: var(--text-3);
   font-size: var(--text-sm);
-  line-height: 1.5;
+}
+
+/* Concealed cases, one numbered chip each, on a single row. */
+.tcases-hidden {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.tcases-hidden-label {
+  margin-right: var(--space-1);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tcase-chip {
+  min-width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.tcase-chip:hover {
+  border-style: solid;
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .tcase-list {
@@ -132,15 +166,6 @@
   padding: var(--space-2) var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-}
-
-.tcase.is-concealed {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 3px var(--space-1) 3px var(--space-3);
-  border-style: dashed;
-  color: var(--text-2);
 }
 
 .tcase-head {
@@ -212,16 +237,41 @@ a.result-saved:hover {
 
 /* ---- History: keep the code of an entry ---- */
 
-.history-entry {
+.history-entry,
+.history-head {
   display: flex;
   align-items: center;
   gap: var(--space-0-5);
 }
 
-.history-entry > .history-row {
+.history-entry > .history-row,
+.history-head > .history-grid {
   flex: 1;
-  width: auto;
   min-width: 0;
+}
+
+/* Muted column names, with room for the save button the rows have. */
+.history-head {
+  min-height: 28px;
+  margin-bottom: var(--space-0-5);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.history-head > .history-grid > span {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-head-save {
+  flex: none;
+  width: var(--control-h-sm);
+}
+
+.history-entry > .history-row {
+  width: auto;
 }
 
 .history-save {
@@ -233,28 +283,31 @@ a.result-saved:hover {
   color: var(--accent-text);
 }
 
-/* The history sits in the statement pane, whose width the user chooses. */
+/* The history sits in the statement pane, whose width the user chooses (or
+   the screen does, on a phone), so its columns follow the pane's width. */
 .pane-body:has(> .history) {
   container-type: inline-size;
 }
 
-@container (max-width: 420px) {
-  .history-row {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 34px 52px 70px;
+/* Memory goes first, then the count and the runtime; status, language and age stay. */
+@container (max-width: 440px) {
+  .history-grid {
+    grid-template-columns: minmax(100px, 1.4fr) minmax(56px, 1fr) 40px 52px 70px;
   }
 
-  .history-mode {
+  .history-memory {
     display: none;
   }
 }
 
-@container (max-width: 340px) {
-  .history-row {
+@container (max-width: 375px) {
+  .history-grid {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 70px;
   }
 
   .history-count,
-  .history-time {
+  .history-time,
+  .history-memory {
     display: none;
   }
 }

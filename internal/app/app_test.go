@@ -435,9 +435,30 @@ func TestTestCaseOperations(t *testing.T) {
 	if len(rest.Items) != 3 || rest.Items[0].Position != 0 || rest.Items[2].Position != 2 {
 		t.Errorf("positions after delete: %+v", rest.Items)
 	}
+	// Replacing keeps the sample cases, in their order, and puts the new cases after them.
+	var samples []string
+	for _, c := range rest.Items {
+		if c.IsSample {
+			samples = append(samples, c.ID)
+		}
+	}
+	if len(samples) == 0 || len(samples) == len(rest.Items) {
+		t.Fatalf("the replace check needs samples and other cases: %+v", rest.Items)
+	}
 	replaced := must(e.app.BulkTestCases(e.ctx, it.ID, decodeInto[app.BulkTestCasesInput](t, `{"cases":[{"expectedStdout":"x"}],"replace":true}`)))
-	if len(replaced.Items) != 1 {
-		t.Errorf("replace: %d cases", len(replaced.Items))
+	if len(replaced.Items) != len(samples)+1 {
+		t.Fatalf("replace: %+v", replaced.Items)
+	}
+	for i, c := range replaced.Items {
+		if c.Position != i {
+			t.Errorf("replace: case %d at position %d", i, c.Position)
+		}
+		if i < len(samples) && c.ID != samples[i] {
+			t.Errorf("replace: sample %d is %s, want %s", i, c.ID, samples[i])
+		}
+	}
+	if last := replaced.Items[len(samples)]; last.IsSample || last.ExpectedStdout != "x" {
+		t.Errorf("replace: the new case should follow the samples: %+v", last)
 	}
 	reading := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R"}`)))
 	_, err = e.app.ListTestCases(e.ctx, reading.ID)

@@ -83,18 +83,20 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await expect(state).toHaveText('Saved');
 });
 
-test('reduced motion: the scroll of a generation in progress is written and still', async ({ page }) => {
+test('reduced motion: the mark of a generation in progress is a still frame', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Normal mock delays, so the generating panel stays up long enough to look at.
   await page.goto('/new');
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
-  const lines = page.locator('.generating-line');
-  await expect(lines).toHaveCount(5);
-  for (const line of await lines.all()) await expect(line).toHaveCSS('animation-name', 'none');
-  await expect(page.locator('.generating-ink').first()).toHaveCSS('transform', 'none');
-  await expect(lines.nth(4)).toHaveCSS('opacity', '0');
-  await expect(page.locator('.generating-quill')).toHaveCSS('animation-name', 'none');
+  const rows = page.locator('.generating-row');
+  await expect(rows).toHaveCount(5);
+  for (const row of await rows.all()) await expect(row).toHaveCSS('animation-name', 'none');
+  await expect(rows.nth(1)).toHaveCSS('opacity', '0');
+  await expect(page.locator('.generating-token').first()).toHaveCSS('animation-name', 'none');
+  const caret = page.locator('.generating-caret');
+  await expect(caret).toHaveCSS('animation-name', 'none');
+  await expect(caret).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 28, 23)');
 });
 
 test('deep links: the open tabs of the solve page are part of the address', async ({ page }) => {
@@ -280,6 +282,7 @@ test('links: menu items and palette results that go somewhere are links', async 
   await page.keyboard.press('Escape');
 
   await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('combobox', { name: 'Search items, collections and commands' }).fill('tags');
   const option = page.getByRole('option', { name: 'Manage tags' });
   await expect(option.locator('a')).toHaveAttribute('href', '/tags');
   await option.click();
@@ -413,6 +416,8 @@ test('focus: a menu row reached with the keyboard has a ring, so it differs from
 
 test('focus: the ring on a tag chip in a library row is not cut off', async ({ page }) => {
   await open(page, '/');
+  // Shown: a page still hidden while it loads (lib/boot.ts) cannot take focus.
+  await expect(page.locator('html')).not.toHaveClass(/is-booting/);
   const chip = page.locator('.item-tags .chip').first();
   await chip.focus();
   await expect(chip).toHaveCSS('outline-offset', '-2px');
@@ -458,9 +463,93 @@ test('menus: a choice in effect is marked by a check, not by a background', asyn
 
   // Choices with icons keep them, and the check goes at the end.
   await page.getByRole('button', { name: /^Theme/ }).click();
-  const theme = page.getByRole('menuitemradio', { name: 'Match system' });
+  const theme = page.getByRole('menuitemradio', { name: 'System' });
   await expect(theme).toHaveAttribute('aria-checked', 'true');
   await expect(theme.locator('.menu-item-icon svg')).toHaveCount(1);
   await expect(theme.locator('.menu-item-icon .menu-item-check')).toHaveCount(0);
   await expect(theme.locator('.menu-item-end .menu-item-check')).toHaveCount(1);
+});
+
+test('layout: selecting a row or setting a filter moves no row and no filter button', async ({ page }) => {
+  await open(page, '/');
+  const firstRow = page.locator('.item-row').first();
+  const bar = page.getByRole('search', { name: 'Filter items' });
+  const difficulty = bar.getByRole('button', { name: /^Difficulty/ });
+  const top = async () => (await firstRow.boundingBox())?.y;
+  const left = async () => (await difficulty.boundingBox())?.x;
+  // The real rows, not the placeholders of a first load.
+  await expect(firstRow.getByRole('checkbox')).toBeVisible();
+  const rowTop = await top();
+  const difficultyLeft = await left();
+
+  await firstRow.getByRole('checkbox').check();
+  await expect(page.getByRole('toolbar', { name: 'Actions for selected items' })).toBeVisible();
+  expect(await top()).toBe(rowTop);
+  await page.keyboard.press('Escape');
+  await expect(bar).toBeVisible();
+
+  await bar.getByRole('button', { name: /^Status/ }).click();
+  await page.getByRole('dialog', { name: 'Status' }).getByText('To do').click();
+  await expect(page).toHaveURL(/status=todo/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.item-head-label')).toHaveText(/^\d+ of 25$/);
+  expect(await top()).toBe(rowTop);
+  expect(await left()).toBe(difficultyLeft);
+});
+
+/** WCAG contrast ratio of two opaque `rgb(…)` colours, as getComputedStyle gives them. */
+function contrast(a: string, b: string): number {
+  const luminance = (rgb: string) => {
+    const [r = 0, g = 0, bl = 0] = (rgb.match(/[\d.]+/g) ?? []).map(Number).map((c) => {
+      const s = c / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`hover: a hovered library row stands out from the others (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await open(page, '/');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    const rows = page.locator('.item-row');
+    // A row has no fill of its own at rest, so it shows the list's.
+    const resting = await page.locator('.item-list-wrap').evaluate((el) => getComputedStyle(el).backgroundColor);
+    await expect(rows.nth(1)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await rows.nth(0).hover();
+    const hovered = await rows.nth(0).evaluate((el) => getComputedStyle(el).backgroundColor);
+    // Different, and by enough to see: 1.02:1, the old step in the dark theme, was not.
+    expect(contrast(hovered, resting)).toBeGreaterThan(1.1);
+  });
+}
+
+test('sidebar: the current view and a hovered one look different', async ({ page }) => {
+  await open(page, '/');
+  const nav = page.getByRole('complementary', { name: 'Navigation' });
+  const active = nav.getByRole('link', { name: /^All items/ });
+  await expect(active).toHaveAttribute('aria-current', 'page');
+  const problems = nav.getByRole('link', { name: /^Problems/ });
+  await problems.hover();
+  const hovered = await problems.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(hovered).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(active).not.toHaveCSS('background-color', hovered);
+});
+
+test('layout: the statement pane stops growing where the statement does', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1000 });
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+  const handle = page.getByRole('separator', { name: 'Resize statement and editor' });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + 2, box.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(1800, box.y + 200, { steps: 8 });
+  await page.mouse.up();
+  const width = async (selector: string) => (await page.locator(selector).first().boundingBox())!.width;
+  // Dragged well past it, the pane holds the statement at its widest and no more.
+  expect(await width('.split-horizontal > .split-pane')).toBeLessThanOrEqual(880);
+  expect(await width('.statement')).toBe(820);
 });

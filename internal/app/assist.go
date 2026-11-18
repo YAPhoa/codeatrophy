@@ -197,12 +197,16 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	if err != nil {
 		return DraftResponse{}, err
 	}
+	conventions, err := a.Conventions(ctx)
+	if err != nil {
+		return DraftResponse{}, err
+	}
 	style, ref := styleOf(preset)
 	large := in.LargeTestCases
 	if hint == "reading" {
 		large = 0
 	}
-	system, user := ai.DraftPrompt{Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
+	system, user := ai.DraftPrompt{Conventions: conventions, Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
 		PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
 	var draft ItemDraft
 	var gens []*ai.ModelLargeCase
@@ -504,12 +508,16 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 		orig["sampleTestCases"] = samples
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
+	conventions, err := a.Conventions(ctx)
+	if err != nil {
+		return DraftResponse{}, err
+	}
 	style, ref := styleOf(preset)
 	large := in.LargeTestCases
 	if it.Type != domain.TypeProblem {
 		large = 0
 	}
-	system, user := ai.VariantPrompt{Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
+	system, user := ai.VariantPrompt{Conventions: conventions, Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
 		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
 	forced := iface
 	if forced == "" {
@@ -577,7 +585,8 @@ type GenerateTestCasesResponse struct {
 
 // GenerateTestCases asks the model for a reference solution and inputs, then
 // runs the solution to compute the expected outputs when an engine is
-// available. Nothing is saved. Style presets do not apply.
+// available. Nothing is saved. Style presets and the custom system prompt
+// do not apply; a custom test case prompt does.
 func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateTestCasesInput) (GenerateTestCasesResponse, error) {
 	count := DefaultGeneratedCases
 	if in.Count.HasValue() {
@@ -632,7 +641,11 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	if rs := it.Problem.ReferenceSolution; rs != nil {
 		existing = "language: " + rs.Language + "\n" + rs.Source
 	}
-	system, user := ai.TestCasesPrompt{Problem: string(problemJSON), Function: function, Count: count, Language: lang,
+	guidance, err := a.testCaseGuidance(ctx)
+	if err != nil {
+		return GenerateTestCasesResponse{}, err
+	}
+	system, user := ai.TestCasesPrompt{Guidance: guidance, Problem: string(problemJSON), Function: function, Count: count, Language: lang,
 		ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
 		Toolchains: a.toolchains(ctx), Large: largeAsk(in.LargeTestCases)}.Build()
 	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}, LargeCases: []*LargeCaseReport{}}

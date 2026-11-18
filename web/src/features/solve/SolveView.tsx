@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { useMeta, useSolutions, useTestCases } from '../../api/queries';
 import type { Item, SubmissionSummary } from '../../api/types';
 import { useShellLayout } from '../../app/shellLayout';
-import { clearCode, initialCode, pickLanguage, rememberLanguage, saveCode } from '../../lib/codeStore';
+import { clearCode, initialCode, loadCustomInput, pickLanguage, rememberLanguage, saveCode, saveCustomInput } from '../../lib/codeStore';
 import { errorLine } from '../../lib/errors';
 import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, plural, verdictTone } from '../../lib/format';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
@@ -33,6 +33,9 @@ import { HistoryList } from './HistoryList';
 import { ResultPanel } from './ResultPanel';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
+
+/** The statement's widest (`.statement`, 820px) plus its pane's padding and a scrollbar: the divider stops there. */
+const STATEMENT_PANE_MAX = 880;
 
 // The open tabs are part of the address (`?tab=notes&panel=result&pane=code`), so a link or a reload lands on the same view.
 const LEFT_TABS = ['description', 'notes', 'submissions', 'variants'] as const;
@@ -117,7 +120,7 @@ export function SolveView({ item }: { item: Item }) {
   const shell = useShellLayout();
   const [saving, setSaving] = useState<{ language: string; source: string; name?: string; submissionId?: string; accepted?: boolean } | null>(null);
   const [savedFrom, setSavedFrom] = useState<ReadonlySet<string>>(() => new Set());
-  const [customInput, setCustomInput] = useState('');
+  const [customInput, setCustomInput] = useState(() => loadCustomInput(item.id));
   const [historic, setHistoric] = useState(false);
   const [narrowPane, setNarrowPane] = useUrlChoice('pane', NARROW_PANES, 'problem');
   const runner = useSubmissionRunner(item.id);
@@ -145,6 +148,15 @@ export function SolveView({ item }: { item: Item }) {
     },
     [item.id],
   );
+
+  // And the custom input, per item, within a size that storage can spare.
+  const latestInput = useRef(customInput);
+  useEffect(() => {
+    latestInput.current = customInput;
+    const t = window.setTimeout(() => saveCustomInput(item.id, customInput), 300);
+    return () => window.clearTimeout(t);
+  }, [item.id, customInput]);
+  useEffect(() => () => saveCustomInput(item.id, latestInput.current), [item.id]);
 
   // ---- Panes ----
 
@@ -776,6 +788,7 @@ export function SolveView({ item }: { item: Item }) {
             initial={0.36}
             min={0.2}
             max={0.65}
+            maxFirstPx={STATEMENT_PANE_MAX}
             first={left}
             second={right}
             collapsed={statementMin ? 'first' : null}

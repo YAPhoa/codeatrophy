@@ -156,7 +156,7 @@ export function PreferencesSection() {
             value={theme}
             onChange={setThemePreference}
             options={[
-              { value: 'system', label: 'Match system' },
+              { value: 'system', label: 'System' },
               { value: 'light', label: 'Light' },
               { value: 'dark', label: 'Dark' },
             ]}

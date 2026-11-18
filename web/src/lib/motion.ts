@@ -9,7 +9,7 @@ export function prefersReducedMotion(): boolean {
 // while the stylesheet is missing (in unit tests), so a later read still finds it.
 const tokenCache = new Map<string, string>();
 
-function token(name: string): string {
+export function token(name: string): string {
   const cached = tokenCache.get(name);
   if (cached !== undefined) return cached;
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -21,7 +21,7 @@ function token(name: string): string {
  * How long something closing plays its exit before it unmounts, in ms: a
  * duration token, `--duration-quick` unless told otherwise. Nil under reduced
  * motion, and where the stylesheet is not loaded (in unit tests), so it goes
- * at once.
+ * at once. Anything else timed in JS reads its duration here too.
  */
 export function exitDuration(name = '--duration-quick'): number {
   if (prefersReducedMotion()) return 0;
@@ -30,17 +30,76 @@ export function exitDuration(name = '--duration-quick'): number {
 }
 
 /**
+ * How long a load may take before it is shown as loading. Most loads are
+ * quicker, and then no indicator ever appears, so none flashes.
+ */
+export const LOADING_SHOWS_AFTER_MS = 400;
+
+/**
+ * Whether a loading indicator should be shown: once `loading` has been true
+ * for LOADING_SHOWS_AFTER_MS. Timed here rather than with `animation-delay`,
+ * which reduced motion cuts to nil; the wait holds there too. Give the
+ * indicator `loading-delay` and `is-pending` until this is true: it keeps its
+ * size meanwhile, and fades in once shown.
+ */
+export function useLoadingShown(loading = true): boolean {
+  const [state, setState] = useState({ loading, shown: false });
+  let current = state;
+  if (state.loading !== loading) {
+    current = { loading, shown: false };
+    setState(current);
+  }
+  useEffect(() => {
+    if (!loading) return;
+    const t = window.setTimeout(() => setState((s) => (s.loading ? { ...s, shown: true } : s)), LOADING_SHOWS_AFTER_MS);
+    return () => window.clearTimeout(t);
+  }, [loading]);
+  return loading && current.shown;
+}
+
+/**
+ * How many times `value` has changed since the component mounted: 0 on the
+ * first render. Key an element on it, or add a class once it is above 0, to
+ * play an entrance on a change and never on mount, so a screen opened on
+ * data that was already so (a favourite, a finished item) stays still.
+ */
+export function useChangeCount<T>(value: T): number {
+  const [seen, setSeen] = useState({ value, count: 0 });
+  if (!Object.is(seen.value, value)) {
+    const next = { value, count: seen.count + 1 };
+    setSeen(next);
+    return next.count;
+  }
+  return seen.count;
+}
+
+/**
+ * Eases an element from where it was drawn before a layout change back to
+ * where it now is, on transform only (a FLIP). `from` is its box before the
+ * change; call this after the change is laid out, in a layout effect.
+ */
+export function slideFrom(el: HTMLElement, from: DOMRect, name = '--duration-slow'): void {
+  const to = el.getBoundingClientRect();
+  const dx = from.left - to.left;
+  const dy = from.top - to.top;
+  const ms = exitDuration(name);
+  if ((dx === 0 && dy === 0) || ms === 0 || typeof el.animate !== 'function') return;
+  el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: ms, easing: token('--ease-out') || 'ease-out' });
+}
+
+/**
  * Keeps something mounted for its exit animation after `open` turns false.
  * `mounted` says whether to render it at all; `closing` is true while it
  * plays out, for a class that runs the exit and an `inert` that keeps it out
  * of reach meanwhile. Opening again while it closes picks it straight back up.
+ * The exit lasts `--duration-quick` unless another duration token is named.
  */
-export function usePresence(open: boolean): { mounted: boolean; closing: boolean } {
+export function usePresence(open: boolean, exitToken = '--duration-quick'): { mounted: boolean; closing: boolean } {
   const [prevOpen, setPrevOpen] = useState(open);
   const [exitMs, setExitMs] = useState(0);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    setExitMs(open ? 0 : exitDuration());
+    setExitMs(open ? 0 : exitDuration(exitToken));
   }
   useEffect(() => {
     if (exitMs === 0) return;
@@ -118,14 +177,21 @@ export function exitOnRemove(node: HTMLElement | null): (() => void) | undefined
  * width at once and plays from where it was, scaled to its old width, back to
  * scale 1 (`pseudo` names the pseudo-element that draws it, and `inset` how
  * much narrower than the child it is drawn).
+ *
+ * With `axis: 'y'` it follows a vertical list instead (an outline's marker):
+ * it writes the child's `--indicator-x`, `--indicator-y` and `--indicator-h`,
+ * and plays the move on transform, scaled to the old height.
  */
-export function useSlidingIndicator<T extends HTMLElement>(selector: string, { pseudo, inset = 0 }: { pseudo: '::before' | '::after'; inset?: number }) {
+export function useSlidingIndicator<T extends HTMLElement>(
+  selector: string,
+  { pseudo, inset = 0, axis = 'x' }: { pseudo: '::before' | '::after'; inset?: number; axis?: 'x' | 'y' },
+) {
   const ref = useRef<T>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const place = () => placeIndicator(el, selector, pseudo, inset);
+    const place = () => (axis === 'y' ? placeVertical(el, selector, pseudo) : placeIndicator(el, selector, pseudo, inset));
     place();
     if (typeof MutationObserver === 'undefined') return;
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
@@ -145,7 +211,7 @@ export function useSlidingIndicator<T extends HTMLElement>(selector: string, { p
       mo.disconnect();
       ro?.disconnect();
     };
-  }, [selector, pseudo, inset]);
+  }, [selector, pseudo, inset, axis]);
 
   return ref;
 }
@@ -173,6 +239,41 @@ function placeIndicator(container: HTMLElement, selector: string, pseudo: string
   const scale = Math.max(0, prev.w - inset) / Math.max(1, w - inset);
   container.animate(
     [{ transform: `translateX(${prev.x}px) scaleX(${scale})` }, { transform: `translateX(${x}px) scaleX(1)` }],
+    { duration: ms, easing: token('--ease-out') || 'ease-out', pseudoElement: pseudo },
+  );
+}
+
+const placedVertical = new WeakMap<HTMLElement, { x: number; y: number; h: number; since: number }>();
+
+/**
+ * How long after it first appears a vertical marker moves without sliding: an
+ * outline marks the heading in view, and while a long page is still laying
+ * out (lazy Markdown, fonts) that can change once or twice on its own.
+ */
+const SETTLE_MS = 600;
+
+function placeVertical(container: HTMLElement, selector: string, pseudo: string) {
+  const selected = container.querySelector<HTMLElement>(selector);
+  if (!selected || selected.offsetHeight === 0) {
+    container.removeAttribute('data-indicator');
+    placedVertical.delete(container);
+    return;
+  }
+  const x = selected.offsetLeft;
+  const y = selected.offsetTop;
+  const h = selected.offsetHeight;
+  const prev = placedVertical.get(container);
+  if (prev && prev.x === x && prev.y === y && prev.h === h) return;
+  const since = prev?.since ?? performance.now();
+  placedVertical.set(container, { x, y, h, since });
+  container.style.setProperty('--indicator-x', `${x}px`);
+  container.style.setProperty('--indicator-y', `${y}px`);
+  container.style.setProperty('--indicator-h', `${h}px`);
+  container.setAttribute('data-indicator', '');
+  const ms = exitDuration('--duration-fast');
+  if (!prev || performance.now() - since < SETTLE_MS || ms === 0 || typeof container.animate !== 'function') return;
+  container.animate(
+    [{ transform: `translate(${prev.x}px, ${prev.y}px) scaleY(${prev.h / Math.max(1, h)})` }, { transform: `translate(${x}px, ${y}px) scaleY(1)` }],
     { duration: ms, easing: token('--ease-out') || 'ease-out', pseudoElement: pseudo },
   );
 }

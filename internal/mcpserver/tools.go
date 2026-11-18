@@ -70,7 +70,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness. include selects optional parts: testCases, solutions, submissions (the 10 most recent).",
+		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness. include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
 		object(props{
 			"id":      str("Item id"),
 			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
@@ -103,7 +103,7 @@ func (t *tools) register(s *mcp.Server) {
 			}
 			if slices.Contains(in.Include, "submissions") {
 				limit := 10
-				subs, err := a.ListSubmissions(ctx, in.ID, app.SubmissionQuery{Limit: &limit})
+				subs, err := a.ListSubmissions(ctx, in.ID, app.SubmissionQuery{Mode: string(domain.ModeSubmit), Limit: &limit})
 				if err != nil {
 					return nil, err
 				}
@@ -367,7 +367,7 @@ func (t *tools) register(s *mcp.Server) {
 		object(props{
 			"itemId":            str("Problem id"),
 			"cases":             arrayOf(testCaseSchema(), "Test cases to add"),
-			"replace":           boolean("Replace all existing test cases"),
+			"replace":           boolean("Replace the existing test cases; sample cases are kept"),
 			"referenceSolution": map[string]any{"anyOf": []any{solutionSchema(), map[string]any{"type": "null"}}},
 			"expectedRevision":  expectedRevision,
 		}, "itemId", "cases"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -478,7 +478,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "run_code", "Run code",
-		"Execute code for a problem and wait for the verdict: mode run (sample cases, or custom stdin) or submit (all cases). For a function problem give only the solution part: it runs inside the language's harness, line numbers in errors refer to it (<runner prefix> and <runner suffix> mark lines inside the runner), and lineOffset is how many lines the harness put before it. Needs a judge engine.",
+		"Execute code for a problem and wait for the verdict: mode run (sample cases, or custom stdin) or submit (all cases). For a function problem give only the solution part: it runs inside the language's harness, line numbers in errors refer to it (<runner prefix> and <runner suffix> mark lines inside the runner), and lineOffset is how many lines the harness put before it. Only submits are kept as history: a run replaces the problem's earlier completed runs. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
 			"language":       languageEnum("Language id; for a function problem, one with a harness"),

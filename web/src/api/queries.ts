@@ -2,6 +2,7 @@
 // keep lists and detail views consistent after a mutation.
 
 import {
+  queryOptions,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -10,7 +11,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { AiLogFilters, Item, ItemListParams, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
+import type { AiLogFilters, Item, ItemListParams, ItemType, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -25,6 +26,8 @@ export const qk = {
   aiLogPages: (filters: AiLogFilters) => ['settings', 'ai-log', 'pages', filters] as const,
   aiLogEntry: (id: string) => ['settings', 'ai-log', 'entry', id] as const,
   styles: ['styles'] as const,
+  systemPrompt: ['settings', 'system-prompt'] as const,
+  testCasePrompt: ['settings', 'testcase-prompt'] as const,
   items: ['items'] as const,
   /** Prefix of every cached item list, whatever its shape. */
   itemLists: ['items', 'list'] as const,
@@ -95,21 +98,40 @@ export function useItemQuery(params: ItemListParams, enabled = true) {
   });
 }
 
+/** How an item is loaded: shared by `useItem` and `prefetchItem`, so the two cannot drift apart. */
+export function itemQuery(id: string) {
+  return queryOptions({
+    queryKey: qk.item(id),
+    queryFn: ({ signal }) => api.items.get(id, signal),
+  });
+}
+
 export function useItem(id: string | undefined) {
-  return useQuery({
-    queryKey: qk.item(id ?? ''),
-    queryFn: ({ signal }) => api.items.get(id ?? '', signal),
-    enabled: !!id,
+  return useQuery({ ...itemQuery(id ?? ''), enabled: !!id });
+}
+
+/**
+ * Load what an item's page opens with, ahead of opening it (the pointer
+ * rests on its row): the item, and a problem's test cases. A copy younger
+ * than this is kept, so resting on the same row again asks for nothing.
+ */
+const PREFETCH_FRESH_MS = 30_000;
+
+export function prefetchItem(qc: QueryClient, id: string, type: ItemType): void {
+  void qc.prefetchQuery({ ...itemQuery(id), staleTime: PREFETCH_FRESH_MS });
+  if (type === 'problem') void qc.prefetchQuery({ ...testCasesQuery(id), staleTime: PREFETCH_FRESH_MS });
+}
+
+/** How a problem's test cases are loaded: shared by `useTestCases` and `prefetchItem`. */
+export function testCasesQuery(itemId: string) {
+  return queryOptions({
+    queryKey: qk.testCases(itemId),
+    queryFn: ({ signal }) => api.testCases.list(itemId, signal),
   });
 }
 
 export function useTestCases(itemId: string, enabled = true) {
-  return useQuery({
-    queryKey: qk.testCases(itemId),
-    queryFn: ({ signal }) => api.testCases.list(itemId, signal),
-    select: (data) => data.items,
-    enabled,
-  });
+  return useQuery({ ...testCasesQuery(itemId), select: (data) => data.items, enabled });
 }
 
 export function useSolutions(itemId: string, enabled = true) {
@@ -173,10 +195,11 @@ export function useUpdatePreferences() {
   });
 }
 
+/** A problem's submission history: submits only, since only the latest run is kept. */
 export function useSubmissionList(itemId: string, enabled = true) {
   return useQuery({
     queryKey: qk.submissions(itemId),
-    queryFn: ({ signal }) => api.submissions.list(itemId, { limit: 50 }, signal),
+    queryFn: ({ signal }) => api.submissions.list(itemId, { mode: 'submit', limit: 50 }, signal),
     enabled,
   });
 }
@@ -189,6 +212,14 @@ export function useStyles(enabled = true) {
     staleTime: 10_000,
     enabled,
   });
+}
+
+export function useSystemPrompt() {
+  return useQuery({ queryKey: qk.systemPrompt, queryFn: ({ signal }) => api.settings.systemPrompt(signal) });
+}
+
+export function useTestCasePrompt() {
+  return useQuery({ queryKey: qk.testCasePrompt, queryFn: ({ signal }) => api.settings.testCasePrompt(signal) });
 }
 
 export function useAiSettings() {

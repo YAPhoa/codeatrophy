@@ -69,8 +69,9 @@ expires; open sessions are unaffected. A request body may be at most
   and `message` the HTTP API would return.
 - Tools are annotated (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so
   clients can apply their own confirmation policy.
-- AI provider settings and credentials, their usage counts and the AI
-  activity log are not reachable through MCP. MCP has no AI generation of its
+- AI provider settings and credentials, their usage counts, the AI
+  activity log, the custom system prompt and the custom test case prompt
+  are not reachable through MCP tools. MCP has no AI generation of its
   own: the connected assistant is the model.
 
 ## Tools
@@ -81,7 +82,7 @@ expires; open sessions are unaffected. A request body may be at most
 | --- | --- |
 | `get_overview` | Library statistics, the collection tree, the tag list, and which languages the judge offers. A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
-| `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent) |
+| `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
 | `get_submission` | A submission with per-case results |
@@ -114,13 +115,13 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `add_test_cases` | Append (or replace all) test cases; may set the reference solution in the same call (for a function problem, the solution part only) |
+| `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only) |
 | `update_test_case` | Change one test case |
 | `delete_test_case` | Delete one test case |
 | `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and changes nothing. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
 | `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only |
 | `delete_solution` | Delete one saved solution; deleting the reference leaves the problem without one |
-| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected |
+| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). A run replaces the problem's earlier completed runs; only submits are kept. For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected |
 
 The execution tools need a judge engine and return `judge_unavailable`
 without one.
@@ -182,6 +183,16 @@ instructions for a model, and may only be written by the instance's user in
 the app's settings. The only exception is the built-in presets a new
 instance starts with, which ship with the app and are then edited like any
 other.
+
+### System prompt
+
+When the user has written a custom system prompt in the app's settings (see
+"System prompt" in `docs/api.md`), the authoring guide carries it in place
+of the editable conventions, followed by the fixed rules the app depends on,
+in `instructions`, the resource and every prompt, `write_test_cases`
+included. No tool reads, creates or changes it. The custom test case
+prompt, which only the app's own test generation uses, appears in none of
+them.
 
 ## Companion skill
 

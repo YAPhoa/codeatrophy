@@ -59,6 +59,11 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
     <div className="tcases">
       <div className="tcases-head">
         <span className="tcases-summary">{describeCases(list.length, samples, reveal.hiding)}</span>
+        {concealed > 0 && (
+          <span className="tcases-note">
+            · hidden until revealed (<Link to="/settings/preferences">change in Settings</Link>)
+          </span>
+        )}
         <span className="spacer" />
         {concealed > 0 && (
           <Button size="sm" icon={<Eye size={14} />} onClick={reveal.revealAll}>
@@ -75,47 +80,55 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
         </LinkButton>
       </div>
 
+      {/* Concealed cases say nothing but their number, so they share one row: a number reveals its case in its place below. */}
       {concealed > 0 && (
-        <p className="tcases-note">
-          Hidden cases are counted, but their input and expected output stay out of sight until you reveal them. <Link to="/settings/preferences">Change this in Settings</Link>
-        </p>
+        <div className="tcases-hidden" role="group" aria-label="Hidden cases">
+          <span className="tcases-hidden-label" aria-hidden="true">
+            Hidden
+          </span>
+          {list.map((c, i) =>
+            reveal.conceals(c) ? (
+              <button key={c.id} type="button" className="tcase-chip" onClick={() => reveal.reveal(c.id)} aria-label={`Reveal case ${i + 1}`} title="Reveal">
+                {i + 1}
+              </button>
+            ) : null,
+          )}
+        </div>
       )}
 
-      <ol className="tcase-list">
-        {list.map((c, i) => {
-          const number = i + 1;
-          if (reveal.conceals(c)) {
+      {concealed < list.length && (
+        <ol className="tcase-list">
+          {list.map((c, i) => {
+            const number = i + 1;
+            if (reveal.conceals(c)) return null;
             return (
-              <li key={c.id} className="tcase is-concealed">
-                <span className="tcase-name">Case {number}</span>
-                <span className="chip">hidden</span>
-                <span className="spacer" />
-                <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => reveal.reveal(c.id)} aria-label={`Reveal case ${number}`}>
-                  Reveal
-                </Button>
+              <li key={c.id} className="tcase">
+                <div className="tcase-head">
+                  <span className="tcase-name">{c.name || `Case ${number}`}</span>
+                  {/* While a hidden case is revealed, a Hide button takes the place of its tag. */}
+                  {reveal.hiding && !c.isSample ? (
+                    <Button size="sm" variant="ghost" icon={<EyeOff size={14} />} onClick={() => reveal.hide(c.id)} aria-label={`Hide case ${number}`}>
+                      Hide
+                    </Button>
+                  ) : (
+                    <span className="chip">{c.isSample ? 'sample' : 'hidden'}</span>
+                  )}
+                  <span className="spacer" />
+                  {onUseInput && (
+                    <Button size="sm" variant="ghost" onClick={() => onUseInput(c.stdin)} title="Copy this input to the Custom input tab">
+                      Use as custom input
+                    </Button>
+                  )}
+                </div>
+                <div className="io-pair">
+                  <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name || `case ${number}`, 'input')} />
+                  <Output label="Expected output" text={c.expectedStdout} filename={textFilename(item.title, c.name || `case ${number}`, 'output')} />
+                </div>
               </li>
             );
-          }
-          return (
-            <li key={c.id} className="tcase">
-              <div className="tcase-head">
-                <span className="tcase-name">{c.name || `Case ${number}`}</span>
-                <span className="chip">{c.isSample ? 'sample' : 'hidden'}</span>
-                <span className="spacer" />
-                {onUseInput && (
-                  <Button size="sm" variant="ghost" onClick={() => onUseInput(c.stdin)} title="Copy this input to the Custom input tab">
-                    Use as custom input
-                  </Button>
-                )}
-              </div>
-              <div className="io-pair">
-                <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name || `case ${number}`, 'input')} />
-                <Output label="Expected output" text={c.expectedStdout} filename={textFilename(item.title, c.name || `case ${number}`, 'output')} />
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+          })}
+        </ol>
+      )}
     </div>
   );
 }

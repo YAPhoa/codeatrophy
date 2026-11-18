@@ -7,6 +7,13 @@ import { readString, remove, writeString } from './storage';
 const codeKey = (itemId: string, language: string) => `code:${itemId}:${language}`;
 const langKey = (itemId: string) => `lang:${itemId}`;
 const LAST_LANG = 'lang:last';
+const inputKey = (itemId: string) => `stdin:${itemId}`;
+
+/**
+ * The largest custom input that is remembered, in bytes. The API takes far
+ * more (`limits.maxTestDataBytes`), but localStorage is small and shared.
+ */
+export const MAX_STORED_INPUT_BYTES = 64 * 1024;
 
 export function loadCode(itemId: string, language: string): string | null {
   return readString(codeKey(itemId, language));
@@ -42,4 +49,18 @@ export function pickLanguage(itemId: string, available: readonly string[], start
 /** The code to show when a language is selected: saved work, else the starter, else empty. */
 export function initialCode(itemId: string, language: string, starterCode: Record<string, string>): string {
   return loadCode(itemId, language) ?? starterCode[language] ?? '';
+}
+
+/** The custom input last used on a problem, or empty. */
+export function loadCustomInput(itemId: string): string {
+  return readString(inputKey(itemId)) ?? '';
+}
+
+/**
+ * Remember a problem's custom input. An empty one, or one too large to keep,
+ * clears what was stored, so an older input does not come back in its place.
+ */
+export function saveCustomInput(itemId: string, input: string): void {
+  if (input === '' || new Blob([input]).size > MAX_STORED_INPUT_BYTES) remove(inputKey(itemId));
+  else writeString(inputKey(itemId), input);
 }

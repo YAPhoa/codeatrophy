@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from './api/client';
 import { routes } from './App';
 import { initTheme } from './lib/theme';
+import { revealWhenSettled } from './lib/boot';
 import { ConfirmProvider } from './ui/Dialog';
 import { ToastProvider } from './ui/Toast';
 // IBM Plex Sans for the interface (--font-sans), bundled so every machine shows it.
@@ -57,6 +58,7 @@ async function start() {
       </QueryClientProvider>
     </StrictMode>,
   );
+  revealWhenSettled(queryClient);
 }
 
 void start();

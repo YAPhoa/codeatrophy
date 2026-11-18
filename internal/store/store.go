@@ -192,6 +192,9 @@ type Tx interface {
 	UpdateSubmission(s *domain.Submission) error
 	AddSubmissionResult(submissionID string, index int, r domain.SubmissionResult) error
 	UnfinishedSubmissionIDs() ([]string, error)
+	// DeleteCompletedRuns removes an item's completed run-mode submissions
+	// with their results. Submit-mode and unfinished ones are kept.
+	DeleteCompletedRuns(itemID string) error
 
 	Stats() (domain.Stats, error)
 

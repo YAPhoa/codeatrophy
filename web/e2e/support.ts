@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
 
-/** Open the app with short mock delays, and fail the test on any page error or third-party request. */
-export async function open(page: Page, path: string): Promise<void> {
+/**
+ * Open the app with short mock delays (or the scenario `mock` names), and
+ * fail the test on any page error or third-party request.
+ */
+export async function open(page: Page, path: string, mock = 'fast'): Promise<void> {
   page.on('pageerror', (error) => {
     throw error;
   });
@@ -10,5 +13,60 @@ export async function open(page: Page, path: string): Promise<void> {
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') throw new Error(`request to a third-party origin: ${request.url()}`);
   });
   const [route = '', hash] = path.split('#');
-  await page.goto(`${route}${route.includes('?') ? '&' : '?'}mock=fast${hash ? `#${hash}` : ''}`);
+  await page.goto(`${route}${route.includes('?') ? '&' : '?'}mock=${mock}${hash ? `#${hash}` : ''}`);
+}
+
+/** What `recordLoading` saw, in ms since the page started. */
+export interface LoadingRecord {
+  /** When the app was first shown (`is-booting` gone). */
+  revealedAt: number | null;
+  /** Each loading indicator that became visible: its text, the element, when it was mounted and when it showed. */
+  indicators: { what: string; where: string; mountedAt: number; shownAt: number }[];
+  /** Each entrance fade that started (styles/layout.css), and when. */
+  entrances: { what: string; at: number }[];
+}
+
+/**
+ * Record, frame by frame, when the app is shown, when loading indicators
+ * (`.loading-delay`) are mounted and when they show, and which entrance
+ * fades start. Read it with `loadingRecord`.
+ */
+export async function recordLoading(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type Marked = Element & { __mountedAt?: number; __shown?: boolean };
+    const record = { revealedAt: null as number | null, indicators: [] as { what: string; where: string; mountedAt: number; shownAt: number }[], entrances: [] as { what: string; at: number }[] };
+    (window as unknown as { __loading: typeof record }).__loading = record;
+    const describe = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${typeof el.className === 'string' ? el.className.trim().replace(/\s+/g, '.') : ''}`;
+    new MutationObserver((changes) => {
+      const now = performance.now();
+      for (const change of changes)
+        for (const node of change.addedNodes)
+          if (node instanceof Element) for (const el of [node, ...node.querySelectorAll('.loading-delay')] as Marked[]) if (el.matches('.loading-delay')) el.__mountedAt ??= now;
+    }).observe(document, { childList: true, subtree: true });
+    document.addEventListener(
+      'transitionstart',
+      (e) => {
+        if (e.propertyName === 'opacity' && e.target instanceof Element && e.target.matches('#root, .shell, .page, .workspace > *, .reader'))
+          record.entrances.push({ what: describe(e.target), at: performance.now() });
+      },
+      true,
+    );
+    const frame = () => {
+      const now = performance.now();
+      const booting = document.documentElement.classList.contains('is-booting');
+      if (!booting && record.revealedAt === null) record.revealedAt = now;
+      if (!booting)
+        for (const el of document.querySelectorAll<Marked>('.loading-delay:not(.is-pending)'))
+          if (!el.__shown) {
+            el.__shown = true;
+            record.indicators.push({ what: el.textContent?.trim() || '', where: describe(el), mountedAt: el.__mountedAt ?? 0, shownAt: now });
+          }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+}
+
+export async function loadingRecord(page: Page): Promise<LoadingRecord> {
+  return page.evaluate(() => structuredClone((window as unknown as { __loading: LoadingRecord }).__loading));
 }

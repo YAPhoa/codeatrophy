@@ -134,6 +134,12 @@ func (s *Server) routes() {
 	s.handle("GET /settings/ai/log", s.listAILog)
 	s.handle("GET /settings/ai/log/{id}", s.getAILogEntry)
 	s.handle("DELETE /settings/ai/log", s.deleteAILog)
+	s.handle("GET /settings/ai/system-prompt", s.getSystemPrompt)
+	s.handle("PUT /settings/ai/system-prompt", s.putSystemPrompt)
+	s.handle("DELETE /settings/ai/system-prompt", s.deleteSystemPrompt)
+	s.handle("GET /settings/ai/testcase-prompt", s.getTestCasePrompt)
+	s.handle("PUT /settings/ai/testcase-prompt", s.putTestCasePrompt)
+	s.handle("DELETE /settings/ai/testcase-prompt", s.deleteTestCasePrompt)
 	s.handle("GET /settings/preferences", s.getPreferences)
 	s.handle("PUT /settings/preferences", s.putPreferences)
 
@@ -886,6 +892,66 @@ func (s *Server) getAILogEntry(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) deleteAILog(w http.ResponseWriter, r *http.Request) error {
 	if err := s.app.DeleteAILog(r.Context(), r.URL.Query().Get("before")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) getSystemPrompt(w http.ResponseWriter, r *http.Request) error {
+	p, err := s.app.GetSystemPrompt(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) putSystemPrompt(w http.ResponseWriter, r *http.Request) error {
+	var in app.SystemPromptInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	p, err := s.app.SetSystemPrompt(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) deleteSystemPrompt(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.ResetSystemPrompt(r.Context()); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) getTestCasePrompt(w http.ResponseWriter, r *http.Request) error {
+	p, err := s.app.GetTestCasePrompt(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) putTestCasePrompt(w http.ResponseWriter, r *http.Request) error {
+	var in app.TestCasePromptInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	p, err := s.app.SetTestCasePrompt(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, p)
+	return nil
+}
+
+func (s *Server) deleteTestCasePrompt(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.ResetTestCasePrompt(r.Context()); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

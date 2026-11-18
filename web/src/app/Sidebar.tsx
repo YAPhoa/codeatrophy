@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,7 +8,6 @@ import {
   Code2,
   Download,
   FolderPlus,
-  Inbox,
   Keyboard,
   Library,
   Monitor,
@@ -31,13 +30,16 @@ import { invalidateLibrary, useCollections, useStats } from '../api/queries';
 import type { Collection, Meta } from '../api/types';
 import { useCollectionActions } from '../features/collections/CollectionActions';
 import { MOD } from '../lib/hotkeys';
+import { useIntent } from '../lib/intent';
 import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { setThemePreference, useThemePreference, type ThemePreference } from '../lib/theme';
 import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
+import { NumberChange } from '../ui/Animated';
 import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
 import { Kbd } from '../ui/misc';
+import { SettingsPage, TagsPage } from './screens';
 import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
@@ -56,30 +58,42 @@ interface SidebarProps {
   onOpenShortcuts: () => void;
 }
 
+const COLLECTIONS_HEIGHT = 'sidebar:collections-height';
+
 interface NavEntryProps {
   to: string;
   icon: ReactNode;
   label: string;
   count?: number;
   active: boolean;
+  /** Loads the screen the entry leads to, once the pointer or focus rests on it. */
+  preload?: () => void;
 }
 
-function NavEntry({ to, icon, label, count, active }: NavEntryProps) {
+const nothing = () => undefined;
+
+function NavEntry({ to, icon, label, count, active, preload }: NavEntryProps) {
+  const intent = useIntent(preload ?? nothing);
   return (
-    <Link to={to} className={cx('nav-item', active && 'is-active')} aria-current={active ? 'page' : undefined}>
+    <Link to={to} className={cx('nav-item', active && 'is-active')} aria-current={active ? 'page' : undefined} {...(preload && intent)}>
       <span className="nav-icon" aria-hidden="true">
         {icon}
       </span>
       <span className="grow truncate">{label}</span>
-      {count != null && <span className="nav-count">{count}</span>}
+      {count != null && (
+        <span className="nav-count">
+          <NumberChange value={count} />
+        </span>
+      )}
     </Link>
   );
 }
 
 /** One destination in the minimised navigation: an icon whose name is its tooltip and accessible name. */
-function RailEntry({ to, icon, label, active }: Omit<NavEntryProps, 'count'>) {
+function RailEntry({ to, icon, label, active, preload }: Omit<NavEntryProps, 'count'>) {
+  const intent = useIntent(preload ?? nothing);
   return (
-    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={label} title={label}>
+    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={label} title={label} {...(preload && intent)}>
       {icon}
     </Link>
   );
@@ -154,7 +168,9 @@ function CollectionTreeNode({
         <NavLink to={`/collections/${c.id}`} className="nav-tree-link truncate" title={c.description || c.name}>
           {c.name}
         </NavLink>
-        <span className="nav-count">{c.itemCount}</span>
+        <span className="nav-count">
+          <NumberChange value={c.itemCount} />
+        </span>
         <MenuButton
           variant="ghost"
           size="sm"
@@ -210,6 +226,18 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readJson<string[]>('sidebar:collapsed', [])));
 
   const tree = useMemo(() => buildTree(collections.data ?? []), [collections.data]);
+  // How tall the collections were last time, to keep their place while they load.
+  const [collectionsHeight] = useState(() => readJson<number>(COLLECTIONS_HEIGHT, 0));
+  const collectionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Measured as the page goes, when nothing is mid-animation.
+    const save = () => {
+      const el = collectionsRef.current;
+      if (el && el.style.minHeight === '' && el.getClientRects().length > 0) writeJson(COLLECTIONS_HEIGHT, el.offsetHeight);
+    };
+    window.addEventListener('pagehide', save);
+    return () => window.removeEventListener('pagehide', save);
+  }, []);
   const toggle = (id: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -235,7 +263,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       align="end"
       icon={THEME_ICON[theme]}
       items={(['system', 'light', 'dark'] as const).map((t) => ({
-        label: t === 'system' ? 'Match system' : t === 'light' ? 'Light' : 'Dark',
+        label: t === 'system' ? 'System' : t === 'light' ? 'Light' : 'Dark',
         icon: THEME_ICON[t],
         selected: t === theme,
         onSelect: () => setThemePreference(t),
@@ -266,8 +294,8 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <RailEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" active={onLibrary && type === 'reading' && !fav && !uncollected} />
           <RailEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
           <span className="rail-sep" aria-hidden="true" />
-          <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} />
-          <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />
+          <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} preload={TagsPage.preload} />
+          <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} preload={SettingsPage.preload} />
         </nav>
         <div className="rail-foot">
           <Link to="/settings/ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
@@ -297,7 +325,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       </div>
 
       <div className="sidebar-actions">
-        <LinkButton to={newHref} variant="primary" icon={<Plus size={16} />} className="sidebar-new">
+        <LinkButton to={newHref} variant="soft" icon={<Plus size={16} />} className="sidebar-new">
           New item
           <Kbd>C</Kbd>
         </LinkButton>
@@ -323,16 +351,16 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <li>
             <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={onLibrary && fav} />
           </li>
-          <li>
-            <NavEntry to="/?uncollected=true" icon={<Inbox size={16} />} label="Uncollected" count={s?.items.uncollected} active={onLibrary && uncollected} />
-          </li>
         </ul>
 
         <div className="nav-heading">
           <h2 id="nav-collections">Collections</h2>
           <IconButton label="New collection" size="sm" icon={<Plus size={14} />} onClick={() => actions.create(null)} />
         </div>
-        {tree.length === 0 ? (
+        {/* Nothing until the collections arrive, so a reload does not flash the hint for having none;
+            their space is kept meanwhile, so Manage does not move when they come. */}
+        <div ref={collectionsRef} style={collections.isSuccess ? undefined : { minHeight: collectionsHeight }}>
+        {!collections.isSuccess ? null : tree.length === 0 ? (
           <p className="nav-empty">
             Group items into ordered lists, such as a study plan or a topic.{' '}
             <button type="button" className="link-btn" onClick={() => actions.create(null)}>
@@ -346,16 +374,17 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
             ))}
           </ul>
         )}
+        </div>
 
         <div className="nav-heading">
           <h2 id="nav-manage">Manage</h2>
         </div>
         <ul className="nav-group" aria-labelledby="nav-manage">
           <li>
-            <NavEntry to="/tags" icon={<Tags size={16} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} />
+            <NavEntry to="/tags" icon={<Tags size={16} />} label="Tags" count={s?.tags} active={location.pathname === '/tags'} preload={TagsPage.preload} />
           </li>
           <li>
-            <NavEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} />
+            <NavEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} preload={SettingsPage.preload} />
           </li>
         </ul>
       </nav>

@@ -46,6 +46,11 @@ when the contract changes; its own tests are in `src/mock/mock.test.ts`.
 
 State lives in memory only: **reloading the page resets it** to the seed.
 
+The mock server forwards nothing to a backend: a request that bypasses the
+mock's client, such as a plain `fetch('/api/…')` from a script, gets
+`503 mock_only` instead of reaching a real instance. Scripts call
+`window.__codeatrophyMock.fetch` to reach the mock.
+
 ### Scenarios
 
 Add `?mock=` with comma-separated flags to any URL. The flags stick for the
@@ -65,6 +70,8 @@ browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
 | `empty` | Start with an empty library and no style presets |
 | `no-styles` | Seed library, but no style presets |
 | `fast` / `instant` | Short / no artificial delays |
+| `slow` | Every plain request takes a second, to see what a screen shows while it waits |
+| `slow-<path>` | Reads under one path (`slow-stats`, `slow-collections`, `slow-items`, …) take a second longer |
 
 Example: <http://localhost:5173/?mock=no-ai,fast>
 
@@ -118,7 +125,9 @@ pretend Gemini service lists only text models, by bare id
 (`gemini-3.5-flash`), as the server passes them on. Listing the models is not
 logged or counted in a provider's usage.
 
-The running mock is exposed as `window.__codeatrophyMock`. To exercise the
+The running mock is exposed as `window.__codeatrophyMock`; its `requests`
+lists every request it has answered (`GET /items/…`), for checking what a
+screen asks for. To exercise the
 "changed elsewhere" flow, open an item's edit page, run
 
 ```js
@@ -133,16 +142,25 @@ connected over MCP would), then save.
 `npm run test:e2e` runs a short Playwright suite (`e2e/smoke.spec.ts`) over
 the flows the product stands on: capture → draft → revise → save; the coding
 workspace with a judged submission, a hidden failing case and its panes; the
-runner rows and folded regions of the solve editor;
+submission history, which leaves runs out; the custom input kept across a
+reload; the runner rows and folded regions of the solve editor;
 keeping an accepted submission as a solution and making it the reference;
 preferences taking effect; large test cases, from their preferences to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
 (key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
 editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; filing selected items
 into a collection; the library's views, row verdicts and sort menu; and Import and Export as pages of Settings, reached from their old addresses too.
-It starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
-backend, AI provider or judge, and it fails on any page error or request to a
-third-party origin. It is separate from `npm test`.
+It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
+default writing style (`e2e/styles.spec.ts`), and the system prompt and
+test case prompt, each edited only after a confirm, reset, and guarded when
+left unsaved (`e2e/system-prompt.spec.ts`). It starts its own
+`dev:mock` server (port 5174, or `E2E_PORT`), so it needs no backend, AI
+provider or judge, and it fails on any page error or request to a third-party
+origin. The tests in `e2e/built` check how a reload paints and that a load at
+the mock's normal speed shows nothing as loading, which depend on the
+production build: they run as a second project against a build made with
+the mock and served by `vite preview` (port 5175, or `E2E_BUILT_PORT`), built
+afresh each run. It is separate from `npm test`.
 
 The first time, download the browser Playwright drives:
 
@@ -240,8 +258,9 @@ A few conventions worth knowing:
   and does not load remote images until asked. `src/ui/Markdown.test.tsx`
   guards this; do not add `rehype-raw`.
 - **Work in progress is kept locally.** Solution code is stored per item and
-  language in `localStorage`; capture input and drafts under review survive a
-  reload the same way. The model names loaded for a provider, by Refresh models
+  language in `localStorage`, and the custom input per item (up to 64 KB);
+  capture input and drafts under review survive a reload the same way. The
+  model names loaded for a provider, by Refresh models
   or a connection test, are remembered there too, per kind and base URL
   (`features/settings/modelCache.ts`): the Model field of the provider form
   offers the list remembered for the server in the form, and a saved provider
@@ -258,9 +277,29 @@ A few conventions worth knowing:
   animation delay (the draft review's staggered entrance) to nil and turns
   smooth scrolling off.
   Keep list rows, menu items and other keyboard-driven highlights instant.
-- **Animate `transform` and `opacity`.** The sliding tab and segmented
-  indicators play their move as a transform (`useSlidingIndicator`). `Collapse`
-  grows a row's height, which lays its content out on every frame: fine for a
-  few rows, but pass `heavy` for code editors and diffs, which then fade in.
+- **Animate a change, never an arrival.** A state that changes on screen may
+  animate: an icon swapping (`IconSwap`), a label (`MorphText`), a count
+  (`NumberChange`, all in `src/ui/Animated.tsx`), a fresh verdict, a toast.
+  Opening a page on data that was already so (a favourite, a done item, a
+  past submission) shows it at rest; `useChangeCount` tells the two apart.
+  `e2e/motion.spec.ts` records every animation on load to hold this; the one
+  arrival that moves is the screen itself fading in (see below).
+- **A quick load shows nothing.** A reload keeps the app hidden until its
+  first data, fonts and lazy parts are in, at most 300ms, then fades it in
+  whole (`src/lib/boot.ts`); later, each screen fades in as it mounts, on
+  opacity only (`styles/layout.css`). A loading indicator appears only once a
+  load has taken 400ms: `PageLoading` does this, and anything else shown while
+  loading uses `useLoadingShown` with the `loading-delay` class, keeping its
+  size meanwhile. Navigating keeps the current screen until the next one has
+  loaded, and resting the pointer on a library row (or focus) loads the item
+  ahead of the click (`useIntent`, `prefetchItem`). The build preloads the
+  fonts the first screen draws with (`vite.config.ts`).
+- **Animate `transform` and `opacity`.** The sliding tab, segmented and
+  outline indicators play their move as a transform (`useSlidingIndicator`),
+  and the reader's text column eases aside for the notes as one (`slideFrom`).
+  `Collapse` grows a row's height, which lays its content out on every frame:
+  fine for a few rows, but pass `heavy` for code editors and diffs, which then
+  fade in. The navigation rail does not tween its width: with a long library on
+  screen that reflows the page on every frame.
 - **Unit tests cover logic, not layout**: the API client, the mock, and the
   modules in `src/lib`. The Playwright suite covers the main flows end to end.

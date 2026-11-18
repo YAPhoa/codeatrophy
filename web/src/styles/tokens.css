@@ -48,21 +48,39 @@
   /* The widest a page grows (.page-wide: the library, the editors). */
   --page-wide: 1400px;
   --rail-width: 48px;
+  /* How far down the command palette and short dialogs (confirms) open: clear
+     of a page's header (title and filter bar), about a quarter down. */
+  --overlay-top: clamp(64px, 25vh, 320px);
   --control-h: 32px;
   --control-h-sm: 28px;
 
   /* Motion. Things that open take --duration-fast and close in --duration-quick;
      lib/motion.ts reads --duration-quick to know how long a closing overlay
      stays mounted, and --duration-fast with --ease-out for the sliding tab
-     and segmented indicators. Under reduced motion base.css cuts every duration to nil. */
+     and segmented indicators. Panels open in --duration-slow; a success check
+     draws in --duration-very-slow; a toast fades out over --duration-fade-out.
+     Under reduced motion base.css cuts every duration to nil. */
+  --duration-micro: 80ms;
   --duration-hover: 120ms;
   --duration-quick: 150ms;
   --duration-fast: 250ms;
   --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --duration-fade-out: 1000ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: ease-in-out;
+  /* A small overshoot: a check settling, a star popping. */
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
   --scale-modal: 0.96;
   --scale-popover: 0.97;
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --blur-small: 2px;
+  --blur-large: 8px;
+  /* Frosted glass: what shows through a toast. */
+  --blur-glass: 16px;
 
   color-scheme: light;
 
@@ -70,6 +88,8 @@
   --surface: #ffffff;
   --surface-2: #e9eeeb;
   --surface-3: #e0e7e3;
+  /* Hover on an inactive sidebar entry: a step short of the active one's --surface-3. */
+  --nav-hover: color-mix(in srgb, var(--surface-2), var(--surface-3));
   --border: #d3dbd6;
   --border-strong: #bfc9c3;
   --text: #16211d;
@@ -78,6 +98,7 @@
   --accent: #076c4b;
   --accent-hover: #06593e;
   --accent-soft: rgb(7 108 75 / 12%);
+  --accent-soft-hover: rgb(7 108 75 / 20%);
   --accent-text: #066144;
   --on-accent: #ffffff;
   --focus: #076c4b;
@@ -90,7 +111,8 @@
   --danger: #be2330;
   --danger-hover: #a01c28;
   --danger-soft: #fce8e7;
-  --star: #c98a00;
+  /* At least 3:1 on --surface, on a hovered row (--surface-3) and on a selected one. */
+  --star: #a87300;
 
   --diff-add: #dcf3e0;
   --diff-add-strong: #a9e2b5;
@@ -138,6 +160,7 @@
   --accent: #10de98;
   --accent-hover: #45e5af;
   --accent-soft: rgb(16 222 152 / 14%);
+  --accent-soft-hover: rgb(16 222 152 / 22%);
   --accent-text: #36e3a8;
   --on-accent: #06241a;
   --focus: #10de98;

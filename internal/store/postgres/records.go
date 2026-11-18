@@ -367,6 +367,11 @@ func (t *tx) AddSubmissionResult(submissionID string, index int, r domain.Submis
 	return err
 }
 
+func (t *tx) DeleteCompletedRuns(itemID string) error {
+	_, err := t.exec(`DELETE FROM submissions WHERE item_id = $1 AND mode = 'run' AND status = 'completed'`, itemID)
+	return err
+}
+
 func (t *tx) UnfinishedSubmissionIDs() ([]string, error) {
 	rows, err := t.query(`SELECT id FROM submissions WHERE status != 'completed' ORDER BY seq`)
 	if err != nil {

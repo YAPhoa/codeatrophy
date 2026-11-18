@@ -58,7 +58,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     if (timer?.handle) window.clearTimeout(timer.handle);
     timers.current.delete(id);
     const remove = () => setToasts((list) => list.filter((t) => t.id !== id));
-    const ms = exitDuration('--duration-medium');
+    // The fade out (--duration-fade-out), then the row closing (--duration-fast); see ui.css.
+    const ms = exitDuration('--duration-fade-out') + exitDuration('--duration-fast');
     if (ms === 0) {
       remove();
       return;

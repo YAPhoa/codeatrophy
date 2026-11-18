@@ -107,6 +107,7 @@ describe('meta and stats', () => {
       maxStylePresets: 20,
       maxStyleNameChars: 60,
       maxStyleInstructionsChars: 2000,
+      maxSystemPromptChars: 20000,
       maxModelIdChars: 200,
       maxApiKeyChars: 1000,
       maxAiProviders: 20,
@@ -116,7 +117,7 @@ describe('meta and stats', () => {
       maxBundleNameChars: 200,
       maxBundleDescriptionChars: 5000,
     });
-    expect(Object.keys(meta.limits)).toHaveLength(41);
+    expect(Object.keys(meta.limits)).toHaveLength(42);
     expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
     expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
       'c GCC 9.2.0',
@@ -154,6 +155,27 @@ describe('meta and stats', () => {
     expect(down.languages.length).toBeGreaterThan(0);
   });
 
+  it('slows every request, or the reads of one path, and logs what it is asked', async () => {
+    expect(optionsFromFlags(['slow']).speed).toBe('slow');
+    expect(optionsFromFlags(['fast', 'slow-stats', 'slow-items'])).toMatchObject({ speed: 'fast', slowPaths: ['stats', 'items'] });
+
+    vi.useFakeTimers();
+    try {
+      start({ slowPaths: ['stats'] });
+      let stats = false;
+      void api.stats().then(() => (stats = true));
+      const tags = await api.tags.list();
+      expect(tags.items.length).toBeGreaterThan(0);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stats).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stats).toBe(true);
+      expect(server.requests).toEqual(['GET /stats', 'GET /tags']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('counts the seed library with every enum key present', async () => {
     const stats = await api.stats();
     expect(stats.items.total).toBe(25);
@@ -188,16 +210,16 @@ describe('meta and stats', () => {
     expect(await counts()).toMatchObject({ favorites: 0, uncollected: 0 });
   });
 
-  it('counts only submit-mode submissions as accepted', async () => {
+  it('counts only submit-mode submissions', async () => {
     const before = (await api.stats()).submissions;
     const source = 'print("ok")';
     const run = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source, mode: 'run', stdin: null });
     expect((await judged(run.id)).final.verdict).toBe('accepted');
-    expect((await api.stats()).submissions).toEqual({ total: before.total + 1, accepted: before.accepted });
+    expect((await api.stats()).submissions).toEqual(before);
 
     const submit = await api.submissions.create(seedIds.items.twoSum, { language: 'python', source, mode: 'submit', stdin: null });
     expect((await judged(submit.id)).final.verdict).toBe('accepted');
-    expect((await api.stats()).submissions).toEqual({ total: before.total + 2, accepted: before.accepted + 1 });
+    expect((await api.stats()).submissions).toEqual({ total: before.total + 1, accepted: before.accepted + 1 });
   });
 });
 
@@ -674,7 +696,13 @@ describe('test cases', () => {
       replace: true,
       referenceSolution: { language: 'go', source: 'package main' },
     });
-    expect(replaced.items).toHaveLength(1);
+    // Replacing keeps the sample cases, in order, and puts the new case after them.
+    const samples = afterDelete.filter((c) => c.isSample).map((c) => c.id);
+    expect(samples.length).toBeGreaterThan(0);
+    expect(replaced.items.map((c) => c.id).slice(0, samples.length)).toEqual(samples);
+    expect(replaced.items).toHaveLength(samples.length + 1);
+    expect(replaced.items.map((c) => c.position)).toEqual(replaced.items.map((_, i) => i));
+    expect(replaced.items.at(-1)).toMatchObject({ isSample: false, expectedStdout: '1\n' });
     const after = await api.items.get(itemId);
     expect(after.problem?.referenceSolution).toMatchObject({ language: 'go', source: 'package main' });
     expect(after.revision).toBeGreaterThan(before.revision);
@@ -1368,6 +1396,37 @@ describe('submissions', () => {
     const run = await api.submissions.create(lru, { language: 'python', source: 'print(1)', mode: 'run', stdin: null });
     await judged(run.id);
     expect((await api.items.get(lru)).lastVerdict).toBe('wrong_answer');
+  });
+
+  it('keeps only the latest run of a problem, and every submit', async () => {
+    const twoSum = seedIds.items.twoSum;
+    const ids = async (mode?: 'run' | 'submit', item = twoSum) =>
+      (await api.submissions.list(item, mode ? { mode } : {})).items.map((s) => s.id);
+    const submits = await ids('submit');
+    const otherRuns = await ids('run', seedIds.items.networkDelay);
+    expect(otherRuns).toHaveLength(1);
+    const body = { language: 'python', source: 'print(1)', mode: 'run', stdin: null } as const;
+
+    const first = await api.submissions.create(twoSum, body);
+    await judged(first.id);
+    expect(await ids('run')).toEqual([first.id]);
+    // One still being judged is left for the next run to remove.
+    const pending = await api.submissions.create(twoSum, body);
+    const next = await api.submissions.create(twoSum, { ...body, stdin: '1 2' });
+    expect(await ids('run')).toEqual([next.id, pending.id]);
+    await judged(pending.id);
+    await judged(next.id);
+    const submit = await api.submissions.create(twoSum, { ...body, mode: 'submit' });
+    await judged(submit.id);
+    // A submit removes no run.
+    expect(await ids('run')).toEqual([next.id, pending.id]);
+    const last = await api.submissions.create(twoSum, body);
+    await judged(last.id);
+
+    expect(await ids('run')).toEqual([last.id]);
+    expect(await ids('submit')).toEqual([submit.id, ...submits]);
+    expect(await ids('run', seedIds.items.networkDelay)).toEqual(otherRuns);
+    expect((await failure(api.submissions.get(first.id))).status).toBe(404);
   });
 
   it('seeds a history with failures to look at', async () => {
@@ -2324,6 +2383,80 @@ describe('style presets', () => {
     start({ styles: 'none' });
     expect((await api.styles.list()).items).toEqual([]);
     expect((await api.ai.draft({ text: 'two sum' })).style).toBeNull();
+  });
+});
+
+describe('system prompt', () => {
+  it('starts with the built-in conventions and the fixed rules', async () => {
+    const sp = await api.settings.systemPrompt();
+    expect(sp.isCustom).toBe(false);
+    expect(sp.custom).toBeNull();
+    expect(sp.builtIn).toMatch(/^# Codeatrophy authoring conventions\n/);
+    expect(sp.fixed).toMatch(/^# Fixed rules\n/);
+    expect(sp.fixed).toContain('**stdin/stdout**');
+    expect(sp.builtIn).not.toContain('**stdin/stdout**');
+    expect(sp.draftRules).toMatch(/^## Drafting rules\n/);
+    expect(sp.variantRules).toMatch(/^## Variant rules\n/);
+  });
+
+  it('saves a custom text, trimmed, and resets it', async () => {
+    const saved = await api.settings.putSystemPrompt('  # Mine\r\n\n\tindented \n');
+    expect(saved).toMatchObject({ isCustom: true, custom: '# Mine\n\n\tindented' });
+    expect((await api.settings.systemPrompt()).custom).toBe('# Mine\n\n\tindented');
+    await api.settings.resetSystemPrompt();
+    expect(await api.settings.systemPrompt()).toMatchObject({ isCustom: false, custom: null });
+    // Resetting again is fine.
+    await api.settings.resetSystemPrompt();
+  });
+
+  it('treats the built-in text saved unchanged as no customisation', async () => {
+    const { builtIn } = await api.settings.systemPrompt();
+    expect((await api.settings.putSystemPrompt(`\n${builtIn}\n`)).isCustom).toBe(false);
+  });
+
+  it('validates like style presets, and saves nothing on failure', async () => {
+    await api.settings.putSystemPrompt('kept');
+    for (const bad of ['', '  \n ', 'bell\u0007', 'esc\u001b[0m', 'é'.repeat(LIMITS.maxSystemPromptChars + 1)]) {
+      const err = await failure(api.settings.putSystemPrompt(bad));
+      expect(err.status).toBe(422);
+      expect(err.fields).toHaveProperty('custom');
+    }
+    for (const body of ['{"custom":null}', '{}']) {
+      expect((await server.fetch('/api/v1/settings/ai/system-prompt', { method: 'PUT', body })).status).toBe(422);
+    }
+    expect((await api.settings.systemPrompt()).custom).toBe('kept');
+    expect((await api.settings.putSystemPrompt('😀'.repeat(LIMITS.maxSystemPromptChars))).isCustom).toBe(true);
+  });
+});
+
+describe('test case prompt', () => {
+  it('starts with the built-in guidance and the fixed rules, apart from the system prompt', async () => {
+    const tp = await api.settings.testCasePrompt();
+    expect(tp).toMatchObject({ isCustom: false, custom: null });
+    expect(tp.builtIn).toMatch(/^- For a program problem, write a correct, efficient reference solution/);
+    expect(tp.builtIn).toContain('one-sentence rationale');
+    expect(tp.fixed).toMatch(/^# Fixed rules\n/);
+    expect(tp.fixed).toContain('predictedStdout');
+    expect(tp.fixed).toMatch(/and nothing else\.$/);
+    expect(tp.builtIn).not.toContain('predictedStdout');
+    expect(tp.builtIn).not.toBe((await api.settings.systemPrompt()).builtIn);
+  });
+
+  it('saves, validates and resets its own text', async () => {
+    const saved = await api.settings.putTestCasePrompt('  # Mine\r\n\n\tindented \n');
+    expect(saved).toMatchObject({ isCustom: true, custom: '# Mine\n\n\tindented' });
+    expect((await api.settings.systemPrompt()).isCustom).toBe(false);
+    for (const bad of ['', 'bell\u0007', 'é'.repeat(LIMITS.maxSystemPromptChars + 1)]) {
+      expect((await failure(api.settings.putTestCasePrompt(bad))).fields).toHaveProperty('custom');
+    }
+    expect((await server.fetch('/api/v1/settings/ai/testcase-prompt', { method: 'PUT', body: '{}' })).status).toBe(422);
+    expect((await api.settings.testCasePrompt()).custom).toBe('# Mine\n\n\tindented');
+    const { builtIn } = await api.settings.testCasePrompt();
+    expect((await api.settings.putTestCasePrompt(`\n${builtIn}\n`)).isCustom).toBe(false);
+    await api.settings.putTestCasePrompt('again');
+    await api.settings.resetTestCasePrompt();
+    expect(await api.settings.testCasePrompt()).toMatchObject({ isCustom: false, custom: null });
+    await api.settings.resetTestCasePrompt();
   });
 });
 

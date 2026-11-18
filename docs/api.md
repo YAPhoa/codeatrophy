@@ -158,6 +158,7 @@ to show.
     "maxStylePresets": 20,
     "maxStyleNameChars": 60,
     "maxStyleInstructionsChars": 2000,
+    "maxSystemPromptChars": 20000,
     "maxModelIdChars": 200,
     "maxApiKeyChars": 1000,
     "maxAiProviders": 20,
@@ -200,7 +201,9 @@ to show.
   (which sets `maxImportBytes` and, at four times that,
   `maxImportUncompressedBytes`).
   `maxSolutionsPerItem`, `maxSolutionNameChars` and `maxSolutionNotesChars`
-  bound [solutions](#solutions).
+  bound [solutions](#solutions). `maxSystemPromptChars` bounds a
+  [custom system prompt](#system-prompt) and a
+  [custom test case prompt](#test-case-prompt).
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`.
@@ -233,9 +236,9 @@ All enum keys are always present, with `0` when empty.
 `items.favorites` and `items.uncollected` are the counts the library's
 Favorites and Uncollected views show: each equals the `total` of `GET /items`
 with only `favorite=true`, or only `uncollected=true`, as the filter.
-`submissions.total` counts every submission; `submissions.accepted` counts
-only `submit`-mode submissions whose verdict is `accepted` — a `run` whose
-sample cases all pass is not counted.
+`submissions.total` counts `submit`-mode submissions only, and
+`submissions.accepted` those of them whose verdict is `accepted`. Runs are
+not counted: a `run` whose sample cases all pass adds to neither.
 
 ## Items
 
@@ -578,7 +581,7 @@ Editing `stdin` or `expectedStdout` through `PATCH` resets `verified` to
 | --- | --- |
 | `GET /items/{id}/testcases` | `{ "items": [TestCase] }` ordered by `position`; not paginated |
 | `POST /items/{id}/testcases` | Body `TestCaseInput`; appended. `201` `TestCase` |
-| `POST /items/{id}/testcases/bulk` | Body `{ "cases": [TestCaseInput], "replace": false, "referenceSolution": null }`. Appends, or replaces all existing cases when `replace` is `true`. A non-null `referenceSolution` (`{language, source}`) is stored on the item in the same transaction. Returns `{ "items": [TestCase] }` — the full list after the change |
+| `POST /items/{id}/testcases/bulk` | Body `{ "cases": [TestCaseInput], "replace": false, "referenceSolution": null }`. Appends, or with `replace: true` replaces every existing case except the samples, which keep their order and come first. A non-null `referenceSolution` (`{language, source}`) is stored on the item in the same transaction. Returns `{ "items": [TestCase] }` — the full list after the change |
 | `PATCH /testcases/{id}` | Partial `TestCaseInput`. Returns `TestCase` |
 | `DELETE /testcases/{id}` | `204` |
 | `PUT /items/{id}/testcases/order` | Body `{ "ids": [...] }` — must be exactly the item's case ids. Returns `{ "items": [TestCase] }` |
@@ -651,7 +654,7 @@ A problem can keep any number of saved solutions: different approaches, the
 same approach in several languages, a brute force next to the intended one.
 They are part of the item's content — exported in bundles unless solutions
 are left out — and are separate from submissions, which are the history of
-what was run.
+what was submitted.
 
 At most one solution per item is the **reference solution**: the one used to
 compute and verify expected outputs. It is also what
@@ -845,6 +848,13 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
 Returns `202` with the `Submission` in status `queued`. Judging is
 asynchronous; poll `GET /submissions/{id}` until `status` is `completed`.
 
+Only submits are kept as history. A run is a submission too, so that it can
+be judged and polled like one, but creating a run deletes the item's earlier
+runs whose `status` is `completed`, with their results; runs still `queued`
+or `running` are left for the next run to delete. A problem therefore keeps
+its latest run (and any still being judged), and `GET /submissions/{id}` of
+an earlier one is `404`.
+
 Side effects on the item's status: any submission moves `todo` →
 `in_progress`; an `accepted` verdict in `submit` mode moves it to `done`.
 
@@ -855,7 +865,9 @@ Returns `Submission`.
 ### `GET /items/{id}/submissions`
 
 Query: `mode` (optional filter), `limit`, `offset`. Newest first. Returns
-`{ "items": [SubmissionSummary], "total": n }`.
+`{ "items": [SubmissionSummary], "total": n }`. With `mode=submit` it is the
+problem's submission history; `mode=run` lists at most the latest run and
+any still being judged.
 
 ## AI
 
@@ -1602,7 +1614,7 @@ Violations are `422 validation_failed`; a 21st preset is `409 conflict`.
 
 At most one preset has `isDefault: true`. Setting it on one preset clears it
 on the others in the same transaction. With no default, generation uses the
-built-in conventions alone unless a request names a preset.
+authoring conventions alone unless a request names a preset.
 
 A new instance starts with a few built-in presets, one of them the default.
 They are ordinary presets: they can be edited or deleted like any other,
@@ -1616,8 +1628,9 @@ count towards the limit, and are not recreated once changed or deleted.
 | `DELETE /styles/{id}` | `204`. Deleting the default leaves no default |
 
 A preset shapes prose and layout only. It is inserted into the prompt as a
-clearly delimited block of *preferences* after the built-in authoring
-conventions; it cannot change the response schema, and where it conflicts
+clearly delimited block of *preferences* after the authoring conventions
+(the built-in ones or a [custom system prompt](#system-prompt) with the
+fixed rules); it cannot change the response schema, and where it conflicts
 with a rule the app depends on (the JSON structure, the stdin/stdout
 convention) the built-in rule wins.
 
@@ -1640,6 +1653,122 @@ They are independent of the AI provider and remain when it changes.
 Both responses carry, next to `draft`, the preset that was actually applied:
 `"style": { "id": "...", "name": "LeetCode style" }`, or `"style": null`.
 Presets do not apply to `POST /items/{id}/ai/testcases`.
+
+## System prompt
+
+The system prompt of a draft or variant starts with the *authoring
+conventions*: how a statement is laid out, how readings are structured,
+what makes a good title, tag set or test set, and the rules the app depends
+on. The user may replace the first kind, the **editable conventions**, with
+a text of their own. The second kind, the **fixed rules**, always applies:
+judging on stdin/stdout, the `program` and `function` interfaces and their
+harness protocol, the folded input region, how output is compared, limits,
+language ids and versions, and expected outputs coming from a reference
+solution. So do the rules each request adds after the conventions and the
+style preset (sample test cases with correct outputs, the reference
+solution, assumptions, large test cases, the JSON-only answer), and the
+judge's languages in the user turn.
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /settings/ai/system-prompt` | `SystemPrompt` |
+| `PUT /settings/ai/system-prompt` | Body `{ "custom": "..." }`. Saves a custom text. Returns `SystemPrompt` |
+| `DELETE /settings/ai/system-prompt` | `204`. Removes the custom text, so the built-in conventions apply again. Succeeds without one too |
+
+`SystemPrompt`:
+
+```json
+{
+  "builtIn": "# Codeatrophy authoring conventions\n\nAn item is either ...",
+  "custom": null,
+  "isCustom": false,
+  "fixed": "# Fixed rules\n\nThese rules are how the app works ...",
+  "draftRules": "## Drafting rules\n\n- The user_input block is ...",
+  "variantRules": "## Variant rules\n\n- The original block describes ..."
+}
+```
+
+- `builtIn` is the editable part of the built-in conventions: the text a
+  custom one replaces, and a starting point for writing it.
+- `custom` is the saved text, or `null`; `isCustom` is whether there is one.
+- `fixed` is the fixed rules, as sent after a custom text. `draftRules` and
+  `variantRules` are the rules that end the system prompt of a draft and of
+  a variant, after the style preset, as sent when no large test cases are
+  asked for (asking for them adds rules). All four texts are for reading:
+  they may change between versions.
+- Without a custom text a prompt carries the built-in conventions exactly as
+  they always were, with the editable and fixed parts interleaved. With one,
+  it carries the custom text, then `fixed`, then the style preset's block.
+- `custom` is required and must be a string (`422` otherwise; reset with
+  `DELETE`). It is 1–`limits.maxSystemPromptChars` (20000) characters,
+  counted in Unicode code points after trimming surrounding whitespace, and
+  `\r\n` becomes `\n`. Control characters other than newline and tab are
+  rejected. Violations are `422 validation_failed` and nothing is saved; the
+  text is never truncated. Saving `builtIn` unchanged removes the custom
+  text instead, as `DELETE` does.
+- A custom text applies to `POST /ai/draft`, `POST /items/{id}/ai/variant`
+  and the MCP server's authoring guide (instructions, resource and prompts),
+  from the next request on. Test generation has rules of its own and does
+  not use the conventions; their editable part is the separate
+  [test case prompt](#test-case-prompt). A saved text stays as it is when a
+  later version changes `builtIn`.
+
+Like style presets, the system prompt is local configuration and the user's
+own standing instructions to a model: it is never written to or read from
+bundles, and no MCP tool reads or sets it, so the only way text gets into
+it is the instance's own user typing it here. It is independent of the AI
+provider.
+
+## Test case prompt
+
+The system prompt of `POST /items/{id}/ai/testcases` has rules of its own,
+separate from the authoring conventions, and also comes in two kinds of
+part. The **editable** part is the test-design guidance: writing a correct,
+efficient reference solution and choosing and covering the inputs, each
+with a name and a one-sentence rationale. The user may replace it with a
+text of their own. The **fixed rules** always apply: the program and
+function-harness contract, the judge's language versions, inputs following
+the format and constraints within about 100 KB each, predicted outputs that
+the server replaces by running the solution, which cases are samples, the
+Java and Kotlin entry points, the large-case rules when large cases are
+asked for, and the JSON-only answer.
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /settings/ai/testcase-prompt` | `TestCasePrompt` |
+| `PUT /settings/ai/testcase-prompt` | Body `{ "custom": "..." }`. Saves a custom text. Returns `TestCasePrompt` |
+| `DELETE /settings/ai/testcase-prompt` | `204`. Removes the custom text, so the built-in rules apply again. Succeeds without one too |
+
+`TestCasePrompt`:
+
+```json
+{
+  "builtIn": "- For a program problem, write a correct, efficient reference solution ...",
+  "custom": null,
+  "isCustom": false,
+  "fixed": "# Fixed rules\n\nThese rules are how the app works ..."
+}
+```
+
+- `builtIn`, `custom` and `isCustom` are as for the
+  [system prompt](#system-prompt). `fixed` is the fixed rules as sent after
+  a custom text when no large test cases are asked for (asking for them adds
+  rules), ending with the JSON-only answer. The texts are for reading: they
+  may change between versions.
+- Without a custom text a test generation carries the built-in rules
+  exactly as they always were, with the editable and fixed parts
+  interleaved. With one, it carries the custom text, then `fixed`. Where an
+  editable part's built-in wording states a rule the app depends on (the
+  program contract, the input-size cap), `fixed` restates it.
+- `custom` is validated as for the system prompt, with the same limit
+  (`limits.maxSystemPromptChars`), and saving `builtIn` unchanged removes
+  the custom text. It applies from the next `POST /items/{id}/ai/testcases`
+  on, and to nothing else: drafts, variants and the MCP server's authoring
+  guide (`write_test_cases` included) do not use it, and the custom system
+  prompt does not apply to test generation.
+
+It is local configuration like the system prompt: never written to or read
+from bundles, and no MCP tool reads or sets it.
 
 ## Preferences
 

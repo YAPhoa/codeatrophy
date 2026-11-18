@@ -54,9 +54,11 @@ import type {
   SubmissionMode,
   SubmissionRequest,
   SubmissionSummary,
+  SystemPrompt,
   Tag,
   TestCase,
   TestCaseInput,
+  TestCasePrompt,
   TextEditsRequest,
   VariantRequest,
   VerifyResult,
@@ -338,6 +340,14 @@ export const api = {
     logEntry: (id: string, signal?: AbortSignal) => request<AiLogDetail>('GET', `/settings/ai/log/${enc(id)}`, { signal }),
     /** Everything, or with `before` the entries created before that moment. */
     clearLog: (before?: string) => request<void>('DELETE', '/settings/ai/log', { query: { before } }),
+    systemPrompt: (signal?: AbortSignal) => request<SystemPrompt>('GET', '/settings/ai/system-prompt', { signal }),
+    putSystemPrompt: (custom: string) => request<SystemPrompt>('PUT', '/settings/ai/system-prompt', { body: { custom } }),
+    /** Back to the built-in conventions. */
+    resetSystemPrompt: () => request<void>('DELETE', '/settings/ai/system-prompt'),
+    testCasePrompt: (signal?: AbortSignal) => request<TestCasePrompt>('GET', '/settings/ai/testcase-prompt', { signal }),
+    putTestCasePrompt: (custom: string) => request<TestCasePrompt>('PUT', '/settings/ai/testcase-prompt', { body: { custom } }),
+    /** Back to the built-in test-case rules. */
+    resetTestCasePrompt: () => request<void>('DELETE', '/settings/ai/testcase-prompt'),
   },
 
   bundle: {

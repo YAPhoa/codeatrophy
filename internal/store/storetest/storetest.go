@@ -41,6 +41,7 @@ func Run(t *testing.T, open Opener) {
 		{"StatsMatchListFilters", testStatsMatchListFilters},
 		{"SubmissionResultsAndUnfinished", testSubmissionResultsAndUnfinished},
 		{"Submissions", testSubmissions},
+		{"DeleteCompletedRuns", testDeleteCompletedRuns},
 		{"ArbitraryText", testArbitraryText},
 		{"StylePresetConstraints", testStylePresetConstraints},
 		{"BuiltinStylePresetsOnANewDatabase", testBuiltinStylePresets},
@@ -801,7 +802,7 @@ func testTagsStatsSettings(t *testing.T, db store.Store) {
 	}
 	s := Read(t, db, func(tx store.Tx) (domain.Stats, error) { return tx.Stats() })
 	if s.Items.Total != 3 || s.Items.ByType["problem"] != 2 || s.Items.ByStatus["done"] != 1 || s.Items.ByDifficulty["easy"] != 1 ||
-		s.Items.ByDifficulty["none"] != 2 || s.Collections != 1 || s.Tags != 4 || s.Submissions.Total != 3 || s.Submissions.Accepted != 1 {
+		s.Items.ByDifficulty["none"] != 2 || s.Collections != 1 || s.Tags != 4 || s.Submissions.Total != 2 || s.Submissions.Accepted != 1 {
 		t.Errorf("stats: %+v", s)
 	}
 	Write(t, db, func(tx store.Tx) error {
@@ -944,6 +945,66 @@ func testSubmissions(t *testing.T, db store.Store) {
 	}
 	if err := db.Read(context.Background(), func(tx store.Tx) error { _, err := tx.GetSubmission("nope"); return err }); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("missing submission: %v", err)
+	}
+}
+
+// DeleteCompletedRuns removes only the item's completed runs, with their
+// results.
+func testDeleteCompletedRuns(t *testing.T, db store.Store) {
+	Write(t, db, func(tx store.Tx) error {
+		for _, id := range []string{"a", "b"} {
+			it := Item(id, id, domain.TypeProblem)
+			if err := tx.InsertItem(&it); err != nil {
+				return err
+			}
+		}
+		subs := []struct {
+			id, item string
+			mode     domain.SubmissionMode
+			status   domain.SubmissionStatus
+		}{
+			{"run-done", "a", domain.ModeRun, domain.SubmissionCompleted},
+			{"run-queued", "a", domain.ModeRun, domain.SubmissionQueued},
+			{"run-running", "a", domain.ModeRun, domain.SubmissionRunning},
+			{"submit-done", "a", domain.ModeSubmit, domain.SubmissionCompleted},
+			{"other-run", "b", domain.ModeRun, domain.SubmissionCompleted},
+		}
+		for _, c := range subs {
+			s := domain.Submission{ID: c.id, ItemID: c.item, Mode: c.mode, Language: "python", Source: "x",
+				Status: c.status, TotalCount: 1, CreatedAt: now}
+			if err := tx.InsertSubmission(&s); err != nil {
+				return err
+			}
+			if err := tx.AddSubmissionResult(c.id, 0, domain.SubmissionResult{Name: "1", Verdict: domain.VerdictAccepted}); err != nil {
+				return err
+			}
+		}
+		return tx.DeleteCompletedRuns("a")
+	})
+	list := func(item string) string {
+		var out []string
+		if err := db.Read(context.Background(), func(tx store.Tx) error {
+			l, _, err := tx.ListSubmissions(item, "", 0, 0)
+			for _, s := range l {
+				out = append(out, s.ID)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := list("a"); got != "submit-done,run-running,run-queued" {
+		t.Errorf("item a after pruning: %s", got)
+	}
+	if got := list("b"); got != "other-run" {
+		t.Errorf("another item's runs: %s", got)
+	}
+	if err := db.Read(context.Background(), func(tx store.Tx) error { _, err := tx.GetSubmission("run-done"); return err }); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("pruned run: %v", err)
+	}
+	if s := Read(t, db, func(tx store.Tx) (domain.Submission, error) { return tx.GetSubmission("submit-done") }); len(s.Results) != 1 {
+		t.Errorf("kept submission results: %+v", s.Results)
 	}
 }
 

@@ -92,7 +92,8 @@ func trimPrefix(s, p string) string {
 }
 
 // BulkTestCasesInput appends or replaces test cases, optionally setting the
-// reference solution in the same transaction.
+// reference solution in the same transaction. Replacing keeps the sample
+// cases: they are part of the statement, and the new cases follow them.
 type BulkTestCasesInput struct {
 	Cases             []domain.TestCaseInput      `json:"cases"`
 	Replace           bool                        `json:"replace"`
@@ -121,8 +122,14 @@ func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCases
 			return err
 		}
 		start := len(existing)
+		var samples []string
 		if in.Replace {
-			start = 0
+			for _, c := range existing {
+				if c.IsSample {
+					samples = append(samples, c.ID)
+				}
+			}
+			start = len(samples)
 		}
 		if start+len(in.Cases) > domain.MaxTestCasesPerItem {
 			return errField("cases", fmt.Sprintf("a problem can have at most %d test cases", domain.MaxTestCasesPerItem))
@@ -132,7 +139,15 @@ func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCases
 			return err
 		}
 		if in.Replace {
-			if err := tx.DeleteTestCases(itemID); err != nil {
+			for _, c := range existing {
+				if c.IsSample {
+					continue
+				}
+				if err := tx.DeleteTestCase(c.ID); err != nil {
+					return err
+				}
+			}
+			if err := tx.SetTestCasePositions(itemID, samples); err != nil {
 				return err
 			}
 		}
@@ -153,7 +168,7 @@ func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCases
 			}
 			it = next
 		}
-		if len(cases) > 0 || (in.Replace && len(existing) > 0) {
+		if len(cases) > 0 || (in.Replace && len(existing) > len(samples)) {
 			if err := a.testCasesChanged(tx, &it); err != nil {
 				return err
 			}

@@ -9,6 +9,24 @@
     <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
     <title>Codeatrophy</title>
+    <!-- Before the first paint, so a reload in the dark theme does not flash white
+         while the stylesheet and lib/theme.ts load. Keep the storage key and the
+         two backgrounds (--bg) in step with lib/theme.ts and styles/tokens.css.
+         `is-booting` keeps the app hidden until lib/boot.ts shows it whole;
+         layout.css fades it in. -->
+    <script>
+      document.documentElement.classList.add('is-booting');
+      try {
+        var t = localStorage.getItem('codeatrophy:theme');
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <style>
+      :root { background: #f3f6f4; }
+      :root[data-theme='dark'] { color-scheme: dark; background: #0f141c; }
+      :root.is-booting #root { visibility: hidden; opacity: 0; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
