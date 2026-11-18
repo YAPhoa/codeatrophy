@@ -56,13 +56,8 @@ function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) 
     <ul className={cx('item-list', 'item-skeleton', leaving && 'is-leaving')} aria-hidden="true">
       {Array.from({ length: count }, (_, i) => (
         <li key={i} className="item-row">
-          <span className="item-cell item-check">
-            <span className="skel skel-box" />
-          </span>
-          <span className="item-cell">
-            <span className="skel skel-icon" />
-          </span>
-          <span className="item-cell">
+          <span className="item-cell item-check" />
+          <span className="item-cell item-status">
             <span className="skel skel-icon" />
           </span>
           <span className="item-cell item-type">
@@ -71,8 +66,9 @@ function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) 
           <span className="item-main">
             <span className="skel skel-line" style={{ width: SKELETON_WIDTHS[i % SKELETON_WIDTHS.length] }} />
           </span>
-          <span className="item-cell item-diff" />
-          <span className="item-cell item-result" />
+          <span className="item-cell item-verdict" />
+          <span className="item-cell item-kind" />
+          <span className="item-cell item-tests" />
           <span className="item-cell item-updated">
             <span className="skel skel-line skel-short" />
           </span>
@@ -222,6 +218,11 @@ export function LibraryPage() {
       if (open === wasOpen) return;
       // Closing takes the details out of reach, so focus inside them goes back to the row.
       if (!open && document.getElementById(detailsId(item.id))?.contains(document.activeElement)) focusRow(index);
+      // Opening takes the tags off the row's line, so focus on one there (or on its "+N") moves to the row's expand button.
+      if (open) {
+        const row = listRef.current?.querySelector(`[data-row="${index}"]`);
+        if (row?.querySelector('.item-tags')?.contains(document.activeElement)) row.querySelector<HTMLElement>('.item-expand button')?.focus();
+      }
       const next = new Set(openRef.current);
       if (open) next.add(item.id);
       else next.delete(item.id);
@@ -586,7 +587,7 @@ export function LibraryPage() {
               </EmptyState>
             )
           ) : (
-            <div className={cx('item-list-wrap', query.isPlaceholderData && 'is-stale')}>
+            <div className={cx('item-list-wrap', reorderable && 'is-reorderable', query.isPlaceholderData && 'is-stale')}>
               {/* Always shown, so selecting a row or filtering never pushes the list down. */}
               <div className="item-list-head">
                 <span className="item-cell item-check">
@@ -607,11 +608,28 @@ export function LibraryPage() {
                       ? `${total} of ${viewTotal}`
                       : plural(total, 'item')}
                 </span>
+                {/* Over the rows' columns; manual order needs the room for its hint. */}
+                {!reorderable && (
+                  <>
+                    <span className="item-col-head is-verdict" aria-hidden="true">
+                      Verdict
+                    </span>
+                    <span className="item-col-head is-kind" aria-hidden="true">
+                      Difficulty
+                    </span>
+                    <span className="item-col-head is-tests" aria-hidden="true">
+                      Tests
+                    </span>
+                    <span className="item-col-head is-updated" aria-hidden="true">
+                      Updated
+                    </span>
+                  </>
+                )}
                 {query.isFetching && <Spinner size={14} label="Refreshing…" />}
               </div>
               <div className="item-list-body">
                 <ul
-                  className={cx('item-list', reorderable && 'is-reorderable', reveal === 'cross' && 'is-revealing', reveal === 'fade' && 'is-arriving')}
+                  className={cx('item-list', reorderable && 'is-reorderable', selection.size > 0 && 'is-selecting', reveal === 'cross' && 'is-revealing', reveal === 'fade' && 'is-arriving')}
                   ref={listRef}
                   onKeyDown={onListKeyDown}
                   aria-label={`${title}: items`}

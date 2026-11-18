@@ -413,45 +413,111 @@
   }
 }
 
+/* The rows' columns (see .item-row), shared with the head bar so its
+   column names sit over them. */
+.item-list-wrap {
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 104px 76px 60px 84px 28px 28px;
+}
+
+.item-list-wrap.is-reorderable {
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 104px 76px 60px 84px 28px 28px 22px;
+}
+
+/* The checkbox over the rows' checkboxes, the count from the status column
+   on, the column names over theirs, and a spinner over the chevrons. */
 .item-list-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--item-columns);
+  grid-template-rows: 100%;
   align-items: center;
-  gap: var(--space-2);
+  column-gap: var(--space-0-5);
   height: 30px;
-  padding: 0 var(--space-3) 0 var(--space-1);
+  padding: 0 var(--space-1);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-3);
   font-size: var(--text-sm);
 }
 
-.item-head-label {
-  flex: 1;
+.item-list-head .item-check {
+  grid-column: 1;
 }
 
+.item-head-label {
+  grid-column: 2 / 10;
+  min-width: 0;
+  padding-left: calc(var(--space-2) - var(--space-0-5));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-head-label:has(+ .item-col-head) {
+  grid-column: 2 / 5;
+}
+
+.item-col-head {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.item-col-head.is-verdict {
+  grid-column: 5;
+}
+
+.item-col-head.is-kind {
+  grid-column: 6;
+}
+
+.item-col-head.is-tests {
+  grid-column: 7;
+  justify-self: end;
+}
+
+.item-col-head.is-updated {
+  grid-column: 8;
+  justify-self: end;
+}
+
+.item-list-head .spin-wrap {
+  grid-column: 10;
+  justify-self: center;
+}
+
+/* A row's line: the checkbox, status and type on the left, the title and
+   its tags, then the facts in fixed columns (a failed verdict, difficulty or
+   "Reading", tests, updated), the star and the chevron. Every column keeps
+   its width whether or not a row fills it, so the facts line up from row to
+   row. A click anywhere but on a control opens or closes the row (ItemRow). */
 .item-row {
+  /* An open row: a step towards a hovered one, so it reads as one block. */
+  --row-open: color-mix(in srgb, var(--surface-3) 45%, var(--surface));
   display: grid;
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 28px;
+  grid-template-columns: var(--item-columns);
   /* The line keeps its 40px (less the border) when the details open below it. */
   grid-template-rows: minmax(39px, auto);
   align-items: center;
   column-gap: var(--space-0-5);
   min-height: 40px;
-  padding: 0 var(--space-1) 0 var(--space-1);
+  padding: 0 var(--space-1);
   border-bottom: 1px solid var(--border);
   position: relative;
   /* Rows off screen are not laid out, so a library loaded far down stays light. */
   content-visibility: auto;
   contain-intrinsic-size: auto 40px;
+  cursor: pointer;
+}
+
+/* A near miss on a control does nothing, so its cell does not offer a click. */
+.item-row :is(.item-check, .item-status, .item-star, .item-expand),
+.item-skeleton .item-row {
+  cursor: default;
 }
 
 /* An open row is always laid out, so its height is known wherever it is. */
 .item-row.is-open {
   content-visibility: visible;
-}
-
-.item-list.is-reorderable .item-row {
-  grid-template-columns: 32px 28px 28px 24px minmax(0, 1fr) 72px 180px 84px 28px 22px;
+  background: var(--row-open);
 }
 
 .item-row:last-child {
@@ -498,9 +564,11 @@
   min-width: 0;
 }
 
-.item-check {
+.item-check,
+.item-type,
+.item-star,
+.item-expand {
   justify-content: center;
-  width: 30px;
 }
 
 .item-check input {
@@ -509,39 +577,60 @@
   margin: 0;
 }
 
-.item-type {
-  justify-content: center;
+/* The checkbox and an unstarred star wait for the row to be pointed at or
+   reached by keyboard, or for a selection to start, and keep their place
+   meanwhile so nothing moves when they show. A starred star always shows.
+   Hidden by opacity only: a screen reader still finds them, and only the
+   current row's controls are tab stops, and focus there shows them. (Not
+   .is-current itself: on a click into another row it is still the old row
+   for a moment, which would flash.) Devices
+   without hover always show them. They show at once and fade out: a page
+   that opens under the pointer, or with a row focused, plays nothing. */
+@media (hover: hover) {
+  .item-check input,
+  .item-star .fav-btn:not(.is-fav) {
+    opacity: 0;
+    transition: opacity var(--duration-hover) var(--ease-out);
+  }
+
+  .item-row:hover :is(.item-check input, .item-star .fav-btn),
+  .item-row:focus-within :is(.item-check input, .item-star .fav-btn),
+  .item-row:has(.item-status [aria-expanded='true']) :is(.item-check input, .item-star .fav-btn),
+  .item-list.is-selecting :is(.item-check input, .item-star .fav-btn) {
+    opacity: 1;
+    transition: none;
+  }
 }
 
+/* The title and its tags. Every item is centred on the line, so taking the
+   tags away when the row opens moves nothing that stays. */
 .item-main {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
+  align-items: center;
+  align-self: stretch;
+  gap: var(--space-3);
   min-width: 0;
   padding: 0 var(--space-3) 0 var(--space-1);
-  /* Its width, not the window's, decides whether a summary has room. */
-  container-type: inline-size;
 }
 
-/* The title and its variant mark keep their width while anything else in
-   the cell can give way; only a title longer than the cell truncates. */
+/* The title and its variant mark come first: the tags get what they leave.
+   A long title truncates, but not below a few words. */
 .item-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
-  flex: none;
-  min-width: 0;
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 80px;
 }
 
 .item-title {
   color: var(--text);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 0 1 auto;
-  min-width: 60px;
+  min-width: 0;
   border-radius: 2px;
 }
 
@@ -552,87 +641,71 @@
   color: var(--text-3);
   font-size: var(--text-xs);
   flex: none;
-  align-self: center;
 }
 
-.item-summary {
-  flex: 1 1 0;
-  min-width: 0;
-  color: var(--text-3);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Too narrow for a summary to say anything: leave the room to the title and tags. */
-@container (max-width: 440px) {
-  .item-summary {
-    display: none;
-  }
-}
-
-/* The tags share the title's cell, so they take whatever room the summary
-   does not need. The summary only gets what is left over (basis 0), so it
-   truncates first; then the tags give way. */
+/* The room after the title, right-aligned against the facts. Its width
+   depends on the title's alone, never on its chips, so ItemRow can fit as
+   many chips as it has room for in one pass (LineTags). It keeps room for a
+   "+N" however long the title. */
 .item-tags {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   justify-content: flex-end;
-  align-self: center;
-  min-width: 0;
-  max-width: 50%;
-  margin-left: auto;
-  overflow: hidden;
-}
-
-/* One line of chips: a chip that does not fit wraps onto a second line,
-   which is hidden, rather than being cut in half. */
-.item-tags .tagchips {
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  min-width: 32px;
   height: 24px;
   overflow: hidden;
 }
 
-.item-tags .chip {
-  flex: 0 1 auto;
-  min-width: 28px;
+.item-tags .tagchips {
+  flex-wrap: nowrap;
 }
 
-/* The cell and chip strip clip overflow, so an outside ring would be cut off. */
+.item-tags .chip {
+  flex: none;
+  /* Whole or not at all: a tag cut to a few letters says nothing. */
+  max-width: none;
+}
+
+/* The strip clips overflow, so an outside ring would be cut off. */
 .item-tags .chip:focus-visible {
   outline-offset: -2px;
 }
 
-.item-diff {
-  justify-content: flex-end;
-  font-size: var(--text-sm);
+/* Tags look the same on the line and in the details: a filled pill with a
+   fine edge, which still shows on a hovered row of the same fill. */
+.item-row .tagchips .chip {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* Two fixed slots, so a failed verdict starts at the same place on every row
-   whatever the test count, and the counts line up under each other. */
-.item-result {
-  display: grid;
-  grid-template-columns: 100px 56px;
-  column-gap: var(--space-2);
-  /* Keeps a failed verdict clear of the difficulty badge before it. */
-  padding-left: var(--space-4);
-  font-size: var(--text-sm);
-  white-space: nowrap;
+/* An open row's line drops its tags at once, as the details that show them
+   grow in. When the row closes they wait out the details' close
+   (--duration-quick, .collapse.is-closing) and then fade back in, so they are
+   never shown twice. */
+.item-tags.is-returning {
+  animation: fade-in var(--duration-fast) var(--ease-out) var(--duration-quick) backwards;
 }
 
-.item-result .badge {
-  grid-column: 1;
-  justify-self: start;
+.item-verdict .badge {
+  max-width: 100%;
 }
 
-.item-tests {
-  grid-column: 2;
-  justify-self: end;
-  font-variant-numeric: tabular-nums;
+/* Difficulty for a problem, "Reading" for a reading: outlined, so the column
+   stays quiet and shows on any row fill. */
+.item-kind .badge {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  font-weight: 500;
 }
 
+.item-kind .badge-difficulty {
+  padding: 0 var(--space-1-5) 0 var(--space-1);
+}
+
+.badge-kind {
+  color: var(--text-3);
+}
+
+.item-tests,
 .item-updated {
   justify-content: flex-end;
   color: var(--text-3);
@@ -647,10 +720,6 @@
   cursor: grab;
 }
 
-.item-expand {
-  justify-content: center;
-}
-
 .item-expand-icon {
   transition: transform var(--duration-quick) var(--ease-out);
 }
@@ -660,9 +729,11 @@
   transition-duration: var(--duration-fast);
 }
 
-/* The details: a second line under the row's, from the title to the end. */
+/* The details: under the title, ending where the difficulty column
+   starts (an open row's verdict stays on its line, so they may run under
+   it). Long text and tags wrap there. */
 .item-row > .collapse {
-  grid-column: 5 / -1;
+  grid-area: 2 / 4 / 3 / 6;
 }
 
 .item-details {
@@ -670,29 +741,58 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-3) var(--space-1);
-  border-top: 1px solid var(--border);
-  cursor: default;
+  padding: 0 var(--space-3) var(--space-3) var(--space-1);
 }
 
+/* The summary opens the item too (a link, but not a tab stop: the title is). */
 .item-details-summary {
-  margin: 0;
+  display: block;
+  max-width: 48rem;
   color: var(--text-2);
   font-size: var(--text-sm);
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
+.item-details-summary:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* Each fact beside its label, the label level with the first line of a
+   value that wraps (the tags). */
 .item-details-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  align-self: stretch;
+  gap: var(--space-1-5) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.item-details-facts dt {
+  color: var(--text-3);
+}
+
+.item-details-facts dd {
+  min-width: 0;
+}
+
+/* As wide as the value's column, so a long chip ellipsizes in it. */
+.item-details-facts .tagchips {
   display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--space-1-5);
-  margin: 0;
+}
+
+.item-details-empty {
   color: var(--text-3);
   font-size: var(--text-xs);
 }
 
-.item-details-facts a {
-  color: var(--text-2);
+/* A collection looks like a tag, with a folder where a tag has its "#". */
+.chip-collection svg {
+  flex: none;
+  color: var(--text-3);
 }
 
 .item-list-more {
@@ -702,24 +802,113 @@
   border-top: 1px solid var(--border);
 }
 
+/* Narrow: the facts and tags move to a second, compact line under the
+   title, so the title keeps the whole width of the first. */
 @media (max-width: 700px) {
-  .item-row,
-  .item-list.is-reorderable .item-row {
-    grid-template-columns: 32px 28px 28px minmax(0, 1fr) auto 28px;
+  .item-row {
+    grid-template-columns: 28px 28px auto auto auto auto minmax(0, 1fr) 28px 28px;
+    grid-template-rows: 34px 24px;
+    column-gap: 0;
+    padding-bottom: var(--space-1-5);
+    contain-intrinsic-size: auto 64px;
   }
 
-  /* The type icon is hidden, so the title is the fourth column. */
+  .item-row:last-child {
+    grid-template-rows: 34px 24px;
+  }
+
+  .item-main {
+    display: contents;
+  }
+
+  /* A placeholder row's line stands in for the title. */
+  .item-skeleton .item-main {
+    display: flex;
+    align-items: center;
+    grid-area: 1 / 3 / 2 / 8;
+    padding: 0 var(--space-2) 0 var(--space-1);
+  }
+
+  .item-check {
+    grid-area: 1 / 1;
+  }
+
+  .item-status {
+    grid-area: 1 / 2;
+  }
+
+  .item-head {
+    grid-area: 1 / 3 / 2 / 8;
+    padding: 0 var(--space-2) 0 var(--space-1);
+  }
+
+  .item-star {
+    grid-area: 1 / 8;
+  }
+
+  .item-expand {
+    grid-area: 1 / 9;
+  }
+
+  .item-kind {
+    grid-area: 2 / 3;
+    padding-left: var(--space-1);
+  }
+
+  .item-verdict {
+    grid-area: 2 / 4;
+  }
+
+  .item-tests {
+    grid-area: 2 / 5;
+  }
+
+  .item-updated {
+    grid-area: 2 / 6;
+  }
+
+  .item-kind:not(:empty),
+  .item-verdict:not(:empty),
+  .item-tests:not(:empty),
+  .item-updated {
+    padding-right: var(--space-3);
+  }
+
+  .item-tags {
+    grid-area: 2 / 7 / 3 / -1;
+    justify-content: flex-start;
+    min-width: 0;
+    padding-right: var(--space-2);
+  }
+
   .item-row > .collapse {
-    grid-column: 4 / -1;
+    grid-area: 3 / 3 / 4 / -1;
+  }
+
+  .item-details {
+    padding-top: var(--space-1-5);
   }
 
   .item-type,
-  .item-result,
-  .item-updated,
   .item-grip,
-  .item-summary,
-  .item-tags {
+  .item-col-head {
     display: none;
+  }
+
+  /* The line has no columns to name: the head is the checkbox and the count. */
+  .item-list-head {
+    display: flex;
+    gap: var(--space-2);
+    padding-right: var(--space-3);
+  }
+
+  .item-list-head .item-check {
+    width: 28px;
+  }
+
+  .item-head-label {
+    flex: 1;
+    padding-left: 0;
   }
 
   .filter-search {

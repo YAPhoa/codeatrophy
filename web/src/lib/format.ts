@@ -91,6 +91,18 @@ export function absoluteTime(iso: string): string {
   return Number.isNaN(t) ? '' : dateTimeFmt.format(t);
 }
 
+/** The day alone: "Nov 18, 2026". */
+export function absoluteDate(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? '' : dateFmt.format(t);
+}
+
+/** Whether two times fall on the same local calendar day. */
+export function sameDay(a: string, b: string): boolean {
+  const [x, y] = [new Date(a), new Date(b)];
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+
 const wholeFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const tenthsFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 

@@ -52,8 +52,8 @@ interface ItemRef {
   title: string;
 }
 
-/** Status as a menu button; changes are saved immediately. */
-export function StatusControl({ item, compact, size = 'md' }: { item: ItemRef; compact?: boolean; size?: ButtonSize }) {
+/** Status as a menu button; changes are saved immediately. `title` replaces its tooltip. */
+export function StatusControl({ item, compact, size = 'md', title }: { item: ItemRef; compact?: boolean; size?: ButtonSize; title?: string }) {
   const update = useQuickUpdate();
   const toast = useToast();
   return (
@@ -61,7 +61,7 @@ export function StatusControl({ item, compact, size = 'md' }: { item: ItemRef; c
       variant={compact ? 'ghost' : 'default'}
       size={size}
       label={compact ? `Status of ${item.title}: ${STATUS_LABEL[item.status]}. Change` : undefined}
-      title={`Status: ${STATUS_LABEL[item.status]}`}
+      title={title ?? `Status: ${STATUS_LABEL[item.status]}`}
       menuLabel="Set status"
       icon={
         <IconSwap swapKey={item.status}>

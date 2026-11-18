@@ -1,16 +1,18 @@
-import { Fragment, memo, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { Fragment, memo, useLayoutEffect, useRef, useState, type AnimationEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { Link } from 'react-router';
-import { ChevronDown, GitBranch, GripVertical } from 'lucide-react';
+import { ChevronDown, Folder, GitBranch, GripVertical } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { prefetchItem } from '../../api/queries';
 import type { Collection, ItemSummary } from '../../api/types';
 import { ItemPage } from '../../app/screens';
 import { useIntent } from '../../lib/intent';
-import { isFailedVerdict, plural, relativeTime, absoluteTime } from '../../lib/format';
+import { STATUS_LABEL, VERDICT_LABEL, absoluteDate, absoluteTime, isFailedVerdict, plural, relativeTime, sameDay } from '../../lib/format';
 import { pathTo } from '../../lib/tree';
 import { Button, cx } from '../../ui/Button';
 import { preloadCodeEditor } from '../../ui/CodeEditor';
 import { Collapse } from '../../ui/Collapse';
+import { Badge } from '../../ui/misc';
 import { DifficultyBadge, FavoriteButton, StatusControl, TagChips, TypeIcon, VerdictBadge } from '../item/controls';
 
 interface ItemRowProps {
@@ -43,51 +45,147 @@ function titleIfCut(e: MouseEvent<HTMLElement>) {
 /** The id of a row's details, for the controls that open them. */
 export const detailsId = (itemId: string) => `item-details-${itemId}`;
 
-/** Created on, updated on: relative, with the exact time as a tooltip. */
-function When({ label, iso }: { label: string; iso: string }) {
+// ---- The line's tags: as many as fit, then "+N" ----
+
+// One observer for every row. It only reports when a row's tag strip changes
+// size (a resize, the sidebar, a row coming into view), never on scroll, and
+// it runs after layout, so reading the chips' widths there forces no extra one.
+// The fits it finds are applied before the frame is painted, so a row never
+// shows its chips cut off first.
+type Fit = (width: number) => void;
+const fits = new WeakMap<Element, Fit>();
+let observer: ResizeObserver | null = null;
+
+function watchWidth(el: Element, fit: Fit) {
+  observer ??= new ResizeObserver((entries) => {
+    flushSync(() => {
+      for (const e of entries) fits.get(e.target)?.(e.contentBoxSize[0]?.inlineSize ?? e.contentRect.width);
+    });
+  });
+  fits.set(el, fit);
+  observer.observe(el);
+  return () => {
+    fits.delete(el);
+    observer?.unobserve(el);
+  };
+}
+
+/** The width of a "+N" chip, from the last one shown; any row's will do. */
+let moreWidth = 30;
+
+/**
+ * The row's tags on its line: as many as fit in the room the title leaves,
+ * then "+N" for the rest. The strip's width depends only on the title's, so
+ * changing how many chips show never resizes it, and the fit settles in one
+ * pass. Chip widths are measured once, while every chip shows, and kept.
+ */
+function LineTags({ tags, tab, returning, onReturned, more }: { tags: readonly string[]; tab: number; returning: boolean; onReturned: (e: AnimationEvent) => void; more: { expanded: boolean; controls: string; onToggle: () => void } }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const key = tags.join('\n');
+  // How many chips show; every one until the strip has been measured.
+  const [fit, setFit] = useState({ key, shown: tags.length });
+  const shown = fit.key === key ? fit.shown : tags.length;
+  if (fit.key !== key) setFit({ key, shown });
+  const widths = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return watchWidth(el, (room) => {
+      if (room <= 0) return; // Hidden (a narrow screen) or not laid out yet.
+      const chips = el.querySelectorAll<HTMLElement>('.chip');
+      for (const chip of chips) {
+        const w = chip.getBoundingClientRect().width;
+        if (chip.classList.contains('chip-more')) moreWidth = w;
+        else if (chip.textContent) widths.current.set(chip.textContent, w);
+      }
+      const gap = parseFloat(getComputedStyle(el.firstElementChild ?? el).columnGap) || 0;
+      let used = 0;
+      let n = 0;
+      for (const [i, tag] of tags.entries()) {
+        const w = widths.current.get(tag);
+        if (w == null) break;
+        const next = used + (n > 0 ? gap : 0) + w;
+        const rest = i < tags.length - 1 ? gap + moreWidth : 0;
+        if (next + rest > room + 0.5) break;
+        used = next;
+        n += 1;
+      }
+      setFit((f) => (f.key === key && f.shown === n ? f : { key, shown: n }));
+    });
+  }, [tags, key]);
   return (
-    <span>
-      {label}{' '}
-      <time dateTime={iso} title={absoluteTime(iso)}>
-        {relativeTime(iso)}
-      </time>
+    <span ref={ref} className={cx('item-tags', returning && 'is-returning')} onAnimationEnd={onReturned}>
+      <TagChips tags={tags} max={shown} tabIndex={tab} more={more} />
     </span>
   );
 }
 
-/** What the row's line cuts short: the whole summary, every tag, the dates and the collections. */
+// ---- The details under the line ----
+
+/** What the line leaves out: the whole summary, then every tag and the facts that add something, each beside its label. */
 function ItemDetails({ item, collections, tab }: { item: ItemSummary; collections: readonly Collection[]; tab: number }) {
   const paths = item.collectionIds.map((id) => pathTo(collections, id)).filter((p) => p.length > 0);
+  const facts: { label: string; value: ReactNode }[] = [];
+  if (item.tags.length > 0) facts.push({ label: 'Tags', value: <TagChips tags={item.tags} tabIndex={tab} /> });
+  // The line's date says when it was updated; the day it was created only adds something when it differs.
+  if (!sameDay(item.createdAt, item.updatedAt))
+    facts.push({
+      label: 'Created',
+      value: (
+        <time dateTime={item.createdAt} title={absoluteTime(item.createdAt)}>
+          {absoluteDate(item.createdAt)}
+        </time>
+      ),
+    });
+  if (paths.length > 0)
+    facts.push({
+      label: 'Collections',
+      value: (
+        <span className="tagchips">
+          {paths.map((path) => {
+            const name = path.map((c) => c.name).join(' / ');
+            return (
+              <Link
+                key={path[path.length - 1]!.id}
+                to={`/collections/${path[path.length - 1]!.id}`}
+                className="chip chip-collection"
+                title={`Show ${name}`}
+                tabIndex={tab}
+                draggable={false}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Folder size={12} aria-hidden="true" />
+                <span className="truncate">{name}</span>
+              </Link>
+            );
+          })}
+        </span>
+      ),
+    });
   return (
     <div className="item-details" id={detailsId(item.id)}>
-      {item.summary && <p className="item-details-summary">{item.summary}</p>}
-      {item.tags.length > 0 && <TagChips tags={item.tags} tabIndex={tab} />}
-      <p className="item-details-facts">
-        <When label="Created" iso={item.createdAt} />
-        <span aria-hidden="true">·</span>
-        <When label="Updated" iso={item.updatedAt} />
-        {paths.length > 0 && (
-          <>
-            <span aria-hidden="true">·</span>
-            <span>
-              In:{' '}
-              {paths.map((path, i) => (
-                <Fragment key={path[path.length - 1]!.id}>
-                  {i > 0 && ', '}
-                  <Link to={`/collections/${path[path.length - 1]!.id}`} tabIndex={tab} draggable={false}>
-                    {path.map((c) => c.name).join(' / ')}
-                  </Link>
-                </Fragment>
-              ))}
-            </span>
-          </>
-        )}
-      </p>
+      {/* Opens the item like the title; the title is the row's one tab stop for it. */}
+      {item.summary && (
+        <Link to={`/items/${item.id}`} className="item-details-summary" tabIndex={-1} draggable={false}>
+          {item.summary}
+        </Link>
+      )}
+      {facts.length > 0 && (
+        <dl className="item-details-facts">
+          {facts.map((f) => (
+            <Fragment key={f.label}>
+              <dt>{f.label}</dt>
+              <dd>{f.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {!item.summary && facts.length === 0 && <p className="item-details-empty">No description.</p>}
     </div>
   );
 }
 
-/** One line of the library list: quick controls on the left, facts on the right, and details that open below. */
+/** One line of the library list: status and type on the left, facts in columns on the right, and details that open below. */
 export const ItemRow = memo(function ItemRow({
   item,
   index,
@@ -108,6 +206,18 @@ export const ItemRow = memo(function ItemRow({
   // Only the current row's controls are tab stops, so Tab moves through one
   // row and then out of the list; J/K (or arrows) move between rows.
   const tab = current ? 0 : -1;
+  // Set when the row closes, so the line's tags fade back in, and
+  // cleared once they have, so a resize that hides and shows them again does
+  // not replay the fade.
+  const [returning, setReturning] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setReturning(!open);
+  }
+  const onReturned = (e: AnimationEvent) => {
+    if (e.target === e.currentTarget) setReturning(false);
+  };
   // Resting on a row (pointer or focus) loads the item and its screen, so opening it shows no loading state.
   const qc = useQueryClient();
   const intent = useIntent(() => {
@@ -115,6 +225,21 @@ export const ItemRow = memo(function ItemRow({
     ItemPage.preload();
     if (item.type === 'problem') preloadCodeEditor();
   });
+  // The status icon already says when a problem is solved, so the line shows
+  // only a failed last verdict; the icon's tooltip gives any last one.
+  const verdict = item.type === 'problem' ? item.lastVerdict : null;
+  const statusTitle = verdict ? `${STATUS_LABEL[item.status]} · Last verdict: ${VERDICT_LABEL[verdict]}` : undefined;
+  // A click on the row's line or details opens or closes it, but not one
+  // meant for a control in it (or a near miss in a control's cell, or one in
+  // a menu it portals out), one that ends selecting text, or one with a
+  // modifier key held.
+  const onClick = (e: MouseEvent<HTMLLIElement>) => {
+    const target = e.target as Element;
+    if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!e.currentTarget.contains(target) || target.closest('a, button, input, label, .item-check, .item-status, .item-star, .item-expand, .item-grip')) return;
+    if (window.getSelection()?.toString()) return;
+    onToggleOpen(index);
+  };
   return (
     <li
       className={cx('item-row', selected && 'is-selected', current && 'is-current', open && 'is-open', dropEdge && `drop-${dropEdge}`)}
@@ -134,6 +259,7 @@ export const ItemRow = memo(function ItemRow({
       onDragOver={(e) => onDragOver(index, e)}
       onDrop={(e) => onDrop(index, e)}
       onDragEnd={onDragEnd}
+      onClick={onClick}
     >
       <span className="item-cell item-check">
         <input
@@ -145,11 +271,8 @@ export const ItemRow = memo(function ItemRow({
           onClick={(e) => onSelect(index, e)}
         />
       </span>
-      <span className="item-cell">
-        <FavoriteButton item={item} size="sm" />
-      </span>
-      <span className="item-cell">
-        <StatusControl item={item} compact size="sm" />
+      <span className="item-cell item-status">
+        <StatusControl item={item} compact size="sm" title={statusTitle} />
       </span>
       <span className="item-cell item-type">
         <TypeIcon type={item.type} />
@@ -167,32 +290,28 @@ export const ItemRow = memo(function ItemRow({
             </span>
           )}
         </span>
-        {item.summary && (
-          <span className="item-summary" onMouseEnter={titleIfCut}>
-            {item.summary}
-          </span>
-        )}
-        {item.tags.length > 0 && (
-          <span className="item-tags">
-            <TagChips tags={item.tags} max={2} tabIndex={tab} more={{ expanded: open, controls: detailsId(item.id), onToggle: () => onToggleOpen(index) }} />
-          </span>
-        )}
-      </span>
-      <span className="item-cell item-diff">
-        <DifficultyBadge difficulty={item.difficulty} />
-      </span>
-      <span className="item-cell item-result">
-        {/* The status icon already says when a problem is solved, so only a failed last verdict is shown. */}
-        {item.type === 'problem' && (
-          <>
-            {item.lastVerdict && isFailedVerdict(item.lastVerdict) && <VerdictBadge verdict={item.lastVerdict} short />}
-            <span className="item-tests muted">{item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test')}</span>
-          </>
+        {/* An open row shows every tag in its details, so the line leaves them out. */}
+        {!open && item.tags.length > 0 && (
+          <LineTags
+            tags={item.tags}
+            tab={tab}
+            returning={returning}
+            onReturned={onReturned}
+            more={{ expanded: open, controls: detailsId(item.id), onToggle: () => onToggleOpen(index) }}
+          />
         )}
       </span>
-      <time className="item-cell item-updated" dateTime={item.updatedAt} title={`Updated ${absoluteTime(item.updatedAt)}`}>
+      <span className="item-cell item-verdict">{verdict && isFailedVerdict(verdict) && <VerdictBadge verdict={verdict} short />}</span>
+      <span className="item-cell item-kind">
+        {item.type === 'problem' ? <DifficultyBadge difficulty={item.difficulty} /> : <Badge className="badge-kind">Reading</Badge>}
+      </span>
+      <span className="item-cell item-tests">{item.type === 'problem' && (item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test'))}</span>
+      <time className="item-cell item-updated" dateTime={item.updatedAt} title={`Created ${absoluteTime(item.createdAt)}\nUpdated ${absoluteTime(item.updatedAt)}`}>
         {relativeTime(item.updatedAt)}
       </time>
+      <span className="item-cell item-star">
+        <FavoriteButton item={item} size="sm" />
+      </span>
       <span className="item-cell item-expand">
         <Button
           variant="ghost"

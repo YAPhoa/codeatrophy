@@ -1,10 +1,21 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { open } from './support';
 
-// A library row opens to show what its line cuts short: the whole summary,
-// every tag, when it was created and updated, and its collections.
+// A library row's line shows the title, as many tags as fit and the facts in
+// columns, named in the list's head; it opens, from its chevron or a click
+// anywhere but on a control, to show what the line leaves out: the whole
+// summary, then every tag and the facts that add something (the day it was
+// created when that differs, its collections), each beside its label. The
+// details stay under the title, clear of the facts' columns. While it is open
+// the line leaves the tags to the details, so each shows once, and nothing
+// else on the line moves.
 
 const LONGEST = 'Longest Substring Without Repeating Characters';
+const LONGEST_SUMMARY = 'Length of the longest run of characters with no repeats, in one pass with a sliding window.';
+const LONGEST_TAGS = ['hash-map', 'sliding-window', 'string'];
+/** Given more tags than any line has room for (openWithTags). */
+const COIN = 'Coin Change';
+const MANY_TAGS = ['bottom-up', 'classic', 'coins', 'dynamic-programming', 'greedy-fails', 'interview', 'memoization', 'minimum', 'top-down', 'unbounded-knapsack'];
 
 /** The library row of the item titled `title`. */
 const row = (page: Page, title: string) => page.locator('li.item-row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
@@ -15,14 +26,64 @@ async function detailsOf(page: Page, title: string) {
   return page.locator(`[id="${id}"]`);
 }
 
-test('library details: the chevron opens a row on every tag and its dates, and closes it again', async ({ page }) => {
+/** Where everything on a row's line sits, but its tags: left, top (in the row), width and height of each part shown. */
+const lineOf = (r: Locator) =>
+  r.evaluate((li) => {
+    const top = li.getBoundingClientRect().top;
+    const parts = ['.item-check input', '.item-status button', '.type-icon', '.item-title', '.item-variant', '.item-verdict .badge', '.item-kind .badge', '.item-tests', '.item-updated', '.item-star button', '.item-expand button'];
+    return Object.fromEntries(
+      parts.map((part) => {
+        const box = li.querySelector(part)?.getBoundingClientRect();
+        return [part, box && box.width > 0 ? [box.left, box.top - top, box.width, box.height] : null];
+      }),
+    );
+  });
+
+/** Open the library with `title` tagged `tags`, set through the mock before the list first loads. */
+async function openWithTags(page: Page, title: string, tags: string[]) {
+  await open(page, '/tags');
+  await page.waitForFunction(() => '__codeatrophyMock' in window);
+  await page.evaluate(
+    async ([title, tags]) => {
+      type Mock = { db: { items: Map<string, { id: string; title: string; revision: number }> }; fetch: (path: string, init?: RequestInit) => Promise<Response> };
+      const mock = (window as unknown as { __codeatrophyMock: Mock }).__codeatrophyMock;
+      const item = [...mock.db.items.values()].find((i) => i.title === title)!;
+      const res = await mock.fetch(`/api/v1/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tags, expectedRevision: item.revision }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    [title, tags] as const,
+  );
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^All items/ }).click();
+  await expect(row(page, title)).toBeVisible();
+}
+
+/** The tags on a row's line: how many show, and how much of the strip is left over (it is right-aligned, so on the left). */
+const lineTags = (r: Locator) =>
+  r.locator('.item-tags').evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const chips = [...el.querySelectorAll('.chip')].map((c) => c.getBoundingClientRect());
+    return {
+      shown: el.querySelectorAll('.chip-tag').length,
+      more: el.querySelector('.chip-more')?.textContent ?? null,
+      inside: chips.every((c) => c.left >= box.left - 0.5 && c.right <= box.right + 0.5),
+      free: chips.length > 0 ? chips[0]!.left - box.left : box.width,
+      gap: parseFloat(getComputedStyle(el.querySelector('.tagchips')!).columnGap),
+    };
+  });
+
+test('library details: the chevron opens a row on its summary, every tag and the facts, and closes it again', async ({ page }) => {
   await open(page, '/');
   const r = row(page, LONGEST);
   const below = r.locator('+ li');
   const show = r.getByRole('button', { name: 'Show details' });
   await expect(show).toHaveAttribute('aria-expanded', 'false');
-  // The line has room for two tags and a "+1".
-  await expect(r.locator('.item-tags .chip-tag')).toHaveCount(2);
+  // The line has room for all three tags, so there is no "+N".
+  await expect(r.locator('.item-tags .chip-tag')).toHaveText(LONGEST_TAGS);
+  await expect(r.locator('.chip-more')).toHaveCount(0);
   const belowTop = (await below.boundingBox())!.y;
 
   await show.click();
@@ -30,14 +91,16 @@ test('library details: the chevron opens a row on every tag and its dates, and c
   await expect(hide).toHaveAttribute('aria-expanded', 'true');
   const details = await detailsOf(page, LONGEST);
   await expect(details).toBeVisible();
-  await expect(details.locator('.item-details-summary')).toHaveText('Length of the longest run of characters with no repeats, in one pass with a sliding window.');
-  await expect(details.locator('.chip-tag')).toHaveText(['hash-map', 'sliding-window', 'string']);
-  await expect(details.getByText(/^Created /)).toBeVisible();
-  await expect(details.getByText(/^Updated 3 days ago$/)).toBeVisible();
-  await expect(details.locator('time')).toHaveCount(2);
-  for (const time of await details.locator('time').all()) await expect(time).toHaveAttribute('title', /\d/);
+  await expect(details.locator('.item-details-summary')).toHaveText(LONGEST_SUMMARY);
+  // Each fact beside its label; created a month ago, updated three days ago: the day it was created adds something.
+  const facts = details.locator('.item-details-facts');
+  await expect(facts.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
+  await expect(facts.locator('dd').nth(0).locator('.chip-tag')).toHaveText(LONGEST_TAGS);
+  await expect(facts.locator('dd').nth(1)).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
+  await expect(details.getByText(/Updated|verdict|Wrong answer/)).toHaveCount(0);
+  await expect(details.locator('time')).toHaveAttribute('title', /\d:\d\d/);
   // A nested collection is named by its whole path.
-  await expect(details.getByRole('link', { name: 'Interview prep / Arrays & hashing' })).toBeVisible();
+  await expect(facts.locator('dd').nth(2).getByRole('link')).toHaveText(['Weekly practice', 'Interview prep / Arrays & hashing']);
   // The rows below make room.
   await expect.poll(async () => (await below.boundingBox())!.y).toBeGreaterThan(belowTop + 40);
 
@@ -47,27 +110,148 @@ test('library details: the chevron opens a row on every tag and its dates, and c
   await expect.poll(async () => (await below.boundingBox())!.y).toBe(belowTop);
 });
 
-test('library details: the "+1" chip opens them too', async ({ page }) => {
+test('library details: the day an item was created shows only when it is not the day it was updated', async ({ page }) => {
+  await open(page, '/');
+  // Created and updated four days ago.
+  const same = row(page, 'Merge k Sorted Lists');
+  await same.getByRole('button', { name: 'Show details' }).click();
+  const details = await detailsOf(page, 'Merge k Sorted Lists');
+  await expect(details.locator('.chip-tag')).toHaveText(['heap', 'linked-list']);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Collections']);
+  await expect(details.getByText(/Created|Updated/)).toHaveCount(0);
+
+  // The line's date gives both times exactly.
+  await expect(same.locator('.item-updated')).toHaveText('4 days ago');
+  await expect(same.locator('.item-updated')).toHaveAttribute('title', /^Created .*\d:\d\d.*\nUpdated .*\d:\d\d/);
+});
+
+for (const width of [1440, 600]) {
+  test(`library details: nothing on the line moves as a row opens and closes (${width}px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, '/');
+    await expect(page.locator('html')).not.toHaveClass(/is-booting/);
+    for (const title of [LONGEST, 'Two Sum', 'How B-Trees Work']) {
+      const r = row(page, title);
+      await page.mouse.move(0, 0);
+      const before = await lineOf(r);
+      expect(before['.item-title']).not.toBeNull();
+
+      await r.getByRole('button', { name: 'Show details' }).click();
+      // While the details grow, and once they are open.
+      expect(await lineOf(r)).toEqual(before);
+      await expect(await detailsOf(page, title)).toBeVisible();
+      await expect(r.locator('.item-tags')).toHaveCount(0);
+      await page.waitForTimeout(400);
+      expect(await lineOf(r)).toEqual(before);
+
+      await r.getByRole('button', { name: 'Hide details' }).click();
+      expect(await lineOf(r)).toEqual(before);
+      await expect(await detailsOf(page, title)).toHaveCount(0);
+      await expect(r.locator('.item-tags')).toBeVisible();
+      expect(await lineOf(r)).toEqual(before);
+    }
+  });
+}
+
+test('library details: an open row shows each tag once, and closing puts them back on the line', async ({ page }) => {
   await open(page, '/');
   const r = row(page, LONGEST);
-  const more = r.getByRole('button', { name: '1 more tag' });
-  await expect(more).toHaveText('+1');
+  await r.getByRole('button', { name: 'Show details' }).click();
+  const details = await detailsOf(page, LONGEST);
+  await expect(details).toBeVisible();
+  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(1);
+  for (const tag of LONGEST_TAGS) await expect(r.locator('.chip-tag', { hasText: new RegExp(`^${tag}$`) })).toHaveCount(1);
+  await expect(r.locator('.item-tags')).toHaveCount(0);
+
+  await r.getByRole('button', { name: 'Hide details' }).click();
+  await expect(details).toHaveCount(0);
+  await expect(r.locator('.item-tags .chip-tag')).toHaveText(LONGEST_TAGS);
+  // The summary is only in the details: the line is the title and its tags.
+  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(0);
+});
+
+test('library tags: the line shows as many tags as fit, then "+N", at any width', async ({ page }) => {
+  await openWithTags(page, COIN, MANY_TAGS);
+  const r = row(page, COIN);
+  const seen = new Set<number>();
+  for (const width of [1440, 1200, 1000, 600]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(r.locator('.chip-more')).toBeVisible();
+    const fit = await lineTags(r);
+    seen.add(fit.shown);
+    expect(fit.inside).toBe(true);
+    expect(fit.more).toBe(`+${MANY_TAGS.length - fit.shown}`);
+    await expect(r.locator('.item-tags .chip-tag')).toHaveText(MANY_TAGS.slice(0, fit.shown));
+    // The next tag would not have fitted: what is left is narrower than it.
+    const next = MANY_TAGS[fit.shown]!;
+    await r.getByRole('button', { name: 'Show details' }).click();
+    const nextWidth = (await (await detailsOf(page, COIN)).locator('.chip-tag', { hasText: new RegExp(`^${next}$`) }).boundingBox())!.width;
+    expect(fit.free).toBeLessThan(nextWidth + fit.gap);
+    await r.getByRole('button', { name: 'Hide details' }).click();
+    await expect(await detailsOf(page, COIN)).toHaveCount(0);
+  }
+  // Fewer fit as the row narrows.
+  expect(seen.size).toBeGreaterThan(2);
+});
+
+test('library details: the "+N" chip opens them too', async ({ page }) => {
+  await openWithTags(page, COIN, MANY_TAGS);
+  const r = row(page, COIN);
+  const more = r.locator('.chip-more');
+  const shown = await r.locator('.item-tags .chip-tag').count();
+  const rest = MANY_TAGS.length - shown;
+  await expect(more).toHaveAccessibleName(`${rest} more tags`);
+  await expect(more).toHaveAttribute('title', MANY_TAGS.slice(shown).join(', '));
   await expect(more).toHaveAttribute('aria-expanded', 'false');
   // It controls the same details as the chevron.
   const controls = await r.locator('.item-expand button').getAttribute('aria-controls');
   await expect(more).toHaveAttribute('aria-controls', controls!);
-  const details = await detailsOf(page, LONGEST);
+  const details = await detailsOf(page, COIN);
 
   await more.click();
-  await expect(more).toHaveAttribute('aria-expanded', 'true');
-  await expect(details.locator('.chip-tag')).toHaveText(['hash-map', 'sliding-window', 'string']);
+  await expect(details.locator('.chip-tag')).toHaveText(MANY_TAGS);
+  // It leaves the line with the other chips.
+  await expect(more).toHaveCount(0);
   await expect(r.getByRole('button', { name: 'Hide details' })).toBeVisible();
   // Not a selection, and no navigation.
   await expect(r.getByRole('checkbox')).not.toBeChecked();
-  await expect(page).toHaveURL(/\/\?mock=fast$/);
+  await expect(page).toHaveURL(/\/$/);
 
-  await more.click();
+  await r.getByRole('button', { name: 'Hide details' }).click();
   await expect(details).toHaveCount(0);
+  await expect(more).toHaveText(`+${rest}`);
+});
+
+test('library details: opening from a focused "+N" moves focus to the expand button, which keeps it on closing', async ({ page }) => {
+  await openWithTags(page, COIN, MANY_TAGS);
+  await expect(page.locator('html')).not.toHaveClass(/is-booting/);
+  const r = row(page, COIN);
+  const details = await detailsOf(page, COIN);
+  await r.focus();
+  const more = r.locator('.chip-more');
+  await more.focus();
+
+  await page.keyboard.press('Enter');
+  await expect(details).toBeVisible();
+  await expect(more).toHaveCount(0);
+  const hide = r.getByRole('button', { name: 'Hide details' });
+  await expect(hide).toBeFocused();
+
+  await page.keyboard.press('Enter');
+  await expect(details).toHaveCount(0);
+  await expect(r.getByRole('button', { name: 'Show details' })).toBeFocused();
+  await expect(more).toBeVisible();
+
+  // D from one of the line's tags lands there too.
+  await r.locator('.item-tags .chip-tag').first().focus();
+  await page.keyboard.press('d');
+  await expect(details).toBeVisible();
+  await expect(hide).toBeFocused();
+  // The list's keys still work from there.
+  await page.keyboard.press('d');
+  await expect(details).toHaveCount(0);
+  await page.keyboard.press('j');
+  await expect(r.locator('+ li')).toBeFocused();
 });
 
 test('library details: → opens, ← closes and D toggles the focused row', async ({ page }) => {
@@ -102,34 +286,227 @@ test('library details: → opens, ← closes and D toggles the focused row', asy
   await expect(r.locator('+ li')).toBeFocused();
 });
 
-test('library details: a click inside them selects nothing and opens nothing, but a tag filters', async ({ page }) => {
+test('library details: a click on the facts closes the row and selects nothing, a tag filters, and the summary opens the item', async ({ page }) => {
   await open(page, '/');
   const r = row(page, LONGEST);
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, LONGEST);
-  await details.locator('.item-details-summary').click();
-  await details.getByText(/^Created /).click();
+  await details.getByText('Created', { exact: true }).click();
+  await expect(details).toHaveCount(0);
   await expect(r.getByRole('checkbox')).not.toBeChecked();
   await expect(page.getByRole('toolbar', { name: 'Actions for selected items' })).toHaveCount(0);
   await expect(page).toHaveURL(/\/\?mock=fast$/);
-  await expect(details).toBeVisible();
+
+  await r.getByRole('button', { name: 'Show details' }).click();
+  // The summary is not a tab stop of its own: the title is the row's link to the item.
+  await expect(details.locator('.item-details-summary')).toHaveAttribute('tabindex', '-1');
 
   await details.locator('.chip-tag', { hasText: 'string' }).click();
   await expect(page).toHaveURL(/[?&]tag=string/);
+  await expect(details).toBeVisible();
   await expect(r.getByRole('checkbox')).not.toBeChecked();
+
+  await details.locator('.item-details-summary').click();
+  await expect(page).toHaveURL(/\/items\//);
 });
 
-test('library details: on a narrow screen, where the line shows no tags, they show every tag', async ({ page }) => {
+test('library details: they stay under the title, clear of the facts\' columns, and long tags and collections wrap there', async ({ page }) => {
+  await openWithTags(page, COIN, MANY_TAGS);
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    const r = row(page, COIN);
+    await r.getByRole('button', { name: 'Show details' }).click();
+    const details = await detailsOf(page, COIN);
+    await expect(details).toBeVisible();
+    await page.waitForTimeout(400);
+    const box = await r.evaluate((li) => {
+      const right = (sel: string) => Math.max(...[...li.querySelectorAll(sel)].map((el) => el.getBoundingClientRect().right));
+      const tops = [...li.querySelectorAll('.item-details .chip-tag')].map((el) => el.getBoundingClientRect().top);
+      return {
+        kind: li.querySelector('.item-kind')!.getBoundingClientRect().left,
+        title: li.querySelector('.item-title')!.getBoundingClientRect().left,
+        summary: li.querySelector('.item-details-summary')!.getBoundingClientRect().left,
+        details: li.querySelector('.item-details')!.getBoundingClientRect(),
+        content: right('.item-details *'),
+        lines: new Set(tops.map(Math.round)).size,
+      };
+    });
+    expect(Math.abs(box.summary - box.title)).toBeLessThan(1);
+    expect(box.details.right).toBeLessThanOrEqual(box.kind);
+    // Nothing in them reaches the difficulty column, with a gap before it.
+    expect(box.content).toBeLessThan(box.kind - 4);
+    expect(box.lines).toBeGreaterThan(1);
+    await r.getByRole('button', { name: 'Hide details' }).click();
+    await expect(details).toHaveCount(0);
+  }
+});
+
+test('library details: each label is level with the first line of its value', async ({ page }) => {
+  await openWithTags(page, COIN, MANY_TAGS);
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const r = row(page, COIN);
+  await r.getByRole('button', { name: 'Show details' }).click();
+  const details = await detailsOf(page, COIN);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
+  const pairs = await details.locator('.item-details-facts').evaluate((dl) =>
+    [...dl.querySelectorAll('dt')].map((dt) => {
+      const first = (dt.nextElementSibling!.querySelector('.chip, time') ?? dt.nextElementSibling!).getBoundingClientRect();
+      const label = dt.getBoundingClientRect();
+      return { label: label.top + label.height / 2, value: first.top + first.height / 2, valueHeight: dt.nextElementSibling!.getBoundingClientRect().height };
+    }),
+  );
+  // The tags take several lines; the label stays on the first.
+  expect(pairs[0]!.valueHeight).toBeGreaterThan(40);
+  for (const p of pairs) expect(Math.abs(p.label - p.value)).toBeLessThan(3);
+});
+
+test('library details: a collection is a chip like a tag, and opens the collection', async ({ page }) => {
+  await open(page, '/');
+  const r = row(page, LONGEST);
+  await r.getByRole('button', { name: 'Show details' }).click();
+  const details = await detailsOf(page, LONGEST);
+  const chip = details.getByRole('link', { name: 'Interview prep / Arrays & hashing' });
+  const tag = details.locator('.chip-tag').first();
+  await expect(chip).toHaveClass(/\bchip\b/);
+  for (const prop of ['color', 'background-color', 'height', 'border-radius', 'font-size']) {
+    expect(await chip.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)).toBe(await tag.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop));
+  }
+  await expect(chip).toHaveAttribute('tabindex', (await tag.getAttribute('tabindex'))!);
+
+  await chip.click();
+  await expect(page).toHaveURL(/\/collections\/[\w-]+$/);
+  await expect(page.getByRole('heading', { level: 1, name: /Arrays & hashing/ })).toBeVisible();
+});
+
+test('library details: a failed last verdict shows on the line, in a column of its own, and not in the details', async ({ page }) => {
+  await open(page, '/');
+  const r = row(page, LONGEST);
+  await expect(r.locator('.item-verdict .badge')).toHaveText('Wrong answer');
+  // An accepted one does not: the status icon says it is solved, and its tooltip gives the verdict.
+  const solved = row(page, 'Two Sum');
+  await expect(solved.locator('.item-verdict')).toHaveText('');
+  await expect(solved.locator('.item-status button')).toHaveAttribute('title', 'Done · Last verdict: Accepted');
+  // The verdicts line up from row to row.
+  const lefts = await page.locator('.item-verdict').evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().left))).size);
+  expect(lefts).toBe(1);
+
+  await r.getByRole('button', { name: 'Show details' }).click();
+  const details = await detailsOf(page, LONGEST);
+  await expect(details).toBeVisible();
+  await expect(details.getByText('Wrong answer')).toHaveCount(0);
+  await expect(r.locator('.item-verdict .badge')).toHaveText('Wrong answer');
+});
+
+test('library row: a click on its empty space opens and closes it, but not one on its title or a tag', async ({ page }) => {
+  await open(page, '/');
+  await expect(page.locator('html')).not.toHaveClass(/is-booting/);
+  const r = row(page, LONGEST);
+  const details = await detailsOf(page, LONGEST);
+  // The room between the title and its tags, and the empty test column of another row.
+  const title = (await r.locator('.item-title').boundingBox())!;
+  const chips = (await r.locator('.item-tags .chip').first().boundingBox())!;
+  const between = { x: (title.x + title.width + chips.x) / 2, y: title.y + title.height / 2 };
+  await expect(r).toHaveCSS('cursor', 'pointer');
+
+  await page.mouse.click(between.x, between.y);
+  await expect(details).toBeVisible();
+  await expect(r.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(r.getByRole('checkbox')).not.toBeChecked();
+  // A click in the open details' empty space closes it.
+  const facts = (await details.locator('.item-details-facts').boundingBox())!;
+  await page.mouse.click(facts.x + facts.width - 4, facts.y + facts.height - 4);
+  await expect(details).toHaveCount(0);
+
+  // On the date, too; not with Shift held, nor at the end of a drag.
+  await r.locator('.item-updated').click();
+  await expect(details).toBeVisible();
+  await r.locator('.item-updated').click({ modifiers: ['Shift'] });
+  await expect(details).toBeVisible();
+  const summary = (await details.locator('.item-details-summary').boundingBox())!;
+  await page.mouse.move(summary.x + summary.width - 2, summary.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(summary.x + summary.width + 40, summary.y + summary.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect(details).toBeVisible();
+  await r.getByRole('button', { name: 'Hide details' }).click();
+  await expect(details).toHaveCount(0);
+
+  // The star and the chevron keep their own clicks: the chevron toggles once.
+  await r.getByRole('button', { name: 'Show details' }).click();
+  await expect(details).toBeVisible();
+  await r.locator('.item-star button').click();
+  await expect(details).toBeVisible();
+  await r.locator('.item-star button').click();
+  await r.getByRole('button', { name: 'Hide details' }).click();
+  await expect(details).toHaveCount(0);
+
+  // A tag on the line filters, and leaves the row closed.
+  await r.locator('.item-tags .chip-tag', { hasText: 'string' }).click();
+  await expect(page).toHaveURL(/[?&]tag=string/);
+  await expect(r).toBeVisible();
+  await expect(details).toHaveCount(0);
+
+  // The title opens the item.
+  await r.locator('.item-title').click();
+  await expect(page).toHaveURL(/\/items\//);
+});
+
+test('library head: the facts\' columns are named over them, but not on a narrow screen or in manual order', async ({ page }) => {
+  await open(page, '/');
+  const head = page.locator('.item-list-head');
+  const names = head.locator('.item-col-head');
+  await expect(names).toHaveText(['Verdict', 'Difficulty', 'Tests', 'Updated']);
+  await expect(names.first()).toHaveAttribute('aria-hidden', 'true');
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    const r = row(page, 'LRU Cache');
+    const cell = async (sel: string) => (await r.locator(sel).boundingBox())!;
+    const name = async (text: string) => (await names.filter({ hasText: text }).boundingBox())!;
+    // Verdict and difficulty start where their badges do; tests and updated end where their text does.
+    expect(Math.abs((await name('Verdict')).x - (await cell('.item-verdict .badge')).x)).toBeLessThan(1);
+    expect(Math.abs((await name('Difficulty')).x - (await cell('.item-kind .badge')).x)).toBeLessThan(1);
+    for (const [text, sel] of [['Tests', '.item-tests'], ['Updated', '.item-updated']] as const) {
+      const n = await name(text);
+      const c = await cell(sel);
+      expect(Math.abs(n.x + n.width - (c.x + c.width))).toBeLessThan(1);
+    }
+    await expect(head.locator('.item-head-label')).toHaveText('25 items');
+  }
+
+  await page.setViewportSize({ width: 600, height: 900 });
+  await expect(names.first()).toBeHidden();
+  await expect(head.locator('.item-head-label')).toHaveText('25 items');
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('link', { name: 'Interview prep' }).click();
+  await expect(page.locator('ul.item-list.is-reorderable')).toBeVisible();
+  await expect(head.locator('.item-head-label')).toHaveText(/^Manual order/);
+  await expect(names).toHaveCount(0);
+});
+
+test('library details: on a narrow screen the tags and facts take a second line, and the details start under the title', async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 900 });
   await open(page, '/');
   const r = row(page, LONGEST);
-  await expect(r.locator('.item-tags')).toBeHidden();
+  const title = (await r.getByRole('link', { name: LONGEST, exact: true }).boundingBox())!;
+  // The title has the first line to itself, in full.
+  await expect(r.locator('.item-title')).not.toHaveAttribute('title', /./);
+  expect(await r.locator('.item-title').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  for (const part of ['.item-kind .badge', '.item-verdict .badge', '.item-tests', '.item-updated', '.item-tags']) {
+    const box = (await r.locator(part).boundingBox())!;
+    expect(box.y).toBeGreaterThan(title.y + title.height);
+  }
+  // After the verdict, as many tags as fit.
+  const shown = await r.locator('.item-tags .chip-tag').count();
+  expect(shown).toBeGreaterThan(0);
+  await expect(r.locator('.item-tags .chip-tag')).toHaveText(LONGEST_TAGS.slice(0, shown));
+  // The second line starts under the title.
+  expect(Math.abs((await r.locator('.item-kind .badge').boundingBox())!.x - title.x)).toBeLessThan(2);
+
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, LONGEST);
-  await expect(details.locator('.chip-tag')).toHaveText(['hash-map', 'sliding-window', 'string']);
-  // They start under the title, not under the row's controls.
-  const title = (await r.getByRole('link', { name: LONGEST, exact: true }).boundingBox())!;
-  expect(Math.abs((await details.boundingBox())!.x - title.x)).toBeLessThan(12);
+  await expect(details.locator('.chip-tag')).toHaveText(LONGEST_TAGS);
+  expect(Math.abs((await details.locator('.item-details-summary').boundingBox())!.x - title.x)).toBeLessThan(2);
 });
 
 test('library details: in a collection in manual order, the chevron comes before the grip and moving a row keeps it open', async ({ page }) => {

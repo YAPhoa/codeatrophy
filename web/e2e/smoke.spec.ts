@@ -983,27 +983,35 @@ test('organise: selected items are filed into a new collection', async ({ page }
   await expect(page.getByRole('link', { name: 'Edit Distance' })).toBeVisible();
 });
 
-test('library: the filter box names the view, a row shows only a failed verdict and a cut description in full on hover, and the sidebar counts every view', async ({ page }) => {
+test('library: the filter box names the view, a row shows only a failed verdict and a cut title in full on hover, and the sidebar counts every view', async ({ page }) => {
   await open(page, '/');
   const nav = page.getByRole('complementary', { name: 'Navigation' });
   const filter = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
   await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
   await expect(filter).toHaveAccessibleName('Filter items');
 
-  // The test count is always there; a verdict only when the last one failed.
+  // The test count is always there; a verdict only when the last one failed. The status icon's tooltip gives any last one.
   const rows = page.locator('.item-row');
   const lru = rows.filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) });
-  await expect(lru.locator('.item-result')).toHaveText(/Compile error\s*4 tests/);
-  await expect(page.locator('.item-result', { hasText: /Accepted|Executed/ })).toHaveCount(0);
-  await expect(page.locator('.item-result', { hasText: 'no tests' }).first()).toBeVisible();
+  await expect(lru.locator('.item-tests')).toHaveText('4 tests');
+  await expect(lru.locator('.item-verdict')).toHaveText('Compile error');
+  await expect(lru.locator('.item-status button')).toHaveAttribute('title', 'To do · Last verdict: Compile error');
+  await expect(page.locator('.item-verdict', { hasText: /Accepted|Executed/ })).toHaveCount(0);
+  await expect(page.locator('.item-tests', { hasText: 'no tests' }).first()).toBeVisible();
+  // A reading says so where a problem gives its difficulty, and has no test count.
+  const reading = rows.filter({ has: page.getByRole('link', { name: 'How B-Trees Work', exact: true }) });
+  await expect(reading.locator('.item-kind')).toHaveText('Reading');
+  await expect(reading.locator('.item-tests')).toHaveText('');
 
-  // A description cut off by the row shows in full on hover; one that fits gets no tooltip.
-  const cut = rows.filter({ has: page.getByRole('link', { name: 'Sliding-window rate limiter', exact: true }) }).locator('.item-summary');
+  // A title cut off by the row shows in full on hover; one that fits gets no tooltip.
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const cut = rows.locator('.item-title', { hasText: 'Longest Substring Without Repeating Characters' });
   await cut.hover();
-  await expect(cut).toHaveAttribute('title', 'Allow at most K requests per user in any window of W seconds.');
-  const fits = rows.filter({ has: page.getByRole('link', { name: 'Merge k Sorted Lists', exact: true }) }).locator('.item-summary');
+  await expect(cut).toHaveAttribute('title', 'Longest Substring Without Repeating Characters');
+  const fits = rows.locator('.item-title', { hasText: 'Merge k Sorted Lists' });
   await fits.hover();
   await expect(fits).not.toHaveAttribute('title', /./);
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // Favorites is counted like the other views, and follows changes. Uncollected is not in the sidebar for now.
   const count = (name: string) => nav.getByRole('link', { name: new RegExp(`^${name}`) }).locator('.nav-count');
@@ -1046,7 +1054,7 @@ test('library: the sort menu holds the directions, named for the field, and a di
   await sort.click();
   await expect(choice('Easiest first')).toHaveAttribute('aria-checked', 'true');
   await choice('Hardest first').click();
-  await expect(page.locator('.item-row').first().locator('.item-diff')).toHaveText('Hard');
+  await expect(page.locator('.item-row').first().locator('.item-kind')).toHaveText('Hard');
 
   // A collection's own order has no direction.
   await page.getByRole('link', { name: 'Interview prep' }).click();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, isFailedVerdict, withUnit } from './format';
+import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, isFailedVerdict, sameDay, withUnit } from './format';
 import type { Verdict } from '../api/types';
 
 describe('formatRunTime', () => {
@@ -117,5 +117,14 @@ describe('isFailedVerdict', () => {
     for (const v of failed) expect(isFailedVerdict(v)).toBe(true);
     expect(isFailedVerdict('accepted')).toBe(false);
     expect(isFailedVerdict('executed')).toBe(false);
+  });
+});
+
+describe('sameDay', () => {
+  it('compares local calendar days, not 24-hour spans', () => {
+    const at = (h: number, d = 18) => new Date(2026, 10, d, h, 30).toISOString();
+    expect(sameDay(at(0), at(23))).toBe(true);
+    expect(sameDay(at(23), at(0, 19))).toBe(false);
+    expect(sameDay(at(12), at(12, 17))).toBe(false);
   });
 });
