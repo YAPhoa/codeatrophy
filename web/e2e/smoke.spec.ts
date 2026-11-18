@@ -594,6 +594,26 @@ test('settings: each category is its own page, and a link to an old section stil
   await expect(page).toHaveURL(/\/settings\/preferences$/);
 });
 
+test('preferences: the reading text size scales rendered Markdown and is kept in this browser', async ({ page }) => {
+  await open(page, '/settings/preferences');
+  const appearance = page.getByRole('group', { name: 'Appearance' });
+  await appearance.getByText('Large', { exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-reading-size', 'large');
+
+  const nav = page.getByRole('complementary', { name: 'Navigation' });
+  await nav.getByRole('link', { name: /^Readings/ }).click();
+  await page.locator('.item-title').first().click();
+  const body = page.locator('.md-longform');
+  await expect(body).toHaveCSS('font-size', '19.55px');
+
+  // Kept across a reload, and Default puts the sizes back.
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-reading-size', 'large');
+  await page.goto('/settings/preferences');
+  await page.getByRole('group', { name: 'Appearance' }).getByText('Default', { exact: true }).click();
+  await expect(page.locator('html')).not.toHaveAttribute('data-reading-size');
+});
+
 test('AI providers: a new one gets a model from the loaded list, is added once tested, and becomes the default', async ({ page }) => {
   await open(page, '/settings/ai');
   const section = page.getByRole('region', { name: 'AI providers' });

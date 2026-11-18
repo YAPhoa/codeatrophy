@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { useLimits, usePreferences, useUpdatePreferences } from '../../api/queries';
 import type { EditorPreferences, Preferences, PreferencesUpdate } from '../../api/types';
 import { setThemePreference, useThemePreference } from '../../lib/theme';
+import { setReadingSize, useReadingSize } from '../../lib/readingSize';
 import { Checkbox, NumberStepper, Segmented } from '../../ui/Field';
 import { ErrorCallout, Spinner } from '../../ui/misc';
 import { FONT_SIZE_MAX, FONT_SIZE_MIN, lineHeightFor, TAB_SIZES, type TabSize } from '../../ui/editorOptions';
@@ -125,6 +126,7 @@ export function PreferencesSection() {
   const { editor } = shown;
   const setEditor = (change: Partial<EditorPreferences>) => save({ editor: change });
   const theme = useThemePreference();
+  const readingSize = useReadingSize();
   const limits = useLimits();
   const maxGenerated = limits?.maxGeneratedTestCases ?? 30;
   const maxLarge = limits?.maxLargeTestCases ?? 5;
@@ -138,7 +140,7 @@ export function PreferencesSection() {
         <SaveStatus state={state} />
       </div>
       <p className="settings-lead">
-        Changes are saved as you make them and follow you to any browser, except the theme, which is kept per browser.
+        Changes are saved as you make them and follow you to any browser, except Appearance, which is kept per browser.
       </p>
       {state.status === 'error' && <ErrorCallout error={state.error} title="Could not save the change. The previous setting is restored." />}
 
@@ -149,7 +151,6 @@ export function PreferencesSection() {
         <div className="prefs-row">
           <div className="prefs-row-text">
             <div className="prefs-row-label">Theme</div>
-            <div className="field-hint">Stored in this browser.</div>
           </div>
           <Segmented
             label="Theme"
@@ -159,6 +160,22 @@ export function PreferencesSection() {
               { value: 'system', label: 'System' },
               { value: 'light', label: 'Light' },
               { value: 'dark', label: 'Dark' },
+            ]}
+          />
+        </div>
+        <div className="prefs-row">
+          <div className="prefs-row-text">
+            <div className="prefs-row-label">Reading text size</div>
+            <div className="field-hint">For statements, readings and notes.</div>
+          </div>
+          <Segmented
+            label="Reading text size"
+            value={readingSize}
+            onChange={setReadingSize}
+            options={[
+              { value: 'small', label: 'Small' },
+              { value: 'default', label: 'Default' },
+              { value: 'large', label: 'Large' },
             ]}
           />
         </div>

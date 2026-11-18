@@ -1,8 +1,9 @@
 /* Rendered Markdown. `.md` is the compact variant used for problem statements
-   and previews; `.md-longform` is tuned for reading articles. */
+   and previews; `.md-longform` is tuned for reading articles. Their sizes
+   scale with --reading-scale, the reader's chosen text size. */
 
 .md {
-  font-size: 15px;
+  font-size: calc(15px * var(--reading-scale));
   line-height: 1.6;
   color: var(--text);
   overflow-wrap: break-word;
@@ -116,7 +117,7 @@
 .md pre code {
   padding: 0;
   background: none;
-  font-size: var(--text-code);
+  font-size: calc(var(--text-code) * var(--reading-scale));
 }
 
 .md blockquote {
@@ -217,7 +218,7 @@
 /* Long-form reading */
 
 .md-longform {
-  font-size: 17px;
+  font-size: calc(17px * var(--reading-scale));
   line-height: 1.7;
 }
 
@@ -250,7 +251,7 @@
 }
 
 .md-longform pre code {
-  font-size: 14px;
+  font-size: calc(14px * var(--reading-scale));
 }
 
 .md-longform blockquote {

@@ -23,6 +23,9 @@
   --text-2xl: 24px;
   /* Static code; the code editor itself is 14px by default. */
   --text-code: 13px;
+  /* Reading text size (Preferences, lib/readingSize.ts): rendered Markdown
+     scales its sizes by this. */
+  --reading-scale: 1;
 
   /* Spacing, on a 4px grid. The half steps --space-0-5 and --space-1-5 are
      for tight spots inside controls, such as the gap between an icon and its
@@ -143,6 +146,14 @@
   --logo-fade-3: #95beb0;
   --logo-fade-4: #bad3c9;
   --logo-glow: transparent;
+}
+
+:root[data-reading-size='small'] {
+  --reading-scale: 0.9;
+}
+
+:root[data-reading-size='large'] {
+  --reading-scale: 1.15;
 }
 
 :root[data-theme='dark'] {
