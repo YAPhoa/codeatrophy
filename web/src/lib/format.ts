@@ -86,6 +86,15 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   return dateFmt.format(t);
 }
 
+const monthFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short' });
+
+/** As relativeTime, for a narrow column: past a year, the month alone ("Nov 2025"). */
+export function shortRelativeTime(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso);
+  if (!Number.isNaN(t) && Math.abs(t - now) >= 365 * 24 * 60 * 60_000) return monthFmt.format(t);
+  return relativeTime(iso, now);
+}
+
 export function absoluteTime(iso: string): string {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? '' : dateTimeFmt.format(t);
@@ -95,12 +104,6 @@ export function absoluteTime(iso: string): string {
 export function absoluteDate(iso: string): string {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? '' : dateFmt.format(t);
-}
-
-/** Whether two times fall on the same local calendar day. */
-export function sameDay(a: string, b: string): boolean {
-  const [x, y] = [new Date(a), new Date(b)];
-  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
 }
 
 const wholeFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });

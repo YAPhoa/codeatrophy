@@ -7,7 +7,7 @@ import { prefetchItem } from '../../api/queries';
 import type { Collection, ItemSummary } from '../../api/types';
 import { ItemPage } from '../../app/screens';
 import { useIntent } from '../../lib/intent';
-import { STATUS_LABEL, VERDICT_LABEL, absoluteDate, absoluteTime, isFailedVerdict, plural, relativeTime, sameDay } from '../../lib/format';
+import { STATUS_LABEL, VERDICT_LABEL, absoluteDate, absoluteTime, isFailedVerdict, plural, shortRelativeTime } from '../../lib/format';
 import { pathTo } from '../../lib/tree';
 import { Button, cx } from '../../ui/Button';
 import { preloadCodeEditor } from '../../ui/CodeEditor';
@@ -121,21 +121,20 @@ function LineTags({ tags, tab, returning, onReturned, more }: { tags: readonly s
 
 // ---- The details under the line ----
 
-/** What the line leaves out: the whole summary, then every tag and the facts that add something, each beside its label. */
+/** What the line leaves out: the whole summary, then every tag and the other facts, each beside its label. */
 function ItemDetails({ item, collections, tab }: { item: ItemSummary; collections: readonly Collection[]; tab: number }) {
   const paths = item.collectionIds.map((id) => pathTo(collections, id)).filter((p) => p.length > 0);
   const facts: { label: string; value: ReactNode }[] = [];
   if (item.tags.length > 0) facts.push({ label: 'Tags', value: <TagChips tags={item.tags} tabIndex={tab} /> });
-  // The line's date says when it was updated; the day it was created only adds something when it differs.
-  if (!sameDay(item.createdAt, item.updatedAt))
-    facts.push({
-      label: 'Created',
-      value: (
-        <time dateTime={item.createdAt} title={absoluteTime(item.createdAt)}>
-          {absoluteDate(item.createdAt)}
-        </time>
-      ),
-    });
+  if (item.type === 'problem') facts.push({ label: 'Tests', value: item.testCaseCount === 0 ? 'None' : plural(item.testCaseCount, 'test case') });
+  facts.push({
+    label: 'Created',
+    value: (
+      <time dateTime={item.createdAt} title={absoluteTime(item.createdAt)}>
+        {absoluteDate(item.createdAt)}
+      </time>
+    ),
+  });
   if (paths.length > 0)
     facts.push({
       label: 'Collections',
@@ -169,17 +168,15 @@ function ItemDetails({ item, collections, tab }: { item: ItemSummary; collection
           {item.summary}
         </Link>
       )}
-      {facts.length > 0 && (
-        <dl className="item-details-facts">
-          {facts.map((f) => (
-            <Fragment key={f.label}>
-              <dt>{f.label}</dt>
-              <dd>{f.value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      )}
-      {!item.summary && facts.length === 0 && <p className="item-details-empty">No description.</p>}
+      {!item.summary && <p className="item-details-empty">No description.</p>}
+      <dl className="item-details-facts">
+        {facts.map((f) => (
+          <Fragment key={f.label}>
+            <dt>{f.label}</dt>
+            <dd>{f.value}</dd>
+          </Fragment>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -304,9 +301,8 @@ export const ItemRow = memo(function ItemRow({
         <DifficultyBadge difficulty={item.difficulty} />
       </span>
       <span className="item-cell item-verdict">{verdict && isFailedVerdict(verdict) && <VerdictBadge verdict={verdict} short />}</span>
-      <span className="item-cell item-tests">{item.type === 'problem' && (item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test'))}</span>
       <time className="item-cell item-updated" dateTime={item.updatedAt} title={`Created ${absoluteTime(item.createdAt)}\nUpdated ${absoluteTime(item.updatedAt)}`}>
-        {relativeTime(item.updatedAt)}
+        {shortRelativeTime(item.updatedAt)}
       </time>
       <span className="item-cell item-star">
         <FavoriteButton item={item} size="sm" />

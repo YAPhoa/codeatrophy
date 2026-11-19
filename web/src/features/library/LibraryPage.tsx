@@ -68,7 +68,6 @@ function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) 
           </span>
           <span className="item-cell item-kind" />
           <span className="item-cell item-verdict" />
-          <span className="item-cell item-tests" />
           <span className="item-cell item-updated">
             <span className="skel skel-line skel-short" />
           </span>
@@ -616,9 +615,6 @@ export function LibraryPage() {
                     </span>
                     <span className="item-col-head is-verdict" aria-hidden="true">
                       Verdict
-                    </span>
-                    <span className="item-col-head is-tests" aria-hidden="true">
-                      Tests
                     </span>
                     <span className="item-col-head is-updated" aria-hidden="true">
                       Updated

@@ -4,8 +4,8 @@ import { open } from './support';
 // A library row's line shows the title, as many tags as fit and the facts in
 // columns, named in the list's head; it opens, from its chevron or a click
 // anywhere but on a control, to show what the line leaves out: the whole
-// summary, then every tag and the facts that add something (the day it was
-// created when that differs, its collections), each beside its label. The
+// summary, then every tag, a problem's test cases, the day it was created
+// and its collections, each beside its label. The
 // details stay under the title, clear of the facts' columns. While it is open
 // the line leaves the tags to the details, so each shows once, and nothing
 // else on the line moves.
@@ -30,7 +30,7 @@ async function detailsOf(page: Page, title: string) {
 const lineOf = (r: Locator) =>
   r.evaluate((li) => {
     const top = li.getBoundingClientRect().top;
-    const parts = ['.item-check input', '.item-status button', '.type-icon', '.item-title', '.item-variant', '.item-verdict .badge', '.item-kind .badge', '.item-tests', '.item-updated', '.item-star button', '.item-expand button'];
+    const parts = ['.item-check input', '.item-status button', '.type-icon', '.item-title', '.item-variant', '.item-verdict .badge', '.item-kind .badge', '.item-updated', '.item-star button', '.item-expand button'];
     return Object.fromEntries(
       parts.map((part) => {
         const box = li.querySelector(part)?.getBoundingClientRect();
@@ -92,15 +92,21 @@ test('library details: the chevron opens a row on its summary, every tag and the
   const details = await detailsOf(page, LONGEST);
   await expect(details).toBeVisible();
   await expect(details.locator('.item-details-summary')).toHaveText(LONGEST_SUMMARY);
+  // The chevron sits on the open row's own fill, and shades it on hover.
+  await page.mouse.move(0, 0);
+  await expect(hide).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await hide.hover();
+  await expect(hide).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   // Each fact beside its label; created a month ago, updated three days ago: the day it was created adds something.
   const facts = details.locator('.item-details-facts');
-  await expect(facts.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
+  await expect(facts.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
   await expect(facts.locator('dd').nth(0).locator('.chip-tag')).toHaveText(LONGEST_TAGS);
-  await expect(facts.locator('dd').nth(1)).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
+  await expect(facts.locator('dd').nth(1)).toHaveText('7 test cases');
+  await expect(facts.locator('dd').nth(2)).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
   await expect(details.getByText(/Updated|verdict|Wrong answer/)).toHaveCount(0);
   await expect(details.locator('time')).toHaveAttribute('title', /\d:\d\d/);
   // A nested collection is named by its whole path.
-  await expect(facts.locator('dd').nth(2).getByRole('link')).toHaveText(['Weekly practice', 'Interview prep / Arrays & hashing']);
+  await expect(facts.locator('dd').nth(3).getByRole('link')).toHaveText(['Weekly practice', 'Interview prep / Arrays & hashing']);
   // The rows below make room.
   await expect.poll(async () => (await below.boundingBox())!.y).toBeGreaterThan(belowTop + 40);
 
@@ -110,15 +116,32 @@ test('library details: the chevron opens a row on its summary, every tag and the
   await expect.poll(async () => (await below.boundingBox())!.y).toBe(belowTop);
 });
 
-test('library details: the day an item was created shows only when it is not the day it was updated', async ({ page }) => {
+test('library details: the day an item was created always shows, and a problem\'s test cases, but not a reading\'s', async ({ page }) => {
   await open(page, '/');
   // Created and updated four days ago.
   const same = row(page, 'Merge k Sorted Lists');
   await same.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, 'Merge k Sorted Lists');
   await expect(details.locator('.chip-tag')).toHaveText(['heap', 'linked-list']);
-  await expect(details.locator('dt')).toHaveText(['Tags', 'Collections']);
-  await expect(details.getByText(/Created|Updated/)).toHaveCount(0);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
+  await expect(details.locator('dd').nth(1)).toHaveText('7 test cases');
+  await expect(details.locator('dd time')).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
+  await expect(details.getByText(/Updated/)).toHaveCount(0);
+  // The line has no test count of its own.
+  await expect(same.locator('.item-tests')).toHaveCount(0);
+
+  // None, for a problem without any.
+  const untested = row(page, 'Sliding-window rate limiter');
+  await untested.getByRole('button', { name: 'Show details' }).click();
+  const none = await detailsOf(page, 'Sliding-window rate limiter');
+  await expect(none.locator('dt').nth(1)).toHaveText('Tests');
+  await expect(none.locator('dd').nth(1)).toHaveText('None');
+
+  // A reading has no tests.
+  const reading = row(page, 'How B-Trees Work');
+  await reading.getByRole('button', { name: 'Show details' }).click();
+  const readingDetails = await detailsOf(page, 'How B-Trees Work');
+  await expect(readingDetails.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
 
   // The line's date gives both times exactly.
   await expect(same.locator('.item-updated')).toHaveText('4 days ago');
@@ -346,7 +369,7 @@ test('library details: each label is level with the first line of its value, or 
   const r = row(page, COIN);
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, COIN);
-  await expect(details.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
   const pairs = () =>
     details.locator('.item-details-facts').evaluate((dl) =>
       [...dl.querySelectorAll('dt')].map((dt) => {
@@ -463,9 +486,9 @@ test('library head: the facts\' columns are named over them, but not on a narrow
   await open(page, '/');
   const head = page.locator('.item-list-head');
   const names = head.locator('.item-col-head');
-  await expect(names).toHaveText(['Difficulty', 'Verdict', 'Tests', 'Updated']);
+  await expect(names).toHaveText(['Difficulty', 'Verdict', 'Updated']);
   await expect(names.first()).toHaveAttribute('aria-hidden', 'true');
-  const columns = ['.item-kind', '.item-verdict', '.item-tests', '.item-updated'];
+  const columns = ['.item-kind', '.item-verdict', '.item-updated'];
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     // Where each column's name starts, and on every row, where each fact's content starts and ends, and where the next column starts.
@@ -517,7 +540,7 @@ test('library details: on a narrow screen the tags and facts take a second line,
   // The title has the first line to itself, in full.
   await expect(r.locator('.item-title')).not.toHaveAttribute('title', /./);
   expect(await r.locator('.item-title').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  for (const part of ['.item-kind .badge', '.item-verdict .badge', '.item-tests', '.item-updated', '.item-tags']) {
+  for (const part of ['.item-kind .badge', '.item-verdict .badge', '.item-updated', '.item-tags']) {
     const box = (await r.locator(part).boundingBox())!;
     expect(box.y).toBeGreaterThan(title.y + title.height);
   }

@@ -990,23 +990,20 @@ test('library: the filter box names the view, a row shows only a failed verdict 
   await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
   await expect(filter).toHaveAccessibleName('Filter items');
 
-  // The test count is always there; a verdict only when the last one failed. The status icon's tooltip gives any last one.
+  // A verdict only when the last one failed. The status icon's tooltip gives any last one.
   const rows = page.locator('.item-row');
   const lru = rows.filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) });
-  await expect(lru.locator('.item-tests')).toHaveText('4 tests');
   await expect(lru.locator('.item-verdict')).toHaveText('Compile error');
   await expect(lru.locator('.item-status button')).toHaveAttribute('title', 'To do · Last verdict: Compile error');
   await expect(page.locator('.item-verdict', { hasText: /Accepted|Executed/ })).toHaveCount(0);
-  await expect(page.locator('.item-tests', { hasText: 'no tests' }).first()).toBeVisible();
-  // A reading's type icon says what it is; its difficulty shows like a problem's, when it has one, and it has no test count.
+  // A reading's type icon says what it is; its difficulty shows like a problem's, when it has one.
   const reading = rows.filter({ has: page.getByRole('link', { name: 'How B-Trees Work', exact: true }) });
   await expect(reading.getByLabel('Reading', { exact: true })).toBeVisible();
   await expect(reading.locator('.item-kind')).toHaveText('');
   const rated = rows.filter({ has: page.getByRole('link', { name: 'Raft: Leader Election Cheat Sheet', exact: true }) });
   await expect(rated.locator('.item-kind .badge-difficulty')).toHaveText('Medium');
-  await expect(rows.locator('.item-kind, .item-verdict, .item-tests').filter({ hasText: 'Reading' })).toHaveCount(0);
+  await expect(rows.locator('.item-kind, .item-verdict').filter({ hasText: 'Reading' })).toHaveCount(0);
   await expect(rows.locator('.badge').filter({ hasText: /^Reading$/ })).toHaveCount(0);
-  await expect(reading.locator('.item-tests')).toHaveText('');
 
   // A title cut off by the row shows in full on hover; one that fits gets no tooltip.
   await page.setViewportSize({ width: 1000, height: 900 });

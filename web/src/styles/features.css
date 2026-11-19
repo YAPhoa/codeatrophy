@@ -416,11 +416,11 @@
 /* The rows' columns (see .item-row), shared with the head bar so its
    column names sit over them. */
 .item-list-wrap {
-  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 64px 84px 28px 28px;
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 76px 24px 28px;
 }
 
 .item-list-wrap.is-reorderable {
-  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 64px 84px 28px 28px 22px;
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 76px 24px 28px 22px;
 }
 
 /* The checkbox over the rows' checkboxes, the count from the status column
@@ -444,7 +444,7 @@
 }
 
 .item-head-label {
-  grid-column: 2 / 10;
+  grid-column: 2 / 9;
   min-width: 0;
   padding-left: calc(var(--space-2) - var(--space-0-5));
   white-space: nowrap;
@@ -469,22 +469,18 @@
   grid-column: 6;
 }
 
-.item-col-head.is-tests {
+.item-col-head.is-updated {
   grid-column: 7;
 }
 
-.item-col-head.is-updated {
-  grid-column: 8;
-}
-
 .item-list-head .spin-wrap {
-  grid-column: 10;
+  grid-column: 9;
   justify-self: center;
 }
 
 /* A row's line: the checkbox, status and type on the left, the title and
-   its tags, then the facts in fixed columns (a problem's difficulty, a
-   failed verdict, tests, updated), the star and the chevron. Every column
+   its tags, then the facts in fixed columns (difficulty, a failed verdict,
+   updated), the star and the chevron. Every column
    keeps its width whether or not a row fills it, and each starts its content
    at its left edge, under its name in the head, so the facts line up from
    row to row. Each is as wide as its longest usual value and a gap. A click anywhere but on a control opens or closes the row (ItemRow). */
@@ -568,6 +564,11 @@
 .item-star,
 .item-expand {
   justify-content: center;
+}
+
+/* The star's button is a little narrower than the others, to sit closer to the date. */
+.item-star .btn-icon {
+  width: 24px;
 }
 
 .item-check input {
@@ -699,7 +700,6 @@
   padding: 0 var(--space-1-5) 0 var(--space-1);
 }
 
-.item-tests,
 .item-updated {
   color: var(--text-3);
   font-size: var(--text-sm);
@@ -711,6 +711,16 @@
   justify-content: center;
   color: var(--text-3);
   cursor: grab;
+}
+
+/* The chevron sits on the row's own fill, open or not; a hover shades that
+   fill a step, so it still reads as a button on any row and theme. */
+.item-expand .btn-ghost[aria-expanded] {
+  background: transparent;
+}
+
+.item-expand .btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .item-expand-icon {
@@ -815,7 +825,7 @@
    title, so the title keeps the whole width of the first. */
 @media (max-width: 700px) {
   .item-row {
-    grid-template-columns: 28px 28px auto auto auto auto minmax(0, 1fr) 28px 28px;
+    grid-template-columns: 28px 28px auto auto auto minmax(0, 1fr) 28px 28px;
     grid-template-rows: 34px 24px;
     column-gap: 0;
     padding-bottom: var(--space-1-5);
@@ -834,7 +844,7 @@
   .item-skeleton .item-main {
     display: flex;
     align-items: center;
-    grid-area: 1 / 3 / 2 / 8;
+    grid-area: 1 / 3 / 2 / 7;
     padding: 0 var(--space-2) 0 var(--space-1);
   }
 
@@ -847,16 +857,16 @@
   }
 
   .item-head {
-    grid-area: 1 / 3 / 2 / 8;
+    grid-area: 1 / 3 / 2 / 7;
     padding: 0 var(--space-2) 0 var(--space-1);
   }
 
   .item-star {
-    grid-area: 1 / 8;
+    grid-area: 1 / 7;
   }
 
   .item-expand {
-    grid-area: 1 / 9;
+    grid-area: 1 / 8;
   }
 
   .item-kind {
@@ -868,23 +878,18 @@
     grid-area: 2 / 4;
   }
 
-  .item-tests {
-    grid-area: 2 / 5;
-  }
-
   .item-updated {
-    grid-area: 2 / 6;
+    grid-area: 2 / 5;
   }
 
   .item-kind:not(:empty),
   .item-verdict:not(:empty),
-  .item-tests:not(:empty),
   .item-updated {
     padding-right: var(--space-3);
   }
 
   .item-tags {
-    grid-area: 2 / 7 / 3 / -1;
+    grid-area: 2 / 6 / 3 / -1;
     justify-content: flex-start;
     min-width: 0;
     padding-right: var(--space-2);
