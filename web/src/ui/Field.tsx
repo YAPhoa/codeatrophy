@@ -1,7 +1,8 @@
-import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { useId, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton, cx } from './Button';
 import { InfoTip } from './InfoTip';
+import { Select, type SelectProps } from './Select';
 import { useSlidingIndicator } from '../lib/motion';
 
 interface FieldProps {
@@ -133,11 +134,8 @@ export function TextAreaField({ label, value, onChange, hint, error, hideLabel, 
   );
 }
 
-type SelectFieldProps<T extends string> = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange' | 'value' | 'children'> & {
+type SelectFieldProps<T extends string> = Omit<SelectProps<T>, 'id' | 'aria-describedby' | 'aria-invalid'> & {
   label: string;
-  value: T;
-  onChange: (value: T) => void;
-  options: readonly { value: T; label: string; disabled?: boolean }[];
   hint?: ReactNode;
   info?: ReactNode;
   error?: string | null;
@@ -145,18 +143,10 @@ type SelectFieldProps<T extends string> = Omit<SelectHTMLAttributes<HTMLSelectEl
   fieldClassName?: string;
 };
 
-export function SelectField<T extends string>({ label, value, onChange, options, hint, info, error, hideLabel, fieldClassName, className, ...rest }: SelectFieldProps<T>) {
+export function SelectField<T extends string>({ label, hint, info, error, hideLabel, fieldClassName, ...rest }: SelectFieldProps<T>) {
   return (
     <Field label={label} hint={hint} info={info} error={error} hideLabel={hideLabel} className={fieldClassName}>
-      {(a) => (
-        <select {...rest} {...a} name={rest.name ?? a.name} className={cx('input select', className)} value={value} onChange={(e) => onChange(e.target.value as T)}>
-          {options.map((o) => (
-            <option key={o.value} value={o.value} disabled={o.disabled}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )}
+      {(a) => <Select {...rest} {...a} name={rest.name ?? a.name} />}
     </Field>
   );
 }

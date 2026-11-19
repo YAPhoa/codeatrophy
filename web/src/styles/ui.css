@@ -322,6 +322,50 @@
   border-radius: var(--radius-sm);
 }
 
+/* The app's own select (ui/Select.tsx): a button drawn as the field. The
+   choice is cut short with an ellipsis; where the width is left to it, the
+   unseen labels of every option make it as wide as the longest, as a native
+   select is. */
+.select-trigger {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.select-trigger > * {
+  grid-area: 1 / 1;
+}
+
+.select-trigger:disabled {
+  cursor: default;
+}
+
+/* Open, it keeps the ring of focus, whatever opened it. */
+.select-trigger[aria-expanded='true'] {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-sizer {
+  display: flex;
+  flex-direction: column;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* Drawn from an attribute, so the labels are no part of the button's text. */
+.select-sizer > span::before {
+  content: attr(data-label);
+}
+
 .check {
   display: flex;
   align-items: flex-start;
@@ -784,6 +828,29 @@ button.chip:hover {
   width: 16px;
   justify-content: center;
   flex: none;
+}
+
+/* A select's list: the menu's rows, scrolling inside the popover's border
+   past a height. It may be wider than its button for long labels, which
+   wrap past the popover's widest. */
+.select-pop {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: min(560px, calc(100vw - 16px));
+}
+
+.select-list {
+  min-height: 0;
+  max-height: 320px;
+  padding: var(--space-1);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.select-option-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .menu-sep {

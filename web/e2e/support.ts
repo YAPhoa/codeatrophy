@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Open the app with short mock delays (or the scenario `mock` names), and
@@ -95,4 +95,22 @@ export async function withExtraItems(page: Page, count: number): Promise<void> {
       },
     });
   }, count);
+}
+
+/**
+ * Open the list of one of the app's selects (ui/Select.tsx), a button with
+ * the role combobox, and return it. Escape puts it away again.
+ */
+export async function openList(select: Locator): Promise<Locator> {
+  await select.click();
+  const id = await select.getAttribute('aria-controls');
+  const list = select.page().locator(`[id="${id}"]`);
+  await list.waitFor();
+  return list;
+}
+
+/** Choose an option in one of the app's selects as a pointer does: open its list and click the option with that name. */
+export async function choose(select: Locator, option: string | RegExp): Promise<void> {
+  const list = await openList(select);
+  await list.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
 }

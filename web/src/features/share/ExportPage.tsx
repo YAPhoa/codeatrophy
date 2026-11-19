@@ -36,7 +36,7 @@ export function ExportSection() {
   const [implied] = useState<ExportScope>(() => (passedIds.length > 0 ? 'items' : presetCollection ? 'collection' : 'all'));
   const [scope, setScope] = useUrlState<ExportScope>(
     'scope',
-    (raw) => (raw === 'all' || raw === 'collection' || raw === 'items' ? raw : implied),
+    (raw) => (raw === 'all' || raw === 'collection' || (raw === 'items' && passedIds.length > 0) ? raw : implied),
     (value) => (value === implied ? null : value),
   );
   const [collectionId, setCollectionId] = useState(presetCollection ?? '');
@@ -51,7 +51,7 @@ export function ExportSection() {
   const [done, setDone] = useState<{ filename: string; size: number } | null>(null);
 
   const tree = useMemo(() => buildTree(collections), [collections]);
-  const options = useMemo(() => flattenTree(tree).map((n) => ({ value: n.collection.id, label: `${' '.repeat(n.depth)}${n.collection.name}` })), [tree]);
+  const options = useMemo(() => flattenTree(tree).map((n) => ({ value: n.collection.id, label: n.collection.name, depth: n.depth })), [tree]);
   const effectiveCollection = collectionId || options[0]?.value || '';
   const chosen = collections.find((c) => c.id === effectiveCollection);
   const nested = chosen ? descendantIds(tree, chosen.id).length : 0;
@@ -96,8 +96,8 @@ export function ExportSection() {
         Export a bundle
       </h1>
       <p className="settings-lead">
-        A bundle is a zip of plain Markdown, JSON and source files that any Codeatrophy instance can import. It carries content only:{' '}
-        <strong>your status, favorites, notes and submissions are never included</strong>.
+        A bundle is a zip of plain Markdown, JSON and source files that any Codeatrophy instance can import. It does not include{' '}
+        <strong>your status, favorites, notes or submissions</strong>.
       </p>
 
       <form
@@ -108,11 +108,11 @@ export function ExportSection() {
         }}
       >
         <fieldset className="choice-cards">
-          <legend className="field-label">What to export</legend>
+          <legend className="field-label">I want to export</legend>
           <label className={cx('choice-card', scope === 'all' && 'is-selected')}>
             <input type="radio" name="scope" checked={scope === 'all'} onChange={() => setScope('all')} />
             <span>
-              <strong>The whole library</strong>
+              <strong>My whole library</strong>
               <span className="choice-text">
                 {stats.data ? `${plural(stats.data.items.total, 'item')} and ${plural(stats.data.collections, 'collection')}` : 'Every item and collection'}
               </span>
@@ -122,18 +122,19 @@ export function ExportSection() {
             <input type="radio" name="scope" checked={scope === 'collection'} disabled={options.length === 0} onChange={() => setScope('collection')} />
             <span>
               <strong>A collection</strong>
-              <span className="choice-text">{options.length === 0 ? 'There are no collections yet' : 'The collection, everything nested in it, and their items'}</span>
+              {options.length === 0 && <span className="choice-text">There are no collections yet</span>}
             </span>
           </label>
-          <label className={cx('choice-card', scope === 'items' && 'is-selected', passedIds.length === 0 && 'is-disabled')}>
-            <input type="radio" name="scope" checked={scope === 'items'} disabled={passedIds.length === 0} onChange={() => setScope('items')} />
-            <span>
-              <strong>Selected items</strong>
-              <span className="choice-text">
-                {passedIds.length > 0 ? `${plural(passedIds.length, 'item')} you selected (no collections)` : 'Select items in the library, then choose “Export” in the selection bar'}
+          {/* Offered only to someone who came here with a selection from the library. */}
+          {passedIds.length > 0 && (
+            <label className={cx('choice-card', scope === 'items' && 'is-selected')}>
+              <input type="radio" name="scope" checked={scope === 'items'} onChange={() => setScope('items')} />
+              <span>
+                <strong>Selected items</strong>
+                <span className="choice-text">{plural(passedIds.length, 'item')} you selected (no collections)</span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
         </fieldset>
 
         {scope === 'collection' && options.length > 0 && (
@@ -170,13 +171,13 @@ export function ExportSection() {
             checked={includeSolutions}
             onChange={setIncludeSolutions}
             label="Saved solutions"
-            hint="Every solution saved with a problem, the reference solution included. Turn off to share problems without giving the answers away."
+            hint="Includes each problem&apos;s reference solution."
           />
           <Checkbox
             checked={includeHiddenTests}
             onChange={setIncludeHiddenTests}
             label="Hidden test cases"
-            hint="Turn off to export only the sample cases. Recipients can read and run samples, but cannot judge a full submission."
+            hint="Turn off to export only the sample cases."
           />
         </fieldset>
 
@@ -186,7 +187,6 @@ export function ExportSection() {
         </div>
         <TextAreaField
           label="Description (optional)"
-          hint="Shown to whoever imports the bundle."
           value={description}
           onChange={setDescription}
           rows={2}

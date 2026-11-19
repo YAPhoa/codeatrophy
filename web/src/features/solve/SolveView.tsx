@@ -19,6 +19,7 @@ import { CodeEditor } from '../../ui/CodeEditor';
 import { useConfirm } from '../../ui/Dialog';
 import { LargeText } from '../../ui/LargeText';
 import { Markdown } from '../../ui/Markdown';
+import { Select } from '../../ui/Select';
 import { SplitPane } from '../../ui/SplitPane';
 import { Callout, ErrorCallout, PageLoading, Tabs, tabPanelProps } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
@@ -463,14 +464,15 @@ export function SolveView({ item }: { item: Item }) {
         <label htmlFor="solve-language" className="sr-only">
           Language
         </label>
-        <select id="solve-language" name="language" className="input input-sm select solve-language" value={language ?? ''} onChange={(e) => setLanguage(e.target.value)} disabled={languages.length === 0}>
-          {languages.map((l) => (
-            <option key={l} value={l}>
-              {languageName(l)}
-              {versionOf(l) ? ` ${versionOf(l)}` : ''}
-            </option>
-          ))}
-        </select>
+        <Select
+          id="solve-language"
+          name="language"
+          className="input-sm solve-language"
+          value={language ?? ''}
+          onChange={setLanguage}
+          options={languages.map((l) => ({ value: l, label: `${languageName(l)}${versionOf(l) ? ` ${versionOf(l)}` : ''}` }))}
+          disabled={languages.length === 0}
+        />
         <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => void resetCode()} title="Replace your code with the starter code">
           Reset
         </Button>

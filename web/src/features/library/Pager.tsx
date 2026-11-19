@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { PAGE_SIZES, pageList, withPage, type PageSize } from '../../lib/paging';
 import { cx } from '../../ui/Button';
+import { Select } from '../../ui/Select';
 
 interface PagerProps {
   page: number;
@@ -42,19 +43,14 @@ export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageS
   return (
     <div className="pager">
       <div className="pager-info">
-        <select
+        <Select
           id={sizeId}
           name="page-size"
-          className="input input-sm select pager-size"
-          value={pageSize}
-          onChange={(e) => onPageSize(Number(e.target.value) as PageSize)}
-        >
-          {PAGE_SIZES.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+          className="input-sm pager-size"
+          value={String(pageSize)}
+          onChange={(v) => onPageSize(Number(v) as PageSize)}
+          options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
+        />
         <label htmlFor={sizeId}>per page</label>
         <span className="pager-range">
           Showing {total === 0 ? 0 : offset + 1}–{offset + shown} of {total}

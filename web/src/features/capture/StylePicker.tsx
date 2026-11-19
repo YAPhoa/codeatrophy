@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { PenLine } from 'lucide-react';
 import type { StylePreset } from '../../api/types';
 import type { StyleChoice } from '../../lib/styleChoice';
+import { Select } from '../../ui/Select';
 
 export { resolveStyleChoice, type StyleChoice } from '../../lib/styleChoice';
 
@@ -34,23 +35,16 @@ export function StylePicker({ styles, value, onChange, disabled, id = 'style-pic
         <PenLine size={14} aria-hidden="true" />
         Style
       </label>
-      <select
+      <Select
         name="style"
         id={id}
-        className="input input-sm select"
+        className="input-sm"
         value={value ?? NONE}
         disabled={disabled}
-        onChange={(e) => onChange(e.target.value === NONE ? null : e.target.value)}
+        onChange={(v) => onChange(v === NONE ? null : v)}
         title={styles.find((s) => s.id === value)?.instructions ?? 'Only the built-in authoring conventions'}
-      >
-        <option value={NONE}>No style (built-in)</option>
-        {styles.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-            {s.isDefault ? ' (default)' : ''}
-          </option>
-        ))}
-      </select>
+        options={[{ value: NONE, label: 'No style (built-in)' }, ...styles.map((s) => ({ value: s.id, label: `${s.name}${s.isDefault ? ' (default)' : ''}` }))]}
+      />
     </span>
   );
 }

@@ -19,6 +19,7 @@ import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { DiffView } from '../../ui/DiffView';
 import { Checkbox, TextField } from '../../ui/Field';
 import { TestDataField } from '../../ui/LargeText';
+import { Select } from '../../ui/Select';
 import { Badge, Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { ItemBar } from '../item/ItemBar';
@@ -718,13 +719,14 @@ function TestsManager({ item }: { item: Item }) {
                     <label htmlFor="verify-solution" className="verify-panel-label">
                       Check another
                     </label>
-                    <select
+                    <Select
                       name="solution"
                       id="verify-solution"
-                      className="input select verify-select"
+                      className="verify-select"
                       value={other.id}
-                      onChange={(e) => {
-                        setPickedId(e.target.value);
+                      options={others.map((s) => ({ value: s.id, label: `${s.name} · ${languageLabel(s.language, meta?.judge.languages)}` }))}
+                      onChange={(id) => {
+                        setPickedId(id);
                         // Results belong to the solution that produced them.
                         if (!referenceRun) {
                           setVerify(null);
@@ -733,13 +735,7 @@ function TestsManager({ item }: { item: Item }) {
                         }
                       }}
                       disabled={verifying !== null}
-                    >
-                      {others.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} · {languageLabel(s.language, meta?.judge.languages)}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <Button onClick={() => void runVerify(other)} busy={verifying?.id === other.id} disabled={!canCheck || verifying !== null} title={!judgeOn ? 'Needs a judge engine' : undefined}>
                       Check solution
                     </Button>

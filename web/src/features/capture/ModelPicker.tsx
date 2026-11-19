@@ -5,6 +5,7 @@ import { isApiError } from '../../api/client';
 import { qk, useAiSettings } from '../../api/queries';
 import type { AiSettings } from '../../api/types';
 import { providerIdToSend, providerLabel, readyProviders, resolveProviderChoice, type ProviderChoice } from '../../lib/providerChoice';
+import { Select } from '../../ui/Select';
 
 export type { ProviderChoice } from '../../lib/providerChoice';
 
@@ -50,13 +51,7 @@ export function ModelPicker({ settings, value, onChange, disabled, id = 'model-p
         <Cpu size={13} aria-hidden="true" />
         Model
       </label>
-      <select name="model" id={id} className="input input-sm select" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <Select name="model" id={id} className="input-sm" value={value ?? ''} disabled={disabled} onChange={onChange} options={options} />
     </span>
   );
 }

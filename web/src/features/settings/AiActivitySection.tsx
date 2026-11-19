@@ -8,7 +8,7 @@ import type { AiLogDetail, AiLogEntry, AiLogFilters, AiLogStatus, AiOperation } 
 import { OPERATIONS, OPERATION_LABEL, entryFacts, exportName, filterParams, filtersFrom, logProviders, rawRequest, rawResponse, thirtyDaysBefore, type RawText } from '../../lib/aiLog';
 import { saveJson } from '../../lib/download';
 import { errorLine, sentence } from '../../lib/errors';
-import { absoluteTime, formatDuration, formatTokens, plural, relativeTime } from '../../lib/format';
+import { absoluteTime, formatDuration, formatTokens, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { Collapse, ExpandChevron } from '../../ui/Collapse';
@@ -74,7 +74,6 @@ export function AiActivitySection() {
         <h1 id="ai-activity-title" className="page-title">
           AI activity
         </h1>
-        {log.data && <span className="muted">{plural(total, 'request')}</span>}
         <span className="spacer" />
         <Button variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(entries, 'ai-activity.json')} disabled={entries.length === 0} title="The entries loaded so far">
           Export list
@@ -83,7 +82,7 @@ export function AiActivitySection() {
           Clear…
         </Button>
       </div>
-      <p className="settings-lead">Every request sent to an AI provider. Open one for what was sent and what came back.</p>
+      <p className="settings-lead">Logs for every request sent to AI providers.</p>
 
       <div className="row log-filters">
         <SelectField

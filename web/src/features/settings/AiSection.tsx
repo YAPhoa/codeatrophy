@@ -119,9 +119,8 @@ export function AiSection({ meta }: { meta: Meta }) {
         </Button>
       </div>
       <p className="settings-lead">
-        Used to draft items from rough notes, generate test cases and create variants. You can keep several providers, such as a hosted service and your own server, and pick one
-        as the default. Without a provider, everything else still works and items are written by hand. Assistants connected over MCP use their own model and do not use these
-        providers.
+        Connect AI providers to draft items from rough notes, generate test cases and create variants. Providers are optional: you can still write items yourself, or edit your
+        library with an assistant over MCP.
       </p>
 
       {data && full && (

@@ -49,7 +49,7 @@ function CollectionEditor({ state, collections, onClose }: { state: EditorState;
       { value: ROOT, label: 'Top level' },
       ...flattenTree(tree)
         .filter((n) => !blocked.has(n.collection.id))
-        .map((n) => ({ value: n.collection.id, label: `${' '.repeat(n.depth)}${n.collection.name}` })),
+        .map((n) => ({ value: n.collection.id, label: n.collection.name, depth: n.depth })),
     ];
   }, [collections, editing]);
 

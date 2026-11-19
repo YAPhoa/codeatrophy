@@ -258,7 +258,7 @@ export function StylesSection() {
                 <SaveStatus state={choice.state} />
               </div>
               <p id="default-style-hint" className="field-hint">
-                Used for new drafts unless you choose a different one when drafting.
+                Used as default. You can manually pick a different one when drafting.
               </p>
             </div>
             <Button

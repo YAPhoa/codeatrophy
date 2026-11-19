@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, withExtraItems } from './support';
+import { choose, open, withExtraItems } from './support';
 
 // The library lists one page at a time. A bar under the list says how many
 // items a page holds (kept per browser) and which this one shows, and has a
@@ -15,7 +15,7 @@ test('paging: the bar shows the range and links to each page, and the page is in
   await withExtraItems(page, 107);
   await open(page, '/');
   await expect(pager(page).locator('.pager-range')).toHaveText('Showing 1–50 of 132');
-  await expect(pager(page).getByRole('combobox', { name: 'per page' })).toHaveValue('50');
+  await expect(pager(page).getByRole('combobox', { name: 'per page' })).toHaveText('50');
   await expect(pages(page).getByRole('link', { name: /^Page/ })).toHaveText(['1', '2', '3']);
   await expect(pages(page).getByRole('link', { name: 'Page 1' })).toHaveAttribute('aria-current', 'page');
   await expect(pages(page).getByRole('button', { name: 'Previous page' })).toBeDisabled();
@@ -53,14 +53,14 @@ test('paging: a long list shows its first, last and nearby pages, with gaps betw
 test('paging: the page size is kept in this browser, and changing it starts from the first page', async ({ page }) => {
   await withExtraItems(page, 107);
   await open(page, '/?page=2');
-  await pager(page).getByRole('combobox', { name: 'per page' }).selectOption('25');
+  await choose(pager(page).getByRole('combobox', { name: 'per page' }), '25');
   await expect(page).not.toHaveURL(/page=/);
   await expect(pager(page).locator('.pager-range')).toHaveText('Showing 1–25 of 132');
   await expect(pages(page).getByRole('link', { name: /^Page/ })).toHaveText(['1', '2', '3', '4', '5', '6']);
   await expect(titles(page)).toHaveCount(25);
 
   await page.reload();
-  await expect(pager(page).getByRole('combobox', { name: 'per page' })).toHaveValue('25');
+  await expect(pager(page).getByRole('combobox', { name: 'per page' })).toHaveText('25');
   await expect(titles(page)).toHaveCount(25);
 });
 

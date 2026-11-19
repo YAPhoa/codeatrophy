@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { choose, open, openList } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
 // against the API mock, whose state lives in the page: every test starts from
@@ -71,10 +71,11 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
   await page.getByRole('link', { name: 'Open and solve' }).click();
   await expect(page.locator('.editor-host .cm-content')).toContainText('def twoSum(self, nums');
   await expect(page.locator('.editor-host .cm-content')).not.toContainText('sys.stdin');
-  const languages = page.getByRole('combobox', { name: 'Language' }).locator('option');
+  const languages = (await openList(page.getByRole('combobox', { name: 'Language' }))).getByRole('option');
   // The default style keeps Python and Go, each with its runner.
   await expect(languages).toHaveCount(2);
   await expect(languages).toContainText(['Go', 'Python']);
+  await page.keyboard.press('Escape');
 
   // The runner is one click away, folded around the solver's code.
   const editor = page.locator('.editor-host');
@@ -127,7 +128,7 @@ test('solve: the lines that read the input open folded, and unfold in place', as
   await expect(editor.locator('.cm-foldPlaceholder')).toHaveCount(0);
 
   // Opened in another language, its region is folded again.
-  await page.getByRole('combobox', { name: 'Language' }).selectOption('cpp');
+  await choose(page.getByRole('combobox', { name: 'Language' }), /^C\+\+/);
   await expect(editor.locator('.cm-line').filter({ hasText: '// region input' })).toBeVisible();
   await expect(editor.getByText('cin >> rows')).toHaveCount(0);
 });
@@ -844,9 +845,10 @@ test('AI providers: the request timeout is saved when committed, and a value out
 test('model: a draft, its revision and generated test cases use the provider chosen for them, and the default stays', async ({ page }) => {
   await open(page, '/new');
   const model = page.getByRole('combobox', { name: 'Model' });
-  await expect(model.locator('option')).toHaveText(['Personal key · claude-opus-5-5 (default)', 'Local Ollama · qwen2.5-coder:14b', 'Work gateway · llama3.1:70b']);
-  await expect(model.locator('option:checked')).toHaveText('Personal key · claude-opus-5-5 (default)');
-  await model.selectOption({ label: 'Local Ollama · qwen2.5-coder:14b' });
+  await expect((await openList(model)).getByRole('option')).toHaveText(['Personal key · claude-opus-5-5 (default)', 'Local Ollama · qwen2.5-coder:14b', 'Work gateway · llama3.1:70b']);
+  await page.keyboard.press('Escape');
+  await expect(model).toHaveText('Personal key · claude-opus-5-5 (default)');
+  await choose(model, 'Local Ollama · qwen2.5-coder:14b');
 
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
@@ -856,8 +858,8 @@ test('model: a draft, its revision and generated test cases use the provider cho
   // The revision form, once unfolded, carries the choice on, and can change it.
   await page.getByRole('button', { name: 'Ask for a revision' }).click();
   const revise = page.locator('.revise-form').getByRole('combobox', { name: 'Model' });
-  await expect(revise.locator('option:checked')).toHaveText('Local Ollama · qwen2.5-coder:14b');
-  await revise.selectOption({ label: 'Work gateway · llama3.1:70b' });
+  await expect(revise).toHaveText('Local Ollama · qwen2.5-coder:14b');
+  await choose(revise, 'Work gateway · llama3.1:70b');
   await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
   await expect(page.getByText('Revising the draft…')).toBeHidden();
@@ -872,8 +874,8 @@ test('model: a draft, its revision and generated test cases use the provider cho
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
   await page.getByRole('link', { name: /Generate/ }).first().click();
-  await expect(model.locator('option:checked')).toHaveText('Personal key · claude-opus-5-5 (default)');
-  await model.selectOption({ label: 'Work gateway · llama3.1:70b' });
+  await expect(model).toHaveText('Personal key · claude-opus-5-5 (default)');
+  await choose(model, 'Work gateway · llama3.1:70b');
   await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
   await expect(page.locator('.proposal-head .usage-line')).toContainText('llama3.1:70b');
 });
@@ -908,14 +910,12 @@ test('AI activity: a generation is logged with its raw request, and the list loa
   await expect(newest.getByRole('textbox')).toHaveCount(0);
 
   // The rest of the log arrives as its end comes into view.
-  await expect(page.getByText('247 requests')).toBeVisible();
   await expect(rows).toHaveCount(50);
   await rows.last().scrollIntoViewIfNeeded();
   await expect(rows).toHaveCount(100);
 
-  // Filters are the server's: the count is of what matches.
-  await page.getByLabel('Outcome').selectOption('failed');
-  await expect(page.getByText('247 requests')).toHaveCount(0);
+  // Filters are the server's.
+  await choose(page.getByRole('combobox', { name: 'Outcome' }), 'Failed');
   await expect(rows.first()).toContainText('failed');
   await rows.first().locator('.log-row').click();
   await expect(rows.first().getByText('No response arrived.')).toBeVisible();
@@ -926,8 +926,9 @@ test('output comparison: the two choices are explained behind the "i" of the fie
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   // Exact: the library also has "Edit Distance".
   await page.getByRole('link', { name: 'Edit', exact: true }).click();
-  const choice = page.getByLabel('Output comparison', { exact: true });
-  await expect(choice.locator('option')).toHaveText(['Values only', 'Exact text']);
+  const choice = page.getByRole('combobox', { name: 'Output comparison', exact: true });
+  await expect((await openList(choice)).getByRole('option')).toHaveText(['Values only', 'Exact text']);
+  await page.keyboard.press('Escape');
 
   const tip = page.getByRole('button', { name: 'About output comparison' });
   await expect(page.getByRole('tooltip')).toHaveCount(0);
@@ -1046,7 +1047,7 @@ test('settings: Import and Export are pages of Settings, and their old addresses
   await expect(nav.getByRole('link', { name: 'Export' })).toHaveAttribute('aria-current', 'page');
   await expect(page).toHaveTitle(/^Export · Settings/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Export a bundle');
-  await expect(page.getByLabel('Collection', { exact: true })).toHaveValue(collection);
+  await expect(page.getByLabel('Collection', { exact: true })).toHaveAttribute('value', collection);
 
   await nav.getByRole('link', { name: 'Import' }).click();
   await expect(page).toHaveURL(/\/settings\/import$/);
@@ -1056,7 +1057,7 @@ test('settings: Import and Export are pages of Settings, and their old addresses
   // A bookmark of the old page arrives, with what it asked to export.
   await open(page, `/export?collection=${collection}&solutions=0`);
   await expect(page).toHaveURL(new RegExp(`/settings/export\\?collection=${collection}&solutions=0`));
-  await expect(page.getByLabel('Collection', { exact: true })).toHaveValue(collection);
+  await expect(page.getByLabel('Collection', { exact: true })).toHaveAttribute('value', collection);
   await expect(page.getByRole('checkbox', { name: 'Saved solutions' })).not.toBeChecked();
   await open(page, '/import');
   await expect(page).toHaveURL(/\/settings\/import\?mock=fast$/);

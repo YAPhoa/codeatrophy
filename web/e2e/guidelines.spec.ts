@@ -144,7 +144,7 @@ test('deep links: an export of selected items survives in the address', async ({
 
   await page.getByRole('checkbox', { name: 'Saved solutions' }).uncheck();
   await expect(page).toHaveURL(/[?&]solutions=0/);
-  await page.getByRole('radio', { name: /The whole library/ }).check();
+  await page.getByRole('radio', { name: /My whole library/ }).check();
   await expect(page).toHaveURL(/[?&]scope=all/);
 });
 
@@ -175,7 +175,7 @@ test('deep links: the selected test case is in the address', async ({ page }) =>
 test('forms: every text input, text area and select has a name', async ({ page }) => {
   const unnamed = () =>
     page.evaluate(() =>
-      [...document.querySelectorAll<HTMLInputElement>('input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea, select')]
+      [...document.querySelectorAll<HTMLInputElement>('input:not([type=checkbox]):not([type=radio]):not([type=file]), textarea, select, button[role=combobox]')]
         .filter((el) => !el.name)
         .map((el) => el.outerHTML.slice(0, 120)),
     );
