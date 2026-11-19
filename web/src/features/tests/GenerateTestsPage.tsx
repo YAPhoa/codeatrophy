@@ -151,7 +151,7 @@ function Generator({ item }: { item: Item }) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   // The large cases follow their summary, on request.
   const [largeShown, setLargeShown] = useState(false);
-  const [replace, setReplace] = useState(false);
+  const [replace, setReplace] = useState(true);
   const [wantsSolution, setKeepSolution] = useState(true);
   const keepSolution = wantsSolution && !noRoom;
   const [showSolution, setShowSolution] = useState(false);
@@ -271,6 +271,7 @@ function Generator({ item }: { item: Item }) {
     if (!proposal || !c) return null;
     const isOpen = open.has(i);
     const generator = largeAt.get(i);
+    const isLarge = largeAt.has(i);
     return (
       <li key={i} className={cx('proposal-case card', !keep[i] && 'is-off', c.predictionMatched === false && 'is-flagged', c.error && 'is-failed')}>
         <div className="proposal-row">
@@ -302,16 +303,18 @@ function Generator({ item }: { item: Item }) {
               </Callout>
             )}
             <div className="io-pair">
-              <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name, 'input')} />
-              {c.predictionMatched !== false && (
+              <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name, 'input')} concealed={isLarge} />
+              {(c.predictionMatched !== false || isLarge) && (
                 <Output
                   label={c.verified ? 'Expected output (from running the solution)' : 'Expected output (the model’s prediction)'}
                   text={c.expectedStdout}
                   filename={textFilename(item.title, c.name, 'output')}
+                  concealed={isLarge}
                 />
               )}
             </div>
-            {c.predictionMatched === false && (
+            {/* A large case's outputs stay out of sight, so its prediction is not set against them either. */}
+            {c.predictionMatched === false && !isLarge && (
               <div className="io-block">
                 <div className="io-label">What the model predicted vs. what the solution printed (kept as the expected output)</div>
                 <DiffView expected={c.predictedStdout ?? ''} actual={c.expectedStdout} mode={item.problem?.compare} leftLabel="Model’s prediction" rightLabel="Actual output" variant="before-after" />

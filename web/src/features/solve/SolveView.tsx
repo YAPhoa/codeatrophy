@@ -387,19 +387,6 @@ export function SolveView({ item }: { item: Item }) {
 
   const description = (
     <div className="statement">
-      <div className="statement-meta">
-        <TagChips tags={item.tags} />
-        <span className="muted">
-          Time {formatMs(problem.timeLimitMs)} · Memory {formatMemoryKb(problem.memoryLimitKb)} · {problem.compare === 'tokens' ? 'whitespace-insensitive check' : 'exact output check'}
-        </span>
-        {item.source.url && (
-          <a href={item.source.url} target="_blank" rel="noopener noreferrer" className="statement-source">
-            <ExternalLink size={12} aria-hidden="true" />
-            Source
-          </a>
-        )}
-        {item.source.note && <span className="muted">· {item.source.note}</span>}
-      </div>
       {item.body.trim() === '' ? (
         <Callout tone="info" title="No statement yet" actions={<Link to={`/items/${item.id}/edit`}>Write the statement</Link>}>
           {item.summary ? `So far this problem has only a summary: “${item.summary}”.` : 'So far this problem has only a title.'}
@@ -407,6 +394,27 @@ export function SolveView({ item }: { item: Item }) {
       ) : (
         <Markdown source={item.body} />
       )}
+      {/* After the statement: its tags, then how it is judged and where it came from. */}
+      <div className="statement-facts">
+        {item.tags.length > 0 && (
+          <div className="statement-fact">
+            <span className="muted">Tags:</span>
+            <TagChips tags={item.tags} />
+          </div>
+        )}
+        <div className="statement-fact">
+          <span className="muted">
+            Time {formatMs(problem.timeLimitMs)} · Memory {formatMemoryKb(problem.memoryLimitKb)} · {problem.compare === 'tokens' ? 'whitespace-insensitive check' : 'exact output check'}
+          </span>
+          {item.source.url && (
+            <a href={item.source.url} target="_blank" rel="noopener noreferrer" className="statement-source">
+              <ExternalLink size={12} aria-hidden="true" />
+              Source
+            </a>
+          )}
+          {item.source.note && <span className="muted">· {item.source.note}</span>}
+        </div>
+      </div>
     </div>
   );
 

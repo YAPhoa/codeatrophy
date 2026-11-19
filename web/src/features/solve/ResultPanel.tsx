@@ -25,17 +25,19 @@ interface OutputProps {
   wrap?: boolean;
   /** Name of the file a large text downloads as; derived from the label otherwise. */
   filename?: string;
+  /** Kept out of sight whatever its size, as a large test case's data is. */
+  concealed?: boolean;
 }
 
 /** A stream or a test case's data, labelled; a large one kept out of sight, as a download. */
-export function Output({ label, note, text, tone, wrap, filename }: OutputProps) {
+export function Output({ label, note, text, tone, wrap, filename, concealed }: OutputProps) {
   return (
     <div className="io-block">
       <div className="io-label">
         {label}
         {note && <span className="io-note"> · {note}</span>}
       </div>
-      {isLargeText(text) ? (
+      {(concealed && text !== '') || isLargeText(text) ? (
         <LargeText text={text} filename={filename ?? textFilename(label)} label={label} />
       ) : (
         <pre translate="no" className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>

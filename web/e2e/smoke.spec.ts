@@ -555,8 +555,13 @@ test('large test cases: asked for on the generate form, then kept and managed on
   const generator = last.getByRole('textbox', { name: /^Generator of “.+”, Python/ });
   await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(3);
   await expect(generator).toContainText('random.seed(');
-  await expect(last.getByRole('button', { name: 'Download' })).toBeVisible();
-  expect((await generator.boundingBox())!.y).toBeLessThan((await last.getByRole('button', { name: 'Download' }).boundingBox())!.y);
+  await expect(last.getByRole('button', { name: 'Download' })).toHaveCount(2);
+  expect((await generator.boundingBox())!.y).toBeLessThan((await last.getByRole('button', { name: 'Download' }).first().boundingBox())!.y);
+  // Input and expected output alike, however small the output is, and nothing set against a prediction.
+  for (const card of await largeProposed.all()) {
+    await expect(card.getByText(/^Too large to show ·/)).toHaveCount(2);
+    await expect(card.locator('pre.code-block')).toHaveCount(0);
+  }
   await expectNoLargeText(page);
   await last.getByRole('checkbox', { name: /^Keep / }).uncheck();
   await outcomes.getByRole('button', { name: 'Hide large cases' }).click();
@@ -565,6 +570,8 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(page.getByRole('button', { name: 'Save 5 cases' })).toBeVisible();
   await show.click();
   await largeProposed.last().getByRole('checkbox', { name: /^Keep / }).check();
+  // Replacing all but the samples is the default; the other cases go.
+  await expect(page.getByRole('radio', { name: /^Replace all but the 2 samples/ })).toBeChecked();
   await page.getByRole('button', { name: 'Save 6 cases' }).click();
 
   // On the Test cases page they stay out of sight too; renaming, marking and moving still work.
@@ -582,9 +589,13 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(page.getByText('Test case saved')).toBeVisible();
   const row = page.locator('.case-row').filter({ hasText: 'Big input' });
   await expect(row.getByText('sample', { exact: true })).toBeVisible();
-  // A saved sample has no Delete: it is part of the statement.
-  await expect(editor.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-  await expect(editor.getByText('Untick Sample to delete it')).toBeVisible();
+  // A saved sample cannot be deleted: it is part of the statement, so Delete says to untick Sample first.
+  const del = editor.getByRole('button', { name: 'Delete' });
+  await expect(del).toHaveAttribute('aria-disabled', 'true');
+  await expect(del).toHaveAttribute('title', 'Untick Sample to delete it');
+  await del.click({ force: true });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row).toBeVisible();
   await row.getByRole('button', { name: 'Move Big input up' }).click();
   await expect(page.locator('.case-row').nth(-2)).toContainText('Big input');
   await expect(editor.getByText(/Too large to show or edit/)).toBeVisible();

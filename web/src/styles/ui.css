@@ -22,7 +22,7 @@
   flex: none;
 }
 
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--surface-3);
   text-decoration: none;
 }
@@ -30,6 +30,11 @@
 .btn:disabled,
 .btn[aria-disabled='true'] {
   opacity: 0.55;
+}
+
+/* Marked disabled, it keeps its pointer events so that its title says why. */
+.btn[aria-disabled='true'] {
+  cursor: not-allowed;
 }
 
 .btn svg {
@@ -102,7 +107,7 @@
   color: #1a0707;
 }
 
-.btn-danger:hover:not(:disabled) {
+.btn-danger:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--danger-hover);
   border-color: var(--danger-hover);
 }

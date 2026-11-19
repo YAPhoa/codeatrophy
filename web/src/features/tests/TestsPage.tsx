@@ -164,6 +164,8 @@ function TestsManager({ item }: { item: Item }) {
   };
 
   const dirty = draft !== null && (selectedId === NEW || (base !== null && !sameDraft(draft, base)));
+  // A saved sample, still ticked, cannot be deleted.
+  const sampleLocked = selected?.isSample === true && draft?.isSample === true;
   const leaveGuard = useLeaveGuard({ when: dirty, body: selectedId === NEW ? 'The new test case has not been saved.' : 'Your changes to this test case have not been saved.' });
 
   /** Test-case writes change the item's case count and `updatedAt` (not its revision); refresh what shows them. */
@@ -644,23 +646,35 @@ function TestsManager({ item }: { item: Item }) {
                     )}
                     {caseError != null && <ErrorCallout error={caseError} title="Could not save the case" />}
                     <div className="form-actions">
-                      <Button type="submit" variant="primary" icon={<Save size={14} />} busy={busy}>
-                        {selectedId === NEW ? 'Add case' : 'Save case'}
-                      </Button>
+                      <span className="spacer" />
                       {dirty && selected && (
                         <Button variant="ghost" onClick={() => load(draftOf(selected))} disabled={busy}>
                           Revert
                         </Button>
                       )}
-                      <span className="spacer" />
-                      {/* A sample is part of the statement, so it is not deleted by accident: untick Sample first. */}
-                      {selected?.isSample && draft.isSample ? (
-                        <span className="muted">Untick Sample to delete it</span>
+                      {selectedId === NEW ? (
+                        <Button variant="ghost" onClick={() => void deleteCase()} disabled={busy}>
+                          Cancel
+                        </Button>
                       ) : (
-                        <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => void deleteCase()} disabled={busy}>
-                          {selectedId === NEW ? 'Cancel' : 'Delete'}
+                        // A sample is part of the statement, so it is not deleted by accident: untick Sample first.
+                        // Marked disabled rather than disabled, so that it still says why on hover.
+                        <Button
+                          variant="danger"
+                          icon={<Trash2 size={14} />}
+                          aria-disabled={sampleLocked || undefined}
+                          title={sampleLocked ? 'Untick Sample to delete it' : undefined}
+                          onClick={() => {
+                            if (!sampleLocked) void deleteCase();
+                          }}
+                          disabled={busy}
+                        >
+                          Delete
                         </Button>
                       )}
+                      <Button type="submit" variant="primary" icon={<Save size={14} />} busy={busy}>
+                        {selectedId === NEW ? 'Add case' : 'Save case'}
+                      </Button>
                     </div>
                   </form>
                 ) : (
