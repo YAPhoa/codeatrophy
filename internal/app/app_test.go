@@ -478,11 +478,13 @@ func TestItemFacets(t *testing.T) {
 	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"A","status":"done","tags":["x"]`+in+`}`)))
 	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"B","difficulty":"hard","tags":["x","y"]`+in+`}`)))
 	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"C","status":"done","difficulty":"hard"}`)))
+	must(e.app.CreateItem(e.ctx, input(t, `{"type":"problem","title":"D","status":"done","tags":["x"]`+in+`}`)))
 
 	// Each dimension ignores its own filter but keeps the others; tags keep
 	// every filter, theirs too.
-	f := must(e.app.ItemFacets(e.ctx, app.ItemQuery{CollectionID: col.ID, Status: []string{"done"}, Difficulty: []string{"none"}, Tag: []string{"X"}}))
+	f := must(e.app.ItemFacets(e.ctx, app.ItemQuery{CollectionID: col.ID, Type: "reading", Status: []string{"done"}, Difficulty: []string{"none"}, Tag: []string{"X"}}))
 	want := domain.ItemFacets{
+		ByType:       map[string]int{"problem": 1, "reading": 1},
 		ByStatus:     map[string]int{"todo": 0, "in_progress": 0, "done": 1},
 		ByDifficulty: map[string]int{"easy": 0, "medium": 0, "hard": 0, "none": 1},
 		ByTag:        map[string]int{"x": 1},
@@ -492,9 +494,10 @@ func TestItemFacets(t *testing.T) {
 	}
 	f = must(e.app.ItemFacets(e.ctx, app.ItemQuery{CollectionID: col.ID}))
 	want = domain.ItemFacets{
-		ByStatus:     map[string]int{"todo": 1, "in_progress": 0, "done": 1},
-		ByDifficulty: map[string]int{"easy": 0, "medium": 0, "hard": 1, "none": 1},
-		ByTag:        map[string]int{"x": 2, "y": 1},
+		ByType:       map[string]int{"problem": 1, "reading": 2},
+		ByStatus:     map[string]int{"todo": 1, "in_progress": 0, "done": 2},
+		ByDifficulty: map[string]int{"easy": 0, "medium": 0, "hard": 1, "none": 2},
+		ByTag:        map[string]int{"x": 3, "y": 1},
 	}
 	if fmt.Sprint(f) != fmt.Sprint(want) {
 		t.Errorf("collection facets %v, want %v", f, want)

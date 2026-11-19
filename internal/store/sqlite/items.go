@@ -573,6 +573,8 @@ func (t *tx) CountItemsBy(f store.ItemFilter, group string) (map[string]int, err
 	}
 	var key string
 	switch group {
+	case store.GroupType:
+		key = `i.type`
 	case store.GroupStatus:
 		key = `i.status`
 	case store.GroupDifficulty:

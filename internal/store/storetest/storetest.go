@@ -672,7 +672,7 @@ func testTestCases(t *testing.T, db store.Store) {
 	}
 }
 
-// testCountItemsBy checks that the counts by status, difficulty and tag
+// testCountItemsBy checks that the counts by type, status, difficulty and tag
 // are the totals of the list filtered by each value on top of the same
 // filter, in collections (nested too), searches and combined filters.
 func testCountItemsBy(t *testing.T, db store.Store) {
@@ -733,31 +733,37 @@ func testCountItemsBy(t *testing.T, db store.Store) {
 	}
 	yes := true
 	for _, tc := range []struct {
-		name                     string
-		f                        store.ItemFilter
-		status, difficulty, tags string
+		name                            string
+		f                               store.ItemFilter
+		types, status, difficulty, tags string
 	}{
 		{"everything", store.ItemFilter{},
-			"done=2 in_progress=1 todo=2", "easy=1 hard=2 none=2", "array=2 graph=1 search=2 tree=1"},
+			"problem=3 reading=2", "done=2 in_progress=1 todo=2", "easy=1 hard=2 none=2", "array=2 graph=1 search=2 tree=1"},
 		{"problems", store.ItemFilter{Type: domain.TypeProblem},
-			"done=1 in_progress=1 todo=1", "easy=1 hard=2", "array=2 graph=1 search=1"},
+			"problem=3", "done=1 in_progress=1 todo=1", "easy=1 hard=2", "array=2 graph=1 search=1"},
 		{"collection", store.ItemFilter{CollectionID: parent},
-			"done=1 todo=1", "easy=1 hard=1", "array=2 search=1"},
+			"problem=2", "done=1 todo=1", "easy=1 hard=1", "array=2 search=1"},
 		{"collection and nested", store.ItemFilter{CollectionID: parent, Recursive: true},
-			"done=2 in_progress=1 todo=1", "easy=1 hard=2 none=1", "array=2 graph=1 search=2 tree=1"},
+			"problem=3 reading=1", "done=2 in_progress=1 todo=1", "easy=1 hard=2 none=1", "array=2 graph=1 search=2 tree=1"},
 		{"search", store.ItemFilter{Query: "search"},
-			"done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
+			"problem=1 reading=1", "done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
 		{"favorites with a tag", store.ItemFilter{Favorite: &yes, Tags: []string{"search"}},
-			"done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
+			"problem=1 reading=1", "done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
 		{"statuses and difficulties", store.ItemFilter{Statuses: []domain.ItemStatus{domain.StatusDone}, Difficulties: []string{"hard", "none"}},
-			"done=2", "hard=1 none=1", "array=1 search=1 tree=1"},
-		{"no match", store.ItemFilter{Query: "!!!"}, "", "", ""},
+			"problem=1 reading=1", "done=2", "hard=1 none=1", "array=1 search=1 tree=1"},
+		{"no match", store.ItemFilter{Query: "!!!"}, "", "", "", ""},
 	} {
-		got := []string{str(count(tc.f, store.GroupStatus)), str(count(tc.f, store.GroupDifficulty)), str(count(tc.f, store.GroupTag))}
-		if want := []string{tc.status, tc.difficulty, tc.tags}; !slices.Equal(got, want) {
+		got := []string{str(count(tc.f, store.GroupType)), str(count(tc.f, store.GroupStatus)), str(count(tc.f, store.GroupDifficulty)), str(count(tc.f, store.GroupTag))}
+		if want := []string{tc.types, tc.status, tc.difficulty, tc.tags}; !slices.Equal(got, want) {
 			t.Errorf("%s: counts %q, want %q", tc.name, got, want)
 		}
 		// Each count is the total of the list narrowed to that value.
+		for typ, n := range count(tc.f, store.GroupType) {
+			f := tc.f
+			if f.Type = domain.ItemType(typ); total(f) != n {
+				t.Errorf("%s: type %s counts %d, list %d", tc.name, typ, n, total(f))
+			}
+		}
 		for st, n := range count(tc.f, store.GroupStatus) {
 			f := tc.f
 			if f.Statuses = []domain.ItemStatus{domain.ItemStatus(st)}; total(f) != n {

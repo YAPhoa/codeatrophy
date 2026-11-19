@@ -453,12 +453,13 @@ Returns `{ "items": [ItemSummary], "total": n }`.
 
 ### `GET /items/facets`
 
-Counts the items of a filtered list by status, difficulty and tag, for the
-library's filter menus. Takes the filters of `GET /items`; `sort`, `order`,
+Counts the items of a filtered list by type, status, difficulty and tag, for
+the library's filter menus. Takes the filters of `GET /items`; `sort`, `order`,
 `limit` and `offset` are ignored, and an invalid filter is `400` as there.
 
 ```json
 {
+  "byType": { "problem": 30, "reading": 12 },
   "byStatus": { "todo": 14, "in_progress": 5, "done": 23 },
   "byDifficulty": { "easy": 10, "medium": 15, "hard": 5, "none": 12 },
   "byTag": { "array": 7, "graph": 2 }
@@ -468,14 +469,16 @@ library's filter menus. Takes the filters of `GET /items`; `sort`, `order`,
 Each count is how many items with that value the list shows once the value
 is picked as well:
 
+- `byType` is counted with every filter except `type`, since picking a type
+  replaces the one in the filter.
 - `byStatus` is counted with every filter except `status`, and
   `byDifficulty` with every filter except `difficulty`, since values within
   one parameter combine with OR.
 - `byTag` is counted with every filter, `tag` included, since tags combine
   with AND.
 
-`byStatus` and `byDifficulty` have every key, with `0` when empty; `byTag`
-has only the tags the counted items carry.
+`byType`, `byStatus` and `byDifficulty` have every key, with `0` when
+empty; `byTag` has only the tags the counted items carry.
 
 ### `POST /items`
 

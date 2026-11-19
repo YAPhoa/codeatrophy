@@ -146,8 +146,8 @@ func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSumma
 	return out, err
 }
 
-// ItemFacets counts the items of the query's list by status, difficulty
-// and tag, as described on domain.ItemFacets. The query's order and page
+// ItemFacets counts the items of the query's list by type, status,
+// difficulty and tag, as described on domain.ItemFacets. The query's order and page
 // are ignored.
 func (a *App) ItemFacets(ctx context.Context, q ItemQuery) (domain.ItemFacets, error) {
 	f, err := itemFilter(q)
@@ -155,15 +155,16 @@ func (a *App) ItemFacets(ctx context.Context, q ItemQuery) (domain.ItemFacets, e
 		return domain.ItemFacets{}, err
 	}
 	stats := domain.NewStats().Items
-	out := domain.ItemFacets{ByStatus: stats.ByStatus, ByDifficulty: stats.ByDifficulty, ByTag: map[string]int{}}
-	byStatus, byDifficulty := f, f
-	byStatus.Statuses, byDifficulty.Difficulties = nil, nil
+	out := domain.ItemFacets{ByType: stats.ByType, ByStatus: stats.ByStatus, ByDifficulty: stats.ByDifficulty, ByTag: map[string]int{}}
+	byType, byStatus, byDifficulty := f, f, f
+	byType.Type, byStatus.Statuses, byDifficulty.Difficulties = "", nil, nil
 	err = a.store.Read(ctx, func(tx store.Tx) error {
 		for _, g := range []struct {
 			group string
 			f     store.ItemFilter
 			into  map[string]int
 		}{
+			{store.GroupType, byType, out.ByType},
 			{store.GroupStatus, byStatus, out.ByStatus},
 			{store.GroupDifficulty, byDifficulty, out.ByDifficulty},
 			{store.GroupTag, f, out.ByTag},

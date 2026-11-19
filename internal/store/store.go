@@ -25,6 +25,7 @@ const (
 
 // Fields CountItemsBy groups by.
 const (
+	GroupType       = "type"
 	GroupStatus     = "status"
 	GroupDifficulty = "difficulty" // "none" for items without one
 	GroupTag        = "tag"        // an item counts once for each of its tags
