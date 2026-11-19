@@ -1,0 +1,80 @@
+import { useId } from 'react';
+import { Link, useSearchParams } from 'react-router';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { PAGE_SIZES, pageList, withPage, type PageSize } from '../../lib/paging';
+import { cx } from '../../ui/Button';
+
+interface PagerProps {
+  page: number;
+  pageCount: number;
+  /** Where the page starts in the list, how many items it shows, and how many there are. */
+  offset: number;
+  shown: number;
+  total: number;
+  pageSize: PageSize;
+  onPageSize: (size: PageSize) => void;
+}
+
+/**
+ * The bar under the list: how many items a page holds and which this one
+ * shows, then the pages. Each page is a link to the same view with its
+ * `page=`, so it can be opened in a new tab, and back and forward move
+ * between pages.
+ */
+export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageSize }: PagerProps) {
+  const [searchParams] = useSearchParams();
+  const sizeId = useId();
+  const to = (n: number) => ({ search: withPage(searchParams, n).toString() });
+  // Previous and Next; at either end, a disabled button in the link's place.
+  const step = (n: number, next: boolean) => {
+    const label = next ? 'Next page' : 'Previous page';
+    const icon = next ? <ChevronRight size={16} aria-hidden="true" /> : <ChevronLeft size={16} aria-hidden="true" />;
+    return n < 1 || n > pageCount ? (
+      <button type="button" className="pager-btn" aria-label={label} disabled>
+        {icon}
+      </button>
+    ) : (
+      <Link className="pager-btn" to={to(n)} rel={next ? 'next' : 'prev'} aria-label={label} title={label}>
+        {icon}
+      </Link>
+    );
+  };
+  return (
+    <div className="pager">
+      <div className="pager-info">
+        <select
+          id={sizeId}
+          name="page-size"
+          className="input input-sm select pager-size"
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value) as PageSize)}
+        >
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={sizeId}>per page</label>
+        <span className="pager-range">
+          Showing {total === 0 ? 0 : offset + 1}–{offset + shown} of {total}
+        </span>
+      </div>
+      <nav className="pager-pages" aria-label="Pages">
+        {step(page - 1, false)}
+        {pageList(page, pageCount).map((n, i) =>
+          n === 'gap' ? (
+            <span key={`gap-${i}`} className="pager-gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <Link key={n} className={cx('pager-btn', n === page && 'is-current')} to={to(n)} aria-current={n === page ? 'page' : undefined} aria-label={`Page ${n}`}>
+              {n}
+            </Link>
+          ),
+        )}
+        {step(page + 1, true)}
+      </nav>
+    </div>
+  );
+}

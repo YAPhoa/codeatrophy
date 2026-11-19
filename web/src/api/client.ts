@@ -34,6 +34,7 @@ import type {
   Item,
   ItemCheckRequest,
   ItemCheckResponse,
+  ItemFacets,
   ItemInput,
   ItemListParams,
   ItemPatch,
@@ -231,6 +232,9 @@ export const api = {
   items: {
     list: (params: ItemListParams = {}, signal?: AbortSignal) =>
       request<Page<ItemSummary>>('GET', '/items', { query: { ...params }, signal }),
+    /** Counts for the filter menus; the order and page of the params are ignored. */
+    facets: (params: ItemListParams = {}, signal?: AbortSignal) =>
+      request<ItemFacets>('GET', '/items/facets', { query: { ...params }, signal }),
     get: (id: string, signal?: AbortSignal) => request<Item>('GET', `/items/${enc(id)}`, { signal }),
     create: (input: ItemInput) => request<Item>('POST', '/items', { body: input }),
     update: (id: string, patch: ItemPatch, opts: { keepalive?: boolean } = {}) => request<Item>('PATCH', `/items/${enc(id)}`, { body: patch, keepalive: opts.keepalive }),

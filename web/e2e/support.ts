@@ -70,3 +70,29 @@ export async function recordLoading(page: Page): Promise<void> {
 export async function loadingRecord(page: Page): Promise<LoadingRecord> {
   return page.evaluate(() => structuredClone((window as unknown as { __loading: LoadingRecord }).__loading));
 }
+
+/**
+ * Give the mock library `count` more readings before the app first loads it
+ * (and again on every reload): "Extra reading 001" and on, older than any
+ * seeded item, so they come last in the default order.
+ */
+export async function withExtraItems(page: Page, count: number): Promise<void> {
+  await page.addInitScript((count) => {
+    type Item = { id: string; type: string; title: string; tags: string[]; favorite: boolean; createdAt: string; updatedAt: string; seq: number };
+    type Mock = { db: { items: Map<string, Item>; nextSeq: () => number } };
+    let mock: Mock | undefined;
+    Object.defineProperty(window, '__codeatrophyMock', {
+      configurable: true,
+      get: () => mock,
+      set: (m: Mock) => {
+        mock = m;
+        const base = [...m.db.items.values()].find((i) => i.type === 'reading')!;
+        for (let n = 1; n <= count; n++) {
+          const id = `99999999-9999-4999-8999-${String(n).padStart(12, '0')}`;
+          const at = new Date(Date.now() - (400 + n) * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+          m.db.items.set(id, { ...base, id, title: `Extra reading ${String(n).padStart(3, '0')}`, tags: ['extra'], favorite: false, createdAt: at, updatedAt: at, seq: m.db.nextSeq() });
+        }
+      },
+    });
+  }, count);
+}

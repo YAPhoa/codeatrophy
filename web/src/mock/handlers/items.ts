@@ -4,6 +4,7 @@ import type {
   CompareMode,
   Difficulty,
   HarnessCode,
+  ItemFacets,
   ItemSort,
   ItemSource,
   ItemStatus,
@@ -346,48 +347,47 @@ export function searchScore(item: StoredItem, terms: readonly string[]): number 
 
 const DIFFICULTY_RANK: Record<string, number> = { easy: 0, medium: 1, hard: 2 };
 
-function listItems(db: MockDb, req: Req) {
-  const q = req.query;
-  const text = (q.get('q') ?? '').trim();
-  const type = enumParam(q, 'type', TYPES);
-  const statuses = enumListParam(q, 'status', STATUSES);
-  const difficulties = enumListParam(q, 'difficulty', [...DIFFICULTIES, 'none'] as const);
-  const tags = normaliseTags(q.getAll('tag'));
-  // Repeatable; unknown ids simply match nothing.
-  const ids = q.getAll('id').filter((id) => id !== '');
-  const collectionId = q.get('collectionId') || undefined;
-  const recursive = boolParam(q, 'recursive') ?? false;
-  const uncollected = boolParam(q, 'uncollected') ?? false;
-  const variantOf = q.get('variantOf') || undefined;
-  const favorite = boolParam(q, 'favorite');
-  const sort = enumParam(q, 'sort', SORTS) ?? 'updated';
-  const order = enumParam(q, 'order', ['asc', 'desc'] as const);
-  const { limit, offset } = pagination(q, LIMITS.maxPageSize);
+/** The filters of `GET /items` and `GET /items/facets`. */
+function itemFilter(q: URLSearchParams) {
+  return {
+    text: (q.get('q') ?? '').trim(),
+    type: enumParam(q, 'type', TYPES),
+    statuses: enumListParam(q, 'status', STATUSES),
+    difficulties: enumListParam<Difficulty | 'none'>(q, 'difficulty', [...DIFFICULTIES, 'none']),
+    tags: normaliseTags(q.getAll('tag')),
+    // Repeatable; unknown ids simply match nothing.
+    ids: q.getAll('id').filter((id) => id !== ''),
+    collectionId: q.get('collectionId') || undefined,
+    recursive: boolParam(q, 'recursive') ?? false,
+    uncollected: boolParam(q, 'uncollected') ?? false,
+    variantOf: q.get('variantOf') || undefined,
+    favorite: boolParam(q, 'favorite'),
+  };
+}
 
-  if (sort === 'position' && (!collectionId || recursive)) {
-    throw badRequest('sort=position requires a non-recursive collectionId');
-  }
-  if (sort === 'relevance' && text === '') throw badRequest('sort=relevance requires q');
+type ItemFilter = ReturnType<typeof itemFilter>;
 
+/** The items a filter selects, with their search scores while searching. */
+function matchItems(db: MockDb, f: ItemFilter) {
   let memberIds: string[] | null = null;
-  if (collectionId) {
-    const scope = [collectionId, ...(recursive ? db.descendants(collectionId) : [])];
+  if (f.collectionId) {
+    const scope = [f.collectionId, ...(f.recursive ? db.descendants(f.collectionId) : [])];
     memberIds = db.collections.filter((c) => scope.includes(c.id)).flatMap((c) => c.itemIds);
   }
   const collected = new Set(db.collections.flatMap((c) => c.itemIds));
-  const terms = words(text);
+  const terms = words(f.text);
   const scores = new Map<string, number>();
 
   const matches = [...db.items.values()].filter((item) => {
-    if (ids.length > 0 && !ids.includes(item.id)) return false;
-    if (type && item.type !== type) return false;
-    if (statuses.length > 0 && !statuses.includes(item.status)) return false;
-    if (difficulties.length > 0 && !difficulties.includes(item.difficulty ?? 'none')) return false;
-    if (!tags.every((t) => item.tags.includes(t))) return false;
+    if (f.ids.length > 0 && !f.ids.includes(item.id)) return false;
+    if (f.type && item.type !== f.type) return false;
+    if (f.statuses.length > 0 && !f.statuses.includes(item.status)) return false;
+    if (f.difficulties.length > 0 && !f.difficulties.includes(item.difficulty ?? 'none')) return false;
+    if (!f.tags.every((t) => item.tags.includes(t))) return false;
     if (memberIds && !memberIds.includes(item.id)) return false;
-    if (uncollected && collected.has(item.id)) return false;
-    if (variantOf && item.variantOf !== variantOf) return false;
-    if (favorite !== undefined && item.favorite !== favorite) return false;
+    if (f.uncollected && collected.has(item.id)) return false;
+    if (f.variantOf && item.variantOf !== f.variantOf) return false;
+    if (f.favorite !== undefined && item.favorite !== f.favorite) return false;
     if (terms.length > 0) {
       const score = searchScore(item, terms);
       if (score === 0) return false;
@@ -395,6 +395,36 @@ function listItems(db: MockDb, req: Req) {
     }
     return true;
   });
+  return { matches, scores, memberIds };
+}
+
+/** Counts by status and difficulty, each without its own filter, and by tag with every filter. */
+function itemFacets(db: MockDb, req: Req) {
+  const f = itemFilter(req.query);
+  const out: ItemFacets = {
+    byStatus: { todo: 0, in_progress: 0, done: 0 },
+    byDifficulty: { easy: 0, medium: 0, hard: 0, none: 0 },
+    byTag: {},
+  };
+  for (const item of matchItems(db, { ...f, statuses: [] }).matches) out.byStatus[item.status]++;
+  for (const item of matchItems(db, { ...f, difficulties: [] }).matches) out.byDifficulty[item.difficulty ?? 'none']++;
+  for (const item of matchItems(db, f).matches) for (const t of item.tags) out.byTag[t] = (out.byTag[t] ?? 0) + 1;
+  return ok(out);
+}
+
+function listItems(db: MockDb, req: Req) {
+  const q = req.query;
+  const f = itemFilter(q);
+  const sort = enumParam(q, 'sort', SORTS) ?? 'updated';
+  const order = enumParam(q, 'order', ['asc', 'desc'] as const);
+  const { limit, offset } = pagination(q, LIMITS.maxPageSize);
+
+  if (sort === 'position' && (!f.collectionId || f.recursive)) {
+    throw badRequest('sort=position requires a non-recursive collectionId');
+  }
+  if (sort === 'relevance' && f.text === '') throw badRequest('sort=relevance requires q');
+
+  const { matches, scores, memberIds } = matchItems(db, f);
 
   // Dates and relevance read best newest/strongest first; everything else ascending.
   const descending = (order ?? (sort === 'updated' || sort === 'created' || sort === 'relevance' ? 'desc' : 'asc')) === 'desc';
@@ -706,6 +736,7 @@ export function itemRoutes(db: MockDb): [string, string, Handler][] {
     ['POST', '/items', (req) => createItem(db, req)],
     ['POST', '/items/bulk', (req) => bulk(db, req)],
     ['POST', '/items/check', (req) => checkItem(db, req)],
+    ['GET', '/items/facets', (req) => itemFacets(db, req)],
     ['GET', '/items/:id', (req) => ok(db.full(db.getItem(req.params.id!)))],
     ['PATCH', '/items/:id', (req) => patchItem(db, req)],
     ['POST', '/items/:id/edits', (req) => editItemText(db, req)],

@@ -106,6 +106,28 @@ export function sortDirections(sort: ItemSort): { order: SortOrder; label: strin
   }
 }
 
+/** A direction of a sort as words for a sentence: "newest first", "A to Z". */
+export function directionText(sort: ItemSort, order: SortOrder): string | null {
+  const label = sortDirections(sort)?.find((d) => d.order === order)?.label;
+  return label ? label.replace(' → ', ' to ').replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase()) : null;
+}
+
+/** The columns whose names in the list's head sort it. */
+export type SortColumn = 'title' | 'difficulty' | 'updated';
+
+/**
+ * The filters after a click on a column's name: the list sorts by it in its
+ * natural direction, then the other way, then goes back to the view's own
+ * order (by update, by relevance while searching, or a collection's own).
+ */
+export function nextColumnSort(f: LibraryFilters, collectionId: string | null, column: SortColumn): LibraryFilters {
+  const sort = effectiveSort(f, collectionId);
+  const order = f.order ?? defaultOrder(sort);
+  if (sort !== column) return { ...f, sort: column, order: null };
+  if (order === defaultOrder(column)) return { ...f, sort: column, order: order === 'asc' ? 'desc' : 'asc' };
+  return { ...f, sort: null, order: null };
+}
+
 /**
  * What a library view lists, as its filter box names it: a Problems or
  * Readings view, or items anywhere else (all items, Favorites, Uncollected,

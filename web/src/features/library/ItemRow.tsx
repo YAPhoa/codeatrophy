@@ -1,14 +1,13 @@
 import { Fragment, memo, useLayoutEffect, useRef, useState, type AnimationEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { Link } from 'react-router';
-import { ChevronDown, Folder, GitBranch, GripVertical } from 'lucide-react';
+import { ChevronDown, GitBranch, GripVertical } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { prefetchItem } from '../../api/queries';
-import type { Collection, ItemSummary } from '../../api/types';
+import type { ItemSummary } from '../../api/types';
 import { ItemPage } from '../../app/screens';
 import { useIntent } from '../../lib/intent';
 import { STATUS_LABEL, VERDICT_LABEL, absoluteDate, absoluteTime, isFailedVerdict, plural, shortRelativeTime } from '../../lib/format';
-import { pathTo } from '../../lib/tree';
 import { Button, cx } from '../../ui/Button';
 import { preloadCodeEditor } from '../../ui/CodeEditor';
 import { Collapse } from '../../ui/Collapse';
@@ -24,7 +23,6 @@ interface ItemRowProps {
   /** Whether the details under the row's line are shown. */
   open: boolean;
   /** Every collection, to name the ones the item is in. */
-  collections: readonly Collection[];
   dropEdge: 'before' | 'after' | null;
   onSelect: (index: number, e: MouseEvent | KeyboardEvent | null) => void;
   onToggleOpen: (index: number) => void;
@@ -122,8 +120,7 @@ function LineTags({ tags, tab, returning, onReturned, more }: { tags: readonly s
 // ---- The details under the line ----
 
 /** What the line leaves out: the whole summary, then every tag and the other facts, each beside its label. */
-function ItemDetails({ item, collections, tab }: { item: ItemSummary; collections: readonly Collection[]; tab: number }) {
-  const paths = item.collectionIds.map((id) => pathTo(collections, id)).filter((p) => p.length > 0);
+function ItemDetails({ item, tab }: { item: ItemSummary; tab: number }) {
   const facts: { label: string; value: ReactNode }[] = [];
   if (item.tags.length > 0) facts.push({ label: 'Tags', value: <TagChips tags={item.tags} tabIndex={tab} /> });
   if (item.type === 'problem') facts.push({ label: 'Tests', value: item.testCaseCount === 0 ? 'None' : plural(item.testCaseCount, 'test case') });
@@ -135,31 +132,6 @@ function ItemDetails({ item, collections, tab }: { item: ItemSummary; collection
       </time>
     ),
   });
-  if (paths.length > 0)
-    facts.push({
-      label: 'Collections',
-      value: (
-        <span className="tagchips">
-          {paths.map((path) => {
-            const name = path.map((c) => c.name).join(' / ');
-            return (
-              <Link
-                key={path[path.length - 1]!.id}
-                to={`/collections/${path[path.length - 1]!.id}`}
-                className="chip chip-collection"
-                title={`Show ${name}`}
-                tabIndex={tab}
-                draggable={false}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Folder size={12} aria-hidden="true" />
-                <span className="truncate">{name}</span>
-              </Link>
-            );
-          })}
-        </span>
-      ),
-    });
   return (
     <div className="item-details" id={detailsId(item.id)}>
       {/* Opens the item like the title; the title is the row's one tab stop for it. */}
@@ -189,7 +161,6 @@ export const ItemRow = memo(function ItemRow({
   current,
   reorderable,
   open,
-  collections,
   dropEdge,
   onSelect,
   onToggleOpen,
@@ -329,7 +300,7 @@ export const ItemRow = memo(function ItemRow({
         </span>
       )}
       <Collapse open={open}>
-        <ItemDetails item={item} collections={collections} tab={tab} />
+        <ItemDetails item={item} tab={tab} />
       </Collapse>
     </li>
   );

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../../api/client';
-import { qk, useCollections, useItemPages, useMeta, useQuickUpdate, useStats, useTags } from '../../api/queries';
+import { qk, useCollections, useItemPage, useMeta, useQuickUpdate, useStats, useTags } from '../../api/queries';
 import type { Collection, ItemStatus, ItemSummary, Stats } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
@@ -11,9 +11,10 @@ import { DRAG_ITEMS } from '../../app/Sidebar';
 import { activeFilterCount, barFilterCount, canReorder, clearBarFilters, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
 import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
-import { exitDuration, useChangeCount, useLoadingShown } from '../../lib/motion';
+import { exitDuration, prefersReducedMotion, useChangeCount, useLoadingShown } from '../../lib/motion';
 import { isBooting } from '../../lib/boot';
 import { useNewItemHref } from '../../lib/newItem';
+import { parsePage, setPageSize, usePageSize, withPage } from '../../lib/paging';
 import { writeString } from '../../lib/storage';
 import { moveIndex, pathTo, placeAfter, siblingsOf } from '../../lib/tree';
 import { Button, LinkButton, cx } from '../../ui/Button';
@@ -26,6 +27,8 @@ import { useCollectionActions } from '../collections/CollectionActions';
 import { BulkBar } from './BulkBar';
 import { FilterBar } from './FilterBar';
 import { ItemRow, detailsId } from './ItemRow';
+import { Pager } from './Pager';
+import { SortHeader, SortMenu } from './SortControls';
 
 const nextStatus = (s: ItemStatus): ItemStatus => ITEM_STATUSES[(ITEM_STATUSES.indexOf(s) + 1) % ITEM_STATUSES.length] ?? 'todo';
 
@@ -123,22 +126,46 @@ export function LibraryPage() {
   const params = useMemo(() => toListParams(filters, collectionId), [filters, collectionId]);
   const reorderable = canReorder(filters, collectionId);
 
-  const paged = useItemPages(params);
+  // One page at a time; the page is in the URL, and changing the filters or
+  // the sort (setFilters) leaves it out, so they start again from the first.
+  const pageSize = usePageSize();
+  const page = parsePage(searchParams);
+  const offset = (page - 1) * pageSize;
+  const query = useItemPage(params, pageSize, offset);
 
   const [orderOverride, setOrderOverride] = useState<string[] | null>(null);
-  const serverItems = useMemo<ItemSummary[]>(() => paged.data?.pages.flatMap((p) => p.items) ?? [], [paged.data]);
+  const serverItems = useMemo<ItemSummary[]>(() => query.data?.items ?? [], [query.data]);
   const items = useMemo(() => {
     if (!orderOverride) return serverItems;
     const byId = new Map(serverItems.map((it) => [it.id, it]));
     return orderOverride.map((id) => byId.get(id)).filter((it): it is ItemSummary => !!it);
   }, [serverItems, orderOverride]);
-  const total = paged.data?.pages[0]?.total ?? 0;
-  const query = paged;
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   // The skeleton, like any loading indicator, shows only once the load is slow.
   const skeletonShown = useLoadingShown(query.isPending);
   const reveal = useSkeletonReveal(query.isPending, skeletonShown);
 
   useEffect(() => setOrderOverride(null), [collectionId, serverItems]);
+
+  // A page past the end (items deleted, a link kept from a longer list) shows the last one instead.
+  const pastEnd = query.isSuccess && !query.isPlaceholderData && page > pageCount;
+  useEffect(() => {
+    if (pastEnd) setSearchParams((sp) => withPage(sp, pageCount), { replace: true });
+  }, [pastEnd, pageCount, setSearchParams]);
+
+  // Another page starts at the list's top: brought into view if it is scrolled past.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const shownPage = useRef(page);
+  useEffect(() => {
+    if (shownPage.current === page) return;
+    shownPage.current = page;
+    const el = wrapRef.current;
+    const scroller = el?.closest('.main');
+    if (el && scroller && el.getBoundingClientRect().top < scroller.getBoundingClientRect().top) {
+      el.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    }
+  }, [page]);
 
   // Remember where the user was, so item pages can link back to this exact view.
   useEffect(() => {
@@ -238,13 +265,17 @@ export function LibraryPage() {
   // ones build on each other.
   const orderQueue = useRef<Promise<unknown>>(Promise.resolve());
   const pendingMoves = useRef(0);
+  // A row moved to the top of a later page goes before the one it displaced,
+  // which may follow an item on the page before: it is placed after that one.
   const saveMove = useCallback(
-    (movedId: string, afterId: string | null) => {
+    (movedId: string, afterId: string | null, beforeId: string | null) => {
       if (!collectionId) return;
       pendingMoves.current += 1;
       const step = orderQueue.current.then(async () => {
         const { itemIds } = await api.collections.itemIds(collectionId);
-        await api.collections.setItems(collectionId, placeAfter(itemIds, movedId, afterId));
+        const rest = itemIds.filter((id) => id !== movedId);
+        const after = afterId ?? (beforeId ? (rest[rest.indexOf(beforeId) - 1] ?? null) : null);
+        await api.collections.setItems(collectionId, placeAfter(itemIds, movedId, after));
       });
       orderQueue.current = step.catch(() => undefined);
       step
@@ -267,7 +298,7 @@ export function LibraryPage() {
       if (!reorderable || !moved || to < 0 || to >= items.length || from === to) return;
       const next = moveIndex(items, from, to).map((i) => i.id);
       setOrderOverride(next);
-      saveMove(moved.id, to > 0 ? (next[to - 1] ?? null) : null);
+      saveMove(moved.id, to > 0 ? (next[to - 1] ?? null) : null, next[to + 1] ?? null);
       setCursor(to);
       requestAnimationFrame(() => focusRow(to));
     },
@@ -411,7 +442,10 @@ export function LibraryPage() {
             ? 'Readings'
             : 'Library';
   useDocumentTitle(title);
+  // Readings have no verdicts, so a list of only readings has no column for them.
+  const noVerdict = filters.type === 'reading';
 
+  const sortProps = { filters, collectionId, onChange: setFilters };
   const filterCount = activeFilterCount(filters);
   const barFilters = barFilterCount(filters);
   const viewTotal = unfilteredTotal(filters, collection, stats.data);
@@ -543,7 +577,7 @@ export function LibraryPage() {
           )}
 
           {query.isPending ? (
-            <div className={cx('item-list-wrap', 'loading-delay', !skeletonShown && 'is-pending')} role="status">
+            <div className={cx('item-list-wrap', noVerdict && 'no-verdict', 'loading-delay', !skeletonShown && 'is-pending')} role="status">
               <div className="item-list-head">
                 <span className="item-cell item-check">
                   <span className="skel skel-box" />
@@ -586,13 +620,13 @@ export function LibraryPage() {
               </EmptyState>
             )
           ) : (
-            <div className={cx('item-list-wrap', reorderable && 'is-reorderable', query.isPlaceholderData && 'is-stale')}>
+            <div ref={wrapRef} className={cx('item-list-wrap', reorderable && 'is-reorderable', noVerdict && 'no-verdict', query.isPlaceholderData && 'is-stale')}>
               {/* Always shown, so selecting a row or filtering never pushes the list down. */}
               <div className="item-list-head">
                 <span className="item-cell item-check">
                   <input
                     type="checkbox"
-                    aria-label={allSelected ? 'Deselect all' : 'Select all shown'}
+                    aria-label={allSelected ? 'Deselect all' : 'Select all on this page'}
                     checked={allSelected}
                     ref={(el) => {
                       if (el) el.indeterminate = !allSelected && selection.size > 0;
@@ -600,27 +634,16 @@ export function LibraryPage() {
                     onChange={() => setSelection(allSelected ? new Set() : new Set(items.map((i) => i.id)))}
                   />
                 </span>
-                <span className="item-head-label">
-                  {reorderable
-                    ? 'Manual order: drag rows or press Alt+↑ / Alt+↓ to rearrange'
-                    : barFilters > 0 && viewTotal != null && viewTotal >= total
-                      ? `${total} of ${viewTotal}`
-                      : plural(total, 'item')}
-                </span>
-                {/* Over the rows' columns; manual order needs the room for its hint. */}
-                {!reorderable && (
-                  <>
-                    <span className="item-col-head is-kind" aria-hidden="true">
-                      Difficulty
-                    </span>
-                    <span className="item-col-head is-verdict" aria-hidden="true">
-                      Verdict
-                    </span>
-                    <span className="item-col-head is-updated" aria-hidden="true">
-                      Updated
-                    </span>
-                  </>
+                {/* The columns' names sort the list; a narrow screen, with no columns, has a menu instead. */}
+                <SortHeader column="title" label="Title" className="is-title" {...sortProps} />
+                <SortHeader column="difficulty" label="Difficulty" className="is-kind" {...sortProps} />
+                {!noVerdict && (
+                  <span className="item-col-head is-verdict" aria-hidden="true">
+                    Verdict
+                  </span>
                 )}
+                <SortHeader column="updated" label="Updated" className="is-updated" {...sortProps} />
+                <SortMenu {...sortProps} />
                 {query.isFetching && <Spinner size={14} label="Refreshing…" />}
               </div>
               <div className="item-list-body">
@@ -639,7 +662,6 @@ export function LibraryPage() {
                       current={i === cursor}
                       reorderable={reorderable}
                       open={openIds.has(item.id)}
-                      collections={collections}
                       dropEdge={drag && drag.over === i && drag.from !== i ? drag.edge : null}
                       onSelect={onSelect}
                       onToggleOpen={toggleOpen}
@@ -653,13 +675,21 @@ export function LibraryPage() {
                 </ul>
                 {reveal === 'cross' && <SkeletonRows count={skeletonRows} leaving />}
               </div>
-              {paged.hasNextPage && (
-                <div className="item-list-more">
-                  <Button busy={paged.isFetchingNextPage} onClick={() => void paged.fetchNextPage()}>
-                    Load more ({total - items.length} remaining)
-                  </Button>
-                </div>
-              )}
+              <div className="item-list-foot">
+                {reorderable && <p className="item-list-hint">Drag rows or press Alt+↑ / Alt+↓ to reorder.</p>}
+                <Pager
+                  page={page}
+                  pageCount={pageCount}
+                  offset={offset}
+                  shown={serverItems.length}
+                  total={total}
+                  pageSize={pageSize}
+                  onPageSize={(size) => {
+                    setPageSize(size);
+                    setSearchParams((sp) => withPage(sp, 1), { replace: true });
+                  }}
+                />
+              </div>
             </div>
           )}
         </>

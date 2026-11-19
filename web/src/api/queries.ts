@@ -29,9 +29,10 @@ export const qk = {
   systemPrompt: ['settings', 'system-prompt'] as const,
   testCasePrompt: ['settings', 'testcase-prompt'] as const,
   items: ['items'] as const,
-  /** Prefix of every cached item list, whatever its shape. */
+  /** Prefix of every cached item list, whatever its shape, and of the counts of the filter menus. */
   itemLists: ['items', 'list'] as const,
-  itemPages: (params: ItemListParams) => ['items', 'list', 'pages', params] as const,
+  itemFacets: (params: ItemListParams) => ['items', 'list', 'facets', params] as const,
+  itemPage: (params: ItemListParams, limit: number, offset: number) => ['items', 'list', 'page', params, limit, offset] as const,
   itemQuery: (params: ItemListParams) => ['items', 'list', 'query', params] as const,
   item: (id: string) => ['items', 'detail', id] as const,
   testCases: (itemId: string) => ['testcases', itemId] as const,
@@ -73,17 +74,26 @@ export function useTags() {
   });
 }
 
-/** Paged item list for the library ("load more"). */
-export function useItemPages(params: ItemListParams, enabled = true) {
-  return useInfiniteQuery({
-    queryKey: qk.itemPages(params),
-    queryFn: ({ pageParam, signal }) => api.items.list({ ...params, limit: PAGE_SIZE, offset: pageParam }, signal),
-    initialPageParam: 0,
-    getNextPageParam: (last, pages) => {
-      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
-      return loaded < last.total && last.items.length > 0 ? loaded : undefined;
-    },
-    enabled,
+/**
+ * The filter menus' counts for a view. Kept under the lists' key, so whatever
+ * refreshes the lists refreshes them too; the counts before stay shown while
+ * new ones load.
+ */
+export function useItemFacets(params: ItemListParams) {
+  const { sort: _sort, order: _order, limit: _limit, offset: _offset, ...filters } = params;
+  return useQuery({
+    queryKey: qk.itemFacets(filters),
+    queryFn: ({ signal }) => api.items.facets(filters, signal),
+    placeholderData: (prev) => prev,
+    staleTime: 10_000,
+  });
+}
+
+/** One page of the library; the page before stays shown while the next loads. */
+export function useItemPage(params: ItemListParams, limit: number, offset: number) {
+  return useQuery({
+    queryKey: qk.itemPage(params, limit, offset),
+    queryFn: ({ signal }) => api.items.list({ ...params, limit, offset }, signal),
     placeholderData: (prev) => prev,
   });
 }
@@ -274,10 +284,26 @@ function patchLists(qc: QueryClient, id: string, change: Partial<ItemSummary>): 
   const update = (data: ListData): ListData => {
     if (!data) return data;
     if (Array.isArray(data)) return data.map(one);
-    return 'pages' in data ? { ...data, pages: data.pages.map(apply) } : apply(data);
+    if ('pages' in data) return { ...data, pages: data.pages.map(apply) };
+    // The filter menus' counts share the prefix; they refresh on invalidation.
+    return 'items' in data ? apply(data) : data;
   };
   qc.setQueriesData<ListData>({ queryKey: qk.itemLists }, update);
   qc.setQueryData<Item>(qk.item(id), (item) => (item ? { ...item, ...change } : item));
+}
+
+/**
+ * Show a change to several items' personal state (status, favorite) at once,
+ * as `useQuickUpdate` does for one; returns what to restore if the server
+ * rejects it.
+ */
+export async function patchItemsNow(qc: QueryClient, ids: readonly string[], change: Partial<ItemSummary>): Promise<() => void> {
+  await qc.cancelQueries({ queryKey: qk.items });
+  const snapshot = qc.getQueriesData<unknown>({ queryKey: qk.items });
+  for (const id of ids) patchLists(qc, id, change);
+  return () => {
+    for (const [key, data] of snapshot) qc.setQueryData(key, data);
+  };
 }
 
 /** Put a freshly returned item into the cache and refresh the lists that may show it. */

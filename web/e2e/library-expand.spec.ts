@@ -4,8 +4,8 @@ import { open } from './support';
 // A library row's line shows the title, as many tags as fit and the facts in
 // columns, named in the list's head; it opens, from its chevron or a click
 // anywhere but on a control, to show what the line leaves out: the whole
-// summary, then every tag, a problem's test cases, the day it was created
-// and its collections, each beside its label. The
+// summary, then every tag, a problem's test cases and the day it was
+// created, each beside its label. The
 // details stay under the title, clear of the facts' columns. While it is open
 // the line leaves the tags to the details, so each shows once, and nothing
 // else on the line moves.
@@ -99,14 +99,14 @@ test('library details: the chevron opens a row on its summary, every tag and the
   await expect(hide).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   // Each fact beside its label; created a month ago, updated three days ago: the day it was created adds something.
   const facts = details.locator('.item-details-facts');
-  await expect(facts.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
+  await expect(facts.locator('dt')).toHaveText(['Tags', 'Tests', 'Created']);
   await expect(facts.locator('dd').nth(0).locator('.chip-tag')).toHaveText(LONGEST_TAGS);
   await expect(facts.locator('dd').nth(1)).toHaveText('7 test cases');
   await expect(facts.locator('dd').nth(2)).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
   await expect(details.getByText(/Updated|verdict|Wrong answer/)).toHaveCount(0);
   await expect(details.locator('time')).toHaveAttribute('title', /\d:\d\d/);
-  // A nested collection is named by its whole path.
-  await expect(facts.locator('dd').nth(3).getByRole('link')).toHaveText(['Weekly practice', 'Interview prep / Arrays & hashing']);
+  // Its collections are the sidebar's to show, not the row's.
+  await expect(details.getByRole('link', { name: /Weekly practice|Arrays & hashing/ })).toHaveCount(0);
   // The rows below make room.
   await expect.poll(async () => (await below.boundingBox())!.y).toBeGreaterThan(belowTop + 40);
 
@@ -123,7 +123,7 @@ test('library details: the day an item was created always shows, and a problem\'
   await same.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, 'Merge k Sorted Lists');
   await expect(details.locator('.chip-tag')).toHaveText(['heap', 'linked-list']);
-  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created']);
   await expect(details.locator('dd').nth(1)).toHaveText('7 test cases');
   await expect(details.locator('dd time')).toHaveText(/^\w{3} \d{1,2}, \d{4}$/);
   await expect(details.getByText(/Updated/)).toHaveCount(0);
@@ -141,7 +141,7 @@ test('library details: the day an item was created always shows, and a problem\'
   const reading = row(page, 'How B-Trees Work');
   await reading.getByRole('button', { name: 'Show details' }).click();
   const readingDetails = await detailsOf(page, 'How B-Trees Work');
-  await expect(readingDetails.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
+  await expect(readingDetails.locator('dt')).toHaveText(['Tags', 'Created']);
 
   // The line's date gives both times exactly.
   await expect(same.locator('.item-updated')).toHaveText('4 days ago');
@@ -333,7 +333,7 @@ test('library details: a click on the facts closes the row and selects nothing, 
   await expect(page).toHaveURL(/\/items\//);
 });
 
-test('library details: they stay under the title, clear of the facts\' columns, and long tags and collections wrap there', async ({ page }) => {
+test('library details: they stay under the title, clear of the facts\' columns, and long tags wrap there', async ({ page }) => {
   await openWithTags(page, COIN, MANY_TAGS);
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
@@ -369,7 +369,7 @@ test('library details: each label is level with the first line of its value, or 
   const r = row(page, COIN);
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, COIN);
-  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created', 'Collections']);
+  await expect(details.locator('dt')).toHaveText(['Tags', 'Tests', 'Created']);
   const pairs = () =>
     details.locator('.item-details-facts').evaluate((dl) =>
       [...dl.querySelectorAll('dt')].map((dt) => {
@@ -389,24 +389,6 @@ test('library details: each label is level with the first line of its value, or 
   await expect.poll(async () => (await pairs()).every((p) => p.labelBottom <= p.valueTop + 0.5)).toBe(true);
   // A tag still shows whole there.
   expect(await details.locator('.chip-tag .truncate').evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth))).toBe(true);
-});
-
-test('library details: a collection is a chip like a tag, and opens the collection', async ({ page }) => {
-  await open(page, '/');
-  const r = row(page, LONGEST);
-  await r.getByRole('button', { name: 'Show details' }).click();
-  const details = await detailsOf(page, LONGEST);
-  const chip = details.getByRole('link', { name: 'Interview prep / Arrays & hashing' });
-  const tag = details.locator('.chip-tag').first();
-  await expect(chip).toHaveClass(/\bchip\b/);
-  for (const prop of ['color', 'background-color', 'height', 'border-radius', 'font-size']) {
-    expect(await chip.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)).toBe(await tag.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop));
-  }
-  await expect(chip).toHaveAttribute('tabindex', (await tag.getAttribute('tabindex'))!);
-
-  await chip.click();
-  await expect(page).toHaveURL(/\/collections\/[\w-]+$/);
-  await expect(page.getByRole('heading', { level: 1, name: /Arrays & hashing/ })).toBeVisible();
 });
 
 test('library details: a failed last verdict shows on the line, in a column of its own, and not in the details', async ({ page }) => {
@@ -482,13 +464,12 @@ test('library row: a click on its empty space opens and closes it, but not one o
   await expect(page).toHaveURL(/\/items\//);
 });
 
-test('library head: the facts\' columns are named over them, but not on a narrow screen or in manual order', async ({ page }) => {
+test('library head: the columns are named over them, the title\'s too, but not on a narrow screen', async ({ page }) => {
   await open(page, '/');
   const head = page.locator('.item-list-head');
-  const names = head.locator('.item-col-head');
-  await expect(names).toHaveText(['Difficulty', 'Verdict', 'Updated']);
-  await expect(names.first()).toHaveAttribute('aria-hidden', 'true');
-  const columns = ['.item-kind', '.item-verdict', '.item-updated'];
+  const names = head.locator('.item-sort, .item-col-head');
+  await expect(names).toHaveText(['Title', 'Difficulty', 'Verdict', 'Updated']);
+  const columns = ['.item-title', '.item-kind', '.item-verdict', '.item-updated'];
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     // Where each column's name starts, and on every row, where each fact's content starts and ends, and where the next column starts.
@@ -498,12 +479,14 @@ test('library head: the facts\' columns are named over them, but not on a narrow
         range.selectNodeContents(cell);
         return range.getBoundingClientRect();
       };
-      const names = [...document.querySelectorAll('.item-list-head .item-col-head')].map((el) => content(el).left);
+      const names = ['.is-title', '.is-kind', '.is-verdict', '.is-updated'].map((sel) => content(document.querySelector(`.item-list-head ${sel}`)!).left);
       const rows = [...document.querySelectorAll('.item-list .item-row')].map((li) =>
         columns.map((sel) => {
           const cell = li.querySelector(sel)!;
           const box = content(cell);
-          return { filled: box.width > 0, left: box.left, right: box.right, next: cell.nextElementSibling!.getBoundingClientRect().left };
+          // A cut title's text runs on under its ellipsis: only where it starts counts.
+          const next = sel === '.item-title' ? Infinity : cell.nextElementSibling!.getBoundingClientRect().left;
+          return { filled: box.width > 0, left: box.left, right: box.right, next };
         }),
       );
       return { names, rows };
@@ -518,18 +501,57 @@ test('library head: the facts\' columns are named over them, but not on a narrow
     }
     // Each column is filled on some row.
     for (const i of columns.keys()) expect(layout.rows.some((r) => r[i]!.filled)).toBe(true);
-    await expect(head.locator('.item-head-label')).toHaveText('25 items');
   }
 
   await page.setViewportSize({ width: 600, height: 900 });
   await expect(names.first()).toBeHidden();
-  await expect(head.locator('.item-head-label')).toHaveText('25 items');
+  await expect(head.getByRole('button', { name: /^Sort:/ })).toBeVisible();
+});
 
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('link', { name: 'Interview prep' }).click();
-  await expect(page.locator('ul.item-list.is-reorderable')).toBeVisible();
-  await expect(head.locator('.item-head-label')).toHaveText(/^Manual order/);
-  await expect(names).toHaveCount(0);
+test('library head: a list of readings has no verdict column, and its title column takes the room', async ({ page }) => {
+  await open(page, '/');
+  const head = page.locator('.item-list-head');
+  const names = head.locator('.item-sort, .item-col-head');
+  await expect(names).toHaveText(['Title', 'Difficulty', 'Verdict', 'Updated']);
+  const mainWidth = async () => (await page.locator('.item-row .item-main').first().boundingBox())!.width;
+  const mixed = await mainWidth();
+
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Readings/ }).click();
+  await expect(page).toHaveURL(/type=reading/);
+  await expect(names).toHaveText(['Title', 'Difficulty', 'Updated']);
+  const rows = page.locator('.item-list .item-row');
+  await expect(rows.first().getByLabel('Reading', { exact: true })).toBeVisible();
+  // No verdict cell takes any room.
+  expect(await page.locator('.item-list .item-verdict').evaluateAll((els) => els.every((el) => el.getBoundingClientRect().width === 0))).toBe(true);
+  expect(await mainWidth()).toBeGreaterThan(mixed + 100);
+  // The names still sit over their columns.
+  const layout = await page.evaluate(() => {
+    const left = (el: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getBoundingClientRect().left;
+    };
+    const [kind, updated] = ['.is-kind', '.is-updated'].map((sel) => left(document.querySelector(`.item-list-head ${sel}`)!));
+    return [...document.querySelectorAll('.item-list .item-row')].map((li) => ({
+      kind: li.querySelector('.item-kind .badge') ? left(li.querySelector('.item-kind')!) - kind! : 0,
+      updated: left(li.querySelector('.item-updated')!) - updated!,
+    }));
+  });
+  for (const row of layout) {
+    expect(Math.abs(row.kind)).toBeLessThan(1);
+    expect(Math.abs(row.updated)).toBeLessThan(1);
+  }
+
+  // On a narrow screen nothing holds a place for one either: the date follows the difficulty, or starts the line.
+  await page.setViewportSize({ width: 600, height: 900 });
+  const raft = row(page, 'Raft: Leader Election Cheat Sheet');
+  const badge = (await raft.locator('.item-kind .badge').boundingBox())!;
+  const date = await raft.locator('.item-updated').evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect().left;
+  });
+  expect(date - (badge.x + badge.width)).toBeLessThan(20);
 });
 
 test('library details: on a narrow screen the tags and facts take a second line, and the details start under the title', async ({ page }) => {

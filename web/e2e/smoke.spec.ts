@@ -1032,39 +1032,6 @@ test('library: the filter box names the view, a row shows only a failed verdict 
   await expect(nav.getByRole('link', { name: /^Uncollected/ })).toHaveCount(0);
 });
 
-test('library: the sort menu holds the directions, named for the field, and a direction keeps the field', async ({ page }) => {
-  await open(page, '/');
-  const sort = page.getByRole('button', { name: /^Sort/ });
-  const menu = page.getByRole('menu', { name: 'Sort by' });
-  const choice = (name: string) => menu.getByRole('menuitemradio', { name, exact: true });
-  await expect(page.getByRole('button', { name: /scending/ })).toHaveCount(0);
-
-  await sort.click();
-  await expect(choice('Newest first')).toHaveAttribute('aria-checked', 'true');
-  await expect(choice('Oldest first')).toHaveAttribute('aria-checked', 'false');
-  await choice('Title').click();
-  await expect(sort).toHaveText(/Sort:\s*Title/);
-  await sort.click();
-  await expect(choice('A → Z')).toHaveAttribute('aria-checked', 'true');
-  await choice('Z → A').click();
-  await expect(page).toHaveURL(/sort=title&order=desc/);
-  await expect(sort).toHaveText(/Sort:\s*Title/);
-  await expect(page.locator('.item-title').first()).toHaveText('Write-Ahead Logging and fsync');
-
-  await sort.click();
-  await choice('Difficulty').click();
-  await sort.click();
-  await expect(choice('Easiest first')).toHaveAttribute('aria-checked', 'true');
-  await choice('Hardest first').click();
-  await expect(page.locator('.item-row').first().locator('.item-kind')).toHaveText('Hard');
-
-  // A collection's own order has no direction.
-  await page.getByRole('link', { name: 'Interview prep' }).click();
-  await sort.click();
-  await expect(choice('Manual order')).toHaveAttribute('aria-checked', 'true');
-  await expect(menu.getByRole('menuitemradio')).toHaveText(['Manual order', 'Last updated', 'Date added', 'Title', 'Difficulty']);
-});
-
 test('settings: Import and Export are pages of Settings, and their old addresses lead there', async ({ page }) => {
   await open(page, '/');
   const sidebar = page.getByRole('complementary', { name: 'Navigation' });

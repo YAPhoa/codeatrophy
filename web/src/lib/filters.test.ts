@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, effectiveSort, filtersToSearch, parseFilters, sortDirections, toListParams, toggleIn, viewNoun } from './filters';
+import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortDirections, toListParams, toggleIn, viewNoun } from './filters';
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs));
 
@@ -138,6 +138,43 @@ describe('sortDirections', () => {
   it('has none for manual order and relevance', () => {
     expect(sortDirections('position')).toBeNull();
     expect(sortDirections('relevance')).toBeNull();
+  });
+});
+
+describe('nextColumnSort', () => {
+  const cycle = (f: typeof EMPTY_FILTERS, collectionId: string | null, column: 'title' | 'difficulty' | 'updated') => {
+    const seen: string[] = [];
+    let cur = f;
+    for (let i = 0; i < 3; i++) {
+      cur = nextColumnSort(cur, collectionId, column);
+      seen.push(`${cur.sort ?? '-'}/${cur.order ?? '-'}`);
+    }
+    return seen;
+  };
+
+  it('sorts by the column in its natural direction, then the other way, then back to the view\'s own order', () => {
+    expect(cycle(EMPTY_FILTERS, null, 'title')).toEqual(['title/-', 'title/desc', '-/-']);
+    expect(cycle(EMPTY_FILTERS, null, 'difficulty')).toEqual(['difficulty/-', 'difficulty/desc', '-/-']);
+    expect(cycle(EMPTY_FILTERS, 'c1', 'title')).toEqual(['title/-', 'title/desc', '-/-']);
+  });
+
+  it('on the column a view sorts by anyway, reverses it first', () => {
+    expect(cycle(EMPTY_FILTERS, null, 'updated')).toEqual(['updated/asc', '-/-', 'updated/asc']);
+    // While searching the view sorts by relevance, so Updated starts at newest first.
+    expect(cycle({ ...EMPTY_FILTERS, q: 'x' }, null, 'updated')).toEqual(['updated/-', 'updated/asc', '-/-']);
+  });
+
+  it('keeps the filters', () => {
+    expect(nextColumnSort({ ...EMPTY_FILTERS, tags: ['a'] }, null, 'title').tags).toEqual(['a']);
+  });
+});
+
+describe('directionText', () => {
+  it('words a direction for a sentence', () => {
+    expect(directionText('title', 'asc')).toBe('A to Z');
+    expect(directionText('difficulty', 'desc')).toBe('hardest first');
+    expect(directionText('updated', 'desc')).toBe('newest first');
+    expect(directionText('position', 'asc')).toBeNull();
   });
 });
 

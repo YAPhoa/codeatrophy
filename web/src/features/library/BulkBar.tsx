@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, FolderMinus, FolderPlus, MoreHorizontal, Star, StarOff, Tag, Trash2, X } from 'lucide-react';
 import { api } from '../../api/client';
-import { invalidateLibrary, useCollections, useTags } from '../../api/queries';
+import { invalidateLibrary, patchItemsNow, useCollections, useTags } from '../../api/queries';
 import type { BulkAction, Collection, ItemSummary } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { exportItemsPath } from '../../lib/exportLink';
@@ -38,7 +38,11 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
   const [dialog, setDialog] = useState<DialogState>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [targetCollection, setTargetCollection] = useState('');
-  const [busy, setBusy] = useState(false);
+  // Deleting is a real wait, so the bar waits with it; a dialog's action
+  // waits in the dialog. Quicker actions leave the bar as it is.
+  const [busy, setBusy] = useState<'delete' | 'dialog' | null>(null);
+  // One action at a time, without dimming the bar to say so.
+  const inFlight = useRef(false);
 
   const ids = useMemo(() => selected.map((s) => s.id), [selected]);
   const n = ids.length;
@@ -46,8 +50,10 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
   const collectionOptions = useMemo(() => flattenTree(buildTree(collections)), [collections]);
   const allFavorite = selected.every((s) => s.favorite);
 
-  const run = async (action: BulkAction, done: string, clear = false) => {
-    setBusy(true);
+  const run = async (action: BulkAction, done: string, { clear = false, wait = null }: { clear?: boolean; wait?: 'delete' | 'dialog' | null } = {}) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(wait);
     try {
       const { affected } = await api.items.bulk({ ids, ...action });
       await invalidateLibrary(qc);
@@ -57,7 +63,26 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
     } catch (e) {
       toast.error(e);
     } finally {
-      setBusy(false);
+      inFlight.current = false;
+      setBusy(null);
+    }
+  };
+
+  // Status and favorite show at once, as a row's own controls do, and the
+  // lists and counts catch up quietly; a rejected change is put back.
+  const quick = async (action: Extract<BulkAction, { action: 'setStatus' | 'setFavorite' }>, done: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    const restore = await patchItemsNow(qc, ids, action.action === 'setStatus' ? { status: action.status } : { favorite: action.favorite });
+    try {
+      const { affected } = await api.items.bulk({ ids, ...action });
+      toast.success(done.replace('{n}', plural(affected, 'item')));
+    } catch (e) {
+      restore();
+      toast.error(e);
+    } finally {
+      inFlight.current = false;
+      void invalidateLibrary(qc);
     }
   };
 
@@ -68,7 +93,7 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
       confirmLabel: `Delete ${plural(n, 'item')}`,
       danger: true,
     });
-    if (ok) await run({ action: 'delete' }, 'Deleted {n}', true);
+    if (ok) await run({ action: 'delete' }, 'Deleted {n}', { clear: true, wait: 'delete' });
   };
 
   return (
@@ -80,26 +105,28 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
       <MenuButton
         size="sm"
         menuLabel="Mark as"
-        disabled={busy}
+        disabled={busy === 'delete'}
         items={ITEM_STATUSES.map((s) => ({
           label: STATUS_LABEL[s],
           icon: <StatusIcon status={s} size={14} />,
-          onSelect: () => void run({ action: 'setStatus', status: s }, `Marked {n} as ${STATUS_LABEL[s].toLowerCase()}`),
+          onSelect: () => void quick({ action: 'setStatus', status: s }, `Marked {n} as ${STATUS_LABEL[s].toLowerCase()}`),
         }))}
       >
         Mark as
       </MenuButton>
       <Button
         size="sm"
-        disabled={busy}
+        disabled={busy === 'delete'}
         icon={allFavorite ? <StarOff size={14} /> : <Star size={14} />}
-        onClick={() => void run({ action: 'setFavorite', favorite: !allFavorite }, allFavorite ? 'Removed {n} from favorites' : 'Added {n} to favorites')}
+        onClick={() => void quick({ action: 'setFavorite', favorite: !allFavorite }, allFavorite ? 'Removed {n} from favorites' : 'Added {n} to favorites')}
       >
         {allFavorite ? 'Unfavorite' : 'Favorite'}
       </Button>
       <MenuButton
         size="sm"
-        disabled={busy}
+        disabled={busy === 'delete'}
+        className="bulk-compact"
+        title="Tags"
         icon={<Tag size={14} />}
         menuLabel="Tags"
         items={[
@@ -124,7 +151,9 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
       </MenuButton>
       <Button
         size="sm"
-        disabled={busy}
+        className="bulk-compact"
+        title="Add to collection"
+        disabled={busy === 'delete'}
         icon={<FolderPlus size={14} />}
         onClick={() => {
           setTargetCollection('');
@@ -133,10 +162,13 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
       >
         Add to collection
       </Button>
+      <Button size="sm" className="bulk-delete bulk-compact" title="Delete" disabled={busy === 'delete'} icon={<Trash2 size={14} />} onClick={() => void remove()}>
+        Delete
+      </Button>
       {/* The less common actions, so the bar fits on one line at narrow widths too. */}
       <MenuButton
         size="sm"
-        disabled={busy}
+        disabled={busy === 'delete'}
         icon={<MoreHorizontal size={14} />}
         label="More actions"
         items={[
@@ -145,17 +177,13 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
                 {
                   label: 'Remove from this collection',
                   icon: <FolderMinus size={14} />,
-                  onSelect: () => void run({ action: 'removeFromCollection', collectionId: collection.id }, `Removed {n} from “${collection.name}”`, true),
+                  onSelect: () => void run({ action: 'removeFromCollection', collectionId: collection.id }, `Removed {n} from “${collection.name}”`, { clear: true }),
                 },
               ]
             : []),
           { label: 'Export…', icon: <Download size={14} />, to: exportItemsPath(ids) },
         ]}
       />
-      <span className="spacer" />
-      <Button size="sm" variant="ghost" className="bulk-delete" disabled={busy} icon={<Trash2 size={14} />} onClick={() => void remove()}>
-        Delete
-      </Button>
 
       <Dialog
         open={dialog?.kind === 'addTags' || dialog?.kind === 'removeTags'}
@@ -163,20 +191,21 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
         guard
         title={dialog?.kind === 'removeTags' ? `Remove tags from ${plural(n, 'item')}` : `Add tags to ${plural(n, 'item')}`}
         size="sm"
-        locked={busy}
+        locked={busy === 'dialog'}
         footer={
           <>
-            <Button onClick={() => setDialog(null)} disabled={busy}>
+            <Button onClick={() => setDialog(null)} disabled={busy === 'dialog'}>
               Cancel
             </Button>
             <Button
               variant="primary"
-              busy={busy}
+              busy={busy === 'dialog'}
               disabled={tags.length === 0}
               onClick={() =>
                 void run(
                   { action: dialog?.kind === 'removeTags' ? 'removeTags' : 'addTags', tags },
                   dialog?.kind === 'removeTags' ? 'Removed tags from {n}' : 'Tagged {n}',
+                  { wait: 'dialog' },
                 )
               }
             >
@@ -217,7 +246,7 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
         onClose={() => setDialog(null)}
         title={`Add ${plural(n, 'item')} to a collection`}
         size="sm"
-        locked={busy}
+        locked={busy === 'dialog'}
         footer={
           <>
             <Button
@@ -228,16 +257,16 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
             >
               New collection…
             </Button>
-            <Button onClick={() => setDialog(null)} disabled={busy}>
+            <Button onClick={() => setDialog(null)} disabled={busy === 'dialog'}>
               Cancel
             </Button>
             <Button
               variant="primary"
-              busy={busy}
+              busy={busy === 'dialog'}
               disabled={!targetCollection}
               onClick={() => {
                 const name = collections.find((c) => c.id === targetCollection)?.name ?? 'collection';
-                void run({ action: 'addToCollection', collectionId: targetCollection }, `Added {n} to “${name}”`);
+                void run({ action: 'addToCollection', collectionId: targetCollection }, `Added {n} to “${name}”`, { wait: 'dialog' });
               }}
             >
               Add to collection

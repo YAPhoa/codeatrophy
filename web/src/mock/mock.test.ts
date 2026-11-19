@@ -313,6 +313,29 @@ describe('listing items', () => {
     expect((await api.items.list({ limit: 200 })).items.length).toBeGreaterThan(0);
   });
 
+  it('counts facets as the list would total with each value, each dimension without its own filter', async () => {
+    const view = { type: 'problem' as const, collectionId: seedIds.collections.interviewPrep, recursive: true };
+    const total = async (params: Parameters<typeof api.items.list>[0]) => (await api.items.list(params)).total;
+    const facets = await api.items.facets({ ...view, status: ['done'], difficulty: ['medium'], sort: 'title', limit: 1 });
+    for (const s of ['todo', 'in_progress', 'done'] as const) {
+      expect(facets.byStatus[s]).toBe(await total({ ...view, status: [s], difficulty: ['medium'] }));
+    }
+    for (const d of ['easy', 'medium', 'hard', 'none'] as const) {
+      expect(facets.byDifficulty[d]).toBe(await total({ ...view, status: ['done'], difficulty: [d] }));
+    }
+    expect(facets.byStatus.done).toBeGreaterThan(0);
+    expect(facets.byDifficulty.easy + facets.byDifficulty.hard).toBeGreaterThan(0);
+    const tags = Object.entries(facets.byTag);
+    expect(tags.length).toBeGreaterThan(0);
+    for (const [tag, n] of tags) expect(n).toBe(await total({ ...view, status: ['done'], difficulty: ['medium'], tag: [tag] }));
+    expect(tags.every(([, n]) => n > 0)).toBe(true);
+
+    // Unfiltered, the status counts add up to the view.
+    const all = await api.items.facets(view);
+    expect(all.byStatus.todo + all.byStatus.in_progress + all.byStatus.done).toBe(await total(view));
+    expect((await failure(api.items.facets({ status: ['lost' as 'done'] }))).status).toBe(400);
+  });
+
   it('links variants to their origin', async () => {
     const origin = await api.items.get(seedIds.items.twoSum);
     expect(origin.variantCount).toBe(2);

@@ -400,8 +400,10 @@ test('sidebar: a long nested collection name truncates, and every count stays in
 });
 
 test('focus: a menu row reached with the keyboard has a ring, so it differs from the row under the pointer', async ({ page }) => {
+  // The sort menu: on a narrow screen, where the list has no columns to sort by.
+  await page.setViewportSize({ width: 600, height: 900 });
   await open(page, '/');
-  const sort = page.getByRole('button', { name: /^Sort/ });
+  const sort = page.getByRole('button', { name: /^Sort:/ });
   await sort.focus();
   await page.keyboard.press('ArrowDown');
   const menu = page.getByRole('menu', { name: 'Sort by' });
@@ -448,8 +450,9 @@ test('toasts: a toast stays while the pointer is on it, so its Undo cannot slip 
 });
 
 test('menus: a choice in effect is marked by a check, not by a background', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 900 });
   await open(page, '/');
-  await page.getByRole('button', { name: /^Sort/ }).click();
+  await page.getByRole('button', { name: /^Sort:/ }).click();
   const menu = page.getByRole('menu', { name: 'Sort by' });
   const current = menu.getByRole('menuitemradio', { name: 'Last updated' });
   await expect(current).toHaveAttribute('aria-checked', 'true');
@@ -460,6 +463,7 @@ test('menus: a choice in effect is marked by a check, not by a background', asyn
   const plain = await menu.getByRole('menuitemradio', { name: 'Title' }).evaluate((el) => getComputedStyle(el).backgroundColor);
   await expect(current).toHaveCSS('background-color', plain);
   await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // Choices with icons keep them, and the check goes at the end.
   await page.getByRole('button', { name: /^Theme/ }).click();
@@ -482,11 +486,11 @@ test('menus: a choice in effect is marked by a check, not by a background', asyn
 test('layout: the filter bar keeps to one line at 1000px, the room kept for clearing included', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await open(page, '/');
-  await expect(page.getByRole('button', { name: /^Sort/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Tags/ })).toBeVisible();
   const tops = () => page.locator('.filterbar > :not(.spacer)').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
   expect(await tops()).toBe(1);
   await page.getByRole('button', { name: /^Difficulty/ }).click();
-  await page.locator('.popover-panel .picklist-item').first().click();
+  await page.locator('.filter-pop .facet-row').first().click();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Clear filters' })).toBeVisible();
   expect(await tops()).toBe(1);
@@ -514,7 +518,7 @@ test('layout: selecting a row or setting a filter moves no row and no filter but
   await page.getByRole('dialog', { name: 'Status' }).getByText('To do').click();
   await expect(page).toHaveURL(/status=todo/);
   await page.keyboard.press('Escape');
-  await expect(page.locator('.item-head-label')).toHaveText(/^\d+ of 25$/);
+  await expect(page.locator('.pager-range')).toHaveText(/^Showing 1–\d+ of \d+$/);
   expect(await top()).toBe(rowTop);
   expect(await left()).toBe(difficultyLeft);
 });
