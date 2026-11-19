@@ -250,7 +250,7 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
         ) : (
           <div className="picklist" role="radiogroup" aria-label="Collection">
             {collectionOptions.map((node) => (
-              <label key={node.collection.id} className="picklist-item" style={{ paddingLeft: 8 + node.depth * 16 }}>
+              <label key={node.collection.id} className="picklist-item" style={{ paddingLeft: 4 + node.depth * 16 }}>
                 <input
                   type="radio"
                   name="bulk-collection"

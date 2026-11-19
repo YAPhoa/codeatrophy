@@ -222,7 +222,7 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
         ) : (
           <div className="picklist">
             {visible.map((n) => (
-              <label key={n.collection.id} className="picklist-item" style={{ paddingLeft: 8 + (q ? 0 : n.depth * 16) }}>
+              <label key={n.collection.id} className="picklist-item" style={{ paddingLeft: 4 + (q ? 0 : n.depth * 16) }}>
                 <input
                   type="checkbox"
                   checked={selected.includes(n.collection.id)}

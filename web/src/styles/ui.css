@@ -660,7 +660,7 @@ button.chip:hover {
 }
 
 .menu {
-  min-width: 190px;
+  min-width: 140px;
   padding: var(--space-1);
 }
 
@@ -790,9 +790,15 @@ button.chip:hover {
   align-items: center;
   gap: var(--space-2);
   min-height: 28px;
-  padding: 3px var(--space-2);
+  padding: 3px var(--space-2) 3px var(--space-1);
   border-radius: var(--radius-sm);
   cursor: pointer;
+}
+
+/* The picklist reaches 4px past the text for its hover background, so the
+   items step back in by as much: their marks line up with the text around them. */
+.picklist-item > input {
+  margin: 0;
 }
 
 .picklist-item:hover {

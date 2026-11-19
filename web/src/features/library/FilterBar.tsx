@@ -200,10 +200,11 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
 
       {children}
 
-      {/* Kept in place while hidden, so its appearing cannot wrap the bar. */}
-      <Button
+      {/* Kept in place while hidden, so its appearing cannot wrap the bar; an
+          icon alone, so the room it keeps does not wrap the bar either. */}
+      <IconButton
         size="sm"
-        variant="ghost"
+        label="Clear filters"
         icon={<X size={14} />}
         className={cx('filter-clear', active === 0 && 'is-idle')}
         tabIndex={active > 0 ? undefined : -1}
@@ -213,9 +214,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           lastPushed.current = '';
           onChange(clearBarFilters(filters));
         }}
-      >
-        Clear filters
-      </Button>
+      />
 
       <span className="spacer" />
 

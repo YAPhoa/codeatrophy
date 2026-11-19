@@ -468,6 +468,28 @@ test('menus: a choice in effect is marked by a check, not by a background', asyn
   await expect(theme.locator('.menu-item-icon svg')).toHaveCount(1);
   await expect(theme.locator('.menu-item-icon .menu-item-check')).toHaveCount(0);
   await expect(theme.locator('.menu-item-end .menu-item-check')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+
+  // A menu with neither icons nor marks has no empty column before its labels.
+  await page.locator('.item-row .item-check input').first().check();
+  await page.getByRole('button', { name: 'Tags', exact: true }).click();
+  const add = page.getByRole('menuitem', { name: 'Add tags…' });
+  await expect(add.locator('.menu-item-icon')).toHaveCount(0);
+  const [item, label] = await add.evaluate((el) => [el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft), el.querySelector('.grow')!.getBoundingClientRect().left]);
+  expect(Math.abs(label - item)).toBeLessThan(1);
+});
+
+test('layout: the filter bar keeps to one line at 1000px, the room kept for clearing included', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await open(page, '/');
+  await expect(page.getByRole('button', { name: /^Sort/ })).toBeVisible();
+  const tops = () => page.locator('.filterbar > :not(.spacer)').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
+  expect(await tops()).toBe(1);
+  await page.getByRole('button', { name: /^Difficulty/ }).click();
+  await page.locator('.popover-panel .picklist-item').first().click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Clear filters' })).toBeVisible();
+  expect(await tops()).toBe(1);
 });
 
 test('layout: selecting a row or setting a filter moves no row and no filter button', async ({ page }) => {

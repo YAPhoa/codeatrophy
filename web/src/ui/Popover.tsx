@@ -229,6 +229,9 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
     }
   };
 
+  // The gutter lines the labels up past icons and marks; a menu with neither leaves it out.
+  const gutter = items.some((e) => typeof e === 'object' && !('heading' in e) && (e.icon !== undefined || e.checked !== undefined || e.selected !== undefined));
+
   return (
     <>
       <Button
@@ -267,9 +270,11 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
             const markInGutter = checkable || (choice && !item.icon);
             const content = (
               <>
-                <span className="menu-item-icon" aria-hidden="true">
-                  {markInGutter ? (item.checked || item.selected ? mark : null) : item.icon}
-                </span>
+                {gutter && (
+                  <span className="menu-item-icon" aria-hidden="true">
+                    {markInGutter ? (item.checked || item.selected ? mark : null) : item.icon}
+                  </span>
+                )}
                 <span className="grow">{item.label}</span>
                 {choice && !markInGutter ? (
                   <span className="menu-item-end" aria-hidden="true">
