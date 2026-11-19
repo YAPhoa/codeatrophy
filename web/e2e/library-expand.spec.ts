@@ -341,23 +341,31 @@ test('library details: they stay under the title, clear of the facts\' columns, 
   }
 });
 
-test('library details: each label is level with the first line of its value', async ({ page }) => {
+test('library details: each label is level with the first line of its value, or above it under a narrow title column', async ({ page }) => {
   await openWithTags(page, COIN, MANY_TAGS);
-  await page.setViewportSize({ width: 1000, height: 900 });
   const r = row(page, COIN);
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, COIN);
   await expect(details.locator('dt')).toHaveText(['Tags', 'Created', 'Collections']);
-  const pairs = await details.locator('.item-details-facts').evaluate((dl) =>
-    [...dl.querySelectorAll('dt')].map((dt) => {
-      const first = (dt.nextElementSibling!.querySelector('.chip, time') ?? dt.nextElementSibling!).getBoundingClientRect();
-      const label = dt.getBoundingClientRect();
-      return { label: label.top + label.height / 2, value: first.top + first.height / 2, valueHeight: dt.nextElementSibling!.getBoundingClientRect().height };
-    }),
-  );
+  const pairs = () =>
+    details.locator('.item-details-facts').evaluate((dl) =>
+      [...dl.querySelectorAll('dt')].map((dt) => {
+        const dd = dt.nextElementSibling!;
+        const first = (dd.querySelector('.chip, time') ?? dd).getBoundingClientRect();
+        const label = dt.getBoundingClientRect();
+        return { label: label.top + label.height / 2, labelBottom: label.bottom, value: first.top + first.height / 2, valueTop: dd.getBoundingClientRect().top, valueHeight: dd.getBoundingClientRect().height };
+      }),
+    );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const beside = await pairs();
   // The tags take several lines; the label stays on the first.
-  expect(pairs[0]!.valueHeight).toBeGreaterThan(40);
-  for (const p of pairs) expect(Math.abs(p.label - p.value)).toBeLessThan(3);
+  expect(beside[0]!.valueHeight).toBeGreaterThan(40);
+  for (const p of beside) expect(Math.abs(p.label - p.value)).toBeLessThan(3);
+
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await expect.poll(async () => (await pairs()).every((p) => p.labelBottom <= p.valueTop + 0.5)).toBe(true);
+  // A tag still shows whole there.
+  expect(await details.locator('.chip-tag .truncate').evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth))).toBe(true);
 });
 
 test('library details: a collection is a chip like a tag, and opens the collection', async ({ page }) => {
@@ -455,21 +463,38 @@ test('library head: the facts\' columns are named over them, but not on a narrow
   await open(page, '/');
   const head = page.locator('.item-list-head');
   const names = head.locator('.item-col-head');
-  await expect(names).toHaveText(['Verdict', 'Difficulty', 'Tests', 'Updated']);
+  await expect(names).toHaveText(['Difficulty', 'Verdict', 'Tests', 'Updated']);
   await expect(names.first()).toHaveAttribute('aria-hidden', 'true');
+  const columns = ['.item-kind', '.item-verdict', '.item-tests', '.item-updated'];
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
-    const r = row(page, 'LRU Cache');
-    const cell = async (sel: string) => (await r.locator(sel).boundingBox())!;
-    const name = async (text: string) => (await names.filter({ hasText: text }).boundingBox())!;
-    // Verdict and difficulty start where their badges do; tests and updated end where their text does.
-    expect(Math.abs((await name('Verdict')).x - (await cell('.item-verdict .badge')).x)).toBeLessThan(1);
-    expect(Math.abs((await name('Difficulty')).x - (await cell('.item-kind .badge')).x)).toBeLessThan(1);
-    for (const [text, sel] of [['Tests', '.item-tests'], ['Updated', '.item-updated']] as const) {
-      const n = await name(text);
-      const c = await cell(sel);
-      expect(Math.abs(n.x + n.width - (c.x + c.width))).toBeLessThan(1);
+    // Where each column's name starts, and on every row, where each fact's content starts and ends, and where the next column starts.
+    const layout = await page.evaluate((columns) => {
+      const content = (cell: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return range.getBoundingClientRect();
+      };
+      const names = [...document.querySelectorAll('.item-list-head .item-col-head')].map((el) => content(el).left);
+      const rows = [...document.querySelectorAll('.item-list .item-row')].map((li) =>
+        columns.map((sel) => {
+          const cell = li.querySelector(sel)!;
+          const box = content(cell);
+          return { filled: box.width > 0, left: box.left, right: box.right, next: cell.nextElementSibling!.getBoundingClientRect().left };
+        }),
+      );
+      return { names, rows };
+    }, columns);
+    for (const row of layout.rows) {
+      for (const [i, fact] of row.entries()) {
+        if (!fact.filled) continue;
+        // Every fact starts where its column's name does, and leaves a gap before the next column.
+        expect(Math.abs(fact.left - layout.names[i]!)).toBeLessThan(1);
+        expect(fact.right).toBeLessThan(fact.next - 6);
+      }
     }
+    // Each column is filled on some row.
+    for (const i of columns.keys()) expect(layout.rows.some((r) => r[i]!.filled)).toBe(true);
     await expect(head.locator('.item-head-label')).toHaveText('25 items');
   }
 

@@ -1,13 +1,15 @@
 // The readings of the seed library. Bodies live as Markdown files in
 // ./content, keyed by `key`.
 
-import type { ItemStatus } from '../../api/types';
+import type { Difficulty, ItemStatus } from '../../api/types';
 
 export interface SeedReading {
   key: string;
   n: number;
   title: string;
   summary: string;
+  /** Readings may have one too; most do not. */
+  difficulty?: Difficulty;
   tags: string[];
   status: ItemStatus;
   favorite?: boolean;
@@ -116,6 +118,7 @@ export const SEED_READINGS: SeedReading[] = [
     n: 24,
     title: 'Raft: Leader Election Cheat Sheet',
     summary: 'States, vote rules and timing for the election half of Raft.',
+    difficulty: 'medium',
     tags: ['distributed-systems'],
     status: 'in_progress',
     created: 18,

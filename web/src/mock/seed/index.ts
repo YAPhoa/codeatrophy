@@ -661,7 +661,7 @@ export function seedDatabase(db: MockDb): void {
       title: r.title,
       summary: r.summary,
       body: seedBody(r.key),
-      difficulty: null,
+      difficulty: r.difficulty ?? null,
       tags: [...r.tags].sort(),
       status: r.status,
       favorite: r.favorite ?? false,

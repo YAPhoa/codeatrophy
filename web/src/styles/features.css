@@ -416,11 +416,11 @@
 /* The rows' columns (see .item-row), shared with the head bar so its
    column names sit over them. */
 .item-list-wrap {
-  --item-columns: 28px 28px 20px minmax(0, 1fr) 104px 76px 60px 84px 28px 28px;
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 64px 84px 28px 28px;
 }
 
 .item-list-wrap.is-reorderable {
-  --item-columns: 28px 28px 20px minmax(0, 1fr) 104px 76px 60px 84px 28px 28px 22px;
+  --item-columns: 28px 28px 20px minmax(0, 1fr) 76px 110px 64px 84px 28px 28px 22px;
 }
 
 /* The checkbox over the rows' checkboxes, the count from the status column
@@ -461,22 +461,20 @@
   white-space: nowrap;
 }
 
-.item-col-head.is-verdict {
+.item-col-head.is-kind {
   grid-column: 5;
 }
 
-.item-col-head.is-kind {
+.item-col-head.is-verdict {
   grid-column: 6;
 }
 
 .item-col-head.is-tests {
   grid-column: 7;
-  justify-self: end;
 }
 
 .item-col-head.is-updated {
   grid-column: 8;
-  justify-self: end;
 }
 
 .item-list-head .spin-wrap {
@@ -485,10 +483,11 @@
 }
 
 /* A row's line: the checkbox, status and type on the left, the title and
-   its tags, then the facts in fixed columns (a failed verdict, difficulty or
-   "Reading", tests, updated), the star and the chevron. Every column keeps
-   its width whether or not a row fills it, so the facts line up from row to
-   row. A click anywhere but on a control opens or closes the row (ItemRow). */
+   its tags, then the facts in fixed columns (a problem's difficulty, a
+   failed verdict, tests, updated), the star and the chevron. Every column
+   keeps its width whether or not a row fills it, and each starts its content
+   at its left edge, under its name in the head, so the facts line up from
+   row to row. Each is as wide as its longest usual value and a gap. A click anywhere but on a control opens or closes the row (ItemRow). */
 .item-row {
   /* An open row: a step towards a hovered one, so it reads as one block. */
   --row-open: color-mix(in srgb, var(--surface-3) 45%, var(--surface));
@@ -689,8 +688,7 @@
   max-width: 100%;
 }
 
-/* Difficulty for a problem, "Reading" for a reading: outlined, so the column
-   stays quiet and shows on any row fill. */
+/* Difficulty: outlined, so the column stays quiet and shows on any row fill. */
 .item-kind .badge {
   background: none;
   box-shadow: inset 0 0 0 1px var(--border-strong);
@@ -701,13 +699,8 @@
   padding: 0 var(--space-1-5) 0 var(--space-1);
 }
 
-.badge-kind {
-  color: var(--text-3);
-}
-
 .item-tests,
 .item-updated {
-  justify-content: flex-end;
   color: var(--text-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -729,11 +722,10 @@
   transition-duration: var(--duration-fast);
 }
 
-/* The details: under the title, ending where the difficulty column
-   starts (an open row's verdict stays on its line, so they may run under
-   it). Long text and tags wrap there. */
+/* The details: under the title, ending where the facts' columns start.
+   Long text and tags wrap there. */
 .item-row > .collapse {
-  grid-area: 2 / 4 / 3 / 6;
+  grid-area: 2 / 4;
 }
 
 .item-details {
@@ -782,6 +774,23 @@
 /* As wide as the value's column, so a long chip ellipsizes in it. */
 .item-details-facts .tagchips {
   display: flex;
+}
+
+/* Under a title column too narrow to give the values room beside their
+   labels, each label goes above its value. */
+.item-details {
+  container: item-details / inline-size;
+}
+
+@container item-details (max-width: 320px) {
+  .item-details-facts {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+
+  .item-details-facts dd + dt {
+    margin-top: var(--space-1);
+  }
 }
 
 .item-details-empty {

@@ -998,9 +998,14 @@ test('library: the filter box names the view, a row shows only a failed verdict 
   await expect(lru.locator('.item-status button')).toHaveAttribute('title', 'To do · Last verdict: Compile error');
   await expect(page.locator('.item-verdict', { hasText: /Accepted|Executed/ })).toHaveCount(0);
   await expect(page.locator('.item-tests', { hasText: 'no tests' }).first()).toBeVisible();
-  // A reading says so where a problem gives its difficulty, and has no test count.
+  // A reading's type icon says what it is; its difficulty shows like a problem's, when it has one, and it has no test count.
   const reading = rows.filter({ has: page.getByRole('link', { name: 'How B-Trees Work', exact: true }) });
-  await expect(reading.locator('.item-kind')).toHaveText('Reading');
+  await expect(reading.getByLabel('Reading', { exact: true })).toBeVisible();
+  await expect(reading.locator('.item-kind')).toHaveText('');
+  const rated = rows.filter({ has: page.getByRole('link', { name: 'Raft: Leader Election Cheat Sheet', exact: true }) });
+  await expect(rated.locator('.item-kind .badge-difficulty')).toHaveText('Medium');
+  await expect(rows.locator('.item-kind, .item-verdict, .item-tests').filter({ hasText: 'Reading' })).toHaveCount(0);
+  await expect(rows.locator('.badge').filter({ hasText: /^Reading$/ })).toHaveCount(0);
   await expect(reading.locator('.item-tests')).toHaveText('');
 
   // A title cut off by the row shows in full on hover; one that fits gets no tooltip.
@@ -1008,7 +1013,7 @@ test('library: the filter box names the view, a row shows only a failed verdict 
   const cut = rows.locator('.item-title', { hasText: 'Longest Substring Without Repeating Characters' });
   await cut.hover();
   await expect(cut).toHaveAttribute('title', 'Longest Substring Without Repeating Characters');
-  const fits = rows.locator('.item-title', { hasText: 'Merge k Sorted Lists' });
+  const fits = rows.locator('.item-title', { hasText: 'LRU Cache' });
   await fits.hover();
   await expect(fits).not.toHaveAttribute('title', /./);
   await page.setViewportSize({ width: 1440, height: 900 });

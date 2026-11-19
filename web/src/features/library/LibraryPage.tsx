@@ -66,8 +66,8 @@ function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) 
           <span className="item-main">
             <span className="skel skel-line" style={{ width: SKELETON_WIDTHS[i % SKELETON_WIDTHS.length] }} />
           </span>
-          <span className="item-cell item-verdict" />
           <span className="item-cell item-kind" />
+          <span className="item-cell item-verdict" />
           <span className="item-cell item-tests" />
           <span className="item-cell item-updated">
             <span className="skel skel-line skel-short" />
@@ -611,11 +611,11 @@ export function LibraryPage() {
                 {/* Over the rows' columns; manual order needs the room for its hint. */}
                 {!reorderable && (
                   <>
-                    <span className="item-col-head is-verdict" aria-hidden="true">
-                      Verdict
-                    </span>
                     <span className="item-col-head is-kind" aria-hidden="true">
                       Difficulty
+                    </span>
+                    <span className="item-col-head is-verdict" aria-hidden="true">
+                      Verdict
                     </span>
                     <span className="item-col-head is-tests" aria-hidden="true">
                       Tests

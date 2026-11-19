@@ -12,7 +12,6 @@ import { pathTo } from '../../lib/tree';
 import { Button, cx } from '../../ui/Button';
 import { preloadCodeEditor } from '../../ui/CodeEditor';
 import { Collapse } from '../../ui/Collapse';
-import { Badge } from '../../ui/misc';
 import { DifficultyBadge, FavoriteButton, StatusControl, TagChips, TypeIcon, VerdictBadge } from '../item/controls';
 
 interface ItemRowProps {
@@ -301,10 +300,10 @@ export const ItemRow = memo(function ItemRow({
           />
         )}
       </span>
-      <span className="item-cell item-verdict">{verdict && isFailedVerdict(verdict) && <VerdictBadge verdict={verdict} short />}</span>
       <span className="item-cell item-kind">
-        {item.type === 'problem' ? <DifficultyBadge difficulty={item.difficulty} /> : <Badge className="badge-kind">Reading</Badge>}
+        <DifficultyBadge difficulty={item.difficulty} />
       </span>
+      <span className="item-cell item-verdict">{verdict && isFailedVerdict(verdict) && <VerdictBadge verdict={verdict} short />}</span>
       <span className="item-cell item-tests">{item.type === 'problem' && (item.testCaseCount === 0 ? 'no tests' : plural(item.testCaseCount, 'test'))}</span>
       <time className="item-cell item-updated" dateTime={item.updatedAt} title={`Created ${absoluteTime(item.createdAt)}\nUpdated ${absoluteTime(item.updatedAt)}`}>
         {relativeTime(item.updatedAt)}
