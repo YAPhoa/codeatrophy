@@ -16,8 +16,6 @@ interface FacetListProps<V extends string> {
   options: readonly FacetOption<V>[];
   selected: readonly V[];
   onChange: (next: V[]) => void;
-  /** The header's words while nothing is picked: "Any status". */
-  noneText: string;
   /** Between the header and the rows: the tags' filter field. */
   before?: ReactNode;
   /** Under the rows, in place of them when there are none: "No match." */
@@ -31,16 +29,14 @@ interface FacetListProps<V extends string> {
  * clears them, then one row per value with its label, its count in the view
  * and a round checkbox. Ticking a row leaves the menu open.
  */
-export function FacetList<V extends string>({ options, selected, onChange, noneText, before, empty, autoFocus }: FacetListProps<V>) {
+export function FacetList<V extends string>({ options, selected, onChange, before, empty, autoFocus }: FacetListProps<V>) {
   const listRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const picked = selected.length;
   return (
     <>
       <div className="facet-head">
-        <span className="facet-picked">
-          {picked > 0 ? `${picked} selected` : noneText}
-        </span>
+        <span className="facet-picked">{picked} selected</span>
         {/* Hidden rather than removed, so the header keeps its height and nothing moves. */}
         <button
           type="button"

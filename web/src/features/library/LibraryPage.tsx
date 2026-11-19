@@ -447,7 +447,7 @@ export function LibraryPage() {
 
   const sortProps = { filters, collectionId, onChange: setFilters };
   const filterCount = activeFilterCount(filters);
-  const barFilters = barFilterCount(filters);
+  const barFilters = barFilterCount(filters, collectionId);
   const viewTotal = unfilteredTotal(filters, collection, stats.data);
   const libraryEmpty = stats.data?.items.total === 0;
   const allSelected = items.length > 0 && items.every((i) => selection.has(i.id));
@@ -595,7 +595,7 @@ export function LibraryPage() {
               <EmptyState
                 icon={<SearchX size={20} />}
                 title="No items match"
-                actions={<Button onClick={() => setFilters(clearBarFilters(filters))}>Clear filters</Button>}
+                actions={<Button onClick={() => setFilters(clearBarFilters(filters, collectionId))}>Clear filters</Button>}
               >
                 Try fewer filters or a different search.
               </EmptyState>

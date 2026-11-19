@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortDirections, toListParams, toggleIn, viewNoun } from './filters';
+import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortDirections, toListParams, toggleIn, typeInBar, viewNoun } from './filters';
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs));
 
@@ -101,12 +101,30 @@ describe('helpers', () => {
   });
 
   it('leaves the sidebar view out of the filter bar', () => {
-    const f = parse('q=a&type=problem&status=todo&difficulty=easy&tag=x&favorite=true&uncollected=true&sort=title');
-    expect(barFilterCount(f)).toBe(4);
-    expect(barFilterCount(parse('type=reading&favorite=true&uncollected=true'))).toBe(0);
-    const cleared = clearBarFilters(f);
-    expect(barFilterCount(cleared)).toBe(0);
-    expect(cleared).toMatchObject({ type: 'problem', favorite: true, uncollected: true, sort: 'title' });
+    const f = parse('q=a&type=problem&status=todo&difficulty=easy&tag=x&uncollected=true&sort=title');
+    expect(barFilterCount(f, null)).toBe(4);
+    expect(barFilterCount(parse('type=reading&uncollected=true'), null)).toBe(0);
+    expect(barFilterCount(parse('favorite=true'), null)).toBe(0);
+    const cleared = clearBarFilters(f, null);
+    expect(barFilterCount(cleared, null)).toBe(0);
+    expect(cleared).toMatchObject({ type: 'problem', uncollected: true, sort: 'title' });
+  });
+
+  it('counts and clears the type as a bar filter in Favorites', () => {
+    const f = parse('type=reading&status=todo&favorite=true');
+    expect(typeInBar(f, null)).toBe(true);
+    expect(typeInBar(parse('type=reading'), null)).toBe(false);
+    expect(barFilterCount(f, null)).toBe(2);
+    expect(clearBarFilters(f, null)).toMatchObject({ type: null, status: [], favorite: true });
+  });
+
+  it('counts and clears the type as a bar filter in a collection', () => {
+    const f = parse('q=a&type=reading&status=todo&recursive=true&sort=title');
+    expect(barFilterCount(f, 'c1')).toBe(3);
+    expect(barFilterCount(parse('type=problem'), 'c1')).toBe(1);
+    const cleared = clearBarFilters(f, 'c1');
+    expect(barFilterCount(cleared, 'c1')).toBe(0);
+    expect(cleared).toMatchObject({ type: null, recursive: true, sort: 'title' });
   });
 
   it('toggles membership', () => {

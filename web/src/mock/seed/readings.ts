@@ -99,7 +99,7 @@ export const SEED_READINGS: SeedReading[] = [
     status: 'todo',
     created: 22,
     updated: 22,
-    collections: ['databases'],
+    collections: ['databases', 'weekly'],
   },
   {
     key: 'untrusted-markdown',

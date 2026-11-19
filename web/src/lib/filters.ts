@@ -186,16 +186,30 @@ export function activeFilterCount(f: LibraryFilters): number {
 }
 
 /**
- * Filters set in the library's filter bar. The type, Favorites and
- * Uncollected are views picked in the sidebar, so the bar neither counts nor
- * clears them.
+ * Whether the filter bar picks the type in this view: in a collection and in
+ * Favorites. Elsewhere the sidebar does (Problems, Readings).
  */
-export function barFilterCount(f: LibraryFilters): number {
-  return (f.q.trim() ? 1 : 0) + (f.status.length ? 1 : 0) + (f.difficulty.length ? 1 : 0) + (f.tags.length ? 1 : 0);
+export function typeInBar(f: LibraryFilters, collectionId: string | null): boolean {
+  return collectionId != null || f.favorite;
 }
 
-export function clearBarFilters(f: LibraryFilters): LibraryFilters {
-  return { ...f, q: '', status: [], difficulty: [], tags: [] };
+/**
+ * Filters set in the library's filter bar. Favorites and Uncollected are
+ * views picked in the sidebar, and so is the type where the bar does not
+ * offer it (typeInBar), so the bar neither counts nor clears them.
+ */
+export function barFilterCount(f: LibraryFilters, collectionId: string | null): number {
+  return (
+    (f.q.trim() ? 1 : 0) +
+    (typeInBar(f, collectionId) && f.type ? 1 : 0) +
+    (f.status.length ? 1 : 0) +
+    (f.difficulty.length ? 1 : 0) +
+    (f.tags.length ? 1 : 0)
+  );
+}
+
+export function clearBarFilters(f: LibraryFilters, collectionId: string | null): LibraryFilters {
+  return { ...f, q: '', type: typeInBar(f, collectionId) ? null : f.type, status: [], difficulty: [], tags: [] };
 }
 
 /** Manual ordering only makes sense when the list is the whole collection in its own order. */

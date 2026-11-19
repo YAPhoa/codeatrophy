@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ChevronDown, Search, X } from 'lucide-react';
 import { useItemFacets } from '../../api/queries';
-import { ITEM_STATUSES, type Difficulty, type Tag } from '../../api/types';
+import { ITEM_STATUSES, type Difficulty, type ItemType, type Tag } from '../../api/types';
 import { DIFFICULTY_LABEL, STATUS_LABEL } from '../../lib/format';
-import { barFilterCount, clearBarFilters, toListParams, viewNoun, type LibraryFilters } from '../../lib/filters';
+import { barFilterCount, clearBarFilters, toListParams, typeInBar, viewNoun, type LibraryFilters } from '../../lib/filters';
 import { IconSwap, NumberChange } from '../../ui/Animated';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Popover } from '../../ui/Popover';
-import { StatusIcon } from '../item/controls';
+import { StatusIcon, TypeIcon } from '../item/controls';
 import { FacetList } from './FacetList';
 
 const DIFFICULTY_VALUES: readonly (Difficulty | 'none')[] = ['easy', 'medium', 'hard', 'none'];
+const TYPE_OPTIONS: readonly { value: ItemType; text: string }[] = [
+  { value: 'problem', text: 'Problem' },
+  { value: 'reading', text: 'Reading' },
+];
 
 /** How many tags the Tags menu lists before any is typed. */
 const TAG_PREVIEW = 5;
@@ -52,7 +56,11 @@ function FilterButton({ label, count, children }: { label: string; count: number
   );
 }
 
-/** Search box plus the filters of the library. The type and Favorites are picked in the sidebar; the list's head sorts it. */
+/**
+ * Search box plus the filters of the library. The type is picked in the
+ * sidebar, but in a collection and in Favorites here; Favorites in the
+ * sidebar; the list's head sorts it.
+ */
 export function FilterBar({ filters, onChange, tags, collectionId, searchRef, children, className }: FilterBarProps) {
   // The search text is debounced into the URL so typing does not fire a request per keystroke.
   const [text, setText] = useState(filters.q);
@@ -94,7 +102,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
     () => (tagQuery ? viewTags.filter((t) => t.name.includes(tagQuery)) : viewTags.slice(0, Math.max(TAG_PREVIEW, filters.tags.length))),
     [viewTags, tagQuery, filters.tags.length],
   );
-  const active = barFilterCount(filters);
+  const active = barFilterCount(filters, collectionId);
   // Names the view so the box is not taken for the search of the whole library (Ctrl+K).
   const noun = viewNoun(filters, collectionId);
 
@@ -121,10 +129,33 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         {text && <IconButton size="sm" label="Clear search" icon={<X size={14} />} onClick={() => setText('')} />}
       </div>
 
+      {typeInBar(filters, collectionId) && (
+        <FilterButton label="Type" count={filters.type ? 1 : 0}>
+          {() => (
+            <FacetList
+              autoFocus
+              selected={filters.type ? [filters.type] : []}
+              // One type at a time: ticking the other one switches to it.
+              onChange={(next) => onChange({ ...filters, type: next.find((t) => t !== filters.type) ?? null })}
+              options={TYPE_OPTIONS.map((t) => ({
+                value: t.value,
+                text: t.text,
+                count: facets?.byType[t.value],
+                label: (
+                  <span className={`facet-pill is-${t.value}`}>
+                    <TypeIcon type={t.value} size={13} />
+                    {t.text}
+                  </span>
+                ),
+              }))}
+            />
+          )}
+        </FilterButton>
+      )}
+
       <FilterButton label="Status" count={filters.status.length}>
         {() => (
           <FacetList
-            noneText="Any status"
             autoFocus
             selected={filters.status}
             onChange={(status) => onChange({ ...filters, status })}
@@ -146,7 +177,6 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
       <FilterButton label="Difficulty" count={filters.difficulty.length}>
         {() => (
           <FacetList
-            noneText="Any difficulty"
             autoFocus
             selected={filters.difficulty}
             onChange={(difficulty) => onChange({ ...filters, difficulty })}
@@ -176,7 +206,6 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           ) : (
             <>
               <FacetList
-                noneText="Any tag"
                 autoFocus={viewTags.length <= TAG_PREVIEW}
                 selected={filters.tags}
                 onChange={(next) => onChange({ ...filters, tags: next })}
@@ -229,7 +258,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
         onClick={() => {
           setText('');
           lastPushed.current = '';
-          onChange(clearBarFilters(filters));
+          onChange(clearBarFilters(filters, collectionId));
         }}
       />
     </div>

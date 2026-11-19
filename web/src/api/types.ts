@@ -160,11 +160,12 @@ export interface Stats {
 
 /**
  * `GET /items/facets`: how many items with each value a filtered list shows
- * once the value is picked. Statuses and difficulties are counted without
- * their own filter; tags with every filter (they combine with AND), and only
+ * once the value is picked. Types, statuses and difficulties are counted
+ * without their own filter; tags with every filter (they combine with AND), and only
  * the tags the counted items carry are present.
  */
 export interface ItemFacets {
+  byType: Record<ItemType, number>;
   byStatus: Record<ItemStatus, number>;
   byDifficulty: Record<Difficulty | 'none', number>;
   byTag: Record<string, number>;

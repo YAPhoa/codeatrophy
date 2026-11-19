@@ -398,14 +398,16 @@ function matchItems(db: MockDb, f: ItemFilter) {
   return { matches, scores, memberIds };
 }
 
-/** Counts by status and difficulty, each without its own filter, and by tag with every filter. */
+/** Counts by type, status and difficulty, each without its own filter, and by tag with every filter. */
 function itemFacets(db: MockDb, req: Req) {
   const f = itemFilter(req.query);
   const out: ItemFacets = {
+    byType: { problem: 0, reading: 0 },
     byStatus: { todo: 0, in_progress: 0, done: 0 },
     byDifficulty: { easy: 0, medium: 0, hard: 0, none: 0 },
     byTag: {},
   };
+  for (const item of matchItems(db, { ...f, type: undefined }).matches) out.byType[item.type]++;
   for (const item of matchItems(db, { ...f, statuses: [] }).matches) out.byStatus[item.status]++;
   for (const item of matchItems(db, { ...f, difficulties: [] }).matches) out.byDifficulty[item.difficulty ?? 'none']++;
   for (const item of matchItems(db, f).matches) for (const t of item.tags) out.byTag[t] = (out.byTag[t] ?? 0) + 1;

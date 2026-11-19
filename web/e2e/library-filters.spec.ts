@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { open } from './support';
 
-// The Status, Difficulty and Tags menus of the filter bar: a header that
-// counts what is picked and clears it, then rows with the value, how many
-// items of the view have it, and a round checkbox.
+// The Type (in a collection), Status, Difficulty and Tags menus of the filter
+// bar: a header that counts what is picked and clears it, then rows with the
+// value, how many items of the view have it, and a round checkbox.
 
 const bar = (page: Page) => page.getByRole('search', { name: 'Filter items' });
 const menu = (page: Page, name: string) => page.getByRole('dialog', { name });
@@ -98,7 +98,7 @@ test('filters: Clear empties the menu\'s values, and the header keeps its height
   const status = await openMenu(page, 'Status');
   const head = status.locator('.facet-head');
   const clear = status.getByRole('button', { name: 'Clear' });
-  await expect(head).toHaveText(/Any status/);
+  await expect(head).toHaveText(/0 selected/);
   await expect(clear).toBeHidden();
   // Measured once the menu has grown in.
   await status.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
@@ -120,7 +120,7 @@ test('filters: Clear empties the menu\'s values, and the header keeps its height
   await expect(page).not.toHaveURL(/status=/);
   await expect(status).toBeVisible();
   await expect(status.getByRole('checkbox', { checked: true })).toHaveCount(0);
-  await expect(head).toHaveText(/Any status/);
+  await expect(head).toHaveText(/0 selected/);
   await expect(clear).toBeHidden();
   expect((await head.boundingBox())!.height).toBe(height);
   // The focus Clear had goes to the first row.
@@ -177,4 +177,100 @@ test('filters: the Tags menu leaves out the tags no item of the view carries, bu
   await expect(first.getByRole('checkbox', { name: 'array', exact: true })).toBeChecked();
   await expect(first.locator('.facet-count')).toHaveText('0');
   await expect(picked.locator('.facet-row')).toHaveCount(1);
+});
+
+test('filters: a collection and Favorites have a Type menu that picks one type at a time; other views pick it in the sidebar', async ({ page }) => {
+  await open(page, '/');
+  await expect(bar(page).getByRole('button', { name: /^Status/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Type/ })).toHaveCount(0);
+  await open(page, '/?type=problem');
+  await expect(bar(page).getByRole('button', { name: /^Status/ })).toBeVisible();
+  await expect(bar(page).getByRole('button', { name: /^Type/ })).toHaveCount(0);
+
+  // Favorites: picking a type keeps the view, and clearing the bar removes it.
+  await open(page, '/?favorite=true');
+  const favType = await openMenu(page, 'Type');
+  await favType.getByRole('checkbox', { name: 'Reading' }).click();
+  await expect(page).toHaveURL(/[?&]type=reading/);
+  await expect(page).toHaveURL(/[?&]favorite=true/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Favorites/);
+  await page.keyboard.press('Escape');
+  await bar(page).getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page).not.toHaveURL(/type=/);
+  await expect(page).toHaveURL(/[?&]favorite=true/);
+
+  // Weekly practice: problems and a reading.
+  const id = '22222222-2222-4222-8222-000000000008';
+  const scope = `collectionId=${id}`;
+  await open(page, `/collections/${id}`);
+  const nav = page.getByRole('complementary', { name: 'Navigation' });
+  const filterButtons = bar(page).locator('.filter-btn');
+  await expect(filterButtons.first()).toHaveText(/^Type/);
+  await expect(filterButtons.nth(1)).toHaveText(/^Status/);
+
+  const type = await openMenu(page, 'Type');
+  await expect(type.locator('.facet-head')).toHaveText(/0 selected/);
+  await expect(type.locator('.facet-count .skel')).toHaveCount(0);
+  const all = { Problem: await total(page, `${scope}&type=problem`), Reading: await total(page, `${scope}&type=reading`) };
+  expect(all.Problem).toBeGreaterThan(0);
+  expect(all.Reading).toBeGreaterThan(0);
+  expect(await counts(page, 'Type')).toEqual(all);
+
+  // Picking narrows the list, and the view stays the collection's.
+  await type.getByRole('checkbox', { name: 'Problem' }).click();
+  await expect(page).toHaveURL(/type=problem/);
+  await expect(type.locator('.facet-head')).toContainText('1 selected');
+  await expect(type.locator('.facet-row.is-selected')).toHaveText(/Problem/);
+  await expect(page.locator('.item-row .item-type [aria-label="Reading"]')).toHaveCount(0);
+  await expect(page.locator('.item-row')).toHaveCount(all.Problem);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Weekly practice/);
+  await expect(page).toHaveTitle(/Weekly practice/);
+  await expect(nav.getByRole('link', { name: /^Weekly practice/ })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: /^Problems/ })).not.toHaveAttribute('aria-current', 'page');
+  // The counts leave the type out, so the other one is still there to pick.
+  expect(await counts(page, 'Type')).toEqual(all);
+
+  // Picking the other switches to it.
+  await type.getByRole('checkbox', { name: 'Reading' }).click();
+  await expect(page).toHaveURL(/type=reading/);
+  await expect(page).not.toHaveURL(/type=problem/);
+  await expect(type.getByRole('checkbox', { checked: true })).toHaveCount(1);
+  await expect(type.getByRole('checkbox', { name: 'Reading' })).toBeChecked();
+  await expect(page.locator('.item-row')).toHaveCount(all.Reading);
+  // As in Readings, a list of readings has no Verdict column.
+  await expect(page.locator('.item-list-head').getByText('Verdict', { exact: true })).toHaveCount(0);
+
+  // Unticking it, or Clear, removes it.
+  await type.getByRole('checkbox', { name: 'Reading' }).click();
+  await expect(page).not.toHaveURL(/type=/);
+  await expect(type.getByRole('checkbox', { checked: true })).toHaveCount(0);
+  await type.getByRole('checkbox', { name: 'Problem' }).click();
+  await expect(page).toHaveURL(/type=problem/);
+  await type.getByRole('button', { name: 'Clear' }).click();
+  await expect(page).not.toHaveURL(/type=/);
+  await expect(type.locator('.facet-head')).toHaveText(/0 selected/);
+
+  // Here it is the bar's filter: counted on its button, and cleared with the others.
+  await type.getByRole('checkbox', { name: 'Problem' }).click();
+  await expect(page).toHaveURL(/type=problem/);
+  await page.keyboard.press('Escape');
+  await expect(bar(page).getByRole('button', { name: /^Type/ }).locator('.filter-count')).toHaveText('1');
+  await bar(page).getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page).not.toHaveURL(/type=/);
+  await expect(page.locator('.item-row')).toHaveCount(all.Problem + all.Reading);
+
+  // Outside a collection, clearing the bar keeps the sidebar's type.
+  await open(page, '/?type=reading&status=done');
+  await bar(page).getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page).toHaveURL(/type=reading/);
+});
+
+test('filters: a collection filtered to one type with nothing in it offers to clear the filters', async ({ page }) => {
+  // Arrays & hashing holds only problems.
+  await open(page, '/collections/22222222-2222-4222-8222-000000000002?type=reading');
+  await expect(page.getByText('No items match')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear filters' }).last().click();
+  await expect(page).not.toHaveURL(/type=/);
+  await expect(page.locator('.item-row').first()).toBeVisible();
 });

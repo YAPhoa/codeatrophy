@@ -317,6 +317,9 @@ describe('listing items', () => {
     const view = { type: 'problem' as const, collectionId: seedIds.collections.interviewPrep, recursive: true };
     const total = async (params: Parameters<typeof api.items.list>[0]) => (await api.items.list(params)).total;
     const facets = await api.items.facets({ ...view, status: ['done'], difficulty: ['medium'], sort: 'title', limit: 1 });
+    for (const t of ['problem', 'reading'] as const) {
+      expect(facets.byType[t]).toBe(await total({ ...view, type: t, status: ['done'], difficulty: ['medium'] }));
+    }
     for (const s of ['todo', 'in_progress', 'done'] as const) {
       expect(facets.byStatus[s]).toBe(await total({ ...view, status: [s], difficulty: ['medium'] }));
     }
@@ -334,6 +337,16 @@ describe('listing items', () => {
     const all = await api.items.facets(view);
     expect(all.byStatus.todo + all.byStatus.in_progress + all.byStatus.done).toBe(await total(view));
     expect((await failure(api.items.facets({ status: ['lost' as 'done'] }))).status).toBe(400);
+  });
+
+  it('counts both types whatever the type filter, so a collection can switch between them', async () => {
+    const view = { collectionId: seedIds.collections.weeklyPractice };
+    const total = async (params: Parameters<typeof api.items.list>[0]) => (await api.items.list(params)).total;
+    const facets = await api.items.facets({ ...view, type: 'problem' });
+    expect(facets.byType).toEqual({ problem: await total({ ...view, type: 'problem' }), reading: await total({ ...view, type: 'reading' }) });
+    expect(facets.byType.problem).toBeGreaterThan(0);
+    expect(facets.byType.reading).toBeGreaterThan(0);
+    expect(facets.byType.problem + facets.byType.reading).toBe(await total(view));
   });
 
   it('links variants to their origin', async () => {
