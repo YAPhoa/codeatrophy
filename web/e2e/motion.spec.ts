@@ -71,7 +71,7 @@ test('motion: favourites and done items play nothing on load or on the way to th
   // each screen fades in as it opens.
   await row.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Two Sum' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove Two Sum from favorites' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Favorite', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Done', exact: true })).toBeVisible();
   await settled(page);
   await page.getByRole('link', { name: 'Back to the library' }).click();
@@ -127,7 +127,8 @@ test('motion: an invalid field shakes after a failed save, and can shake again',
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Two Sum' })).toBeVisible();
-  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
   const title = page.getByLabel('Title');
   await title.fill('');
   await page.getByRole('button', { name: 'Save changes' }).click();

@@ -6,14 +6,14 @@ import { useCollections, useLargeTestCaseCount, useMeta, usePreferences, useStyl
 import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { finePointer } from '../../lib/pointer';
-import { MOD, useHotkeys } from '../../lib/hotkeys';
+import { useHotkeys } from '../../lib/hotkeys';
 import { charCount, checkedState, draftFromForm, emptyForm, formFromDraft, revisionProblem, upgradeForm, type ItemFormState } from '../../lib/itemForm';
 import { useUrlMirror } from '../../lib/urlState';
 import { useStoredState } from '../../lib/useStoredState';
 import { Button } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Segmented } from '../../ui/Field';
-import { Callout, ErrorCallout, Kbd } from '../../ui/misc';
+import { Callout, ErrorCallout } from '../../ui/misc';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
@@ -360,15 +360,12 @@ export default function CapturePage() {
           <div className="capture-actions">
             {aiEnabled ? (
               <>
-                <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
-                  Draft with AI
-                </Button>
-                <span className="muted capture-kbd">
-                  <Kbd>{MOD}</Kbd>&nbsp;<Kbd>Enter</Kbd>
-                </span>
-                <span className="spacer" />
                 <Button variant="ghost" icon={<PenLine size={14} />} onClick={writeByHand}>
                   Write it by hand
+                </Button>
+                <span className="spacer" />
+                <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
+                  Draft with AI
                 </Button>
               </>
             ) : (

@@ -82,17 +82,19 @@ export function StatusControl({ item, compact, size = 'md', title }: { item: Ite
   );
 }
 
-export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: ButtonSize }) {
+/** The favorite toggle: a star alone in a row of the library, a labelled button in an item's bar (`labelled`). */
+export function FavoriteButton({ item, size = 'md', labelled = false }: { item: ItemRef; size?: ButtonSize; labelled?: boolean }) {
   const update = useQuickUpdate();
   const toast = useToast();
   return (
     <Button
-      variant="ghost"
+      variant={labelled ? 'default' : 'ghost'}
       size={size}
-      className={cx('fav-btn', item.favorite && 'is-fav')}
+      className={cx('fav-btn', labelled && 'is-labelled', item.favorite && 'is-fav')}
       aria-pressed={item.favorite}
-      aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
-      title={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
+      // Labelled, the button is named by its text.
+      aria-label={labelled ? undefined : item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}
+      title={labelled ? undefined : item.favorite ? 'Remove from favorites' : 'Add to favorites'}
       icon={
         // A small pop on becoming a favorite; a plain fade on leaving.
         <IconSwap swapKey={item.favorite} plain className={cx('fav-icon', item.favorite && 'is-on')}>
@@ -103,7 +105,9 @@ export function FavoriteButton({ item, size = 'md' }: { item: ItemRef; size?: Bu
         e.stopPropagation();
         update.mutate({ id: item.id, change: { favorite: !item.favorite } }, { onError: (err) => toast.error(err) });
       }}
-    />
+    >
+      {labelled ? (item.favorite ? 'Favorite' : 'Add to favorites') : undefined}
+    </Button>
   );
 }
 
@@ -196,7 +200,6 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        title="Collections"
       >
         <span className="truncate" style={{ maxWidth: 180 }}>
           {text}

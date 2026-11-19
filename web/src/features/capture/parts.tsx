@@ -82,13 +82,13 @@ export function UsageLine({ usage, className, newTab }: { usage: GenerationUsage
   if (!usage || text === '') return null;
   if (!usage.logId) {
     return (
-      <span className={cx('usage-line', className)} title="What this generation used">
+      <span className={cx('usage-line', className)}>
         {text}
       </span>
     );
   }
   return (
-    <Link to={aiLogPath({ entryId: usage.logId })} className={cx('usage-line', className)} title="Open the request in AI activity" {...(newTab ? { target: '_blank', rel: 'noreferrer' } : {})}>
+    <Link to={aiLogPath({ entryId: usage.logId })} className={cx('usage-line', className)} {...(newTab ? { target: '_blank', rel: 'noreferrer' } : {})}>
       {text}
     </Link>
   );

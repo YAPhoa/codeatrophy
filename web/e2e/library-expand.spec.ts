@@ -484,8 +484,10 @@ test('library head: the columns are named over them, the title\'s too, but not o
         columns.map((sel) => {
           const cell = li.querySelector(sel)!;
           const box = content(cell);
-          // A cut title's text runs on under its ellipsis: only where it starts counts.
-          const next = sel === '.item-title' ? Infinity : cell.nextElementSibling!.getBoundingClientRect().left;
+          // A cut title's text runs on under its ellipsis: only where it starts counts. The next
+          // column starts where its content is seen: for the star, the star, not its button.
+          const after = cell.nextElementSibling!;
+          const next = sel === '.item-title' ? Infinity : (after.querySelector('svg') ?? after).getBoundingClientRect().left;
           return { filled: box.width > 0, left: box.left, right: box.right, next };
         }),
       );

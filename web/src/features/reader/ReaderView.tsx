@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { ArrowLeft, ExternalLink, MoreHorizontal, NotebookPen, Pencil, X } from 'lucide-react';
+import { ArrowLeft, ExternalLink, MoreHorizontal, NotebookPen, X } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
 import { slideFrom, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
-import { Button, IconButton, LinkButton, cx } from '../../ui/Button';
+import { Button, IconButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
 import { MenuButton } from '../../ui/Popover';
 import { Callout } from '../../ui/misc';
@@ -129,7 +129,7 @@ export function ReaderView({ item }: { item: Item }) {
         <span className="reader-bar-title truncate">{item.title}</span>
         <span className="spacer" />
         <StatusControl item={item} size="sm" />
-        <FavoriteButton item={item} size="sm" />
+        <FavoriteButton item={item} size="sm" labelled />
         <span className="itembar-wide">
           <CollectionPicker
             size="sm"
@@ -142,11 +142,6 @@ export function ReaderView({ item }: { item: Item }) {
         <Button size="sm" icon={<NotebookPen size={14} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
           Notes
         </Button>
-        <span className="itembar-wide">
-          <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={14} />}>
-            Edit
-          </LinkButton>
-        </span>
         <MenuButton size="sm" variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
       </header>
 

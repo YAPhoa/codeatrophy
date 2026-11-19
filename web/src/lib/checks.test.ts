@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftCheck, LargeCaseReport, VerifyResult } from '../api/types';
-import { describeDraftCheck, describeLargeCase, runnerChecks, summariseVerify } from './checks';
+import { describeDraftCheck, describeLargeCase, runnerChecks, summariseLargeCases, summariseVerify } from './checks';
 
 const check = (change: Partial<DraftCheck> = {}): DraftCheck => ({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: [], largeCases: [], ...change });
 
@@ -91,6 +91,22 @@ describe('summariseVerify', () => {
 
   it('has nothing to say about a problem without test cases', () => {
     expect(summariseVerify([], [], true)).toEqual({ passed: 0, total: 0, slowest: null, failure: null });
+  });
+});
+
+describe('summariseLargeCases', () => {
+  const report = (status: LargeCaseReport['status']): LargeCaseReport => ({ status, error: null, index: null, name: null, inputBytes: null, timeMs: null, generator: null });
+  const sum = (reports: LargeCaseReport[], limit?: number) => summariseLargeCases(reports, reports.map((r) => describeLargeCase(r, limit)));
+
+  it('counts what was generated of what was asked for', () => {
+    expect(sum([report('added'), report('added'), report('added')])).toEqual({ tone: 'ok', text: '3 large cases generated' });
+    expect(sum([report('added')])).toEqual({ tone: 'ok', text: '1 large case generated' });
+    expect(sum([report('added'), report('skipped')])).toEqual({ tone: 'neutral', text: '1 of 2 large cases generated' });
+    expect(sum([report('failed'), report('failed')])).toEqual({ tone: 'warn', text: '0 of 2 large cases generated' });
+  });
+
+  it('warns when a case is slow for the reference solution', () => {
+    expect(sum([{ ...report('added'), timeMs: 1500 }], 2000).tone).toBe('warn');
   });
 });
 

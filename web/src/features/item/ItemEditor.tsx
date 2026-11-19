@@ -5,7 +5,19 @@ import type { CheckOutcome, Collection, CompareMode, Difficulty, DraftCheck, Har
 import { describeDraftCheck, runnerChecks } from '../../lib/checks';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
-import { addFormLanguage, formLanguages, newKey, removeFormLanguage, restoreCases, type FormErrors, type FormTestCase, type ItemFormState } from '../../lib/itemForm';
+import {
+  addFormLanguage,
+  concealedData,
+  formLanguages,
+  largeLast,
+  newKey,
+  removeFormLanguage,
+  restoreCases,
+  type FormErrors,
+  type FormTestCase,
+  type ItemFormState,
+  type TestDataKey,
+} from '../../lib/itemForm';
 import { textFilename } from '../../lib/largeText';
 import { LANGUAGES, languageLabel, languageName, sortLanguages } from '../../lib/languages';
 import { readString, writeString } from '../../lib/storage';
@@ -20,7 +32,7 @@ import { Badge, Tabs, tabPanelProps } from '../../ui/misc';
 import { TagInput } from '../../ui/TagInput';
 import { useToast } from '../../ui/Toast';
 import { lineCount } from '../solutions/solutionWrites';
-import { LargeCaseOutcomes } from '../tests/LargeCaseOutcome';
+import { LargeCaseGenerator, LargeCaseSummary } from '../tests/LargeCaseOutcome';
 import { CollectionPicker } from './controls';
 
 type BodyView = 'write' | 'split' | 'preview';
@@ -79,13 +91,13 @@ function RunnerTabLabel({ language, check }: { language: string; check: RunnerCh
     <>
       {languageName(language)}
       {check?.status === 'ok' && (
-        <span className="tab-mark tone-ok" title="Its runner ran">
+        <span className="tab-mark tone-ok">
           <Check size={12} aria-hidden="true" />
           <span className="sr-only">runner ran</span>
         </span>
       )}
       {check?.status === 'failed' && (
-        <span className="tab-mark tone-warn" title="Its runner did not run">
+        <span className="tab-mark tone-warn">
           <AlertTriangle size={12} aria-hidden="true" />
           <span className="sr-only">runner did not run</span>
         </span>
@@ -173,6 +185,57 @@ export function ItemEditor({
       'testCases',
       form.testCases.map((t) => (t.key === key ? { ...t, ...change, ...('stdin' in change || 'expectedStdout' in change ? { verified: false, outcome: undefined } : {}) } : t)),
     );
+  // A large case's data, once cleared or typed into, is edited like any other.
+  const setData = (t: FormTestCase, field: TestDataKey, value: string) =>
+    setCase(t.key, { ...(field === 'stdin' ? { stdin: value } : { expectedStdout: value }), ...(t.large && !t.unlocked?.includes(field) ? { unlocked: [...(t.unlocked ?? []), field] } : {}) });
+  // The large cases come last, after their summary, and only on request.
+  // The form keeps them last too, so a case's number is its place in it.
+  const regularCases = form.testCases.filter((t) => !t.large);
+  const largeCases = form.testCases.filter((t) => t.large);
+  /** A draft kept from before there could be several has no `largeCases`. */
+  const largeReports = check?.largeCases ?? [];
+  const [largeShown, setLargeShown] = useState(false);
+  // A draft from before cases carried their generators: theirs are the added reports', in order, while none of the cases is gone.
+  const reportedGenerators = largeReports.flatMap((r) => (r.status === 'added' && r.index !== null ? [r] : [])).sort((a, b) => a.index! - b.index!);
+  const generatorOf = (t: FormTestCase) =>
+    t.generator ?? (largeCases.every((c) => !c.generator) && reportedGenerators.length === largeCases.length ? (reportedGenerators[largeCases.indexOf(t)]?.generator ?? undefined) : undefined);
+
+  const caseCard = (t: FormTestCase, n: number) => (
+    <li key={t.key} className={cx('case-card', !initialCases.has(t.key) && 'is-added')}>
+      <div className="row">
+        <span className="case-no">{n}</span>
+        <TextField label={`Name of case ${n}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
+        {t.verified && (
+          <Badge tone="ok">
+            <ShieldCheck size={12} aria-hidden="true" /> verified
+          </Badge>
+        )}
+        {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
+        <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
+        <IconButton size="sm" label={`Remove case ${n}`} title="" icon={<Trash2 size={14} />} onClick={() => removeCase(t.key, n)} />
+      </div>
+      {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
+      {t.large && generatorOf(t) && <LargeCaseGenerator generator={generatorOf(t)!} of={`case ${n}`} labelClassName="field-label" />}
+      <div className="case-io">
+        <TestDataField
+          label="Input (stdin)"
+          rows={3}
+          value={t.stdin}
+          onChange={(stdin) => setData(t, 'stdin', stdin)}
+          concealed={concealedData(t, 'stdin')}
+          filename={textFilename(form.title, t.name || `case ${n}`, 'input')}
+        />
+        <TestDataField
+          label="Expected output"
+          rows={3}
+          value={t.expectedStdout}
+          onChange={(expectedStdout) => setData(t, 'expectedStdout', expectedStdout)}
+          concealed={concealedData(t, 'expectedStdout')}
+          filename={textFilename(form.title, t.name || `case ${n}`, 'output')}
+        />
+      </div>
+    </li>
+  );
 
   return (
     <fieldset className="editor-grid" disabled={disabled}>
@@ -373,25 +436,25 @@ export function ItemEditor({
               <h2 id="cases-heading" className="editor-section-title">
                 Test cases
               </h2>
-              <span className="muted">Saved with the problem. You can generate a fuller set afterwards.</span>
               <span className="spacer" />
               {caseTools}
               <Button
                 size="sm"
                 icon={<Plus size={14} />}
                 onClick={() =>
-                  set('testCases', [
-                    ...form.testCases,
-                    { key: newKey(), name: `Example ${form.testCases.length + 1}`, stdin: '', expectedStdout: '', isSample: true, origin: 'manual', verified: false },
-                  ])
+                  set(
+                    'testCases',
+                    largeLast([
+                      ...form.testCases,
+                      { key: newKey(), name: `Example ${regularCases.length + 1}`, stdin: '', expectedStdout: '', isSample: true, origin: 'manual', verified: false },
+                    ]),
+                  )
                 }
               >
                 Add case
               </Button>
             </div>
             {caseNotice}
-            {/* A draft kept from before there could be several has no `largeCases`. */}
-            <LargeCaseOutcomes reports={check?.largeCases ?? []} timeLimitMs={form.timeLimitMs} />
             {errors.testCases && (
               <div className="field-error" role="alert">
                 {errors.testCases}
@@ -400,36 +463,18 @@ export function ItemEditor({
             {form.testCases.length === 0 ? (
               <p className="editor-empty">No test cases yet. Without any, the problem can be read but not judged.</p>
             ) : (
-              <ol className="case-cards">
-                {form.testCases.map((t, i) => (
-                  <li key={t.key} className={cx('case-card', !initialCases.has(t.key) && 'is-added')}>
-                    <div className="row">
-                      <span className="case-no">{i + 1}</span>
-                      <TextField label={`Name of case ${i + 1}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
-                      {t.large && <Badge title="Not kept when the AI revises the draft">large</Badge>}
-                      {t.verified && (
-                        <Badge tone="ok" title="The reference solution printed this output">
-                          <ShieldCheck size={12} aria-hidden="true" /> verified
-                        </Badge>
-                      )}
-                      {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
-                      <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
-                      <IconButton size="sm" label={`Remove case ${i + 1}`} icon={<Trash2 size={14} />} onClick={() => removeCase(t.key, i + 1)} />
-                    </div>
-                    {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
-                    <div className="case-io">
-                      <TestDataField label="Input (stdin)" rows={3} value={t.stdin} onChange={(stdin) => setCase(t.key, { stdin })} filename={textFilename(form.title, t.name || `case ${i + 1}`, 'input')} />
-                      <TestDataField
-                        label="Expected output"
-                        rows={3}
-                        value={t.expectedStdout}
-                        onChange={(expectedStdout) => setCase(t.key, { expectedStdout })}
-                        filename={textFilename(form.title, t.name || `case ${i + 1}`, 'output')}
-                      />
-                    </div>
-                  </li>
-                ))}
-              </ol>
+              regularCases.length > 0 && <ol className="case-cards">{regularCases.map((t, i) => caseCard(t, i + 1))}</ol>
+            )}
+            <LargeCaseSummary
+              reports={largeReports}
+              timeLimitMs={form.timeLimitMs}
+              open={largeShown}
+              onToggle={() => setLargeShown((v) => !v)}
+              info="Regenerated when the AI revises the draft."
+            />
+            {/* Without the reports there is no summary to open them from. */}
+            {largeCases.length > 0 && (largeShown || largeReports.length === 0) && (
+              <ol className="case-cards">{largeCases.map((t, i) => caseCard(t, regularCases.length + i + 1))}</ol>
             )}
             <p className="field-hint">Sample cases are shown with the statement and used by “Run”. All cases are used by “Submit”.</p>
           </section>
@@ -451,6 +496,7 @@ export function ItemEditor({
               <IconButton
                 size="sm"
                 label="Remove the reference solution"
+                title=""
                 icon={<Trash2 size={14} />}
                 onClick={() => {
                   const solution = form.referenceSolution;
@@ -503,7 +549,6 @@ export function ItemEditor({
                     <span className="sr-only">Not set</span>
                   </>
                 ),
-                title: 'Not set',
               },
               { value: 'easy', label: 'Easy' },
               { value: 'medium', label: 'Medium' },

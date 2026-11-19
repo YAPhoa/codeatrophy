@@ -162,7 +162,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
         <Button variant="ghost" icon={<Trash2 size={14} />} onClick={props.onDiscard} disabled={busy}>
           Discard
         </Button>
-        <Button variant="primary" icon={<Save size={14} />} onClick={props.onSave} busy={props.saving} disabled={props.revising} title={`${MOD}+S`}>
+        <Button variant="primary" icon={<Save size={14} />} onClick={props.onSave} busy={props.saving} disabled={props.revising}>
           {props.saveLabel}
         </Button>
       </div>
@@ -221,7 +221,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
               <StylePicker id="revise-style" styles={props.styles} value={props.styleChoice} onChange={props.onStyleChange} disabled={busy} />
               <ModelPicker id="revise-model" settings={props.aiSettings} value={props.providerChoice} onChange={props.onProviderChange} disabled={busy} />
               <div className="revise-actions">
-                <Button type="submit" disabled={busy} title={`${MOD}+Enter`}>
+                <Button type="submit" disabled={busy}>
                   Revise draft
                 </Button>
                 <p className="revise-hint">The AI reworks the draft as it stands now, including your edits, and returns a new version to review.</p>

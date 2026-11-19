@@ -172,7 +172,7 @@
 }
 
 .field-label {
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -909,6 +909,25 @@ button.chip:hover {
 /* The filter field above a picklist, the line under it when it is empty, and a note or action below it. */
 .picklist-filter {
   margin-bottom: var(--space-2);
+}
+
+/* A filter box with a magnifier at its end, for the eye only. */
+.picklist-search {
+  position: relative;
+  display: block;
+}
+
+.picklist-search .input {
+  padding-right: 28px;
+}
+
+.picklist-search > svg {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  color: var(--text-3);
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .picklist-empty {

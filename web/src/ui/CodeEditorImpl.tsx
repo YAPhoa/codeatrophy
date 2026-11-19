@@ -181,7 +181,14 @@ const codeSetup: Extension = [
   highlightActiveLineGutter(),
   highlightSpecialChars(),
   history(),
-  foldGutter(),
+  // The default markers' "Fold line" / "Unfold line" tooltips left out.
+  foldGutter({
+    markerDOM: (open) => {
+      const marker = document.createElement('span');
+      marker.textContent = open ? '⌄' : '›';
+      return marker;
+    },
+  }),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),
@@ -199,6 +206,8 @@ const codeSetup: Extension = [
  * The parts of an editor that change during its life, each in a compartment
  * of its own so that it can be replaced without rebuilding the editor.
  */
+const labelExtension = (label: string) => EditorView.contentAttributes.of({ 'aria-label': label, tabindex: '0' });
+
 function createCompartments() {
   return {
     language: new Compartment(),
@@ -210,6 +219,7 @@ function createCompartments() {
     indent: new Compartment(),
     metrics: new Compartment(),
     runner: new Compartment(),
+    label: new Compartment(),
   };
 }
 
@@ -295,7 +305,7 @@ export default function CodeEditorImpl({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const { language: langC, readOnly: roC, runner: runnerC } = compartments;
+    const { language: langC, readOnly: roC, runner: runnerC, label: labelC } = compartments;
     const initial = optionsRef.current;
     appliedRef.current = initial;
     appliedRunnerRef.current = runnerRef.current;
@@ -330,7 +340,7 @@ export default function CodeEditorImpl({
           roC.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
           runnerC.of(runnerRef.current),
           placeholder ? placeholderExt(placeholder) : [],
-          EditorView.contentAttributes.of({ 'aria-label': ariaLabel, tabindex: '0' }),
+          labelC.of(labelExtension(ariaLabel)),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && update.transactions.some((tr) => !tr.annotation(externalChange))) {
               onChangeRef.current?.(update.state.doc.toString());
@@ -396,6 +406,11 @@ export default function CodeEditorImpl({
       effects: compartments.readOnly.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
     });
   }, [compartments, readOnly]);
+
+  // A label can change with the editor's place, as a test case's number does.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: compartments.label.reconfigure(labelExtension(ariaLabel)) });
+  }, [compartments, ariaLabel]);
 
   return <div ref={hostRef} className={cx('code-editor', prose && 'code-editor-prose', className)} />;
 }

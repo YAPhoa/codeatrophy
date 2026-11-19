@@ -55,6 +55,13 @@ export function describeLargeCase(report: LargeCaseReport, timeLimitMs?: number)
   return { tone: slow ? 'warn' : 'ok', text: parts.join(' · ') };
 }
 
+/** The large cases of a generation in a line, from each one's line: how many were generated, of how many asked for. */
+export function summariseLargeCases(reports: readonly LargeCaseReport[], lines: readonly CheckLine[]): CheckLine {
+  const added = reports.filter((r) => r.status === 'added').length;
+  const tone = lines.some((l) => l.tone === 'warn') ? 'warn' : added === reports.length ? 'ok' : 'neutral';
+  return { tone, text: added === reports.length ? `${plural(added, 'large case')} generated` : `${added} of ${plural(reports.length, 'large case')} generated` };
+}
+
 const FAILURE: Record<Verdict, string> = {
   accepted: 'printed a different output',
   executed: 'printed a different output',

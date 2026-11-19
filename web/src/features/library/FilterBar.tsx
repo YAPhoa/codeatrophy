@@ -87,8 +87,10 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
 
   // The Tags menu lists the tags the view's items carry, the most used first
   // and only a few of them: the rest are found by typing. A tag no item of
-  // the view carries is left out, as picking it would show nothing; a picked
-  // tag always shows, first, so it can be unticked.
+  // the view carries is left out, as picking it would show nothing. Picked
+  // tags always show, at the top and whatever is typed, so they can be
+  // unticked; and once one is picked the search stays, though the picks
+  // narrow what the other tags count.
   const [tagFilter, setTagFilter] = useState('');
   const tagQuery = tagFilter.trim().toLowerCase();
   const viewTags = useMemo(() => {
@@ -98,10 +100,13 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
       .filter((t) => t.picked || t.rank > 0)
       .sort((a, b) => Number(b.picked) - Number(a.picked) || b.rank - a.rank || a.name.localeCompare(b.name));
   }, [tags, facets, filters.tags]);
-  const shownTags = useMemo(
-    () => (tagQuery ? viewTags.filter((t) => t.name.includes(tagQuery)) : viewTags.slice(0, Math.max(TAG_PREVIEW, filters.tags.length))),
-    [viewTags, tagQuery, filters.tags.length],
-  );
+  const pickedTags = useMemo(() => viewTags.filter((t) => t.picked), [viewTags]);
+  const otherTags = useMemo(() => {
+    const rest = viewTags.filter((t) => !t.picked);
+    return tagQuery ? rest.filter((t) => t.name.includes(tagQuery)) : rest.slice(0, TAG_PREVIEW);
+  }, [viewTags, tagQuery]);
+  const shownTags = useMemo(() => [...pickedTags, ...otherTags], [pickedTags, otherTags]);
+  const tagSearch = viewTags.length > TAG_PREVIEW || tagFilter !== '' || filters.tags.length > 0;
   const active = barFilterCount(filters, collectionId);
   // Names the view so the box is not taken for the search of the whole library (Ctrl+K).
   const noun = viewNoun(filters, collectionId);
@@ -206,21 +211,24 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
           ) : (
             <>
               <FacetList
-                autoFocus={viewTags.length <= TAG_PREVIEW}
+                autoFocus={!tagSearch}
                 selected={filters.tags}
                 onChange={(next) => onChange({ ...filters, tags: next })}
                 before={
-                  (viewTags.length > TAG_PREVIEW || tagFilter !== '') && (
-                    <input
-                      name="tag-filter"
-                      autoComplete="off"
-                      className="input input-sm picklist-filter"
-                      placeholder="Type to search…"
-                      aria-label="Search tags"
-                      value={tagFilter}
-                      onChange={(e) => setTagFilter(e.target.value)}
-                      data-autofocus
-                    />
+                  tagSearch && (
+                    <span className="picklist-filter picklist-search">
+                      <input
+                        name="tag-filter"
+                        autoComplete="off"
+                        className="input input-sm"
+                        placeholder="Type to search…"
+                        aria-label="Search tags"
+                        value={tagFilter}
+                        onChange={(e) => setTagFilter(e.target.value)}
+                        data-autofocus
+                      />
+                      <Search size={14} aria-hidden="true" />
+                    </span>
                   )
                 }
                 options={shownTags.map((t) => ({
@@ -236,7 +244,7 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
                     </span>
                   ),
                 }))}
-                empty={shownTags.length === 0 && <p className="muted picklist-empty">{tagQuery ? 'No match.' : 'No tags in this view.'}</p>}
+                empty={otherTags.length === 0 && (tagQuery || pickedTags.length === 0) && <p className="muted picklist-empty">{tagQuery ? 'No match.' : 'No tags in this view.'}</p>}
               />
               {filters.tags.length > 1 && <p className="field-hint picklist-note">Showing items that have all selected tags.</p>}
             </>

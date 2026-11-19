@@ -158,6 +158,19 @@ test('filters: the Tags menu lists a few of the view’s tags, the most used fir
   expect(await names()).toEqual(['two-pointers']);
   await tags.getByRole('textbox', { name: 'Search tags' }).fill('no-such-tag');
   await expect(tags.getByText('No match.')).toBeVisible();
+
+  // Picked tags stay at the top whatever is typed, and the search stays though the pick narrows the rest.
+  const search = tags.getByRole('textbox', { name: 'Search tags' });
+  await search.fill('two');
+  const twoPointers = tags.getByRole('checkbox', { name: 'two-pointers', exact: true });
+  await twoPointers.click();
+  await expect(twoPointers).toBeChecked();
+  await search.fill('');
+  await expect(search).toBeVisible();
+  expect((await names())[0]).toBe('two-pointers');
+  await search.fill('no-such-tag');
+  expect(await names()).toEqual(['two-pointers']);
+  await expect(tags.getByText('No match.')).toBeVisible();
 });
 
 test('filters: the Tags menu leaves out the tags no item of the view carries, but keeps a picked one', async ({ page }) => {

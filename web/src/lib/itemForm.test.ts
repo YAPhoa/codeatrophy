@@ -3,6 +3,8 @@ import type { Item, ItemDraft, LargeCaseReport, Limits } from '../api/types';
 import {
   addFormLanguage,
   changedFields,
+  concealedData,
+  largeLast,
   checkedState,
   checkRequestFromForm,
   discardableCases,
@@ -121,9 +123,26 @@ describe('formFromDraft', () => {
     const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 2, timeMs: 5, generator: null };
     const failed: LargeCaseReport = { ...report, status: 'failed', error: 'the generator crashed', index: null };
     expect(formFromDraft(big, {}, [report, { ...report, index: 2, name: 'Larger' }]).testCases.map((t) => t.large === true)).toEqual([false, true, true]);
-    expect(formFromDraft(big, {}, [report, failed]).testCases.map((t) => t.large === true)).toEqual([false, true, false]);
+    expect(formFromDraft(big, {}, [report, failed]).testCases.filter((t) => t.large).map((t) => t.name)).toEqual(['Large']);
     expect(formFromDraft(big, {}, [failed]).testCases.some((t) => t.large)).toBe(false);
     expect(formFromDraft(big).testCases.some((t) => t.large)).toBe(false);
+  });
+
+  it('lists the large cases last, each with its own generator', () => {
+    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true });
+    const big: ItemDraft = { ...draft, testCases: [large('Large', '9\n'), ...draft.testCases, large('Larger', '10\n')] };
+    const gen = (source: string) => ({ language: 'python', source });
+    const report: LargeCaseReport = { status: 'added', error: null, index: 0, name: 'Large', inputBytes: 2, timeMs: 5, generator: gen('a') };
+    const form = formFromDraft(big, {}, [report, { ...report, index: 2, name: 'Larger', generator: gen('b') }]);
+    expect(form.testCases.map((t) => [t.name, t.generator?.source])).toEqual([
+      ['Example 1', undefined],
+      ['Large', 'a'],
+      ['Larger', 'b'],
+    ]);
+    // A report without a generator still marks its case.
+    const bare = formFromDraft(big, {}, [{ ...report, generator: null }]).testCases.find((t) => t.large);
+    expect(bare).toMatchObject({ name: 'Large', large: true });
+    expect(bare).not.toHaveProperty('generator');
   });
 
   it('uses the problem defaults for a reading draft', () => {
@@ -189,6 +208,13 @@ describe('inputFromForm', () => {
     expect(switched.harness).toEqual({ python: runner });
     expect(inputFromForm(switched).problem).toMatchObject({ interface: 'program', harness: {} });
     expect(inputFromForm({ ...switched, interface: 'function' }).problem?.harness).toEqual({ python: runner });
+  });
+
+  it('sends nothing of a large case but its data: not its generator, nor which fields were cleared', () => {
+    const form = formFromDraft(draft);
+    const big = { ...form.testCases[0]!, large: true, generator: { language: 'python', source: 'print(1)' }, unlocked: ['stdin' as const] };
+    expect(inputFromForm({ ...form, testCases: [big] }).testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
+    expect(checkRequestFromForm({ ...form, testCases: [big] }).testCases[0]).not.toHaveProperty('generator');
   });
 
   it('sends no problem part or test cases for a reading', () => {
@@ -546,5 +572,30 @@ describe('restoreCases', () => {
   it('copes with a list that changed since: nothing twice, and a lost position means the end', () => {
     expect(restoreCases({ testCases: [before[1]!] }, before, ['b', 'd']).testCases.map((t) => t.key)).toEqual(['b', 'd']);
     expect(restoreCases({ testCases: [] as FormTestCase[] }, before, ['c']).testCases.map((t) => t.key)).toEqual(['c']);
+  });
+
+  it('keeps the large cases last, where a case added since would have gone after one', () => {
+    const big = { ...tc('L'), large: true };
+    expect(restoreCases({ testCases: [tc('a'), tc('b')] }, [tc('a'), big], ['L']).testCases.map((t) => t.key)).toEqual(['a', 'b', 'L']);
+  });
+});
+
+describe('large test cases', () => {
+  const tc = (key: string, change: Partial<FormTestCase> = {}): FormTestCase => ({ key, name: key, stdin: '1', expectedStdout: '2', isSample: false, origin: 'ai', verified: true, ...change });
+
+  it('lists them after the other cases, each kind in its order', () => {
+    const cases = [tc('L1', { large: true }), tc('a'), tc('L2', { large: true }), tc('b')];
+    expect(largeLast(cases).map((t) => t.key)).toEqual(['a', 'b', 'L1', 'L2']);
+  });
+
+  it('shows only the size of the data a large case came with, until that is cleared', () => {
+    expect(concealedData(tc('a'), 'stdin')).toBe(false);
+    const big = tc('L', { large: true });
+    expect(concealedData(big, 'stdin')).toBe(true);
+    expect(concealedData(big, 'expectedStdout')).toBe(true);
+    expect(concealedData({ ...big, expectedStdout: '' }, 'expectedStdout')).toBe(false);
+    const cleared = { ...big, stdin: '3', unlocked: ['stdin' as const] };
+    expect(concealedData(cleared, 'stdin')).toBe(false);
+    expect(concealedData(cleared, 'expectedStdout')).toBe(true);
   });
 });

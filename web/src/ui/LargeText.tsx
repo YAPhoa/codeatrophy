@@ -54,6 +54,8 @@ interface TestDataFieldProps {
   /** Name of the file a large value downloads as. */
   filename: string;
   error?: string | null;
+  /** Shown as that block whatever its size, as a large test case's data is. */
+  concealed?: boolean;
 }
 
 /**
@@ -61,8 +63,8 @@ interface TestDataFieldProps {
  * too large to edit in place — a block that offers it as a download, or to
  * clear it.
  */
-export function TestDataField({ label, value, onChange, rows, filename, error }: TestDataFieldProps) {
-  if (!isLargeText(value)) {
+export function TestDataField({ label, value, onChange, rows, filename, error, concealed = false }: TestDataFieldProps) {
+  if (!concealed && !isLargeText(value)) {
     return (
       <Field label={label} error={error}>
         {(a) => <textarea {...a} className="input textarea mono" rows={rows} spellCheck={false} autoComplete="off" translate="no" value={value} onChange={(e) => onChange(e.target.value)} />}

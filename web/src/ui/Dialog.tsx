@@ -70,8 +70,8 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
     }
     asking.current = true;
     void confirm({
-      title: 'Discard what you entered?',
-      body: 'It has not been saved.',
+      title: 'Discard unsaved changes?',
+      body: 'Your changes haven’t been saved and will be lost.',
       confirmLabel: 'Discard changes',
       cancelLabel: 'Keep editing',
       danger: true,

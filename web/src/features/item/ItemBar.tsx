@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router';
-import { ArrowLeft, MoreHorizontal, Pencil } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
-import { LinkButton, cx } from '../../ui/Button';
+import { cx } from '../../ui/Button';
 import { MenuButton } from '../../ui/Popover';
 import { TAB_INDICATOR, TAB_SELECTED } from '../../ui/misc';
 import { useSlidingIndicator } from '../../lib/motion';
@@ -66,7 +66,7 @@ export function ItemBar({ item }: { item: Item }) {
       </nav>
       <span className="spacer" />
       <StatusControl item={item} size="sm" />
-      <FavoriteButton item={item} size="sm" />
+      <FavoriteButton item={item} size="sm" labelled />
       <span className="itembar-wide">
         <CollectionPicker
           size="sm"
@@ -75,11 +75,6 @@ export function ItemBar({ item }: { item: Item }) {
           onToggle={actions.toggleCollection}
           onCreate={() => collectionActions.create(null, (c) => actions.toggleCollection(c.id, true))}
         />
-      </span>
-      <span className="itembar-wide">
-        <LinkButton to={`/items/${item.id}/edit`} size="sm" icon={<Pencil size={14} />}>
-          Edit
-        </LinkButton>
       </span>
       <MenuButton size="sm" variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
     </header>

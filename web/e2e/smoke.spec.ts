@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { choose, open, openList } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
@@ -404,55 +404,107 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
-  // A line each says what was added; the inputs themselves are not shown, but can be downloaded.
-  const outcomes = page.getByRole('list', { name: 'Large test cases' });
-  await expect(outcomes.getByRole('listitem')).toHaveCount(2);
-  await expect(outcomes.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of \d+\u00a0s$/)).toHaveCount(2);
-  const cards = page.getByRole('listitem').filter({ hasText: 'Too large to show or edit' });
+  // After the other cases, a line sums them up; the large cases follow it on request.
+  const section = page.locator('section[aria-labelledby="cases-heading"]');
+  const outcomes = section.getByRole('region', { name: 'Large test cases' });
+  const summary = outcomes.getByRole('status');
+  const show = outcomes.getByRole('button', { name: 'Show large cases' });
+  const showAll = async () => {
+    if (await show.isVisible()) await show.click();
+  };
+  const cards = section.locator('.case-card');
+  const largeCards = section.locator('.large-cases + .case-cards .case-card');
+  await expect(summary).toHaveText('2 large cases generated');
+  await expect(section.locator('.case-cards + .large-cases')).toHaveCount(1);
   await expect(cards).toHaveCount(2);
-  await expect(cards.getByText('large', { exact: true })).toHaveCount(2);
-  const card = cards.first();
-  await expect(card.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
-  await expect(card.getByText('30000')).toHaveCount(0);
-  // Still renamed and marked like any case: the name and the expected output are the only fields.
-  await expect(card.getByRole('textbox')).toHaveCount(2);
+  await expect(largeCards).toHaveCount(0);
+  await expect(show).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('random.seed')).toHaveCount(0);
+  // What a revision does to them is said behind an "i".
+  await outcomes.getByRole('button', { name: 'About large cases' }).hover();
+  await expect(page.getByRole('tooltip')).toHaveText('Regenerated when the AI revises the draft.');
+  await page.mouse.move(0, 0);
+
+  // Opened, each is a card numbered after the others: its name, its generator, then its data, which only shows its size.
+  await show.click();
+  await expect(largeCards).toHaveCount(2);
+  await expect(cards).toHaveCount(4);
+  await expect(outcomes.getByRole('listitem')).toHaveCount(0);
+  const card = largeCards.first();
+  const name = card.getByRole('textbox', { name: 'Name of case 3' });
+  const generator = card.getByRole('textbox', { name: /^Generator of case 3, Python/ });
+  const input = card.getByRole('group', { name: 'Input (stdin)' });
+  const output = card.getByRole('group', { name: 'Expected output' });
+  await expect(generator).toContainText('random.seed(');
+  await expect(input).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
+  // Even an output of a few bytes is not edited in place.
+  await expect(output).toContainText(/Too large to show or edit · \d+\u00a0B · 1 line/);
+  const top = async (l: Locator) => (await l.boundingBox())!.y;
+  expect(await top(name)).toBeLessThan(await top(generator));
+  expect(await top(generator)).toBeLessThan(await top(input));
+  await expect(card.locator('textarea')).toHaveCount(0);
+  await expect(card.locator('.case-io').getByText('30000')).toHaveCount(0);
+  await expect(largeCards.nth(1).getByRole('textbox', { name: 'Name of case 4' })).toBeVisible();
   await expectNoLargeText(page);
   const download = page.waitForEvent('download');
-  await card.getByRole('button', { name: 'Download' }).click();
+  await input.getByRole('button', { name: 'Download' }).click();
   expect((await download).suggestedFilename()).toMatch(/-input\.txt$/);
 
-  // Each generator is there on request, read-only.
-  const toggles = outcomes.getByRole('button', { name: /^Show generator of “.+”$/ });
-  await expect(toggles).toHaveCount(2);
-  await expect(toggles.first()).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByText('random.seed')).toHaveCount(0);
-  await toggles.first().click();
-  await expect(page.getByRole('textbox', { name: /^Generator of “.+”, Python/ })).toContainText('random.seed(');
-  await expect(toggles).toHaveCount(1);
+  // Clear is the way to replace a value: the field is then typed in like any other.
+  await output.getByRole('button', { name: 'Clear' }).click();
+  await card.getByLabel('Expected output').fill('42');
+  await expect(card.getByLabel('Expected output')).toHaveValue('42');
+  await expect(input).toContainText('Too large to show or edit');
+
+  // A generator stays with its case when another goes, and when it comes back.
+  const secondGenerator = await largeCards.nth(1).getByRole('textbox', { name: /^Generator of case 4/ }).textContent();
+  const firstGenerator = await generator.textContent();
+  expect(secondGenerator).not.toBe(firstGenerator);
+  await card.getByRole('button', { name: 'Remove case 3' }).click();
+  await expect(largeCards).toHaveCount(1);
+  await expect(largeCards.first().getByRole('textbox', { name: /^Generator of case 3/ })).toHaveText(secondGenerator!);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(largeCards).toHaveCount(2);
+  await expect(largeCards.first().getByRole('textbox', { name: /^Generator of case 3/ })).toHaveText(firstGenerator!);
+  await expect(largeCards.nth(1).getByRole('textbox', { name: /^Generator of case 4/ })).toHaveText(secondGenerator!);
+  // A case added by hand goes before them.
+  await section.getByRole('button', { name: 'Add case' }).click();
+  await expect(section.locator('.case-cards').first().locator('.case-card')).toHaveCount(3);
+  await expect(section.getByRole('textbox', { name: 'Name of case 3' })).toHaveValue('Example 3');
+  await expect(largeCards.first().getByRole('textbox', { name: 'Name of case 4' })).toBeVisible();
+  await section.getByRole('button', { name: 'Remove case 3' }).click();
+  await outcomes.getByRole('button', { name: 'Hide large cases' }).click();
+  await expect(largeCards).toHaveCount(0);
 
   // A revision asks again, and the cases come back rather than adding up.
   await page.getByRole('button', { name: 'Ask for a revision' }).click();
   await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
   await expect(page.getByText('Revising the draft…')).toBeHidden();
-  await expect(outcomes.getByText(/^Large case “.+” added/)).toHaveCount(2);
-  await expect(cards).toHaveCount(2);
+  await expect(summary).toHaveText('2 large cases generated');
+  await showAll();
+  await expect(largeCards).toHaveCount(2);
 
-  // Some added and one not: the model wrote one generator fewer than asked for.
+  // Some added and one not: the model wrote one generator fewer than asked for. Only the one without a card has a line.
   await page.getByRole('button', { name: 'Back to input' }).click();
   await page.getByLabel('What you have').fill('two sum, array and target MOCK:LARGE-SHORT');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
-  await expect(outcomes.getByText(/^Large case “.+” added/)).toHaveCount(1);
-  await expect(outcomes.getByText('Large case not added. The model wrote fewer generators than asked for.')).toBeVisible();
-  await expect(outcomes.getByRole('button', { name: /^Show generator/ })).toHaveCount(1);
-  await expect(cards).toHaveCount(1);
+  await expect(summary).toHaveText('1 of 2 large cases generated');
+  await showAll();
+  await expect(outcomes.getByRole('listitem')).toHaveText(['Large case not added. The model wrote fewer generators than asked for.']);
+  await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(1);
+  await expect(largeCards).toHaveCount(1);
 
   // Large cases that could not be built are reported, and nothing is added.
   await page.getByRole('button', { name: 'Back to input' }).click();
   await page.getByLabel('What you have').fill('two sum, array and target MOCK:LARGE-FAIL');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(summary).toHaveText('0 of 2 large cases generated');
+  await expect(summary).toHaveClass(/tone-warn/);
+  await showAll();
   await expect(outcomes.getByText(/^Large case “.+” not added\. The generator crashed/)).toHaveCount(2);
   await expect(page.getByText('Too large to show or edit')).toHaveCount(0);
+  await expect(largeCards).toHaveCount(0);
 });
 
 test('large test cases: asked for on the generate form, then kept and managed on the Test cases page', async ({ page }) => {
@@ -466,18 +518,53 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(large).not.toBeChecked();
   await large.check();
   await page.getByLabel('How many').fill('3');
-  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
-  await expect(page.getByText('6 of 6 selected')).toBeVisible();
-  const outcomes = page.getByRole('list', { name: 'Large test cases' });
-  await expect(outcomes.getByText(/^Large case “.+” added · \d+\u00a0KB · reference solution \d+\u00a0ms of 2\u00a0s$/)).toHaveCount(3);
-
+  const outcomes = page.getByRole('region', { name: 'Large test cases' });
+  const show = outcomes.getByRole('button', { name: 'Show large cases' });
   const proposed = page.locator('.proposal-case');
-  await expect(proposed.filter({ has: page.getByText('large', { exact: true }) })).toHaveCount(3);
-  await expect(proposed.nth(2).getByText('large', { exact: true })).toHaveCount(0);
-  const last = proposed.last();
-  await last.locator('.proposal-main').click();
+  const largeProposed = page.locator('.large-cases + .proposal-list .proposal-case');
+
+  // A case the model wrote no generator for has a line of its own, there being no case to show.
+  await page.getByLabel('Anything to focus on? (optional)').fill('MOCK:LARGE-SHORT');
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
+  await expect(outcomes.getByRole('status')).toHaveText('2 of 3 large cases generated');
+  await show.click();
+  await expect(outcomes.getByRole('listitem')).toHaveText(['Large case not added. The model wrote fewer generators than asked for.']);
+  await expect(largeProposed).toHaveCount(2);
+  await page.getByLabel('Anything to focus on? (optional)').fill('');
+  await page.getByRole('button', { name: 'Generate again' }).click();
+
+  // The proposed cases, then the large ones summed up, which follow on request.
+  await expect(page.getByText('6 of 6 selected')).toBeVisible();
+  await expect(outcomes.getByRole('status')).toHaveText('3 large cases generated');
+  await expect(outcomes.getByRole('button', { name: 'About large cases' })).toHaveCount(0);
+  await expect(page.locator('.proposal-list + .large-cases')).toHaveCount(1);
+  await expect(proposed).toHaveCount(3);
+  await expect(largeProposed).toHaveCount(0);
+  // Out of sight is not left out: they are counted, selected and saved.
+  await page.getByRole('button', { name: 'Select none' }).click();
+  await expect(page.getByText('0 of 6 selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Select all' }).click();
+  await expect(page.getByText('6 of 6 selected')).toBeVisible();
+  await show.click();
+  await expect(largeProposed).toHaveCount(3);
+  await expect(proposed).toHaveCount(6);
+  await expect(outcomes.getByRole('listitem')).toHaveCount(0);
+
+  // Each opens on its generator, then its data, too large to show.
+  const last = largeProposed.last();
+  const generator = last.getByRole('textbox', { name: /^Generator of “.+”, Python/ });
+  await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(3);
+  await expect(generator).toContainText('random.seed(');
   await expect(last.getByRole('button', { name: 'Download' })).toBeVisible();
+  expect((await generator.boundingBox())!.y).toBeLessThan((await last.getByRole('button', { name: 'Download' }).boundingBox())!.y);
   await expectNoLargeText(page);
+  await last.getByRole('checkbox', { name: /^Keep / }).uncheck();
+  await outcomes.getByRole('button', { name: 'Hide large cases' }).click();
+  await expect(largeProposed).toHaveCount(0);
+  await expect(page.getByText('5 of 6 selected')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save 5 cases' })).toBeVisible();
+  await show.click();
+  await largeProposed.last().getByRole('checkbox', { name: /^Keep / }).check();
   await page.getByRole('button', { name: 'Save 6 cases' }).click();
 
   // On the Test cases page they stay out of sight too; renaming, marking and moving still work.
@@ -1067,8 +1154,8 @@ test('AI activity: a generation is logged with its raw request, and the list loa
 test('output comparison: the two choices are explained behind the "i" of the field', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
-  // Exact: the library also has "Edit Distance".
-  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
   const choice = page.getByRole('combobox', { name: 'Output comparison', exact: true });
   await expect((await openList(choice)).getByRole('option')).toHaveText(['Values only', 'Exact text']);
   await page.keyboard.press('Escape');
@@ -1204,4 +1291,50 @@ test('settings: Import and Export are pages of Settings, and their old addresses
   await expect(page.getByRole('checkbox', { name: 'Saved solutions' })).not.toBeChecked();
   await open(page, '/import');
   await expect(page).toHaveURL(/\/settings\/import\?mock=fast$/);
+});
+
+test('item bar: the favorite button says what it does, and the menu keeps only edit, export and delete', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  const bar = page.locator('.itembar');
+  const favorite = bar.getByRole('button', { name: 'Favorite', exact: true });
+  await expect(favorite).toHaveAttribute('aria-pressed', 'true');
+  await favorite.click();
+  const add = bar.getByRole('button', { name: 'Add to favorites', exact: true });
+  await expect(add).toHaveAttribute('aria-pressed', 'false');
+  await add.click();
+  await expect(favorite).toHaveAttribute('aria-pressed', 'true');
+
+  await bar.getByRole('button', { name: 'More actions' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Edit details…', 'Export this item…', 'Delete']);
+});
+
+test('large test cases: a draft kept from before cases carried their generators still shows them', async ({ page }) => {
+  await open(page, '/settings/preferences');
+  await page.getByRole('checkbox', { name: 'Generate large test cases by default' }).check();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+
+  // The kept draft's cases lose their generators; the generation's reports still have them.
+  await expect.poll(() => page.evaluate(() => (localStorage.getItem('codeatrophy:capture:new') ?? '').includes('"generator"'))).toBe(true);
+  await page.evaluate(() => {
+    const key = 'codeatrophy:capture:new';
+    const kept: unknown = JSON.parse(localStorage.getItem(key)!);
+    const strip = (o: unknown): void => {
+      if (Array.isArray(o)) o.forEach(strip);
+      else if (o && typeof o === 'object') {
+        const r = o as Record<string, unknown>;
+        if (r.large) delete r.generator;
+        Object.values(r).forEach(strip);
+      }
+    };
+    strip(kept);
+    localStorage.setItem(key, JSON.stringify(kept));
+  });
+  await page.reload();
+  await page.getByRole('button', { name: 'Show large cases' }).click();
+  await expect(page.getByRole('textbox', { name: /^Generator of case \d+, Python/ })).toHaveCount(3);
 });

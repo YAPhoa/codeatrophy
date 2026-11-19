@@ -67,6 +67,21 @@
   color: var(--star);
 }
 
+/* With a label, only the star takes the colour; the text reads like its neighbours'. */
+.fav-btn.is-labelled,
+.fav-btn.is-labelled.is-fav,
+.fav-btn.is-labelled.is-fav:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.fav-btn.is-labelled .fav-icon {
+  color: var(--text-3);
+}
+
+.fav-btn.is-labelled .fav-icon.is-on {
+  color: var(--star);
+}
+
 /* The filled star carries its own colour, so while it fades out after a
    removal it stays the star's colour rather than the button's. */
 .fav-star-on {
@@ -647,19 +662,19 @@
    whichever columns a list has: a list of readings has no verdicts, so no
    verdict column, and only a collection in manual order has the grip. */
 .item-list-wrap {
-  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 96px [verdict] 110px [updated] 76px [star] 24px [chevron] 28px;
+  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 84px [verdict] 110px [updated] 72px [star] 24px [chevron] 28px;
 }
 
 .item-list-wrap.is-reorderable {
-  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 96px [verdict] 110px [updated] 76px [star] 24px [chevron] 28px [grip] 22px;
+  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 84px [verdict] 110px [updated] 72px [star] 24px [chevron] 28px [grip] 22px;
 }
 
 .item-list-wrap.no-verdict {
-  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 96px [updated] 76px [star] 24px [chevron] 28px;
+  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 84px [updated] 72px [star] 24px [chevron] 28px;
 }
 
 .item-list-wrap.no-verdict.is-reorderable {
-  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 96px [updated] 76px [star] 24px [chevron] 28px [grip] 22px;
+  --item-columns: [check] 28px [status] 28px [type] 20px [main] minmax(0, 1fr) [kind] 84px [updated] 72px [star] 24px [chevron] 28px [grip] 22px;
 }
 
 .item-list-wrap.no-verdict .item-verdict {
@@ -1511,6 +1526,17 @@ a.pager-btn.is-current:hover {
   gap: var(--space-4);
 }
 
+/* What a test case card shows or takes as text is no smaller than 14px: its
+   name, its data, and the size of data kept out of sight. A proposed case's
+   data matches. */
+.case-card .input-sm,
+.case-card .textarea.mono,
+.case-card .large-text,
+.proposal-case .code-block,
+.proposal-case .large-text {
+  font-size: var(--text-md);
+}
+
 @media (max-width: 1100px) {
   .editor-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1603,12 +1629,6 @@ a.pager-btn.is-current:hover {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-4);
-}
-
-.capture-kbd {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
 }
 
 .capture-resume {
@@ -3706,17 +3726,18 @@ button.case-chip:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* The large test cases of a generation: what became of each, and its generator on request. */
+/* The large test cases of a generation, summed up after the other cases; the cases follow on request. */
 .large-cases {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
 
-.large-case {
+.large-case-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  padding-bottom: var(--space-1);
 }
 
 .large-case-row {

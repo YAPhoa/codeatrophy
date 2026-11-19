@@ -184,7 +184,8 @@ test('forms: every text input, text area and select has a name', async ({ page }
   expect(await unnamed()).toEqual([]);
 
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
-  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
   await expect(page.getByLabel('Title')).toBeVisible();
   expect(await unnamed()).toEqual([]);
   await expect(page.getByLabel('Title')).toHaveAttribute('name', 'title');
@@ -205,7 +206,8 @@ test('forms: a save that cannot go through says why and moves to the field', asy
 
   // An item whose title was emptied.
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
-  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
   await page.getByLabel('Title').fill('');
   await page.getByLabel('Source note').focus();
   await page.getByRole('button', { name: 'Save changes' }).click();
@@ -235,7 +237,7 @@ test('dialogs: Escape asks before dropping what was typed, and Cancel does not',
   await page.getByRole('button', { name: 'New collection' }).click();
   await dialog.getByLabel('Name').fill('Graphs');
   await page.keyboard.press('Escape');
-  const ask = page.getByRole('dialog', { name: 'Discard what you entered?' });
+  const ask = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
   await expect(ask.getByRole('button', { name: 'Keep editing' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(ask).toBeHidden();

@@ -579,10 +579,6 @@ function TestsManager({ item }: { item: Item }) {
                   <div className="case-concealed">
                     <EyeOff size={20} className="case-concealed-icon" aria-hidden="true" />
                     <h3 className="case-concealed-title">The content of this case is hidden</h3>
-                    <p className="muted">
-                      Inputs and expected outputs of hidden test cases are kept out of sight so that managing them does not give the problem away. Sample cases stay visible, and you can add a case
-                      without showing the others.
-                    </p>
                     <div className="case-concealed-actions">
                       <Button icon={<Eye size={14} />} onClick={reveal}>
                         Show test cases

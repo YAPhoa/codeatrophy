@@ -37,9 +37,21 @@ export interface FormTestCase {
   verified: boolean;
   /** One of the large test cases the generation built; a revision does not carry it over. */
   large?: boolean;
+  /** The program that built this large case, to read; never sent to the server. */
+  generator?: SourceCode;
+  /** The fields of a large case cleared or typed into since; the others show only their size. */
+  unlocked?: TestDataKey[];
   /** What "Verify all" found for this case, while the form is as it was checked. */
   outcome?: CheckedCase;
 }
+
+export type TestDataKey = 'stdin' | 'expectedStdout';
+
+/** Whether a field of a case shows only its size: one a large case came with, until it is cleared. */
+export const concealedData = (t: FormTestCase, field: TestDataKey): boolean => t.large === true && t[field] !== '' && !t.unlocked?.includes(field);
+
+/** The cases with the large ones last, as the form lists them; otherwise in their order. */
+export const largeLast = (cases: readonly FormTestCase[]): FormTestCase[] => [...cases.filter((t) => !t.large), ...cases.filter((t) => t.large)];
 
 export interface ItemFormState {
   type: ItemType;
@@ -108,9 +120,14 @@ export function normalizeTags(tags: readonly string[]): string[] {
   return Array.from(new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))).sort();
 }
 
-/** `largeCases` says which of the draft's test cases are large ones, if any. */
+/** `largeCases` says which of the draft's test cases are large ones, if any, and with which generator. */
 export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}, largeCases: readonly LargeCaseReport[] = []): ItemFormState {
-  const largeAt = new Set(largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [c.index] : [])));
+  const largeAt = new Map(largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [[c.index, c.generator] as const] : [])));
+  const large = (i: number): Partial<FormTestCase> => {
+    if (!largeAt.has(i)) return {};
+    const generator = largeAt.get(i);
+    return generator ? { large: true, generator: { ...generator } } : { large: true };
+  };
   return {
     ...emptyForm(draft.type),
     ...defaults,
@@ -126,7 +143,7 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
     interface: draft.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(draft.problem?.starterCode ?? {}) },
     harness: structuredClone(draft.problem?.harness ?? {}),
-    testCases: draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...(largeAt.has(i) ? { large: true } : {}) })),
+    testCases: largeLast(draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...large(i) }))),
     referenceSolution: draft.problem?.referenceSolution ? { ...draft.problem.referenceSolution } : null,
   };
 }
@@ -505,7 +522,7 @@ export function withoutCases<S extends CheckedDraft>(draft: S, keys: readonly st
  * Put removed test cases back where they were, for an undo. `before` is the
  * list as it stood when they were removed; the form may have been edited
  * since, so a case that is there again is left alone and a position past the
- * end means the end.
+ * end means the end. The large cases stay last.
  */
 export function restoreCases<T extends Pick<ItemFormState, 'testCases'>>(form: T, before: readonly FormTestCase[], keys: readonly string[]): T {
   const testCases = [...form.testCases];
@@ -513,7 +530,7 @@ export function restoreCases<T extends Pick<ItemFormState, 'testCases'>>(form: T
     if (!keys.includes(t.key) || testCases.some((c) => c.key === t.key)) return;
     testCases.splice(Math.min(index, testCases.length), 0, t);
   });
-  return { ...form, testCases };
+  return { ...form, testCases: largeLast(testCases) };
 }
 
 /**

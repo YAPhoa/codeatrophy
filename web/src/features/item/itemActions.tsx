@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, FlaskConical, GitBranch, Pencil, Trash2 } from 'lucide-react';
+import { Download, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateLibrary, qk } from '../../api/queries';
 import type { Item } from '../../api/types';
@@ -66,14 +66,9 @@ export function useItemActions(item: Item) {
     }
   }, [item, confirm, qc, toast, navigate]);
 
+  // Test cases and variants have their own way in (the Tests page, the Variants tab, Related readings).
   const menu: MenuEntry[] = [
     { label: 'Edit details…', icon: <Pencil size={14} />, to: `/items/${item.id}/edit` },
-    ...(item.type === 'problem'
-      ? ([
-          { label: 'Generate test cases…', icon: <FlaskConical size={14} />, to: `/items/${item.id}/tests/generate` },
-          { label: 'Practise a variant…', icon: <GitBranch size={14} />, to: `/items/${item.id}/variant` },
-        ] satisfies MenuEntry[])
-      : ([{ label: 'Rework as a new reading…', icon: <GitBranch size={14} />, to: `/items/${item.id}/variant` }] satisfies MenuEntry[])),
     { label: 'Export this item…', icon: <Download size={14} />, to: exportItemsPath([item.id]) },
     'separator',
     { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove() },

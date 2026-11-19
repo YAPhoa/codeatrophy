@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { qk, useItem, useLargeTestCaseCount, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
-import type { AiTestCasesResponse, Item, ProposedTestCase } from '../../api/types';
+import type { AiTestCasesResponse, Item, LargeCaseReport, ProposedTestCase, SourceCode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
@@ -24,7 +24,7 @@ import { useGeneration } from '../capture/useGeneration';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { Output } from '../solve/ResultPanel';
-import { LargeCaseOutcomes } from './LargeCaseOutcome';
+import { LargeCaseGenerator, LargeCaseSummary } from './LargeCaseOutcome';
 
 export default function GenerateTestsPage() {
   const { id = '' } = useParams();
@@ -50,6 +50,10 @@ export default function GenerateTestsPage() {
   }
   return <Generator key={item.data.id} item={item.data} />;
 }
+
+/** Where the large cases that were added are among the proposed ones, with their generators. */
+const largeCasesAt = (reports: readonly LargeCaseReport[]): Map<number, SourceCode | null> =>
+  new Map(reports.flatMap((c) => (c.status === 'added' && c.index !== null ? [[c.index, c.generator] as const] : [])));
 
 /** `revealed`: the solution is on screen, so its error output (which can quote the code) may be too. */
 function CaseStatus({ c, attempted, revealed }: { c: ProposedTestCase; attempted: boolean; revealed: boolean }) {
@@ -142,11 +146,11 @@ function Generator({ item }: { item: Item }) {
   const models = modelOptions(provider.settings);
 
   const [proposal, setProposal] = useState<AiTestCasesResponse | null>(null);
-  // Counts the proposals, so that what was opened in one is closed in the next.
-  const [proposalNo, setProposalNo] = useState(0);
   const [keep, setKeep] = useState<boolean[]>([]);
   const [samples, setSamples] = useState<boolean[]>([]);
   const [open, setOpen] = useState<Set<number>>(new Set());
+  // The large cases follow their summary, on request.
+  const [largeShown, setLargeShown] = useState(false);
   const [replace, setReplace] = useState(false);
   const [wantsSolution, setKeepSolution] = useState(true);
   const keepSolution = wantsSolution && !noRoom;
@@ -171,12 +175,13 @@ function Generator({ item }: { item: Item }) {
     const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCases: large ? largeCount : 0, ...provider.request }, signal));
     if (!res) return;
     setProposal(res);
-    setProposalNo((n) => n + 1);
     // Cases whose run failed have no trustworthy expected output; leave them out by default.
     setKeep(res.cases.map((c) => !c.error));
     setSamples(res.cases.map((c) => c.isSample));
-    // Open the cases that need a look.
-    setOpen(new Set(res.cases.flatMap((c, i) => (c.error || c.predictionMatched === false ? [i] : []))));
+    // Open the cases that need a look, and the large ones, which are shown only when asked for.
+    const added = largeCasesAt(res.largeCases);
+    setOpen(new Set(res.cases.flatMap((c, i) => (c.error || c.predictionMatched === false || added.has(i) ? [i] : []))));
+    setLargeShown(false);
     setKeepSolution(true);
     setShowSolution(false);
     setSaveError(null);
@@ -237,8 +242,15 @@ function Generator({ item }: { item: Item }) {
     });
 
   const kept = keep.filter(Boolean).length;
-  // Where the large cases that were added are among the proposed ones.
-  const largeAt = new Set(proposal?.largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [c.index] : [])));
+  const largeAt = largeCasesAt(proposal?.largeCases ?? []);
+  // The large cases come last, after their summary, and only on request.
+  const regularIndices = proposal?.cases.flatMap((_, i) => (largeAt.has(i) ? [] : [i])) ?? [];
+  const largeIndices = proposal?.cases.flatMap((_, i) => (largeAt.has(i) ? [i] : [])) ?? [];
+  // A generator's editor needs a name of its own: its case's name when no other large case has it, else its position.
+  const generatorOf = (i: number) => {
+    const name = proposal?.cases[i]?.name;
+    return name && largeIndices.filter((j) => proposal?.cases[j]?.name === name).length === 1 ? `“${name}”` : `large case ${largeIndices.indexOf(i) + 1}`;
+  };
   const mismatches = proposal?.cases.filter((c) => c.predictionMatched === false).length ?? 0;
   const failures = proposal?.cases.filter((c) => c.error).length ?? 0;
   const verifiedCount = proposal?.cases.filter((c) => c.verified).length ?? 0;
@@ -252,6 +264,64 @@ function Generator({ item }: { item: Item }) {
         : failures > 0
           ? { tone: 'danger', text: `Failed on ${failures} of ${plural(proposal.cases.length, 'input')}` }
           : { tone: 'ok', text: `Ran on all ${plural(proposal.cases.length, 'input')}` };
+
+  /** A proposed case: its row, and once opened its data, after the generator of a large one. */
+  const proposedCase = (i: number) => {
+    const c = proposal?.cases[i];
+    if (!proposal || !c) return null;
+    const isOpen = open.has(i);
+    const generator = largeAt.get(i);
+    return (
+      <li key={i} className={cx('proposal-case card', !keep[i] && 'is-off', c.predictionMatched === false && 'is-flagged', c.error && 'is-failed')}>
+        <div className="proposal-row">
+          <input
+            type="checkbox"
+            checked={keep[i] ?? false}
+            aria-label={`Keep ${c.name}`}
+            onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))}
+          />
+          <button type="button" className="proposal-main" aria-expanded={isOpen} onClick={() => toggleOpen(i)}>
+            <ExpandChevron open={isOpen} />
+            <span className="proposal-text">
+              <span className="proposal-name">{c.name}</span>
+              <span className="proposal-rationale">{c.rationale}</span>
+            </span>
+          </button>
+          <CaseStatus c={c} attempted={proposal.verification.attempted} revealed={showSolution} />
+          <label className="proposal-sample">
+            <input type="checkbox" checked={samples[i] ?? false} onChange={(e) => setSamples((s) => s.map((v, j) => (j === i ? e.target.checked : v)))} />
+            Sample
+          </label>
+        </div>
+        <Collapse open={isOpen} heavy>
+          <div className="proposal-detail">
+            {generator && <LargeCaseGenerator generator={generator} of={generatorOf(i)} />}
+            {c.error && (
+              <Callout tone="danger" title="The solution did not produce an output for this input">
+                {showSolution ? c.error : 'The error is shown with the solution.'}
+              </Callout>
+            )}
+            <div className="io-pair">
+              <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name, 'input')} />
+              {c.predictionMatched !== false && (
+                <Output
+                  label={c.verified ? 'Expected output (from running the solution)' : 'Expected output (the model’s prediction)'}
+                  text={c.expectedStdout}
+                  filename={textFilename(item.title, c.name, 'output')}
+                />
+              )}
+            </div>
+            {c.predictionMatched === false && (
+              <div className="io-block">
+                <div className="io-label">What the model predicted vs. what the solution printed (kept as the expected output)</div>
+                <DiffView expected={c.predictedStdout ?? ''} actual={c.expectedStdout} mode={item.problem?.compare} leftLabel="Model’s prediction" rightLabel="Actual output" variant="before-after" />
+              </div>
+            )}
+          </div>
+        </Collapse>
+      </li>
+    );
+  };
 
   return (
     <div className="workspace">
@@ -347,9 +417,7 @@ function Generator({ item }: { item: Item }) {
           )}
 
           {generation.running && (
-            <GeneratingPanel title="Writing a solution and test cases…" startedAt={generation.startedAt} onCancel={generation.cancel}>
-              {judgeOn ? 'The solution is run on each proposed input, which adds to the wait.' : 'This can take up to a couple of minutes.'}
-            </GeneratingPanel>
+            <GeneratingPanel title="Writing a solution and test cases…" startedAt={generation.startedAt} onCancel={generation.cancel} />
           )}
           {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed" onRetry={() => void generate()} />}
 
@@ -359,7 +427,13 @@ function Generator({ item }: { item: Item }) {
                 {proposal.duplicatesDropped === 1 ? 'The proposed case duplicated an existing one.' : `All ${proposal.duplicatesDropped} proposed cases duplicated existing ones.`}
                 <UsageLine usage={proposal.usage} newTab />
               </p>
-              <LargeCaseOutcomes key={proposalNo} reports={proposal.largeCases} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />
+              <LargeCaseSummary
+                reports={proposal.largeCases}
+                timeLimitMs={item.problem?.timeLimitMs}
+                open={largeShown}
+                onToggle={() => setLargeShown((v) => !v)}
+                className="card large-case-card"
+              />
             </>
           )}
 
@@ -449,64 +523,15 @@ function Generator({ item }: { item: Item }) {
                 </Button>
               </div>
 
-              <LargeCaseOutcomes key={proposalNo} reports={proposal.largeCases} timeLimitMs={item.problem?.timeLimitMs} className="card large-case-card" />
-
-              <ol className="proposal-list">
-                {proposal.cases.map((c, i) => {
-                  const isOpen = open.has(i);
-                  const isLarge = largeAt.has(i);
-                  return (
-                    <li key={i} className={cx('proposal-case card', !keep[i] && 'is-off', c.predictionMatched === false && 'is-flagged', c.error && 'is-failed')}>
-                      <div className="proposal-row">
-                        <input
-                          type="checkbox"
-                          checked={keep[i] ?? false}
-                          aria-label={`Keep ${c.name}`}
-                          onChange={(e) => setKeep((k) => k.map((v, j) => (j === i ? e.target.checked : v)))}
-                        />
-                        <button type="button" className="proposal-main" aria-expanded={isOpen} onClick={() => toggleOpen(i)}>
-                          <ExpandChevron open={isOpen} />
-                          <span className="proposal-text">
-                            <span className="proposal-name">{c.name}</span>
-                            <span className="proposal-rationale">{c.rationale}</span>
-                          </span>
-                        </button>
-                        {isLarge && <Badge>large</Badge>}
-                        <CaseStatus c={c} attempted={proposal.verification.attempted} revealed={showSolution} />
-                        <label className="proposal-sample">
-                          <input type="checkbox" checked={samples[i] ?? false} onChange={(e) => setSamples((s) => s.map((v, j) => (j === i ? e.target.checked : v)))} />
-                          Sample
-                        </label>
-                      </div>
-                      <Collapse open={isOpen} heavy>
-                        <div className="proposal-detail">
-                          {c.error && (
-                            <Callout tone="danger" title="The solution did not produce an output for this input">
-                              {showSolution ? c.error : 'The error is shown with the solution.'}
-                            </Callout>
-                          )}
-                          <div className="io-pair">
-                            <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name, 'input')} />
-                            {c.predictionMatched !== false && (
-                              <Output
-                                label={c.verified ? 'Expected output (from running the solution)' : 'Expected output (the model’s prediction)'}
-                                text={c.expectedStdout}
-                                filename={textFilename(item.title, c.name, 'output')}
-                              />
-                            )}
-                          </div>
-                          {c.predictionMatched === false && (
-                            <div className="io-block">
-                              <div className="io-label">What the model predicted vs. what the solution printed (kept as the expected output)</div>
-                              <DiffView expected={c.predictedStdout ?? ''} actual={c.expectedStdout} mode={item.problem?.compare} leftLabel="Model’s prediction" rightLabel="Actual output" variant="before-after" />
-                            </div>
-                          )}
-                        </div>
-                      </Collapse>
-                    </li>
-                  );
-                })}
-              </ol>
+              {regularIndices.length > 0 && <ol className="proposal-list">{regularIndices.map(proposedCase)}</ol>}
+              <LargeCaseSummary
+                reports={proposal.largeCases}
+                timeLimitMs={item.problem?.timeLimitMs}
+                open={largeShown}
+                onToggle={() => setLargeShown((v) => !v)}
+                className="card large-case-card"
+              />
+              {largeShown && largeIndices.length > 0 && <ol className="proposal-list">{largeIndices.map(proposedCase)}</ol>}
 
               {saveError != null && <ErrorCallout error={saveError} title="Could not save the test cases" onRetry={() => void save()} />}
               {conflict && (
