@@ -407,21 +407,24 @@ func ftsQuery(q string) string {
 	return strings.Join(terms, " ")
 }
 
-func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
+// itemFilterSQL returns the FROM clause and WHERE condition that select the
+// items of f, with their arguments in order. ok is false when f can match no
+// item at all (a search of punctuation only).
+func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bool) {
+	from = `items i`
 	var (
-		from     = `items i`
-		where    []string
-		joinArgs []any // arguments of the FROM clause
-		args     []any // arguments of the WHERE clause
+		where     []string
+		joinArgs  []any // arguments of the FROM clause
+		whereArgs []any // arguments of the WHERE clause
 	)
 	if f.Query != "" {
 		fq := ftsQuery(f.Query)
 		if fq == "" {
-			return []domain.ItemSummary{}, 0, nil
+			return "", "", nil, false
 		}
 		from = `items_fts JOIN items i ON i.seq = items_fts.rowid`
 		where = append(where, `items_fts MATCH ?`)
-		args = append(args, fq)
+		whereArgs = append(whereArgs, fq)
 	}
 	if f.CollectionID != "" && !f.Recursive {
 		from += ` JOIN collection_items ci ON ci.item_id = i.id AND ci.collection_id = ?`
@@ -431,20 +434,20 @@ func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
 		where = append(where, `i.id IN (SELECT item_id FROM collection_items WHERE collection_id IN (
 			WITH RECURSIVE d(id) AS (SELECT ? UNION SELECT c.id FROM collections c JOIN d ON c.parent_id = d.id)
 			SELECT id FROM d))`)
-		args = append(args, f.CollectionID)
+		whereArgs = append(whereArgs, f.CollectionID)
 	}
 	if len(f.IDs) > 0 {
 		where = append(where, `i.id IN (`+placeholders(len(f.IDs))+`)`)
-		args = append(args, anyArgs(f.IDs)...)
+		whereArgs = append(whereArgs, anyArgs(f.IDs)...)
 	}
 	if f.Type != "" {
 		where = append(where, `i.type = ?`)
-		args = append(args, string(f.Type))
+		whereArgs = append(whereArgs, string(f.Type))
 	}
 	if len(f.Statuses) > 0 {
 		where = append(where, `i.status IN (`+placeholders(len(f.Statuses))+`)`)
 		for _, s := range f.Statuses {
-			args = append(args, string(s))
+			whereArgs = append(whereArgs, string(s))
 		}
 	}
 	if len(f.Difficulties) > 0 {
@@ -459,31 +462,36 @@ func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
 		}
 		if len(vals) > 0 {
 			ors = append(ors, `i.difficulty IN (`+placeholders(len(vals))+`)`)
-			args = append(args, vals...)
+			whereArgs = append(whereArgs, vals...)
 		}
 		where = append(where, `(`+strings.Join(ors, ` OR `)+`)`)
 	}
 	for _, tag := range f.Tags {
 		where = append(where, `EXISTS (SELECT 1 FROM item_tags t WHERE t.item_id = i.id AND t.tag = ?)`)
-		args = append(args, tag)
+		whereArgs = append(whereArgs, tag)
 	}
 	if f.Uncollected {
 		where = append(where, `NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id)`)
 	}
 	if f.VariantOf != "" {
 		where = append(where, `i.variant_of = ?`)
-		args = append(args, f.VariantOf)
+		whereArgs = append(whereArgs, f.VariantOf)
 	}
 	if f.Favorite != nil {
 		where = append(where, `i.favorite = ?`)
-		args = append(args, boolInt(*f.Favorite))
+		whereArgs = append(whereArgs, boolInt(*f.Favorite))
 	}
-	whereSQL := ""
 	if len(where) > 0 {
 		whereSQL = ` WHERE ` + strings.Join(where, ` AND `)
 	}
+	return from, whereSQL, append(joinArgs, whereArgs...), true
+}
 
-	args = append(joinArgs, args...)
+func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
+	from, whereSQL, args, ok := itemFilterSQL(f)
+	if !ok {
+		return []domain.ItemSummary{}, 0, nil
+	}
 	var total int
 	if err := t.queryRow(`SELECT COUNT(*) FROM `+from+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -552,6 +560,35 @@ func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
 		list = []domain.ItemSummary{}
 	}
 	return list, total, nil
+}
+
+func (t *tx) CountItemsBy(f store.ItemFilter, group string) (map[string]int, error) {
+	out := map[string]int{}
+	from, whereSQL, args, ok := itemFilterSQL(f)
+	if !ok {
+		return out, nil
+	}
+	var key string
+	switch group {
+	case store.GroupStatus:
+		key = `i.status`
+	case store.GroupDifficulty:
+		key = `COALESCE(i.difficulty, 'none')`
+	case store.GroupTag:
+		key, from = `g.tag`, from+` JOIN item_tags g ON g.item_id = i.id`
+	default:
+		return nil, fmt.Errorf("unknown group %q", group)
+	}
+	err := t.eachRow(`SELECT `+key+`, COUNT(*) FROM `+from+whereSQL+` GROUP BY 1`, args, func(r *sql.Rows) error {
+		var k string
+		var n int
+		if err := r.Scan(&k, &n); err != nil {
+			return err
+		}
+		out[k] = n
+		return nil
+	})
+	return out, err
 }
 
 func (t *tx) ListTags() ([]domain.Tag, error) {

@@ -63,8 +63,8 @@ func pageBounds(limit *int, offset int) (int, int, error) {
 	return l, offset, nil
 }
 
-// ListItems lists items matching the query.
-func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSummary], error) {
+// itemFilter validates the filters of q (not its order or page).
+func itemFilter(q ItemQuery) (store.ItemFilter, error) {
 	f := store.ItemFilter{
 		Query:        strings.TrimSpace(q.Q),
 		CollectionID: q.CollectionID,
@@ -77,20 +77,20 @@ func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSumma
 	if q.Type != "" {
 		t := domain.ItemType(q.Type)
 		if !t.Valid() {
-			return Page[domain.ItemSummary]{}, errBadRequest("type must be problem or reading")
+			return f, errBadRequest("type must be problem or reading")
 		}
 		f.Type = t
 	}
 	for _, s := range q.Status {
 		st := domain.ItemStatus(s)
 		if !st.Valid() {
-			return Page[domain.ItemSummary]{}, errBadRequest("unknown status %q", s)
+			return f, errBadRequest("unknown status %q", s)
 		}
 		f.Statuses = append(f.Statuses, st)
 	}
 	for _, d := range q.Difficulty {
 		if d != "none" && !domain.Difficulty(d).Valid() {
-			return Page[domain.ItemSummary]{}, errBadRequest("unknown difficulty %q", d)
+			return f, errBadRequest("unknown difficulty %q", d)
 		}
 		f.Difficulties = append(f.Difficulties, d)
 	}
@@ -98,6 +98,15 @@ func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSumma
 		if t = domain.NormalizeTag(t); t != "" {
 			f.Tags = append(f.Tags, t)
 		}
+	}
+	return f, nil
+}
+
+// ListItems lists items matching the query.
+func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSummary], error) {
+	f, err := itemFilter(q)
+	if err != nil {
+		return Page[domain.ItemSummary]{}, err
 	}
 	f.Sort = q.Sort
 	if f.Sort == "" {
@@ -125,16 +134,49 @@ func (a *App) ListItems(ctx context.Context, q ItemQuery) (Page[domain.ItemSumma
 	default:
 		return Page[domain.ItemSummary]{}, errBadRequest("order must be asc or desc")
 	}
-	limit, offset, err := pageBounds(q.Limit, q.Offset)
-	if err != nil {
+	if f.Limit, f.Offset, err = pageBounds(q.Limit, q.Offset); err != nil {
 		return Page[domain.ItemSummary]{}, err
 	}
-	f.Limit, f.Offset = limit, offset
 	var out Page[domain.ItemSummary]
 	err = a.store.Read(ctx, func(tx store.Tx) error {
 		items, total, err := tx.ListItems(f)
 		out = Page[domain.ItemSummary]{Items: items, Total: total}
 		return err
+	})
+	return out, err
+}
+
+// ItemFacets counts the items of the query's list by status, difficulty
+// and tag, as described on domain.ItemFacets. The query's order and page
+// are ignored.
+func (a *App) ItemFacets(ctx context.Context, q ItemQuery) (domain.ItemFacets, error) {
+	f, err := itemFilter(q)
+	if err != nil {
+		return domain.ItemFacets{}, err
+	}
+	stats := domain.NewStats().Items
+	out := domain.ItemFacets{ByStatus: stats.ByStatus, ByDifficulty: stats.ByDifficulty, ByTag: map[string]int{}}
+	byStatus, byDifficulty := f, f
+	byStatus.Statuses, byDifficulty.Difficulties = nil, nil
+	err = a.store.Read(ctx, func(tx store.Tx) error {
+		for _, g := range []struct {
+			group string
+			f     store.ItemFilter
+			into  map[string]int
+		}{
+			{store.GroupStatus, byStatus, out.ByStatus},
+			{store.GroupDifficulty, byDifficulty, out.ByDifficulty},
+			{store.GroupTag, f, out.ByTag},
+		} {
+			counts, err := tx.CountItemsBy(g.f, g.group)
+			if err != nil {
+				return err
+			}
+			for k, n := range counts {
+				g.into[k] = n
+			}
+		}
+		return nil
 	})
 	return out, err
 }

@@ -100,3 +100,14 @@ func NewStats() Stats {
 	}
 	return s
 }
+
+// ItemFacets count the items of a filtered list by status, difficulty and
+// tag: each count is how many items with that value the list shows once the
+// value is picked. ByStatus and ByDifficulty are counted without the
+// filter's own statuses or difficulties (values within one combine with
+// OR); ByTag is counted with every filter, since tags combine with AND.
+type ItemFacets struct {
+	ByStatus     map[string]int `json:"byStatus"`
+	ByDifficulty map[string]int `json:"byDifficulty"`
+	ByTag        map[string]int `json:"byTag"`
+}

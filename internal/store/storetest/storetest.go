@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,7 @@ func Run(t *testing.T, open Opener) {
 		{"TestCases", testTestCases},
 		{"TagsStatsSettings", testTagsStatsSettings},
 		{"StatsMatchListFilters", testStatsMatchListFilters},
+		{"CountItemsBy", testCountItemsBy},
 		{"SubmissionResultsAndUnfinished", testSubmissionResultsAndUnfinished},
 		{"Submissions", testSubmissions},
 		{"DeleteCompletedRuns", testDeleteCompletedRuns},
@@ -666,6 +668,113 @@ func testTestCases(t *testing.T, db store.Store) {
 	Write(t, db, func(tx store.Tx) error { return tx.DeleteTestCases("p") })
 	if n := len(Read(t, db, func(tx store.Tx) ([]domain.TestCase, error) { return tx.ListTestCases("p") })); n != 0 {
 		t.Errorf("%d cases left", n)
+	}
+}
+
+// testCountItemsBy checks that the counts by status, difficulty and tag
+// are the totals of the list filtered by each value on top of the same
+// filter, in collections (nested too), searches and combined filters.
+func testCountItemsBy(t *testing.T, db store.Store) {
+	diff := func(d domain.Difficulty) *domain.Difficulty { return &d }
+	parent, child := "top", "nested"
+	Write(t, db, func(tx store.Tx) error {
+		for _, c := range []domain.Collection{
+			{ID: parent, Name: "Top", CreatedAt: now, UpdatedAt: now},
+			{ID: child, Name: "Nested", ParentID: &parent, CreatedAt: now, UpdatedAt: now},
+		} {
+			if err := tx.InsertCollection(&c); err != nil {
+				return err
+			}
+		}
+		items := []domain.Item{
+			Item("a", "Binary search", domain.TypeProblem, "array", "search"),
+			Item("b", "Two pointers", domain.TypeProblem, "array"),
+			Item("c", "Graph walk", domain.TypeProblem, "graph"),
+			Item("d", "Reading on search trees", domain.TypeReading, "search", "tree"),
+			Item("e", "Untagged reading", domain.TypeReading),
+		}
+		items[0].Difficulty, items[1].Difficulty, items[2].Difficulty = diff(domain.DifficultyEasy), diff(domain.DifficultyHard), diff(domain.DifficultyHard)
+		items[1].Status, items[2].Status, items[3].Status = domain.StatusDone, domain.StatusInProgress, domain.StatusDone
+		items[0].Favorite, items[3].Favorite = true, true
+		for i := range items {
+			if err := tx.InsertItem(&items[i]); err != nil {
+				return err
+			}
+		}
+		if err := tx.SetCollectionItemIDs(parent, []string{"a", "b"}); err != nil {
+			return err
+		}
+		return tx.SetCollectionItemIDs(child, []string{"c", "d"})
+	})
+
+	count := func(f store.ItemFilter, group string) map[string]int {
+		t.Helper()
+		return Read(t, db, func(tx store.Tx) (map[string]int, error) { return tx.CountItemsBy(f, group) })
+	}
+	total := func(f store.ItemFilter) int {
+		t.Helper()
+		return Read(t, db, func(tx store.Tx) (int, error) {
+			_, n, err := tx.ListItems(f)
+			return n, err
+		})
+	}
+	str := func(m map[string]int) string {
+		var keys []string
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		var out []string
+		for _, k := range keys {
+			out = append(out, fmt.Sprintf("%s=%d", k, m[k]))
+		}
+		return strings.Join(out, " ")
+	}
+	yes := true
+	for _, tc := range []struct {
+		name                     string
+		f                        store.ItemFilter
+		status, difficulty, tags string
+	}{
+		{"everything", store.ItemFilter{},
+			"done=2 in_progress=1 todo=2", "easy=1 hard=2 none=2", "array=2 graph=1 search=2 tree=1"},
+		{"problems", store.ItemFilter{Type: domain.TypeProblem},
+			"done=1 in_progress=1 todo=1", "easy=1 hard=2", "array=2 graph=1 search=1"},
+		{"collection", store.ItemFilter{CollectionID: parent},
+			"done=1 todo=1", "easy=1 hard=1", "array=2 search=1"},
+		{"collection and nested", store.ItemFilter{CollectionID: parent, Recursive: true},
+			"done=2 in_progress=1 todo=1", "easy=1 hard=2 none=1", "array=2 graph=1 search=2 tree=1"},
+		{"search", store.ItemFilter{Query: "search"},
+			"done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
+		{"favorites with a tag", store.ItemFilter{Favorite: &yes, Tags: []string{"search"}},
+			"done=1 todo=1", "easy=1 none=1", "array=1 search=2 tree=1"},
+		{"statuses and difficulties", store.ItemFilter{Statuses: []domain.ItemStatus{domain.StatusDone}, Difficulties: []string{"hard", "none"}},
+			"done=2", "hard=1 none=1", "array=1 search=1 tree=1"},
+		{"no match", store.ItemFilter{Query: "!!!"}, "", "", ""},
+	} {
+		got := []string{str(count(tc.f, store.GroupStatus)), str(count(tc.f, store.GroupDifficulty)), str(count(tc.f, store.GroupTag))}
+		if want := []string{tc.status, tc.difficulty, tc.tags}; !slices.Equal(got, want) {
+			t.Errorf("%s: counts %q, want %q", tc.name, got, want)
+		}
+		// Each count is the total of the list narrowed to that value.
+		for st, n := range count(tc.f, store.GroupStatus) {
+			f := tc.f
+			if f.Statuses = []domain.ItemStatus{domain.ItemStatus(st)}; total(f) != n {
+				t.Errorf("%s: status %s counts %d, list %d", tc.name, st, n, total(f))
+			}
+		}
+		for tag, n := range count(tc.f, store.GroupTag) {
+			f := tc.f
+			if f.Tags = append(slices.Clone(f.Tags), tag); total(f) != n {
+				t.Errorf("%s: tag %s counts %d, list %d", tc.name, tag, n, total(f))
+			}
+		}
+	}
+	if err := db.Read(context.Background(), func(tx store.Tx) error {
+		_, err := tx.CountItemsBy(store.ItemFilter{}, "title")
+		return err
+	}); err == nil {
+		t.Error("unknown group: no error")
 	}
 }
 

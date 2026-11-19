@@ -23,6 +23,13 @@ const (
 	SortRelevance  = "relevance"
 )
 
+// Fields CountItemsBy groups by.
+const (
+	GroupStatus     = "status"
+	GroupDifficulty = "difficulty" // "none" for items without one
+	GroupTag        = "tag"        // an item counts once for each of its tags
+)
+
 // ItemFilter selects and orders items. Zero values mean "no constraint".
 type ItemFilter struct {
 	Query        string
@@ -149,6 +156,10 @@ type Tx interface {
 	// lastVerdict) are filled on read and ignored on write.
 	GetItem(id string) (domain.Item, error)
 	ListItems(f ItemFilter) ([]domain.ItemSummary, int, error)
+	// CountItemsBy counts the items ListItems selects for f (its order and
+	// page are ignored) by the value of a Group field. Values no matching
+	// item has are left out.
+	CountItemsBy(f ItemFilter, group string) (map[string]int, error)
 	AllItemIDs() ([]string, error)
 	ExistingItemIDs(ids []string) (map[string]bool, error)
 	InsertItem(it *domain.Item) error

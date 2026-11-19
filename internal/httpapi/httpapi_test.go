@@ -176,6 +176,11 @@ func TestItemsLifecycle(t *testing.T) {
 	if got := c.expect("GET", api+"/items?id="+id+"&id=nope", "", 200).json(t); got["total"] != float64(1) {
 		t.Errorf("id filter: %v", got)
 	}
+	facets := c.expect("GET", api+"/items/facets?type=problem&status=done&tag=array&sort=title", "", 200).json(t)
+	if fmt.Sprint(facets) != "map[byDifficulty:map[easy:0 hard:0 medium:0 none:0] byStatus:map[done:0 in_progress:0 todo:1] byTag:map[]]" {
+		t.Errorf("facets: %v", facets)
+	}
+	c.expect("GET", api+"/items/facets?difficulty=brutal", "", 400)
 	c.expect("GET", api+"/items/missing", "", 404)
 	c.expect("DELETE", api+"/items/"+id, "", 204)
 	c.expect("DELETE", api+"/items/"+id, "", 404)

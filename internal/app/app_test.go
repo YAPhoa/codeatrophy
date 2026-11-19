@@ -402,6 +402,41 @@ func TestListItemsQueryValidation(t *testing.T) {
 	}
 }
 
+func TestItemFacets(t *testing.T) {
+	e := newEnv(t)
+	col := must(e.app.CreateCollection(e.ctx, decodeInto[domain.CollectionInput](t, `{"name":"C"}`)))
+	in := `,"collectionIds":["` + col.ID + `"]`
+	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"A","status":"done","tags":["x"]`+in+`}`)))
+	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"B","difficulty":"hard","tags":["x","y"]`+in+`}`)))
+	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"C","status":"done","difficulty":"hard"}`)))
+
+	// Each dimension ignores its own filter but keeps the others; tags keep
+	// every filter, theirs too.
+	f := must(e.app.ItemFacets(e.ctx, app.ItemQuery{CollectionID: col.ID, Status: []string{"done"}, Difficulty: []string{"none"}, Tag: []string{"X"}}))
+	want := domain.ItemFacets{
+		ByStatus:     map[string]int{"todo": 0, "in_progress": 0, "done": 1},
+		ByDifficulty: map[string]int{"easy": 0, "medium": 0, "hard": 0, "none": 1},
+		ByTag:        map[string]int{"x": 1},
+	}
+	if fmt.Sprint(f) != fmt.Sprint(want) {
+		t.Errorf("facets %v, want %v", f, want)
+	}
+	f = must(e.app.ItemFacets(e.ctx, app.ItemQuery{CollectionID: col.ID}))
+	want = domain.ItemFacets{
+		ByStatus:     map[string]int{"todo": 1, "in_progress": 0, "done": 1},
+		ByDifficulty: map[string]int{"easy": 0, "medium": 0, "hard": 1, "none": 1},
+		ByTag:        map[string]int{"x": 2, "y": 1},
+	}
+	if fmt.Sprint(f) != fmt.Sprint(want) {
+		t.Errorf("collection facets %v, want %v", f, want)
+	}
+	// The order and page are not facets' business; bad filters are.
+	big := 999
+	must(e.app.ItemFacets(e.ctx, app.ItemQuery{Sort: "bogus", Limit: &big}))
+	_, err := e.app.ItemFacets(e.ctx, app.ItemQuery{Status: []string{"lost"}})
+	wantCode(t, err, app.CodeBadRequest)
+}
+
 func TestTestCaseOperations(t *testing.T) {
 	e := newEnv(t)
 	it := e.problem(t, "")

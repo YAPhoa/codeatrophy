@@ -449,6 +449,32 @@ the collection's own order. `sort=relevance` is valid only with `q`.
 
 Returns `{ "items": [ItemSummary], "total": n }`.
 
+### `GET /items/facets`
+
+Counts the items of a filtered list by status, difficulty and tag, for the
+library's filter menus. Takes the filters of `GET /items`; `sort`, `order`,
+`limit` and `offset` are ignored, and an invalid filter is `400` as there.
+
+```json
+{
+  "byStatus": { "todo": 14, "in_progress": 5, "done": 23 },
+  "byDifficulty": { "easy": 10, "medium": 15, "hard": 5, "none": 12 },
+  "byTag": { "array": 7, "graph": 2 }
+}
+```
+
+Each count is how many items with that value the list shows once the value
+is picked as well:
+
+- `byStatus` is counted with every filter except `status`, and
+  `byDifficulty` with every filter except `difficulty`, since values within
+  one parameter combine with OR.
+- `byTag` is counted with every filter, `tag` included, since tags combine
+  with AND.
+
+`byStatus` and `byDifficulty` have every key, with `0` when empty; `byTag`
+has only the tags the counted items carry.
+
 ### `POST /items`
 
 Body `ItemInput`. Returns `201` `Item`.

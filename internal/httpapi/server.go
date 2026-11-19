@@ -81,6 +81,7 @@ func (s *Server) routes() {
 	s.handle("GET /stats", s.getStats)
 
 	s.handle("GET /items", s.listItems)
+	s.handle("GET /items/facets", s.itemFacets)
 	s.handle("POST /items", s.createItem)
 	s.handle("POST /items/bulk", s.bulkItems)
 	s.handle("POST /items/check", s.checkItem)
@@ -359,7 +360,8 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (s *Server) listItems(w http.ResponseWriter, r *http.Request) error {
+// itemQuery reads the item filters of GET /items and GET /items/facets.
+func itemQuery(r *http.Request) (app.ItemQuery, error) {
 	q := r.URL.Query()
 	in := app.ItemQuery{
 		Q: q.Get("q"), ID: queryList(r, "id"), Type: q.Get("type"), Status: queryList(r, "status"), Difficulty: queryList(r, "difficulty"),
@@ -368,24 +370,30 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) error {
 	}
 	var err error
 	if in.Limit, err = queryInt(r, "limit"); err != nil {
-		return err
+		return in, err
 	}
 	if off, err := queryInt(r, "offset"); err != nil {
-		return err
+		return in, err
 	} else if off != nil {
 		in.Offset = *off
 	}
 	if b, err := queryBool(r, "recursive"); err != nil {
-		return err
+		return in, err
 	} else if b != nil {
 		in.Recursive = *b
 	}
 	if b, err := queryBool(r, "uncollected"); err != nil {
-		return err
+		return in, err
 	} else if b != nil {
 		in.Uncollected = *b
 	}
-	if in.Favorite, err = queryBool(r, "favorite"); err != nil {
+	in.Favorite, err = queryBool(r, "favorite")
+	return in, err
+}
+
+func (s *Server) listItems(w http.ResponseWriter, r *http.Request) error {
+	in, err := itemQuery(r)
+	if err != nil {
 		return err
 	}
 	page, err := s.app.ListItems(r.Context(), in)
@@ -393,6 +401,19 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusOK, page)
+	return nil
+}
+
+func (s *Server) itemFacets(w http.ResponseWriter, r *http.Request) error {
+	in, err := itemQuery(r)
+	if err != nil {
+		return err
+	}
+	f, err := s.app.ItemFacets(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, f)
 	return nil
 }
 
