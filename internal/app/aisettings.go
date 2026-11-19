@@ -41,6 +41,7 @@ type AIProvider struct {
 	BaseURL    *string       `json:"baseUrl"`
 	APIKeySet  bool          `json:"apiKeySet"`
 	APIKeyHint *string       `json:"apiKeyHint"`
+	Effort     *string       `json:"effort"`
 	Source     string        `json:"source"`
 	IsDefault  bool          `json:"isDefault"`
 	Ready      bool          `json:"ready"`
@@ -51,6 +52,10 @@ type AIProvider struct {
 
 // AISettings is the body of GET /settings/ai.
 type AISettings struct {
+	// Enabled is the saved on/off switch of the AI features, on until it is
+	// saved. AI features are on when it is and the default provider is
+	// ready.
+	Enabled           bool    `json:"enabled"`
 	DefaultProviderID *string `json:"defaultProviderId"`
 	// TimeoutSeconds is the request timeout in effect: the saved one, else
 	// DefaultTimeoutSeconds, the environment's.
@@ -62,6 +67,7 @@ type AISettings struct {
 
 // AISettingsInput is the body of PUT /settings/ai.
 type AISettingsInput struct {
+	Enabled           domain.Opt[bool]   `json:"enabled"`
 	DefaultProviderID domain.Opt[string] `json:"defaultProviderId"`
 	TimeoutSeconds    domain.Opt[int]    `json:"timeoutSeconds"`
 }
@@ -73,6 +79,7 @@ type AIProviderInput struct {
 	Model   domain.Opt[string] `json:"model"`
 	BaseURL domain.Opt[string] `json:"baseUrl"`
 	APIKey  domain.Opt[string] `json:"apiKey"`
+	Effort  domain.Opt[string] `json:"effort"`
 }
 
 // Settings keys and fixed values.
@@ -80,6 +87,9 @@ const (
 	// keyDefaultProvider holds the default provider's id once a default has
 	// been saved; "" means explicitly none.
 	keyDefaultProvider = "ai.default_provider"
+	// keyEnabled holds the AI features switch, "true" or "false"; without it
+	// the switch is on.
+	keyEnabled = "ai.enabled"
 	// keyTimeout holds the saved request timeout in whole seconds; without
 	// it the environment's timeout applies.
 	keyTimeout     = "ai.timeout_seconds"
@@ -129,6 +139,7 @@ type provider struct {
 	id, name, kind, source string
 	model, baseURL         string // configured values; "" means the kind's default
 	apiKey                 string // the key usable with the effective base URL, "" for none
+	effort                 string // one of ai.EffortLevels, "" for the model's default
 	createdAt, updatedAt   *time.Time
 }
 
@@ -144,8 +155,20 @@ func (a *App) envFor(kind string) (model, baseURL, key string) {
 	return "", "", ""
 }
 
+// formerEffort is the effort level the server asked a kind for before
+// providers had one of their own: high for Anthropic, none for the others.
+// Providers that cannot be set (environment ones) and providers carried
+// over from older settings keep it.
+func formerEffort(kind string) string {
+	if kind == ai.ProviderAnthropic {
+		return ai.EffortHigh
+	}
+	return ""
+}
+
 // envProviders returns one read-only provider per kind whose environment
-// variables are set. Its key belongs to its own base URL.
+// variables are set. Its key belongs to its own base URL, and its effort
+// level is the kind's former one.
 func (a *App) envProviders() []provider {
 	var out []provider
 	for _, kind := range ai.ProviderIDs {
@@ -154,7 +177,7 @@ func (a *App) envProviders() []provider {
 			continue
 		}
 		out = append(out, provider{id: envProviderIDs[kind], name: kindNames[kind] + " (environment)", kind: kind,
-			source: sourceEnvironment, model: model, baseURL: base, apiKey: key})
+			source: sourceEnvironment, model: model, baseURL: base, apiKey: key, effort: formerEffort(kind)})
 	}
 	return out
 }
@@ -196,7 +219,7 @@ func keyContext(kind, origin string) string { return kind + "\n" + origin }
 func (a *App) fromRecord(r store.AIProvider) provider {
 	created, updated := r.CreatedAt, r.UpdatedAt
 	p := provider{id: r.ID, name: r.Name, kind: r.Kind, source: sourceSettings, model: r.Model, baseURL: r.BaseURL,
-		createdAt: &created, updatedAt: &updated}
+		effort: r.Effort, createdAt: &created, updatedAt: &updated}
 	if r.APIKey == "" || r.APIKeyOrigin != originOf(a.effectiveBase(r.Kind, r.BaseURL)) {
 		return p
 	}
@@ -248,6 +271,27 @@ func (a *App) defaultProviderID(tx store.Tx, ps []provider) (string, error) {
 		return "", nil
 	}
 	return id, nil
+}
+
+// aiSwitchedOn reports whether the AI features switch is on: it is until it
+// has been saved off.
+func aiSwitchedOn(tx store.Tx) (bool, error) {
+	v, ok, err := tx.GetSetting(keyEnabled)
+	if err != nil || !ok {
+		return true, err
+	}
+	return v != "false", nil
+}
+
+// firstReady returns the first ready provider in the order they are listed,
+// or nil when none is.
+func (a *App) firstReady(ps []provider) *provider {
+	for i := range ps {
+		if a.ready(ps[i]) {
+			return &ps[i]
+		}
+	}
+	return nil
 }
 
 func (a *App) defaultModel(kind string) string {
@@ -329,6 +373,7 @@ func (a *App) view(p provider, isDefault bool, usage map[string]store.AIUsage) A
 		BaseURL:    strPtrOrNil(p.baseURL),
 		APIKeySet:  p.apiKey != "",
 		APIKeyHint: keyHint(p.apiKey),
+		Effort:     strPtrOrNil(p.effort),
 		Source:     p.source,
 		IsDefault:  isDefault,
 		Ready:      a.ready(p),
@@ -363,6 +408,10 @@ func (a *App) requestTimeout(tx store.Tx) (time.Duration, error) {
 
 func (a *App) aiSettings(tx store.Tx) (AISettings, error) {
 	out := AISettings{Providers: []AIProvider{}, Kinds: map[string]AIKind{}}
+	var err error
+	if out.Enabled, err = aiSwitchedOn(tx); err != nil {
+		return out, err
+	}
 	out.DefaultTimeoutSeconds = int(a.aiEnv.Timeout / time.Second)
 	out.TimeoutSeconds = out.DefaultTimeoutSeconds
 	if n, err := savedTimeout(tx); err != nil {
@@ -410,20 +459,22 @@ func (a *App) GetAISettings(ctx context.Context) (AISettings, error) {
 	return out, err
 }
 
-// UpdateAISettings applies a merge update: defaultProviderId chooses the
-// default provider (null turns AI features off), timeoutSeconds sets the
-// request timeout (null removes it, so the environment's applies). Nothing
-// is saved unless both are valid.
+// UpdateAISettings applies a merge update: enabled switches the AI features
+// on or off, keeping the default provider; defaultProviderId chooses the
+// default provider (null for none); timeoutSeconds sets the request timeout
+// (null removes it, so the environment's applies). Switching on with no
+// default makes the first ready provider the default. Nothing is saved
+// unless all are valid.
 func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISettings, error) {
 	var out AISettings
 	err := a.store.Write(ctx, func(tx store.Tx) error {
+		ps, err := a.listProviders(tx)
+		if err != nil {
+			return err
+		}
 		fe := domain.FieldErrors{}
 		id := optText(in.DefaultProviderID)
 		if id != "" {
-			ps, err := a.listProviders(tx)
-			if err != nil {
-				return err
-			}
 			if p := findProvider(ps, id); p == nil {
 				fe.Add("defaultProviderId", "unknown provider")
 			} else if !a.ready(*p) {
@@ -433,11 +484,33 @@ func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISetti
 		if t := in.TimeoutSeconds; t.HasValue() && (t.Val < domain.MinAITimeoutSeconds || t.Val > domain.MaxAITimeoutSeconds) {
 			fe.Add("timeoutSeconds", fmt.Sprintf("must be between %d and %d", domain.MinAITimeoutSeconds, domain.MaxAITimeoutSeconds))
 		}
+		// The default once this update applies, and whether it is new.
+		def, setDefault := id, in.DefaultProviderID.Set
+		if !setDefault {
+			if def, err = a.defaultProviderID(tx, ps); err != nil {
+				return err
+			}
+		}
+		switch e := in.Enabled; {
+		case e.Set && e.Null:
+			fe.Add("enabled", "cannot be null")
+		case e.Val && def == "":
+			if p := a.firstReady(ps); p == nil {
+				fe.Add("enabled", "no AI provider is ready")
+			} else {
+				def, setDefault = p.id, true
+			}
+		}
 		if err := errValidation(fe); err != nil {
 			return err
 		}
-		if in.DefaultProviderID.Set {
-			if err := tx.SetSetting(keyDefaultProvider, id); err != nil {
+		if setDefault {
+			if err := tx.SetSetting(keyDefaultProvider, def); err != nil {
+				return err
+			}
+		}
+		if in.Enabled.Set {
+			if err := tx.SetSetting(keyEnabled, strconv.FormatBool(in.Enabled.Val)); err != nil {
 				return err
 			}
 		}
@@ -451,7 +524,6 @@ func (a *App) UpdateAISettings(ctx context.Context, in AISettingsInput) (AISetti
 				return err
 			}
 		}
-		var err error
 		out, err = a.aiSettings(tx)
 		return err
 	})
@@ -464,6 +536,14 @@ func validModel(m string) bool {
 
 func validAPIKey(k string) bool {
 	return utf8.RuneCountInString(k) <= maxAPIKeyChars && !strings.ContainsFunc(k, func(r rune) bool { return r <= ' ' || r == 0x7f })
+}
+
+// checkEffort validates the effort level of a provider input or a
+// connection test: one of ai.EffortLevels, or null for the model's default.
+func checkEffort(fe domain.FieldErrors, effort domain.Opt[string]) {
+	if effort.HasValue() && !slices.Contains(ai.EffortLevels, effort.Val) {
+		fe.Add("effort", "must be "+strings.Join(ai.EffortLevels, ", ")+" or null")
+	}
 }
 
 // checkConnection validates the model, base URL and API key of a provider
@@ -573,10 +653,11 @@ func (a *App) CreateAIProvider(ctx context.Context, in AIProviderInput) (AIProvi
 		r.Kind = kind
 	}
 	checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+	checkEffort(fe, in.Effort)
 	if err := errValidation(fe); err != nil {
 		return AIProvider{}, err
 	}
-	r.Model, r.BaseURL = optText(in.Model), optText(in.BaseURL)
+	r.Model, r.BaseURL, r.Effort = optText(in.Model), optText(in.BaseURL), in.Effort.Val
 	var out AIProvider
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		all, err := tx.ListAIProviders()
@@ -602,7 +683,7 @@ func (a *App) CreateAIProvider(ctx context.Context, in AIProviderInput) (AIProvi
 }
 
 // UpdateAIProvider applies a merge update to a saved provider's name,
-// model, base URL and key. The kind cannot change.
+// model, base URL, key and effort level. The kind cannot change.
 func (a *App) UpdateAIProvider(ctx context.Context, id string, in AIProviderInput) (AIProvider, error) {
 	if isEnvProviderID(id) {
 		return AIProvider{}, a.errEnvProvider(id)
@@ -627,6 +708,7 @@ func (a *App) UpdateAIProvider(ctx context.Context, id string, in AIProviderInpu
 			fe.Add("kind", "cannot be changed after creation")
 		}
 		checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+		checkEffort(fe, in.Effort)
 		if err := errValidation(fe); err != nil {
 			return err
 		}
@@ -638,6 +720,9 @@ func (a *App) UpdateAIProvider(ctx context.Context, id string, in AIProviderInpu
 		}
 		if in.BaseURL.Set {
 			r.BaseURL = optText(in.BaseURL)
+		}
+		if in.Effort.Set {
+			r.Effort = in.Effort.Val
 		}
 		if err := a.setKey(&r, in.APIKey); err != nil {
 			return err
@@ -691,14 +776,20 @@ func (a *App) providerConfig(p provider, timeout time.Duration) ai.Config {
 // activeAI constructs the provider for a request from the current settings,
 // the request timeout included: the one providerID names, or the default
 // when it is omitted or null. A named provider must exist and be ready
-// (422 on providerId); a missing or unready default is 503. Naming a
-// provider never changes the default.
+// (422 on providerId); a missing or unready default is 503, as is any
+// request while the AI features are switched off. Naming a provider never
+// changes the default.
 func (a *App) activeAI(ctx context.Context, providerID domain.Opt[string]) (activeProvider, error) {
 	named := providerID.HasValue()
 	id := optText(providerID)
 	var p *provider
 	var timeout time.Duration
+	on := true
 	err := a.store.Read(ctx, func(tx store.Tx) error {
+		var err error
+		if on, err = aiSwitchedOn(tx); err != nil || !on {
+			return err
+		}
 		ps, err := a.listProviders(tx)
 		if err != nil {
 			return err
@@ -716,6 +807,8 @@ func (a *App) activeAI(ctx context.Context, providerID domain.Opt[string]) (acti
 		return activeProvider{}, err
 	}
 	switch {
+	case !on:
+		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: "AI features are switched off"}
 	case named && p == nil:
 		return activeProvider{}, errField("providerId", "unknown provider")
 	case named && !a.ready(*p):
@@ -734,7 +827,7 @@ func (a *App) activeAI(ctx context.Context, providerID domain.Opt[string]) (acti
 	if err != nil {
 		return activeProvider{}, &Error{Code: CodeAIUnavailable, Message: ai.SafeMessage(err, p.apiKey)}
 	}
-	return activeProvider{Provider: prov, id: p.id, name: p.name, kind: p.kind, secret: p.apiKey}, nil
+	return activeProvider{Provider: prov, id: p.id, name: p.name, kind: p.kind, secret: p.apiKey, effort: p.effort}, nil
 }
 
 // AIInfo describes the default provider for the meta endpoint.
@@ -747,10 +840,14 @@ type AIInfo struct {
 }
 
 // AIInfo returns whether AI features are available, and with which
-// provider.
+// provider: they are when they are switched on and the default provider is
+// ready.
 func (a *App) AIInfo(ctx context.Context) (AIInfo, error) {
 	out := AIInfo{}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
+		if on, err := aiSwitchedOn(tx); err != nil || !on {
+			return err
+		}
 		ps, err := a.listProviders(tx)
 		if err != nil {
 			return err
@@ -779,6 +876,7 @@ type AITestInput struct {
 	Model      domain.Opt[string] `json:"model"`
 	BaseURL    domain.Opt[string] `json:"baseUrl"`
 	APIKey     domain.Opt[string] `json:"apiKey"`
+	Effort     domain.Opt[string] `json:"effort"`
 }
 
 // AITestResult reports a connection test.
@@ -839,6 +937,7 @@ func (a *App) resolveConnection(ctx context.Context, in AITestInput) (connection
 		fe.Add("kind", "unknown provider kind")
 	}
 	checkConnection(fe, in.Model, in.BaseURL, in.APIKey)
+	checkEffort(fe, in.Effort)
 	if err := errValidation(fe); err != nil {
 		return connection{}, err
 	}
@@ -874,6 +973,11 @@ func (a *App) resolveConnection(ctx context.Context, in AITestInput) (connection
 	}
 	if v := optText(in.APIKey); v != "" {
 		c.p.apiKey = v
+	}
+	// Unlike the others, an effort given as null is an override too: the
+	// model's default.
+	if in.Effort.Set {
+		c.p.effort = in.Effort.Val
 	}
 	return c, nil
 }
@@ -955,7 +1059,7 @@ func (a *App) TestAIProvider(ctx context.Context, in AITestInput) (AITestResult,
 	defer cancel()
 	// Counted in the provider's usage when one was named; a configuration
 	// that is not saved has no counts.
-	ap := activeProvider{Provider: prov, id: c.id, name: p.name, kind: p.kind, secret: p.apiKey}
+	ap := activeProvider{Provider: prov, id: c.id, name: p.name, kind: p.kind, secret: p.apiKey, effort: p.effort}
 	u, err := a.generate(ctx, "test", ap, nil, ai.GenerateRequest{
 		System:     "You are answering an automated connectivity check.",
 		User:       `Reply with the JSON object {"ok": true}.`,

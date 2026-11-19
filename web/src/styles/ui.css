@@ -316,6 +316,11 @@
   background-repeat: no-repeat;
 }
 
+/* A secret in a text field (an API key), masked like a password field. */
+.input-secret {
+  -webkit-text-security: disc;
+}
+
 .input-sm {
   height: var(--control-h-sm);
   font-size: var(--text-sm);
@@ -336,6 +341,25 @@
 
 .select-trigger > * {
   grid-area: 1 / 1;
+}
+
+/* Drawn like the combo box of a model: up-down chevrons where its toggle has them. */
+.select-combo {
+  position: relative;
+  padding-right: 28px;
+  background-image: none;
+}
+
+.select-option-label.mono {
+  font-size: var(--text-code);
+}
+
+.select-chevrons {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  color: var(--text-3);
+  transform: translateY(-50%);
 }
 
 .select-trigger:disabled {

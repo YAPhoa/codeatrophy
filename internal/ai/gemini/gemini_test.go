@@ -212,12 +212,14 @@ func TestGenerateThroughTheOpenAIEndpoint(t *testing.T) {
 		if p.Name() != ai.ProviderGemini || p.Model() != "gemini-3.5-flash" {
 			t.Errorf("name %q, model %q", p.Name(), p.Model())
 		}
-		resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema()})
+		resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema(),
+			Effort: ai.EffortLow})
 		if err != nil || string(resp.JSON) != `{"ok": true}` || *resp.OutputTokens != 4 {
 			t.Errorf("response: %+v %v", resp, err)
 		}
-		if path != "/v1beta/openai/chat/completions" || auth != "Bearer "+key || body["model"] != "gemini-3.5-flash" {
-			t.Errorf("request: %s %q %v", path, auth, body["model"])
+		if path != "/v1beta/openai/chat/completions" || auth != "Bearer "+key || body["model"] != "gemini-3.5-flash" ||
+			body["reasoning_effort"] != "low" {
+			t.Errorf("request: %s %q %v %v", path, auth, body["model"], body["reasoning_effort"])
 		}
 	}
 	// Without a model it can list but not generate.

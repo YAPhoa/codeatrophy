@@ -28,8 +28,9 @@ interface ModelFieldProps {
 
 /**
  * The model of a provider: a text field with the service's models to pick
- * from, and a button that loads them again. A name typed by hand always
- * stands, because some servers do not list their models.
+ * from, and a button that loads them again. A name typed by hand stands
+ * only while no models are known, because some servers do not list theirs;
+ * with a list, leaving the field on a name not in it puts back the last one.
  */
 export function ModelField({ value, onChange, models, loading, onLoad, loadOnFocus, refreshDisabled, placeholder, hint, error, maxLength, inputRef, refreshRef }: ModelFieldProps) {
   const [open, setOpen] = useState(false);
@@ -37,6 +38,8 @@ export function ModelField({ value, onChange, models, loading, onLoad, loadOnFoc
   const [navigated, setNavigated] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listId = useId();
+  // The last name in the field that could stand: put back when it is left on one that cannot.
+  const lastRef = useRef(value);
 
   const known = models !== null && models.length > 0;
   const matches = useMemo(() => (models ? matchModels(models, value) : []), [models, value]);
@@ -61,8 +64,17 @@ export function ModelField({ value, onChange, models, loading, onLoad, loadOnFoc
   };
 
   const pick = (model: string) => {
+    lastRef.current = model;
     onChange(model);
     setOpen(false);
+  };
+
+  /** Whether the name in the field can stand: any while no list is known, else one of the list. */
+  const stands = (name: string) => !known || name.trim() === '' || models.includes(name.trim());
+
+  const settle = () => {
+    if (!stands(value)) onChange(lastRef.current);
+    else lastRef.current = value;
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -85,10 +97,17 @@ export function ModelField({ value, onChange, models, loading, onLoad, loadOnFoc
       e.preventDefault();
       const picked = navigated ? matches[active] : undefined;
       if (picked) pick(picked);
-      else setOpen(false);
+      else {
+        setOpen(false);
+        settle();
+      }
     } else if (e.key === 'Escape' && showList) {
       e.stopPropagation();
       setOpen(false);
+    } else if (e.key === 'Enter' && !stands(value)) {
+      // Not sent with a name the list does not have.
+      e.preventDefault();
+      settle();
     }
   };
 
@@ -113,12 +132,19 @@ export function ModelField({ value, onChange, models, loading, onLoad, loadOnFoc
               autoCapitalize="none"
               spellCheck={false}
               onChange={(e) => {
+                if (stands(e.target.value)) lastRef.current = e.target.value;
                 onChange(e.target.value);
                 show();
               }}
-              onFocus={() => showOrLoad(false)}
+              onFocus={() => {
+                lastRef.current = value;
+                showOrLoad(false);
+              }}
               onMouseDown={() => showOrLoad(false)}
-              onBlur={() => setOpen(false)}
+              onBlur={() => {
+                setOpen(false);
+                settle();
+              }}
               onKeyDown={onKeyDown}
             />
             {/* Out of the tab order: the input itself opens the list from the keyboard. */}

@@ -615,6 +615,89 @@ test('preferences: the reading text size scales rendered Markdown and is kept in
   await expect(page.locator('html')).not.toHaveAttribute('data-reading-size');
 });
 
+test('AI providers: Turn AI off and Turn AI on keep the default', async ({ page }) => {
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  const nav = page.getByRole('complementary', { name: 'Navigation' });
+  const turnOff = section.getByRole('button', { name: 'Turn AI off' });
+  const turnOn = section.getByRole('button', { name: 'Turn AI on' });
+  const personal = section.getByRole('listitem').filter({ hasText: 'Personal key' });
+  await expect(section.getByText('On · Personal key · claude-opus-5-5')).toBeVisible();
+  await expect(turnOn).toHaveCount(0);
+
+  // Off: the default provider stays marked, and nothing tells the user to make one the default.
+  await turnOff.click();
+  await expect(turnOn).toBeVisible();
+  await expect(turnOff).toHaveCount(0);
+  await expect(section.locator('.ai-status')).toHaveText('Off');
+  await expect(personal.getByText('default', { exact: true })).toBeVisible();
+  await expect(nav.getByTitle('AI drafting is off')).toBeVisible();
+  await expect(page.getByText(/no provider is the default|Make default” on one/)).toHaveCount(0);
+
+  // Making another the default does not turn AI on; the default moves.
+  const ollama = section.getByRole('listitem').filter({ hasText: 'Local Ollama' });
+  await ollama.getByRole('button', { name: 'Make default' }).click();
+  await expect(ollama.getByText('default', { exact: true })).toBeVisible();
+  await expect(turnOn).toBeVisible();
+  await personal.getByRole('button', { name: 'Make default' }).click();
+  await expect(personal.getByText('default', { exact: true })).toBeVisible();
+
+  // On again, with the same default.
+  await turnOn.click();
+  await expect(turnOff).toBeVisible();
+  await expect(section.getByText('On · Personal key · claude-opus-5-5')).toBeVisible();
+  await expect(nav.getByTitle('AI drafting: Personal key · claude-opus-5-5')).toBeVisible();
+
+  // Deleting the default leaves none: AI is off, and turning it on picks the first ready provider.
+  await personal.getByRole('button', { name: 'Delete Personal key' }).click();
+  await page.getByRole('dialog', { name: 'Delete the provider “Personal key”?' }).getByRole('button', { name: 'Delete provider' }).click();
+  await expect(personal).toHaveCount(0);
+  await turnOn.click();
+  await expect(section.getByText('On · Local Ollama · qwen2.5-coder:14b')).toBeVisible();
+  await expect(ollama.getByText('default', { exact: true })).toBeVisible();
+});
+
+test('AI providers: Turn AI on picks a ready provider when there is no default, and is not offered with none', async ({ page }) => {
+  // An environment provider, not in use.
+  await open(page, '/settings/ai', 'fast,ai-env,no-ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  const turnOn = section.getByRole('button', { name: 'Turn AI on' });
+  await expect(section.locator('.ai-status')).toHaveText('Off');
+  await turnOn.click();
+  await expect(section.getByText('On · Anthropic (environment) · claude-opus-5-5')).toBeVisible();
+
+  // No providers: nothing to turn on.
+  await open(page, '/settings/ai', 'fast,no-ai');
+  await expect(section.getByText('No providers yet')).toBeVisible();
+  await expect(turnOn).toHaveCount(0);
+});
+
+test('AI providers: with a default that is not ready, AI is off with no Turn AI on, and the warning says what it needs', async ({ page }) => {
+  // The seeded default loses its key before the app loads.
+  await page.addInitScript(() => {
+    type Mock = { db: { ai: { defaultProviderId: string | null; providers: { id: string; apiKey: string | null }[] } } };
+    let mock: Mock | undefined;
+    Object.defineProperty(window, '__codeatrophyMock', {
+      configurable: true,
+      get: () => mock,
+      set: (m: Mock) => {
+        mock = m;
+        m.db.ai.providers.find((p) => p.id === m.db.ai.defaultProviderId)!.apiKey = null;
+      },
+    });
+  });
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  await expect(section.getByText('Off · Personal key is not ready')).toBeVisible();
+  await expect(section.getByRole('button', { name: /^Turn AI (on|off)$/ })).toHaveCount(0);
+  await expect(section.getByText('The default provider, “Personal key”, needs an API key. Complete it, or make another provider the default.')).toBeVisible();
+
+  // Another default makes AI on again, as it was saved on.
+  await section.getByRole('listitem').filter({ hasText: 'Local Ollama' }).getByRole('button', { name: 'Make default' }).click();
+  await expect(section.getByRole('button', { name: 'Turn AI off' })).toBeVisible();
+  await expect(section.getByText(/^The default provider, /)).toHaveCount(0);
+});
+
 test('AI providers: a new one gets a model from the loaded list, is added once tested, and becomes the default', async ({ page }) => {
   await open(page, '/settings/ai');
   const section = page.getByRole('region', { name: 'AI providers' });
@@ -637,6 +720,9 @@ test('AI providers: a new one gets a model from the loaded list, is added once t
   await dialog.getByLabel('Name').fill('Work OpenAI');
   await dialog.getByLabel('API key').fill('sk-smoke-test-0000Zk9d');
   await expect(note).toHaveText('Pick a model, then test the connection.');
+  // The key is masked without a password field, so browsers do not take the form for a login.
+  await expect(dialog.locator('input[type="password"]')).toHaveCount(0);
+  await expect(dialog.getByLabel('API key')).toHaveCSS('-webkit-text-security', 'disc');
 
   // An OpenAI-compatible provider has to name its server before anything is asked of it.
   const baseUrl = dialog.getByLabel('Base URL');
@@ -665,6 +751,14 @@ test('AI providers: a new one gets a model from the loaded list, is added once t
   // Another model needs no new test; another key does.
   await model.fill('gpt-4.1-mini');
   await expect(note).toHaveText('Tested. Ready to add.');
+  // A name the list does not have is put back to the last one on leaving the field, or on Enter.
+  await model.fill('gpt-4.1-min');
+  await dialog.getByLabel('Name').focus();
+  await expect(model).toHaveValue('gpt-4.1-mini');
+  await model.fill('gpt-4');
+  await model.press('Enter');
+  await expect(model).toHaveValue('gpt-4.1-mini');
+  await expect(dialog).toBeVisible();
   await dialog.getByLabel('API key').fill('sk-smoke-other-Zk9d');
   await expect(note).toHaveText('Test the connection to add it.');
   await expect(add).toBeDisabled();
@@ -805,6 +899,55 @@ test('AI providers: editing one offers its models without a test, and asks for a
   await editing.getByRole('button', { name: 'Show models' }).click();
   await expect(page.getByRole('option', { name: 'qwen2.5-coder:14b' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'stale-model' })).toHaveCount(0);
+});
+
+test('AI providers: an effort level is picked and saved, shown in the list, and tested where the test sends it', async ({ page }) => {
+  await open(page, '/settings/ai');
+  const section = page.getByRole('region', { name: 'AI providers' });
+  const editing = page.getByRole('dialog', { name: 'Edit provider' });
+  const note = editing.locator('.dialog-note');
+  const effort = editing.getByRole('combobox', { name: 'Effort level' });
+  const save = editing.getByRole('button', { name: 'Save provider' });
+
+  // Anthropic's is saved as it is: its test asks for low whatever is set.
+  const personal = section.getByRole('listitem').filter({ hasText: 'Personal key' });
+  await expect(personal).toContainText('high effort');
+  await personal.getByRole('button', { name: 'Edit Personal key' }).click();
+  await expect(effort).toHaveText('High');
+  const list = await openList(effort);
+  await expect(list.getByRole('option')).toHaveText(['Default', 'Low', 'Medium', 'High']);
+  await list.getByRole('option', { name: 'Medium', exact: true }).click();
+  await expect(effort).toHaveText('Medium');
+  await expect(note).toHaveText('');
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(personal).toContainText('medium effort');
+  await expect(personal).not.toContainText('high effort');
+
+  // Back to the model's default, nothing is shown.
+  await personal.getByRole('button', { name: 'Edit Personal key' }).click();
+  await choose(effort, 'Default');
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(personal).not.toContainText('effort');
+
+  // An OpenAI-compatible provider sends the level on its test, so another one is saved once tested.
+  const ollama = section.getByRole('listitem').filter({ hasText: 'Local Ollama' });
+  await expect(ollama).not.toContainText('effort');
+  await ollama.getByRole('button', { name: 'Edit Local Ollama' }).click();
+  await expect(effort).toHaveText('Default');
+  await choose(effort, 'Low');
+  await expect(note).toHaveText('Test the connection to save it.');
+  await expect(save).toBeDisabled();
+  await editing.getByRole('button', { name: 'Test connection' }).click();
+  await expect(note).toHaveText('Tested. Save to keep it.');
+  await choose(effort, 'High');
+  await expect(note).toHaveText('Test the connection to save it.');
+  await choose(effort, 'Low');
+  await expect(note).toHaveText('Tested. Save to keep it.');
+  await save.click();
+  await expect(editing).toBeHidden();
+  await expect(ollama).toContainText('low effort');
 });
 
 test('AI providers: the request timeout is saved when committed, and a value out of range is not sent', async ({ page }) => {

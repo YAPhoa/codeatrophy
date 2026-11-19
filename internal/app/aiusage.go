@@ -61,6 +61,7 @@ type activeProvider struct {
 	name   string
 	kind   string
 	secret string
+	effort string // the provider's effort level, sent with every request
 }
 
 // logSubject says what a generation is about, for its log entry. The use
@@ -82,6 +83,7 @@ type logSubject struct {
 // usage carries no log id.
 func (a *App) generate(ctx context.Context, op string, p activeProvider, subject *logSubject, req ai.GenerateRequest,
 	use func(raw json.RawMessage) error) (Usage, error) {
+	req.Effort = p.effort
 	start := time.Now()
 	resp, err := p.Generate(ctx, req)
 	u := Usage{Model: resp.Model, DurationMs: int(time.Since(start).Milliseconds()),
@@ -148,7 +150,7 @@ func (a *App) account(op string, p activeProvider, subject *logSubject, req ai.G
 		msg := AsError(failure).Message
 		e.Error = &msg
 	}
-	body := logBody(req)
+	body := logBody(req, p.kind)
 	if resp.Text != "" {
 		text := domain.Truncate(resp.Text, maxLogTextBytes)
 		body.Response, body.Truncated = &text, body.Truncated || len(text) < len(resp.Text)
@@ -198,10 +200,10 @@ type logMessage struct {
 	Content string `json:"content"`
 }
 
-// logBody is what the log keeps of a request: what the server asked for,
-// built from the provider-neutral request (so no key, header or provider
-// envelope can get in), with its texts cut to fit.
-func logBody(req ai.GenerateRequest) store.AILogBody {
+// logBody is what the log keeps of a request to a provider of the kind:
+// what the server asked for, built from the provider-neutral request (so no
+// key, header or provider envelope can get in), with its texts cut to fit.
+func logBody(req ai.GenerateRequest, kind string) store.AILogBody {
 	system, user := req.System, req.User
 	b := store.AILogBody{}
 	if budget := maxLogTextBytes; len(system)+len(user) > budget {
@@ -214,10 +216,13 @@ func logBody(req ai.GenerateRequest) store.AILogBody {
 	if req.MaxOutputTokens > 0 {
 		r.MaxOutputTokens = &req.MaxOutputTokens
 	}
-	if req.Light {
-		low := "low"
-		r.Effort = &low
+	// The effort asked for: the provider's level, except that a light
+	// request to Anthropic asks for low.
+	effort := req.Effort
+	if req.Light && kind == ai.ProviderAnthropic {
+		effort = ai.EffortLow
 	}
+	r.Effort = strPtrOrNil(effort)
 	raw, _ := json.Marshal(r)
 	b.System, b.Request = system, string(raw)
 	return b

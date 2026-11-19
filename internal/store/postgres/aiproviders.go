@@ -8,16 +8,25 @@ import (
 	"codeatrophy/internal/store"
 )
 
-const aiProviderColumns = `id, name, kind, model, base_url, api_key, api_key_origin, created_at, updated_at`
+const aiProviderColumns = `id, name, kind, model, base_url, api_key, api_key_origin, effort, created_at, updated_at`
 
 func scanAIProvider(sc interface{ Scan(...any) error }) (store.AIProvider, error) {
 	var (
 		p                store.AIProvider
+		effort           sql.NullString
 		created, updated int64
 	)
-	err := sc.Scan(&p.ID, &p.Name, &p.Kind, &p.Model, &p.BaseURL, &p.APIKey, &p.APIKeyOrigin, &created, &updated)
-	p.CreatedAt, p.UpdatedAt = fromUnix(created), fromUnix(updated)
+	err := sc.Scan(&p.ID, &p.Name, &p.Kind, &p.Model, &p.BaseURL, &p.APIKey, &p.APIKeyOrigin, &effort, &created, &updated)
+	p.Effort, p.CreatedAt, p.UpdatedAt = effort.String, fromUnix(created), fromUnix(updated)
 	return p, err
+}
+
+// effortArg stores the model's default effort, "", as NULL.
+func effortArg(effort string) any {
+	if effort == "" {
+		return nil
+	}
+	return effort
 }
 
 func (t *tx) ListAIProviders() ([]store.AIProvider, error) {
@@ -47,15 +56,16 @@ func (t *tx) GetAIProvider(id string) (store.AIProvider, error) {
 
 func (t *tx) InsertAIProvider(p *store.AIProvider) error {
 	_, err := t.exec(`INSERT INTO ai_providers (id, name, name_key, kind, model, base_url, api_key, api_key_origin,
-		created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, p.ID, p.Name, domain.AIProviderNameKey(p.Name),
-		p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, toUnix(p.CreatedAt), toUnix(p.UpdatedAt))
+		effort, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, p.ID, p.Name,
+		domain.AIProviderNameKey(p.Name), p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort),
+		toUnix(p.CreatedAt), toUnix(p.UpdatedAt))
 	return err
 }
 
 func (t *tx) UpdateAIProvider(p *store.AIProvider) error {
 	res, err := t.exec(`UPDATE ai_providers SET name = $1, name_key = $2, model = $3, base_url = $4, api_key = $5,
-		api_key_origin = $6, updated_at = $7 WHERE id = $8`, p.Name, domain.AIProviderNameKey(p.Name), p.Model, p.BaseURL,
-		p.APIKey, p.APIKeyOrigin, toUnix(p.UpdatedAt), p.ID)
+		api_key_origin = $6, effort = $7, updated_at = $8 WHERE id = $9`, p.Name, domain.AIProviderNameKey(p.Name), p.Model,
+		p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), toUnix(p.UpdatedAt), p.ID)
 	if err != nil {
 		return err
 	}

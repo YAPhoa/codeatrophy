@@ -38,7 +38,7 @@ func sse(w http.ResponseWriter, text, stopReason string) {
 
 // effortCapability is the part of a Models API answer that says the model
 // accepts output_config.effort at the levels the provider uses.
-const effortCapability = `"capabilities":{"effort":{"supported":true,"low":{"supported":true},"high":{"supported":true}}}`
+const effortCapability = `"capabilities":{"effort":{"supported":true,"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true}}}`
 
 func TestGenerateStreamsStructuredOutput(t *testing.T) {
 	var body map[string]any
@@ -67,7 +67,7 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 		t.Errorf("default model %q", p.Model())
 	}
 	schema := ai.PingSchema()
-	resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "SYS", User: "USER", Schema: schema})
+	resp, err := p.Generate(context.Background(), ai.GenerateRequest{System: "SYS", User: "USER", Schema: schema, Effort: ai.EffortHigh})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,9 @@ func TestParamsFollowTheModelFacts(t *testing.T) {
 	if !p.(*Provider).firstParty {
 		t.Error("the default endpoint is the first-party API")
 	}
-	able := modelFacts{maxTokens: 128000, effortHigh: true, effortLow: true}
-	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true}, able, true)
+	able := modelFacts{maxTokens: 128000, effortHigh: true, effortMedium: true, effortLow: true}
+	params := p.(*Provider).params(ai.GenerateRequest{System: "s", User: "u", Schema: ai.PingSchema(), Light: true,
+		Effort: ai.EffortHigh}, able, true)
 	b, _ := json.Marshal(params)
 	var m map[string]any
 	json.Unmarshal(b, &m)
@@ -131,6 +132,26 @@ func TestParamsFollowTheModelFacts(t *testing.T) {
 	b, _ = json.Marshal(p.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema(), Light: true}, modelFacts{effortHigh: true}, false))
 	if strings.Contains(string(b), "effort") {
 		t.Errorf("a light request must not fall back to another level: %s", b)
+	}
+	// Any other request asks for the provider's level where the model takes
+	// it, and for none without one.
+	for _, tc := range []struct {
+		effort string
+		facts  modelFacts
+		want   any
+	}{
+		{"", able, nil},
+		{ai.EffortLow, able, "low"},
+		{ai.EffortMedium, able, "medium"},
+		{ai.EffortHigh, able, "high"},
+		{ai.EffortMedium, modelFacts{effortLow: true, effortHigh: true}, nil},
+	} {
+		b, _ := json.Marshal(p.(*Provider).params(ai.GenerateRequest{Schema: ai.PingSchema(), Effort: tc.effort}, tc.facts, false))
+		var m map[string]any
+		json.Unmarshal(b, &m)
+		if got := m["output_config"].(map[string]any)["effort"]; got != tc.want {
+			t.Errorf("effort %q with %+v: sent %v, want %v", tc.effort, tc.facts, got, tc.want)
+		}
 	}
 }
 
@@ -278,7 +299,7 @@ func TestMaxTokensFitsTheModel(t *testing.T) {
 			defer srv.Close()
 			p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "old"})
 			for range 2 {
-				if _, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()}); err != nil {
+				if _, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema(), Effort: ai.EffortHigh}); err != nil {
 					t.Fatal(err)
 				}
 				if body["max_tokens"] != tc.want {

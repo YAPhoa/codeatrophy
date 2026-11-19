@@ -1,6 +1,7 @@
 // The mock's in-memory state and the derived views the API returns.
 
 import type {
+  AiEffort,
   AiLogDetail,
   AiLogEntry,
   AiProvider,
@@ -132,6 +133,7 @@ export interface StoredAiProvider {
   model: string | null;
   baseUrl: string | null;
   apiKey: string | null;
+  effort: AiEffort | null;
   source: AiProvider['source'];
   /** Kept as the two sums the API reports; the mock does not age the last 30 days. */
   usage: AiProviderUsage;
@@ -305,8 +307,17 @@ export class MockDb {
    * this is how verification can report a mismatch.
    */
   readonly truth = new Map<string, string>();
-  /** `timeoutSeconds` is the saved request timeout; `null` leaves the environment's value in effect. */
-  ai: { defaultProviderId: string | null; timeoutSeconds: number | null; providers: StoredAiProvider[] } = { defaultProviderId: null, timeoutSeconds: null, providers: [] };
+  /**
+   * `enabled` is the AI features switch, on until it is saved off;
+   * `timeoutSeconds` is the saved request timeout, `null` leaving the
+   * environment's value in effect.
+   */
+  ai: { enabled: boolean; defaultProviderId: string | null; timeoutSeconds: number | null; providers: StoredAiProvider[] } = {
+    enabled: true,
+    defaultProviderId: null,
+    timeoutSeconds: null,
+    providers: [],
+  };
   /** The AI activity log, oldest first. Nothing is removed unless the user asks. */
   aiLog: StoredLogEntry[] = [];
   styles: StylePreset[] = [];
@@ -343,6 +354,8 @@ export class MockDb {
         model: 'claude-opus-5-5',
         baseUrl: 'https://llm-gateway.example.org/anthropic',
         apiKey: 'sk-ant-mock-env-000000000000k3Wd',
+        // As the server gives an environment Anthropic provider.
+        effort: 'high',
         source: 'environment',
         usage: {
           last30Days: { requests: 6, failed: 0, inputTokens: 27400, outputTokens: 19800 },
@@ -362,6 +375,7 @@ export class MockDb {
         model: 'claude-opus-5-5',
         baseUrl: null,
         apiKey: 'sk-ant-mock-0000000000000000x7Qa',
+        effort: 'high',
         source: 'settings',
         usage: {
           last30Days: { requests: 14, failed: 1, inputTokens: 61200, outputTokens: 48100 },
@@ -382,6 +396,7 @@ export class MockDb {
           model: 'qwen2.5-coder:14b',
           baseUrl: 'http://localhost:11434/v1',
           apiKey: null,
+          effort: null,
           source: 'settings',
           usage: {
             last30Days: { requests: 0, failed: 0, inputTokens: 0, outputTokens: 0 },
@@ -398,6 +413,7 @@ export class MockDb {
           model: 'llama3.1:70b',
           baseUrl: 'https://llm.example.org/v1',
           apiKey: 'sk-mock-00000000000000000000m4Rt',
+          effort: null,
           source: 'settings',
           usage: noUsage(),
           createdAt: now,
@@ -749,6 +765,7 @@ export class MockDb {
       baseUrl: p.baseUrl,
       apiKeySet: p.apiKey !== null,
       apiKeyHint: p.apiKey !== null ? `…${p.apiKey.slice(-4)}` : null,
+      effort: p.effort,
       source: p.source,
       isDefault: p.id === this.ai.defaultProviderId,
       ready: this.isReady(p),
@@ -758,13 +775,17 @@ export class MockDb {
     };
   }
 
+  /** Saved providers by name ignoring case, then environment providers; with `defaultFirst`, the default before them. */
+  orderedProviders(defaultFirst = true): StoredAiProvider[] {
+    const rank = (p: StoredAiProvider) => (defaultFirst && p.id === this.ai.defaultProviderId ? 0 : p.source === 'settings' ? 1 : 2);
+    return [...this.ai.providers].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+  }
+
   /** The default first, then saved providers by name ignoring case, then environment providers. */
   aiSettings(): AiSettings {
-    const rank = (p: StoredAiProvider) => (p.id === this.ai.defaultProviderId ? 0 : p.source === 'settings' ? 1 : 2);
-    const providers = [...this.ai.providers].sort(
-      (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }),
-    );
+    const providers = this.orderedProviders();
     return {
+      enabled: this.ai.enabled,
       defaultProviderId: this.ai.defaultProviderId,
       timeoutSeconds: this.ai.timeoutSeconds ?? DEFAULT_AI_TIMEOUT_SECONDS,
       defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS,
@@ -773,8 +794,9 @@ export class MockDb {
     };
   }
 
-  /** The provider the AI endpoints use: the default, when it is ready. */
+  /** The provider the AI endpoints use: the default, when AI features are switched on and it is ready. */
   get activeProvider(): StoredAiProvider | null {
+    if (!this.ai.enabled) return null;
     const chosen = this.ai.providers.find((p) => p.id === this.ai.defaultProviderId);
     return chosen && this.isReady(chosen) ? chosen : null;
   }

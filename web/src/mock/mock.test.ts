@@ -2544,6 +2544,7 @@ describe('AI settings', () => {
       baseUrl: null,
       apiKeySet: true,
       apiKeyHint: '…x7Qa',
+      effort: 'high',
       source: 'settings',
       isDefault: true,
       ready: true,
@@ -2596,6 +2597,65 @@ describe('AI settings', () => {
     expect(await api.settings.getAi()).toMatchObject({ defaultProviderId: null, providers: [] });
   });
 
+  it('switches AI features off and on again, keeping the default provider', async () => {
+    const personal = await seeded();
+    expect((await api.settings.getAi()).enabled).toBe(true);
+
+    // Off keeps the default and every provider, and refuses AI requests, a named provider too.
+    const off = await api.settings.putAi({ enabled: false });
+    expect(off).toMatchObject({ enabled: false, defaultProviderId: personal.id });
+    expect(off.providers).toHaveLength(3);
+    expect(off.providers[0]).toMatchObject({ id: personal.id, isDefault: true });
+    expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
+    const logged = (await api.settings.log()).total;
+    for (const request of [() => api.ai.draft({ text: 'two sum' }), () => api.ai.draft({ text: 'two sum', providerId: personal.id })]) {
+      expect(await failure(request())).toMatchObject({ status: 503, code: 'ai_unavailable' });
+    }
+    expect((await api.settings.log()).total).toBe(logged);
+
+    // Choosing a default does not switch them on.
+    const ollama = off.providers.find((p) => p.name === 'Local Ollama')!;
+    expect((await api.settings.putAi({ defaultProviderId: ollama.id })).enabled).toBe(false);
+    expect((await api.meta()).ai.enabled).toBe(false);
+    await api.settings.putAi({ defaultProviderId: personal.id });
+
+    // On again uses the same default.
+    expect(await api.settings.putAi({ enabled: true })).toMatchObject({ enabled: true, defaultProviderId: personal.id });
+    expect((await api.meta()).ai).toMatchObject({ enabled: true, providerId: personal.id });
+
+    // Not a boolean is turned down, and nothing changes.
+    for (const enabled of [null, 'no', 0]) {
+      const err = await failure(api.settings.putAi({ enabled: enabled as never, timeoutSeconds: 60 }));
+      expect(err.status).toBe(422);
+      expect(Object.keys(err.fields)).toEqual(['enabled']);
+    }
+    expect((await api.settings.getAi()).timeoutSeconds).not.toBe(60);
+  });
+
+  it('makes the first ready provider the default when AI is switched on with none', async () => {
+    await api.settings.putAi({ enabled: false, defaultProviderId: null });
+    const next = await api.settings.putAi({ enabled: true });
+    // Saved providers by name: Local Ollama is the first, and it is ready.
+    expect(next.providers[0]).toMatchObject({ name: 'Local Ollama', isDefault: true });
+    expect(next.defaultProviderId).toBe(next.providers[0]!.id);
+    expect((await api.meta()).ai).toMatchObject({ enabled: true, providerName: 'Local Ollama' });
+
+    // A default named in the same request comes first.
+    const personal = next.providers.find((p) => p.name === 'Personal key')!;
+    expect((await api.settings.putAi({ enabled: true, defaultProviderId: personal.id })).defaultProviderId).toBe(personal.id);
+    // A null default in the same request leaves none, so one is picked.
+    expect((await api.settings.putAi({ enabled: true, defaultProviderId: null })).providers[0]).toMatchObject({ name: 'Local Ollama', isDefault: true });
+
+    // With nothing ready it is turned down, and nothing is saved.
+    start({ ai: false });
+    await api.settings.createProvider({ name: 'No key', kind: 'anthropic' });
+    const err = await failure(api.settings.putAi({ enabled: true, timeoutSeconds: 60 }));
+    expect(err.status).toBe(422);
+    expect(Object.keys(err.fields)).toEqual(['enabled']);
+    expect(await api.settings.getAi()).toMatchObject({ enabled: true, defaultProviderId: null });
+    expect((await api.settings.getAi()).timeoutSeconds).not.toBe(60);
+  });
+
   it('lists the default first, then saved providers by name, then environment providers', async () => {
     start(optionsFromFlags(['ai-env', 'instant']));
     const zed = await api.settings.createProvider({ name: 'zed', kind: 'anthropic', apiKey: 'sk-ant-zed-0001' });
@@ -2613,7 +2673,7 @@ describe('AI settings', () => {
     expect(settings.defaultProviderId).toBe('env-anthropic');
     expect(settings.providers).toHaveLength(1);
     const env = settings.providers[0]!;
-    expect(env).toMatchObject({ id: 'env-anthropic', kind: 'anthropic', source: 'environment', isDefault: true, ready: true, apiKeySet: true, createdAt: null, updatedAt: null });
+    expect(env).toMatchObject({ id: 'env-anthropic', kind: 'anthropic', source: 'environment', isDefault: true, ready: true, apiKeySet: true, effort: 'high', createdAt: null, updatedAt: null });
     expect(env.baseUrl).toMatch(/^https:/);
     expect(await api.meta()).toMatchObject({ ai: { enabled: true, providerId: 'env-anthropic', kind: 'anthropic', model: 'claude-opus-5-5' } });
     // The other kinds have fixed ids of their own.
@@ -2643,8 +2703,39 @@ describe('AI settings', () => {
 
     // Nothing but a name and a kind is needed, so a key can be stored before a model is chosen.
     const bare = await api.settings.createProvider({ name: 'Work', kind: 'openai_compatible', apiKey: 'sk-work-0000ABCD' });
-    expect(bare).toMatchObject({ model: null, baseUrl: null, apiKeySet: true, apiKeyHint: '…ABCD', ready: false });
+    expect(bare).toMatchObject({ model: null, baseUrl: null, apiKeySet: true, apiKeyHint: '…ABCD', ready: false, effort: null });
     expect(JSON.stringify(bare)).not.toContain('sk-work');
+  });
+
+  it('keeps an effort level per provider, null for the model\'s default', async () => {
+    const before = await seeded();
+    const [, ollama, gateway] = (await api.settings.getAi()).providers;
+    expect([ollama!.effort, gateway!.effort]).toEqual([null, null]);
+    const made = await api.settings.createProvider({ ...local, effort: 'medium' });
+    expect(made.effort).toBe('medium');
+    expect((await api.settings.updateProvider(made.id, { name: 'Renamed' })).effort).toBe('medium');
+    expect((await api.settings.updateProvider(made.id, { effort: 'low' })).effort).toBe('low');
+    expect((await api.settings.updateProvider(made.id, { effort: null })).effort).toBeNull();
+
+    // Only the three levels and null; nothing of a rejected request is applied.
+    for (const effort of ['max', 'xhigh', 'minimal', 'none', '', 'High', 3]) {
+      expect((await failure(api.settings.createProvider({ name: 'Bad', kind: 'anthropic', effort: effort as never }))).fields).toEqual({ effort: 'must be low, medium, high or null' });
+      expect((await failure(api.settings.updateProvider(before.id, { name: 'Changed', effort: effort as never }))).fields).toEqual({ effort: 'must be low, medium, high or null' });
+      expect((await failure(api.settings.testAi({ providerId: before.id, effort: effort as never }))).fields).toEqual({ effort: 'must be low, medium, high or null' });
+    }
+    expect(await seeded()).toEqual(before);
+
+    // Requests carry it; a test of an Anthropic provider asks for low, other kinds' tests for the level given or saved.
+    const latest = async () => api.settings.logEntry((await api.settings.log({ limit: 1 })).items[0]!.id);
+    await api.ai.draft({ text: 'two sum' });
+    expect(((await latest()).request as { effort: unknown }).effort).toBe('high');
+    await api.settings.testAi({ providerId: before.id });
+    expect(((await latest()).request as { effort: unknown }).effort).toBe('low');
+    const deep = await api.settings.updateProvider(made.id, { effort: 'high' });
+    await api.settings.testAi({ providerId: deep.id });
+    expect(((await latest()).request as { effort: unknown }).effort).toBe('high');
+    await api.settings.testAi({ providerId: deep.id, effort: null });
+    expect(((await latest()).request as { effort: unknown }).effort).toBeNull();
   });
 
   it('validates a provider with per-field messages', async () => {

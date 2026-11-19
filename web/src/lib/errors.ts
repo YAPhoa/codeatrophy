@@ -107,8 +107,8 @@ export function describeError(err: unknown): ErrorView {
       };
     case 'ai_unavailable':
       return {
-        title: 'AI is not set up',
-        message: 'No AI provider is in use on this server: none is the default, or the default is not ready. You can still write items by hand.',
+        title: 'AI is off',
+        message: 'AI features are switched off, or no default provider is ready. You can still write items by hand.',
         action: 'ai-settings',
       };
     case 'judge_unavailable':

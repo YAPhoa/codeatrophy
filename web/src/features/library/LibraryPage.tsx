@@ -550,7 +550,7 @@ export function LibraryPage() {
           Paste a problem you half remember, or an article worth keeping.{' '}
           {meta.data?.ai.enabled
             ? 'The AI turns it into a complete entry and shows you what it assumed, and nothing is saved until you have reviewed it.'
-            : 'You can write entries by hand now, and set up an AI provider in Settings to have rough notes drafted for you.'}
+            : 'You can write entries by hand now, and turn on AI in Settings to have rough notes drafted for you.'}
         </EmptyState>
       ) : (
         <>

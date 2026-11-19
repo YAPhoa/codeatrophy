@@ -134,8 +134,9 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	url := pgtest.URL(t)
 	path, want := sqliteLibrary(t, t.TempDir())
 	// Back to version 7: without a tags table, and with an ai_providers that
-	// knew two kinds. Migrations 8 and 9 rebuild ai_providers and item_tags,
-	// so their triggers and indexes are not needed here.
+	// knew two kinds and no effort levels. Migrations 8 and 9 rebuild
+	// ai_providers and item_tags, so their triggers and indexes are not
+	// needed here.
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +152,8 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 			kind TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')), model TEXT NOT NULL DEFAULT '',
 			base_url TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '', api_key_origin TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-		INSERT INTO ai_providers_old SELECT * FROM ai_providers;
+		INSERT INTO ai_providers_old SELECT seq, id, name, name_key, kind, model, base_url, api_key, api_key_origin,
+			created_at, updated_at FROM ai_providers;
 		DROP TABLE ai_providers;
 		ALTER TABLE ai_providers_old RENAME TO ai_providers;
 		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
@@ -164,7 +166,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	db, logs := open(t, dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true})
 	defer db.Close()
 	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
-		!strings.Contains(logs, "imported the SQLite database") {
+		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "imported the SQLite database") {
 		t.Errorf("logs:\n%s", logs)
 	}
 	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))

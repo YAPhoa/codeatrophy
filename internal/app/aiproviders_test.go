@@ -254,6 +254,110 @@ func TestDefaultAIProvider(t *testing.T) {
 	}
 }
 
+// The AI features switch is separate from the default provider: off keeps
+// the default and refuses every AI request; on with no default makes the
+// first ready provider the default.
+func TestAIFeaturesSwitch(t *testing.T) {
+	e := newEnv(t)
+	put := func(js string) (app.AISettings, error) {
+		return e.app.UpdateAISettings(e.ctx, decodeInto[app.AISettingsInput](t, js))
+	}
+	draft := func(extra string) error {
+		e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+		_, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"`+extra+`}`))
+		return err
+	}
+	// Never saved, the switch is on.
+	if st := must(e.app.GetAISettings(e.ctx)); !st.Enabled {
+		t.Error("the switch is on until it is saved")
+	}
+	// Nothing is ready: switching on is refused and saves nothing.
+	e.addProvider(t, `{"name":"A no key","kind":"anthropic"}`)
+	_, err := put(`{"enabled":true,"timeoutSeconds":60}`)
+	if ae := wantCode(t, err, app.CodeValidation); ae.Fields["enabled"] != "no AI provider is ready" {
+		t.Errorf("fields: %v", ae.Fields)
+	}
+	if st := must(e.app.GetAISettings(e.ctx)); st.DefaultProviderID != nil || st.TimeoutSeconds == 60 {
+		t.Errorf("a rejected update saved something: %+v", st)
+	}
+	_, err = put(`{"enabled":null}`)
+	wantField(t, err, "enabled")
+
+	work := e.addProvider(t, `{"name":"Work","kind":"anthropic","apiKey":"sk-ant-work-1111"}`)
+	home := e.addProvider(t, `{"name":"Home","kind":"anthropic","apiKey":"sk-ant-home-2222"}`)
+	e.setDefault(t, work.ID)
+	if !must(e.app.Meta(e.ctx)).AI.Enabled {
+		t.Fatal("AI is on with a ready default")
+	}
+
+	// Off keeps the default and every provider; AI requests are refused as
+	// with no default, a named provider too.
+	st := must(put(`{"enabled":false}`))
+	if st.Enabled || st.DefaultProviderID == nil || *st.DefaultProviderID != work.ID || !st.Providers[0].IsDefault || len(st.Providers) != 3 {
+		t.Errorf("switched off: %+v", st)
+	}
+	if m := must(e.app.Meta(e.ctx)).AI; m.Enabled || m.ProviderID != nil || m.Model != nil {
+		t.Errorf("meta while switched off: %+v", m)
+	}
+	reqs := len(e.ai.Requests())
+	for _, extra := range []string{"", `,"providerId":null`, `,"providerId":"` + home.ID + `"`} {
+		wantCode(t, draft(extra), app.CodeAIUnavailable)
+	}
+	if len(e.ai.Requests()) != reqs {
+		t.Error("a provider was asked while AI is switched off")
+	}
+	// Choosing a default does not switch AI on.
+	if st := e.setDefault(t, home.ID); st.Enabled || must(e.app.Meta(e.ctx)).AI.Enabled {
+		t.Errorf("choosing a default switched AI on: %+v", st)
+	}
+	// Off survives a restart.
+	same := newEnv(t, func(o *app.Options) { o.Store = e.db })
+	if st := must(same.app.GetAISettings(same.ctx)); st.Enabled || *st.DefaultProviderID != home.ID {
+		t.Errorf("after a restart: %+v", st)
+	}
+
+	// On again uses the same default.
+	if st := must(put(`{"enabled":true}`)); !st.Enabled || *st.DefaultProviderID != home.ID {
+		t.Errorf("switched on: %+v", st)
+	}
+	if m := must(e.app.Meta(e.ctx)).AI; !m.Enabled || *m.ProviderID != home.ID {
+		t.Errorf("meta when switched on: %+v", m)
+	}
+	if err := draft(""); err != nil {
+		t.Fatal(err)
+	}
+
+	// On with no default picks the first ready provider as listed (saved
+	// ones by name), skipping one that is not ready.
+	must(put(`{"enabled":false,"defaultProviderId":null}`))
+	if st := must(put(`{"enabled":true}`)); !st.Enabled || *st.DefaultProviderID != home.ID || st.Providers[0].ID != home.ID {
+		t.Errorf("switched on with no default: %+v", st)
+	}
+	// A default given in the same request is applied first: none here, so
+	// one is picked; a named one is kept.
+	if st := must(put(`{"enabled":true,"defaultProviderId":null}`)); *st.DefaultProviderID != home.ID {
+		t.Errorf("on with a null default: %+v", st.DefaultProviderID)
+	}
+	if st := must(put(`{"enabled":true,"defaultProviderId":"` + work.ID + `"}`)); *st.DefaultProviderID != work.ID {
+		t.Errorf("on with a named default: %+v", st.DefaultProviderID)
+	}
+	// With no default while on, AI is off and switching on again picks one.
+	if err := e.app.DeleteAIProvider(e.ctx, work.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := must(e.app.GetAISettings(e.ctx)); !st.Enabled || st.DefaultProviderID != nil || must(e.app.Meta(e.ctx)).AI.Enabled {
+		t.Errorf("after deleting the default: %+v", st)
+	}
+	if st := must(put(`{"enabled":true}`)); *st.DefaultProviderID != home.ID {
+		t.Errorf("on after deleting the default: %+v", st.DefaultProviderID)
+	}
+	// On with a default that is not ready keeps it: AI stays off.
+	must(e.patchProvider(t, home.ID, `{"apiKey":null}`))
+	if st := must(put(`{"enabled":true}`)); !st.Enabled || *st.DefaultProviderID != home.ID || must(e.app.Meta(e.ctx)).AI.Enabled {
+		t.Errorf("on with an unready default: %+v", st)
+	}
+}
+
 func TestEnvironmentProviders(t *testing.T) {
 	e := newEnv(t, withAIEnv(app.AIEnv{Provider: "openai_compatible", OpenAIModel: "llama3", OpenAIBaseURL: "http://ollama:11434/v1",
 		AnthropicAPIKey: "env-key-abcd"}))
@@ -264,11 +368,13 @@ func TestEnvironmentProviders(t *testing.T) {
 	oc, an := st.Providers[0], st.Providers[1]
 	if oc.ID != "env-openai-compatible" || oc.Name != "OpenAI-compatible (environment)" || oc.Source != "environment" ||
 		!oc.Ready || !oc.IsDefault || oc.APIKeySet || *oc.Model != "llama3" || *oc.BaseURL != "http://ollama:11434/v1" ||
-		oc.CreatedAt != nil || oc.UpdatedAt != nil {
+		oc.CreatedAt != nil || oc.UpdatedAt != nil || oc.Effort != nil {
 		t.Errorf("env openai: %+v", oc)
 	}
+	// An environment provider keeps the effort level its kind had before
+	// providers had one.
 	if an.ID != "env-anthropic" || an.Name != "Anthropic (environment)" || !an.Ready || !an.APIKeySet ||
-		*an.APIKeyHint != "…abcd" || an.Model != nil || an.BaseURL != nil {
+		*an.APIKeyHint != "…abcd" || an.Model != nil || an.BaseURL != nil || an.Effort == nil || *an.Effort != "high" {
 		t.Errorf("env anthropic: %+v", an)
 	}
 	if b, _ := json.Marshal(st); strings.Contains(string(b), "env-key-abcd") {
@@ -995,11 +1101,12 @@ func TestLegacyAISettingsAreCarriedOver(t *testing.T) {
 	// took from the environment are now its own.
 	if st.DefaultProviderID == nil || *st.DefaultProviderID != oc.ID || oc.Name != "OpenAI-compatible" || oc.Source != "settings" ||
 		oc.Kind != "openai_compatible" || *oc.Model != "llama3" || *oc.BaseURL != "http://ollama:11434/v1" ||
-		!oc.APIKeySet || *oc.APIKeyHint != "…2222" || !oc.Ready || !oc.IsDefault {
+		!oc.APIKeySet || *oc.APIKeyHint != "…2222" || !oc.Ready || !oc.IsDefault || oc.Effort != nil {
 		t.Errorf("openai_compatible: %+v", oc)
 	}
+	// Anthropic keeps the effort level the server used to ask it for.
 	if an.Name != "Anthropic" || *an.Model != "claude-env" || *an.BaseURL != "https://api.anthropic.com/" || !an.APIKeySet ||
-		*an.APIKeyHint != "…1111" || !an.Ready || an.IsDefault {
+		*an.APIKeyHint != "…1111" || !an.Ready || an.IsDefault || an.Effort == nil || *an.Effort != "high" {
 		t.Errorf("anthropic: %+v", an)
 	}
 	if st.Providers[2].ID != "env-anthropic" || st.Providers[3].ID != "env-openai-compatible" {
@@ -1209,5 +1316,98 @@ func TestGeminiProviders(t *testing.T) {
 	}
 	if p = must(e.patchProvider(t, p.ID, `{"baseUrl":"https://gemini-proxy.example/v1beta"}`)); p.APIKeySet || p.Ready {
 		t.Errorf("the key followed an origin change: %+v", p)
+	}
+}
+
+// A provider's effort level is saved with it, validated, sent with each of
+// its requests and recorded in the log; null is the model's default.
+func TestAIProviderEffort(t *testing.T) {
+	e := newEnv(t)
+	effortOf := func(p app.AIProvider) string {
+		if p.Effort == nil {
+			return "null"
+		}
+		return *p.Effort
+	}
+	if p := e.addProvider(t, `{"name":"Plain","kind":"anthropic","apiKey":"sk-ant-plain-1111"}`); p.Effort != nil {
+		t.Errorf("a new provider has the model's default: %+v", p)
+	}
+	p := e.addProvider(t, `{"name":"Deep","kind":"anthropic","apiKey":"sk-ant-deep-2222","effort":"high"}`)
+	if effortOf(p) != "high" {
+		t.Errorf("created with an effort: %+v", p)
+	}
+	for _, js := range []string{`"max"`, `"xhigh"`, `"minimal"`, `"none"`, `""`, `"High"`, `" low"`} {
+		_, err := e.app.CreateAIProvider(e.ctx, decodeInto[app.AIProviderInput](t, `{"name":"Bad","kind":"anthropic","effort":`+js+`}`))
+		wantField(t, err, "effort")
+		_, err = e.patchProvider(t, p.ID, `{"effort":`+js+`}`)
+		wantField(t, err, "effort")
+	}
+	if got := effortOf(must(e.patchProvider(t, p.ID, `{"name":"Deeper"}`))); got != "high" {
+		t.Errorf("an update without effort keeps it: %s", got)
+	}
+	if got := effortOf(must(e.patchProvider(t, p.ID, `{"effort":"medium"}`))); got != "medium" {
+		t.Errorf("after an update: %s", got)
+	}
+
+	// Its requests carry it, and the log records it.
+	e.setDefault(t, p.ID)
+	res := must(newDraft(t, e, `{"text":"two sum"}`, draftJSON()))
+	if r := e.ai.Last(); r.Effort != "medium" || r.Light {
+		t.Errorf("draft request: effort %q, light %v", r.Effort, r.Light)
+	}
+	loggedEffort := func(id *string) string {
+		t.Helper()
+		var req struct{ Effort *string }
+		if err := json.Unmarshal(must(e.app.GetAILogEntry(e.ctx, *id)).Request, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Effort == nil {
+			return "null"
+		}
+		return *req.Effort
+	}
+	if got := loggedEffort(res.Usage.LogID); got != "medium" {
+		t.Errorf("logged effort of the draft: %s", got)
+	}
+
+	// A connection test is light; an effort in it overrides the saved one,
+	// null included. A light request to Anthropic asks for low.
+	logged := func() string {
+		t.Helper()
+		return loggedEffort(&e.logPage(t, app.AILogQuery{}).Items[0].ID)
+	}
+	for _, tc := range []struct{ js, sent string }{{``, "medium"}, {`,"effort":"high"`, "high"}, {`,"effort":null`, ""}} {
+		if res := e.testProvider(t, `{"providerId":"`+p.ID+`"`+tc.js+`}`); !res.OK {
+			t.Fatalf("test%s: %+v", tc.js, res)
+		}
+		if r := e.ai.Last(); r.Effort != tc.sent || !r.Light {
+			t.Errorf("test%s: effort %q, light %v", tc.js, r.Effort, r.Light)
+		}
+		if got := logged(); got != "low" {
+			t.Errorf("logged effort of an Anthropic test%s: %s", tc.js, got)
+		}
+	}
+	_, err := e.app.TestAIProvider(e.ctx, decodeInto[app.AITestInput](t, `{"providerId":"`+p.ID+`","effort":"max"}`))
+	wantField(t, err, "effort")
+
+	// Other kinds are sent the level on a test too, and the log says so.
+	o := e.addProvider(t, `{"name":"Local","kind":"openai_compatible","model":"llama3","baseUrl":"http://localhost:11434/v1","effort":"low"}`)
+	for _, tc := range []struct{ js, want string }{{``, "low"}, {`,"effort":null`, "null"}} {
+		e.testProvider(t, `{"providerId":"`+o.ID+`"`+tc.js+`}`)
+		if got := logged(); got != tc.want {
+			t.Errorf("logged effort of an OpenAI-compatible test%s: %s", tc.js, got)
+		}
+	}
+
+	// Null is the model's default: nothing is asked for.
+	if got := must(e.patchProvider(t, p.ID, `{"effort":null}`)); got.Effort != nil {
+		t.Errorf("after clearing: %+v", got)
+	}
+	res = must(newDraft(t, e, `{"text":"x"}`, draftJSON()))
+	if r := e.ai.Last(); r.Effort != "" {
+		t.Errorf("draft with the default: effort %q", r.Effort)
+	}
+	if got := loggedEffort(res.Usage.LogID); got != "null" {
+		t.Errorf("logged effort with the default: %s", got)
 	}
 }

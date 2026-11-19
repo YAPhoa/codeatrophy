@@ -4130,6 +4130,12 @@ button.case-chip:hover {
   max-width: 60ch;
 }
 
+/* As wide as its longest level, not the dialog. */
+.effort-select {
+  width: auto;
+  align-self: flex-start;
+}
+
 .key-status {
   display: flex;
   align-items: baseline;
@@ -4407,7 +4413,7 @@ button.case-chip:hover {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 52ch;
-  line-height: 20px;
+  line-height: 22px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

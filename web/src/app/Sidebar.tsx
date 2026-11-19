@@ -271,7 +271,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     />
   );
   const onSettings = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
-  const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is not set up';
+  const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is off';
   const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
 
   if (minimised) {

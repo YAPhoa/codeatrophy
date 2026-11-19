@@ -5,7 +5,7 @@
  * bodies for saving, for a connection test and for a model listing.
  */
 
-import type { AiModelsRequest, AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
+import type { AiEffort, AiModelsRequest, AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
 import { hostOf, movesToAnotherServer, originOf } from './aiKeyBinding';
 import { endpointKey } from './modelCache';
 
@@ -19,6 +19,12 @@ export const KINDS: readonly { id: AiProviderKind; name: string; text: string; m
 ];
 
 export const kindName = (kind: AiProviderKind): string => KINDS.find((k) => k.id === kind)?.name ?? kind;
+
+/** The effort levels a provider can be set to, lowest first. */
+export const EFFORTS: readonly AiEffort[] = ['low', 'medium', 'high'];
+
+/** Whether a connection test sends the effort level. Anthropic's asks for low whatever is set. */
+export const effortTested = (kind: AiProviderKind): boolean => kind !== 'anthropic';
 
 /** What the Model field shows while it is empty: the kind's default, else a prompt to pick from the list, else examples. */
 export function modelPlaceholder(kind: AiProviderKind, kinds: Kinds, listed: boolean): string {
@@ -72,6 +78,8 @@ export interface ProviderForm {
   /** A new key typed by the user. Never pre-filled: stored keys cannot be read back. */
   apiKey: string;
   removeKey: boolean;
+  /** `null` is the model's default. */
+  effort: AiEffort | null;
 }
 
 /** Whether the form asks for a base URL: an OpenAI-compatible provider has to say which server it means. */
@@ -87,6 +95,7 @@ export const formOf = (provider: AiProvider, kinds: Kinds): ProviderForm => ({
   baseUrl: shownBaseUrl(provider, kinds),
   apiKey: '',
   removeKey: false,
+  effort: provider.effort,
 });
 
 /**
@@ -178,6 +187,7 @@ export function createBody(form: ProviderForm): AiProviderInput {
   if (form.model.trim()) body.model = form.model.trim();
   if (form.baseUrl.trim()) body.baseUrl = form.baseUrl.trim();
   if (form.apiKey.trim()) body.apiKey = form.apiKey.trim();
+  if (form.effort !== null) body.effort = form.effort;
   return body;
 }
 
@@ -189,6 +199,7 @@ export function patchBody(form: ProviderForm, provider: AiProvider, kinds: Kinds
   if (form.baseUrl.trim() !== shownBaseUrl(provider, kinds)) patch.baseUrl = form.baseUrl.trim() || null;
   if (form.apiKey.trim()) patch.apiKey = form.apiKey.trim();
   else if (form.removeKey && provider.apiKeySet) patch.apiKey = null;
+  if (form.effort !== provider.effort) patch.effort = form.effort;
   return patch;
 }
 
@@ -208,42 +219,59 @@ export function modelsBody(form: ProviderForm, provider: AiProvider | null, kind
   return { providerId: provider.id, baseUrl: baseUrl ?? kinds[provider.kind].defaultBaseUrl, apiKey };
 }
 
-/** A connection test of the values in the form: the listing's provider and the model, with the same meaning of an emptied field. */
+/**
+ * A connection test of the values in the form: the listing's provider and
+ * the model, with the same meaning of an emptied field, and the effort
+ * level, where `null` is the model's default.
+ */
 export function testBody(form: ProviderForm, provider: AiProvider | null, kinds: Kinds): AiTestRequest {
   const model = form.model.trim() || null;
-  return { ...modelsBody(form, provider, kinds), model: provider ? (model ?? kinds[provider.kind].defaultModel) : model };
+  return { ...modelsBody(form, provider, kinds), model: provider ? (model ?? kinds[provider.kind].defaultModel) : model, effort: form.effort };
 }
 
 /** The endpoint the form's requests go to, as model lists are remembered under; `null` while the base URL is not a URL. */
 const endpointOfForm = (form: ProviderForm, kinds: Kinds): string | null => endpointKey(form.kind, form.baseUrl.trim() || kinds[form.kind].defaultBaseUrl);
 
-/** What a passed connection test covers: the endpoint, and the key typed into the form (empty for none). */
+/** What a passed connection test covers: the endpoint, the key typed into the form (empty for none), and the effort level it sent. */
 export interface PassedTest {
   endpoint: string;
   apiKey: string;
+  effort: AiEffort | null;
 }
 
 export const passedTestOf = (form: ProviderForm, kinds: Kinds): PassedTest | null => {
   const endpoint = endpointOfForm(form, kinds);
-  return endpoint === null ? null : { endpoint, apiKey: form.apiKey.trim() };
+  return endpoint === null ? null : { endpoint, apiKey: form.apiKey.trim(), effort: form.effort };
 };
 
-/** A test of the endpoint and key now in the form has passed. The model and the name can have changed since. */
+/**
+ * A test of the endpoint and key now in the form has passed, and of the
+ * effort level where the test sends it. The model and the name can have
+ * changed since.
+ */
 export const testPassedFor = (form: ProviderForm, kinds: Kinds, passed: PassedTest | null): boolean => {
   const now = passedTestOf(form, kinds);
-  return now !== null && passed !== null && now.endpoint === passed.endpoint && now.apiKey === passed.apiKey;
+  return (
+    now !== null && passed !== null && now.endpoint === passed.endpoint && now.apiKey === passed.apiKey && (!effortTested(form.kind) || now.effort === passed.effort)
+  );
 };
 
 /**
  * Whether saving the form waits for a connection test. A new provider is
  * added once a test of its endpoint and key has passed. A saved one saves
  * freely while its connection is as saved (its endpoint, and no new key;
- * deleting the key is not a new one), and otherwise once a test of the new
- * connection has passed. `passed` is what the last passed test covered.
+ * deleting the key is not a new one; the effort level, where a test sends
+ * it), and otherwise once a test of the new connection has passed. `passed`
+ * is what the last passed test covered.
  */
 export function needsTest(form: ProviderForm, provider: AiProvider | null, kinds: Kinds, passed: PassedTest | null): boolean {
   if (testPassedFor(form, kinds, passed)) return false;
-  return provider === null || form.apiKey.trim() !== '' || endpointOfForm(form, kinds) !== endpointKey(provider.kind, baseUrlInEffect(provider, kinds));
+  return (
+    provider === null ||
+    form.apiKey.trim() !== '' ||
+    endpointOfForm(form, kinds) !== endpointKey(provider.kind, baseUrlInEffect(provider, kinds)) ||
+    (effortTested(form.kind) && form.effort !== provider.effort)
+  );
 }
 
 /**

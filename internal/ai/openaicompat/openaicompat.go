@@ -73,6 +73,8 @@ type chatRequest struct {
 	Messages       []message      `json:"messages"`
 	ResponseFormat map[string]any `json:"response_format,omitempty"`
 	MaxTokens      int            `json:"max_tokens,omitempty"`
+	// ReasoningEffort is the provider's effort level, left out for none.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // errorDetail returns the service's own message from an error response,
@@ -143,6 +145,9 @@ func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.Gen
 			"json_schema": map[string]any{"name": name, "schema": req.Schema, "strict": true},
 		},
 		MaxTokens: req.MaxOutputTokens,
+		// Sent on a light request too, so that a server that does not take
+		// the level fails its connection test.
+		ReasoningEffort: req.Effort,
 	}
 	resp, status, err := p.call(ctx, body)
 	if err != nil && status == http.StatusBadRequest {

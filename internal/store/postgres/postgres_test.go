@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -221,7 +222,8 @@ var downMigrations = map[int]string{
 	// The check of version 7 knew two kinds.
 	8: `ALTER TABLE ai_providers DROP CONSTRAINT ai_providers_kind_check;
 		ALTER TABLE ai_providers ADD CONSTRAINT ai_providers_kind_check CHECK (kind IN ('anthropic', 'openai_compatible'));`,
-	9: `ALTER TABLE item_tags DROP CONSTRAINT item_tags_tag_fkey; DROP TABLE tags;`,
+	9:  `ALTER TABLE item_tags DROP CONSTRAINT item_tags_tag_fkey; DROP TABLE tags;`,
+	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
 }
 
 // undoMigrationsFrom takes the database back to the version before from.
@@ -302,7 +304,7 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 	db.Close()
 
 	db = open(t, url, nil)
-	if v, _ := db.SchemaVersion(ctx); v != 9 {
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
 		t.Fatalf("version %d after migrating", v)
 	}
 	storetest.SameDump(t, "after migration 9", want, storetest.Dump(t, db))
@@ -314,5 +316,57 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 	}
 	if _, err := db.pool.Exec(`DELETE FROM items WHERE id = 's7'`); err != nil {
 		t.Errorf("deleting an item with tags: %v", err)
+	}
+}
+
+// Migration 10 gives AI providers an effort level: Anthropic providers get
+// high, which the server sent them until then, the other kinds none, and
+// every other row is kept.
+func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
+	ctx := context.Background()
+	url := pgtest.URL(t)
+	db := open(t, url, nil)
+	storetest.Populate(t, db)
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	if err := db.Write(ctx, func(tx store.Tx) error {
+		for _, p := range []store.AIProvider{
+			{ID: "a", Name: "Second key", Kind: "anthropic"},
+			{ID: "o", Name: "Local", Kind: "openai_compatible", Effort: "low"},
+			{ID: "g", Name: "Gemini", Kind: "gemini", Effort: "medium"},
+		} {
+			p.CreatedAt, p.UpdatedAt = now, now
+			if err := tx.InsertAIProvider(&p); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := storetest.Dump(t, db)
+	undoMigrationsFrom(t, db, 10)
+	db.Close()
+
+	db = open(t, url, nil)
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
+		t.Fatalf("version %d after migrating", v)
+	}
+	got := storetest.Dump(t, db)
+	delete(want, "ai_providers")
+	delete(got, "ai_providers")
+	storetest.SameDump(t, "after migration 10", want, got)
+	efforts := map[string]string{}
+	var list []store.AIProvider
+	if err := db.Read(ctx, func(tx store.Tx) (err error) { list, err = tx.ListAIProviders(); return err }); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range list {
+		efforts[p.Kind+" "+p.Name] = p.Effort
+	}
+	if fmt.Sprint(efforts) != "map[anthropic Second key:high anthropic Work:high gemini Gemini: openai_compatible Local:]" {
+		t.Errorf("efforts after migrating: %v", efforts)
+	}
+	if _, err := db.pool.Exec(`UPDATE ai_providers SET effort = 'max' WHERE id = 'a'`); err == nil {
+		t.Error("an unknown effort was accepted")
 	}
 }

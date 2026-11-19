@@ -301,7 +301,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		t.Errorf("meta ai: %v", m)
 	}
 	settings := c.expect("GET", api+"/settings/ai", "", 200).json(t)
-	if settings["defaultProviderId"] != nil || len(settings["providers"].([]any)) != 0 ||
+	if settings["enabled"] != true || settings["defaultProviderId"] != nil || len(settings["providers"].([]any)) != 0 ||
 		settings["kinds"].(map[string]any)["anthropic"].(map[string]any)["keyRequired"] != true {
 		t.Errorf("initial settings: %v", settings)
 	}
@@ -336,6 +336,16 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	}
 	c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"kind":"openai_compatible"}`, 422)
 	c.expect("PATCH", api+"/settings/ai/providers/nope", `{"model":"x"}`, 404)
+	if p["effort"] != nil {
+		t.Errorf("a new provider's effort: %v", p["effort"])
+	}
+	r = c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"effort":"max"}`, 422)
+	if f := r.json(t)["error"].(map[string]any)["fields"].(map[string]any); f["effort"] == nil {
+		t.Errorf("an unknown effort: %v", f)
+	}
+	if e := c.expect("PATCH", api+"/settings/ai/providers/"+id, `{"effort":"medium"}`, 200).json(t)["effort"]; e != "medium" {
+		t.Errorf("effort after PATCH: %v", e)
+	}
 	r = c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+id+`"}`, 200)
 	if strings.Contains(string(r.body), "SECRETVALUE") || r.json(t)["defaultProviderId"] != id {
 		t.Errorf("PUT settings: %s", r.body)
@@ -358,8 +368,41 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		m["model"] != "claude-opus-5-5" || m["providerId"] != id || m["providerName"] != "Personal key" || m["kind"] != "anthropic" {
 		t.Errorf("meta ai after setup: %v", m)
 	}
+	// The AI features switch: off keeps the default and refuses AI requests
+	// as with no default; on again uses the same default.
+	if st := c.expect("PUT", api+"/settings/ai", `{"enabled":false}`, 200).json(t); st["enabled"] != false || st["defaultProviderId"] != id {
+		t.Errorf("switched off: %v", st)
+	}
+	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != false || m["providerId"] != nil {
+		t.Errorf("meta ai while switched off: %v", m)
+	}
+	for _, js := range []string{`{"text":"x"}`, `{"text":"x","providerId":"` + id + `"}`} {
+		if e := c.expect("POST", api+"/ai/draft", js, 503).json(t)["error"].(map[string]any); e["code"] != "ai_unavailable" {
+			t.Errorf("draft while switched off: %v", e)
+		}
+	}
+	for _, js := range []string{`{"enabled":"no"}`, `{"enabled":0}`, `{"enabled":null}`} {
+		r := c.expect("PUT", api+"/settings/ai", js, 422)
+		if e := r.json(t)["error"].(map[string]any); e["fields"].(map[string]any)["enabled"] == nil {
+			t.Errorf("%s: %s", js, r.body)
+		}
+	}
+	if st := c.expect("PUT", api+"/settings/ai", `{"enabled":true}`, 200).json(t); st["enabled"] != true || st["defaultProviderId"] != id {
+		t.Errorf("switched on: %v", st)
+	}
+	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != true || m["providerId"] != id {
+		t.Errorf("meta ai when switched on: %v", m)
+	}
+	// With no default, switching on picks the first ready provider.
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":null}`, 200)
+	if st := c.expect("PUT", api+"/settings/ai", `{"enabled":true}`, 200).json(t); st["defaultProviderId"] != id {
+		t.Errorf("switched on with no default: %v", st)
+	}
 	c.expect("DELETE", api+"/settings/ai/providers/"+id, "", 204)
 	c.expect("DELETE", api+"/settings/ai/providers/"+id, "", 404)
+	if r := c.expect("PUT", api+"/settings/ai", `{"enabled":true}`, 422); !strings.Contains(string(r.body), `"enabled"`) {
+		t.Errorf("switched on with nothing ready: %s", r.body)
+	}
 	if m := c.expect("GET", api+"/meta", "", 200).json(t)["ai"].(map[string]any); m["enabled"] != false {
 		t.Errorf("meta ai after deleting the default: %v", m)
 	}

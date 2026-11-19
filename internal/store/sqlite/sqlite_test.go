@@ -103,6 +103,7 @@ var downMigrations = map[int]string{
 		ALTER TABLE item_tags_old RENAME TO item_tags;
 		CREATE INDEX item_tags_tag ON item_tags (tag);
 		DROP TABLE tags;`,
+	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
 }
 
 // undoLatestMigration takes the database back to the version before the
@@ -461,7 +462,7 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != 9 {
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
 		t.Fatalf("version %d after migrating", v)
 	}
 	storetest.SameDump(t, "after migration 9", want, storetest.Dump(t, db))
@@ -476,5 +477,57 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 	}
 	if _, err := db.writer.Exec(`DELETE FROM items WHERE id = 's7'`); err != nil {
 		t.Errorf("deleting an item with tags: %v", err)
+	}
+}
+
+// Migration 10 gives AI providers an effort level: Anthropic providers get
+// high, which the server sent them until then, the other kinds none, and
+// every other row is kept.
+func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v9.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.Populate(t, db)
+	write(t, db, func(tx store.Tx) error {
+		for _, p := range []store.AIProvider{
+			{ID: "a", Name: "Second key", Kind: "anthropic"},
+			{ID: "o", Name: "Local", Kind: "openai_compatible", Effort: "low"},
+			{ID: "g", Name: "Gemini", Kind: "gemini", Effort: "medium"},
+		} {
+			p.CreatedAt, p.UpdatedAt = now, now
+			if err := tx.InsertAIProvider(&p); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	want := storetest.Dump(t, db)
+	undoMigrationsFrom(t, db, 10)
+	db.Close()
+
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
+		t.Fatalf("version %d after migrating", v)
+	}
+	got := storetest.Dump(t, db)
+	delete(want, "ai_providers")
+	delete(got, "ai_providers")
+	storetest.SameDump(t, "after migration 10", want, got)
+	efforts := map[string]string{}
+	for _, p := range read(t, db, func(tx store.Tx) ([]store.AIProvider, error) { return tx.ListAIProviders() }) {
+		efforts[p.Kind+" "+p.Name] = p.Effort
+	}
+	if fmt.Sprint(efforts) != "map[anthropic Second key:high anthropic Work:high gemini Gemini: openai_compatible Local:]" {
+		t.Errorf("efforts after migrating: %v", efforts)
+	}
+	if _, err := db.writer.Exec(`UPDATE ai_providers SET effort = 'max' WHERE id = 'a'`); err == nil {
+		t.Error("an unknown effort was accepted")
 	}
 }

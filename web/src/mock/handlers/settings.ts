@@ -1,6 +1,6 @@
 // Settings endpoints: the AI providers, the system prompt, the test case prompt and the user's preferences.
 
-import type { AiModelsResponse, AiProviderKind, AiTestResponse, SystemPrompt, TestCasePrompt } from '../../api/types';
+import type { AiEffort, AiModelsResponse, AiProviderKind, AiTestResponse, SystemPrompt, TestCasePrompt } from '../../api/types';
 import type { MockDb, StoredAiProvider } from '../db';
 import { AI_KIND_IDS, AI_KINDS, atMostChars, charCount, keyNeeded, LIMITS, noUsage, normaliseText, sameOrigin } from '../db';
 import type { Handler, Req } from '../http';
@@ -79,6 +79,16 @@ function checkApiKey(value: unknown, v: Validator): string | null | undefined {
   return undefined;
 }
 
+const EFFORTS: readonly AiEffort[] = ['low', 'medium', 'high'];
+
+/** An effort level, `null` for the model's default, or absent. Anything else is rejected, the empty string too. */
+function checkEffort(value: unknown, v: Validator): AiEffort | null | undefined {
+  if (value === undefined || value === null) return value;
+  if (EFFORTS.includes(value as AiEffort)) return value as AiEffort;
+  v.add('effort', 'must be low, medium, high or null');
+  return undefined;
+}
+
 /** Names are unique among saved providers, ignoring case. Environment providers are not counted. */
 function nameTaken(db: MockDb, name: string, except?: StoredAiProvider): boolean {
   return db.ai.providers.some((p) => p !== except && p.source === 'settings' && p.name.toLowerCase() === name.toLowerCase());
@@ -99,7 +109,12 @@ function requireSaved(provider: StoredAiProvider): void {
   }
 }
 
-/** A merge update: each field given is checked, and nothing changes unless all of them pass. */
+/**
+ * A merge update: each field given is checked, and nothing changes unless all
+ * of them pass. Switching AI features off keeps the default; switching them
+ * on with no default (after `defaultProviderId`) makes the first ready
+ * provider, as listed, the default.
+ */
 function putSettings(db: MockDb, req: Req) {
   const raw = objectBody(req);
   const v = new Validator();
@@ -111,6 +126,16 @@ function putSettings(db: MockDb, req: Req) {
     if (!provider) v.add('defaultProviderId', 'is not the id of an existing provider');
     else if (!db.isReady(provider)) v.add('defaultProviderId', `cannot be chosen: the provider needs ${missing(db, provider)}`);
   }
+  const enabled = raw.enabled;
+  if (enabled !== undefined && typeof enabled !== 'boolean') v.add('enabled', 'must be true or false');
+  // Whether there is no default once `defaultProviderId` applies.
+  const noDefault = id === undefined ? !db.ai.providers.some((p) => p.id === db.ai.defaultProviderId) : id === null;
+  if (enabled === true && noDefault) {
+    // As `providers` lists them when there is no default.
+    const first = db.orderedProviders(false).find((p) => db.isReady(p));
+    if (!first) v.add('enabled', 'no AI provider is ready');
+    else provider = first;
+  }
   const timeout = raw.timeoutSeconds;
   const { minAiTimeoutSeconds: min, maxAiTimeoutSeconds: max } = LIMITS;
   if (timeout !== undefined && timeout !== null) {
@@ -120,6 +145,7 @@ function putSettings(db: MockDb, req: Req) {
   v.check();
 
   if (provider !== undefined) db.ai.defaultProviderId = provider?.id ?? null;
+  if (typeof enabled === 'boolean') db.ai.enabled = enabled;
   if (timeout !== undefined) db.ai.timeoutSeconds = timeout as number | null;
   return ok(db.aiSettings());
 }
@@ -132,6 +158,7 @@ function createProvider(db: MockDb, req: Req) {
   const model = checkModel(raw.model, v);
   const baseUrl = checkBaseUrl(raw.baseUrl, v);
   const apiKey = checkApiKey(raw.apiKey, v);
+  const effort = checkEffort(raw.effort, v);
   if (name !== undefined && nameTaken(db, name)) v.add('name', 'is already used by another provider');
   v.check();
   if (db.ai.providers.filter((p) => p.source === 'settings').length >= LIMITS.maxAiProviders) {
@@ -146,6 +173,7 @@ function createProvider(db: MockDb, req: Req) {
     model: model ?? null,
     baseUrl: baseUrl ?? null,
     apiKey: apiKey ?? null,
+    effort: effort ?? null,
     source: 'settings',
     usage: noUsage(),
     createdAt: now,
@@ -165,6 +193,7 @@ function patchProvider(db: MockDb, req: Req) {
   const model = checkModel(raw.model, v);
   const baseUrl = checkBaseUrl(raw.baseUrl, v);
   const apiKey = checkApiKey(raw.apiKey, v);
+  const effort = checkEffort(raw.effort, v);
   if (name !== undefined && nameTaken(db, name, provider)) v.add('name', 'is already used by another provider');
   v.check();
 
@@ -173,6 +202,7 @@ function patchProvider(db: MockDb, req: Req) {
   if (model !== undefined) provider.model = model;
   if (baseUrl !== undefined) provider.baseUrl = baseUrl;
   if (apiKey !== undefined) provider.apiKey = apiKey;
+  if (effort !== undefined) provider.effort = effort;
   // A saved key belongs to the server it was saved for: pointing the
   // provider at a different origin drops it, unless this same request brings
   // the key for the new one.
@@ -276,6 +306,9 @@ async function testSettings(db: MockDb, req: Req) {
   const connection = connectionOf(db, raw, v);
   const { saved } = connection;
   const model = checkModel(raw.model, v) ?? (saved ? db.modelOf(saved) : AI_KINDS[connection.kind].defaultModel);
+  // Present, `null` included, it overrides the saved level.
+  const given = checkEffort(raw.effort, v);
+  const effort = 'effort' in raw ? (given ?? null) : (saved?.effort ?? null);
   v.check();
 
   await sleep(db.delay('aiTest'));
@@ -294,7 +327,8 @@ async function testSettings(db: MockDb, req: Req) {
         error: result.ok ? null : (result.error ?? null),
         durationMs: result.latencyMs ?? 240,
         usage: result.ok ? { ...none, inputTokens: 14, outputTokens: 5 } : none,
-        request: { messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxOutputTokens: 16 },
+        // A test asks Anthropic for low; the others are asked for the level.
+        request: { messages: [{ role: 'user', content: 'Reply with the single word: ok' }], maxOutputTokens: 16, effort: connection.kind === 'anthropic' ? 'low' : effort },
         response: result.ok ? 'ok' : null,
       });
     }

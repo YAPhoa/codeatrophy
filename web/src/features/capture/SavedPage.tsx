@@ -95,7 +95,7 @@ export default function SavedPage() {
                     : 'Without a judge engine the expected outputs are the model’s predictions, so they are kept as unverified.'}
                 </p>
               ) : (
-                <p>Samples alone rarely catch a wrong solution. Add hidden cases by hand now, or set up an AI provider to have them proposed for you.</p>
+                <p>Samples alone rarely catch a wrong solution. Add hidden cases by hand now, or turn on AI in Settings to have them proposed for you.</p>
               )}
               <div className="next-card-actions">
                 {aiEnabled ? (

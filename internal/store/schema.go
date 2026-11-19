@@ -16,7 +16,7 @@ var ErrNewerSchema = errors.New("this database was last used by a newer Codeatro
 // each must bring its database to this version: a schema change adds one
 // migration per backend with the next number and bumps this constant (and
 // Tables, when tables or columns change).
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 // Table is a table of the logical schema: the tables and columns every
 // backend has, whatever their physical types. Backend-specific tables, such
@@ -34,7 +34,7 @@ type Table struct {
 var Tables = []Table{
 	{Name: "settings", Columns: []string{"key", "value"}, Key: []string{"key"}},
 	{Name: "ai_providers", Columns: []string{"seq", "id", "name", "name_key", "kind", "model", "base_url", "api_key",
-		"api_key_origin", "created_at", "updated_at"}, Key: []string{"seq"}},
+		"api_key_origin", "created_at", "updated_at", "effort"}, Key: []string{"seq"}},
 	{Name: "ai_usage", Columns: []string{"provider_id", "day", "requests", "failed", "input_tokens", "output_tokens",
 		"last_used_at"}, Key: []string{"provider_id", "day"}},
 	{Name: "ai_log", Columns: []string{"id", "created_at", "operation", "item_id", "title", "provider_id",

@@ -51,7 +51,7 @@ reports the current state (the item revision conflict described under
 | 413 | `too_large` | Body or upload exceeds a limit |
 | 422 | `validation_failed` | Well-formed but invalid |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
-| 503 | `ai_unavailable` | No default AI provider is chosen, or it is not ready |
+| 503 | `ai_unavailable` | AI features are switched off, or no default AI provider is chosen, or it is not ready |
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
 | 500 | `internal` | Unexpected server error |
 
@@ -207,8 +207,8 @@ to show.
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`.
-- `ai.enabled` is `true` when a default provider is chosen and `ready` (see
-  [AI settings](#ai-settings)); `providerId`, `providerName`, `kind` and
+- `ai.enabled` is `true` when AI features are switched on and a default
+  provider is chosen and `ready` (see [AI settings](#ai-settings)); `providerId`, `providerName`, `kind` and
   `model` then describe it, `model` being the one in effect. When `false`,
   all four are `null`.
 - `judge.enabled: false` (engine `none`) → `healthy` is `false`, `languages` is `[]`.
@@ -922,6 +922,9 @@ request, with the model saved on it. It must name a provider that is
 default. Without it, or with `null`, the default provider is used, and the
 answer is `503 ai_unavailable` when no default is chosen and ready. A
 request that names a provider works whether or not there is a default.
+While AI features are switched off (`enabled: false` in
+[AI settings](#get-settingsai)) every request is `503 ai_unavailable`, one
+that names a provider too.
 
 If the client disconnects, the server cancels the provider request. Operators
 who put a reverse proxy in front of the server must raise its read timeout for
@@ -1309,6 +1312,7 @@ A provider is of one of three kinds:
   "baseUrl": null,
   "apiKeySet": true,
   "apiKeyHint": "…x7Qa",
+  "effort": "high",
   "source": "settings",
   "isDefault": true,
   "ready": true,
@@ -1339,6 +1343,14 @@ A provider is of one of three kinds:
 - `model` and `baseUrl` are the saved values; `null` means the kind's default
   applies (see `kinds` below).
 - `apiKeyHint` is `…` plus the last four characters, or `null` without a key.
+- `effort` is how much effort the model is asked to spend on each request:
+  `low`, `medium` or `high`, or `null` for the model's own default, in
+  which case none is asked for. For `anthropic` it is sent as
+  `output_config.effort`, and only where the service reports that the model
+  accepts that level; a connection test asks for `low` whatever is set. For
+  `openai_compatible` and `gemini` it is sent as `reasoning_effort`, on a
+  connection test too, so a server that does not take it fails the test.
+  Environment providers have `high` for `anthropic` and `null` otherwise.
 - A key is only ever sent to the origin (scheme, host and port) it was stored
   for: it is stored together with the origin of the provider's effective base
   URL at the time it was saved, and `apiKeySet` / `apiKeyHint` describe the
@@ -1365,6 +1377,7 @@ Hard limits, enforced by the server:
 | `name` | 1–60 characters, a [single line](#single-line-fields), unique among saved providers (case-insensitive) |
 | `model` | at most `maxModelIdChars`, a single line |
 | `apiKey` | at most `maxApiKeyChars` |
+| `effort` | `low`, `medium`, `high` or `null` |
 | Saved providers per instance | 20 |
 
 Violations are `422 validation_failed`; a 21st provider is `409 conflict`.
@@ -1376,6 +1389,7 @@ bundles and are not available over MCP.
 
 ```json
 {
+  "enabled": true,
   "defaultProviderId": "...",
   "timeoutSeconds": 300,
   "defaultTimeoutSeconds": 300,
@@ -1390,13 +1404,19 @@ bundles and are not available over MCP.
 
 - `providers` lists the default first, then saved providers by name, then
   environment providers. Not paginated.
-- `defaultProviderId` is the provider the AI endpoints use; `null` means AI
-  features are off. It always names a provider in `providers`.
+- `enabled` is the AI features switch as saved; `true` until it is first
+  saved. AI features are on (`ai.enabled` in [`GET /meta`](#get-meta)) when
+  it is `true` and the default provider is `ready`. Switching off keeps the
+  default provider.
+- `defaultProviderId` is the provider the AI endpoints use; `null` means
+  there is none, and AI features are off. It always names a provider in
+  `providers`.
   `CODEATROPHY_AI_PROVIDER` gives its initial value only (the environment
   provider of that kind): once a default has been saved through `PUT` —
   including `null` — the saved value applies.
 - A default that is no longer `ready` (its key was deleted, say) stays
-  selected, and AI features are off until it is fixed or another is chosen.
+  selected, and AI features are off until it is fixed or another is chosen,
+  whatever `enabled` says.
   A default that names an environment provider whose variables have since
   been removed is reported as `null`.
 - `kinds[kind].keyRequired` is whether a key is always required for the kind;
@@ -1412,15 +1432,21 @@ bundles and are not available over MCP.
 ### `PUT /settings/ai`
 
 ```json
-{ "defaultProviderId": "...", "timeoutSeconds": 120 }
+{ "enabled": true, "defaultProviderId": "...", "timeoutSeconds": 120 }
 ```
 
 A merge update: a field left out keeps its value. Returns the same body as
 `GET /settings/ai`.
 
-- `defaultProviderId` chooses the default provider; `null` turns AI features
-  off and keeps every provider. An unknown id, or a provider that is not
-  `ready`, is `422`.
+- `enabled` switches AI features on or off (a boolean, `422` otherwise).
+  `false` keeps the default provider and every provider. `true` when there
+  is no default (after applying a `defaultProviderId` in the same request)
+  makes the first `ready` provider, in the order `providers` lists them, the
+  default; with none ready it is `422` on `enabled`.
+- `defaultProviderId` chooses the default provider; `null` leaves none,
+  which turns AI features off, and keeps every provider. An unknown id, or a
+  provider that is not `ready`, is `422`. Choosing a default does not change
+  `enabled`.
 - `timeoutSeconds` sets the request timeout: an integer from
   `limits.minAiTimeoutSeconds` to `limits.maxAiTimeoutSeconds`, `422`
   otherwise. `null` removes the saved value, so `defaultTimeoutSeconds`
@@ -1431,9 +1457,9 @@ A merge update: a field left out keeps its value. Returns the same body as
 
 | Endpoint | Behaviour |
 | --- | --- |
-| `POST /settings/ai/providers` | Body `{ "name", "kind", "model"?, "baseUrl"?, "apiKey"? }`. `201` `AiProvider` |
-| `PATCH /settings/ai/providers/{id}` | Merge update of `name`, `model`, `baseUrl`, `apiKey`. Returns `AiProvider` |
-| `DELETE /settings/ai/providers/{id}` | `204`. Deleting the default leaves no default: AI features are off until another is chosen |
+| `POST /settings/ai/providers` | Body `{ "name", "kind", "model"?, "baseUrl"?, "apiKey"?, "effort"? }`. `201` `AiProvider` |
+| `PATCH /settings/ai/providers/{id}` | Merge update of `name`, `model`, `baseUrl`, `apiKey`, `effort`. Returns `AiProvider` |
+| `DELETE /settings/ai/providers/{id}` | `204`. Deleting the default leaves no default: AI features are off until another is chosen, or until they are switched on again (which picks one) |
 
 - `kind` cannot be changed after creation (`422`). An unknown id is `404`.
 - A new provider is not made the default; choose it with `PUT /settings/ai`.
@@ -1446,6 +1472,8 @@ A merge update: a field left out keeps its value. Returns the same body as
   origin. Changing only the path on the same origin keeps it.
 - `model: null` / `baseUrl: null` clear the saved value, so the kind's
   default applies.
+- `effort` omitted on create, or `null`, is the model's default. Any value
+  other than `low`, `medium`, `high` or `null` is `422` on `effort`.
 - A provider need not be `ready` to be saved, so a key can be stored before a
   model is chosen.
 
@@ -1455,11 +1483,13 @@ Checks a provider configuration against the service and lists the models it
 offers. Nothing is saved, so a key can be tried before it is stored.
 
 ```json
-{ "providerId": "...", "kind": null, "model": null, "baseUrl": null, "apiKey": null }
+{ "providerId": "...", "kind": null, "model": null, "baseUrl": null, "apiKey": null, "effort": "high" }
 ```
 
 Give `providerId` to test a saved or environment provider; any of `model`,
-`baseUrl`, `apiKey` given with it override its values for this test. Give
+`baseUrl`, `apiKey` given with it override its values for this test, and so
+does `effort` whenever it is present, `null` (the model's default) included.
+An `effort` that is not a [provider's](#ai-settings) is `422`. Give
 `kind` instead (and no `providerId`) to test a configuration that has not
 been saved yet. Exactly one of the two is required (`422` otherwise); an
 unknown `providerId` is `422` too.
@@ -1592,7 +1622,9 @@ up afterwards.
 ```
 
 `request` is what the server asked the provider for (`maxOutputTokens` and
-`effort` are `null` where the provider's default applies) and `response` the
+`effort` are `null` where the provider's default applies; `effort` is the
+provider's level, or `low` for a connection test of an `anthropic`
+provider) and `response` the
 text the model returned (`null` if none arrived). They are for reading, not for
 programs: the fields of `request` may change between versions. They never
 contain an API key or any request header. Either is cut off at 256 KiB, and

@@ -1462,7 +1462,7 @@ func testSolutionConstraints(t *testing.T, db store.Store) {
 }
 
 // The database enforces the AI provider rules: unique case-insensitive
-// single-line names, known kinds (every kind of ai.ProviderIDs), at most 20. (The kind is never written
+// single-line names, known kinds (every kind of ai.ProviderIDs), known effort levels, at most 20. (The kind is never written
 // by an update; each backend tests its own database rule against changing
 // it.)
 func testAIProviderConstraints(t *testing.T, db store.Store) {
@@ -1474,9 +1474,12 @@ func testAIProviderConstraints(t *testing.T, db store.Store) {
 	}
 	full := prov("p1", "Work", "anthropic")
 	full.Model, full.BaseURL, full.APIKey, full.APIKeyOrigin = "m", "https://api.example", "ciphertext", "https://api.example"
+	full.Effort = "medium"
 	if err := insert(full); err != nil {
 		t.Fatal(err)
 	}
+	badEffort := prov("p5", "Other", "anthropic")
+	badEffort.Effort = "max"
 	for what, p := range map[string]*store.AIProvider{
 		"a case-insensitive duplicate name": prov("p2", " WORK ", "anthropic"),
 		"a duplicate id":                    prov("p1", "Other", "anthropic"),
@@ -1485,6 +1488,7 @@ func testAIProviderConstraints(t *testing.T, db store.Store) {
 		"a tab in the name":                 prov("p4", "a\tb", "anthropic"),
 		"an empty name":                     prov("p4", "", "anthropic"),
 		"a 61-character name":               prov("p4", strings.Repeat("n", 61), "anthropic"),
+		"an unknown effort":                 badEffort,
 	} {
 		if err := insert(p); err == nil {
 			t.Errorf("%s was accepted", what)
@@ -1496,12 +1500,12 @@ func testAIProviderConstraints(t *testing.T, db store.Store) {
 	}
 	Write(t, db, func(tx store.Tx) error {
 		p, _ := tx.GetAIProvider("p1")
-		p.Name, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, p.UpdatedAt = "Renamed", "", "", "", "", now.Add(time.Hour)
+		p.Name, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, p.Effort, p.UpdatedAt = "Renamed", "", "", "", "", "", now.Add(time.Hour)
 		p.Kind = "openai_compatible" // ignored: the kind never changes
 		return tx.UpdateAIProvider(&p)
 	})
 	got = Read(t, db, func(tx store.Tx) (store.AIProvider, error) { return tx.GetAIProvider("p1") })
-	if got.Name != "Renamed" || got.Kind != "anthropic" || got.APIKey != "" || !got.UpdatedAt.Equal(now.Add(time.Hour)) ||
+	if got.Name != "Renamed" || got.Kind != "anthropic" || got.APIKey != "" || got.Effort != "" || !got.UpdatedAt.Equal(now.Add(time.Hour)) ||
 		!got.CreatedAt.Equal(now) {
 		t.Errorf("after update: %+v", got)
 	}

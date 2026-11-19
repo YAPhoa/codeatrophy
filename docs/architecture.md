@@ -351,8 +351,15 @@ type Provider interface {
 ```
 
 `Generate` takes a system prompt, a user prompt and a JSON schema, and returns
-JSON conforming to that schema. The two features built on it are provider
-independent:
+JSON conforming to that schema. It also carries the provider's **effort
+level** — `low`, `medium` or `high`, or none for the model's own default —
+which each adapter maps to its own parameter: Anthropic's
+`output_config.effort`, sent only where the Models API says the model takes
+that level (a connection test asks for `low`), and `reasoning_effort` for
+OpenAI-compatible endpoints and Gemini, sent on a connection test too so
+that a server that does not take it fails there. With none, nothing is sent.
+
+The two features built on it are provider independent:
 
 - **Drafting.** The user supplies whatever they have — a pasted fragment, a
   half-remembered description. The model returns a complete, well-structured
@@ -577,8 +584,10 @@ against another origin sends only a key given in that request. Without this, any
 including a page that got past the request checks — could redirect the
 stored key to a server of their choosing.
 
-With no default provider chosen, or one that is not ready, the AI endpoints
-return `ai_unavailable` and the UI falls back to manual authoring.
+AI features can be switched off in the AI settings without forgetting the
+default provider. While they are, or with no default provider chosen, or one
+that is not ready, the AI endpoints return `ai_unavailable` and the UI falls
+back to manual authoring.
 
 ## MCP server
 

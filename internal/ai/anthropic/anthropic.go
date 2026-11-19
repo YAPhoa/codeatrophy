@@ -40,9 +40,23 @@ const (
 // modelFacts is what a request depends on about the configured model. It is
 // read from the Models API, so a new model works without a change here.
 type modelFacts struct {
-	maxTokens  int  // output cap; fallbackOutputTokens when unknown
-	effortHigh bool // output_config.effort accepts "high"
-	effortLow  bool // output_config.effort accepts "low"
+	maxTokens    int  // output cap; fallbackOutputTokens when unknown
+	effortHigh   bool // output_config.effort accepts "high"
+	effortMedium bool // output_config.effort accepts "medium"
+	effortLow    bool // output_config.effort accepts "low"
+}
+
+// accepts reports whether output_config.effort takes the level.
+func (f modelFacts) accepts(level string) bool {
+	switch level {
+	case ai.EffortLow:
+		return f.effortLow
+	case ai.EffortMedium:
+		return f.effortMedium
+	case ai.EffortHigh:
+		return f.effortHigh
+	}
+	return false
 }
 
 type cachedFacts struct {
@@ -144,13 +158,15 @@ func (p *Provider) params(req ai.GenerateRequest, facts modelFacts, fallback boo
 		},
 	}
 	// Thinking is left at the model's default (adaptive where supported);
-	// effort controls depth. The default level differs between models, so it
-	// is set explicitly wherever the model accepts it.
-	switch {
-	case req.Light && facts.effortLow:
-		params.OutputConfig.Effort = sdk.BetaOutputConfigEffortLow
-	case !req.Light && facts.effortHigh:
-		params.OutputConfig.Effort = sdk.BetaOutputConfigEffortHigh
+	// effort controls depth. A light request asks for low, any other for the
+	// provider's level; either only where the model accepts it, and with no
+	// level the model's default applies.
+	effort := req.Effort
+	if req.Light {
+		effort = ai.EffortLow
+	}
+	if facts.accepts(effort) {
+		params.OutputConfig.Effort = sdk.BetaOutputConfigEffort(effort)
 	}
 	if fallback {
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
@@ -326,9 +342,10 @@ func (p *Provider) facts(ctx context.Context) modelFacts {
 	}
 	effort := info.Capabilities.Effort
 	facts := modelFacts{
-		maxTokens:  int(info.MaxTokens),
-		effortHigh: effort.Supported && effort.High.Supported,
-		effortLow:  effort.Supported && effort.Low.Supported,
+		maxTokens:    int(info.MaxTokens),
+		effortHigh:   effort.Supported && effort.High.Supported,
+		effortMedium: effort.Supported && effort.Medium.Supported,
+		effortLow:    effort.Supported && effort.Low.Supported,
 	}
 	factsCache.Store(p.key(), cachedFacts{facts: facts, expires: time.Now().Add(factsTTL)})
 	return facts

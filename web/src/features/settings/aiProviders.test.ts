@@ -39,6 +39,7 @@ const provider = (over: Partial<AiProvider> = {}): AiProvider => ({
   baseUrl: null,
   apiKeySet: true,
   apiKeyHint: '…x7Qa',
+  effort: null,
   source: 'settings',
   isDefault: false,
   ready: true,
@@ -47,7 +48,7 @@ const provider = (over: Partial<AiProvider> = {}): AiProvider => ({
   ...over,
 });
 
-const form = (over: Partial<ProviderForm> = {}): ProviderForm => ({ name: 'New', kind: 'openai_compatible', model: '', baseUrl: '', apiKey: '', removeKey: false, ...over });
+const form = (over: Partial<ProviderForm> = {}): ProviderForm => ({ name: 'New', kind: 'openai_compatible', model: '', baseUrl: '', apiKey: '', removeKey: false, effort: null, ...over });
 
 describe('what a provider uses', () => {
   it('falls back to the default model of its kind', () => {
@@ -193,6 +194,7 @@ describe('request bodies', () => {
       baseUrl: 'http://localhost:11434/v1',
       apiKey: 'sk-1',
     });
+    expect(createBody(form({ name: 'Deep', effort: 'high' }))).toEqual({ name: 'Deep', kind: 'openai_compatible', effort: 'high' });
   });
 
   it('patches only what changed, and never touches the key unasked', () => {
@@ -214,22 +216,30 @@ describe('request bodies', () => {
     const gemini = provider({ kind: 'gemini', model: 'gemini-3.5-flash', baseUrl: null });
     expect(formOf(gemini, kinds).baseUrl).toBe('');
     expect(patchBody(formOf(gemini, kinds), gemini, kinds)).toEqual({});
+    // The effort level, to another one or back to the model's default.
+    const deep = provider({ effort: 'high' });
+    expect(formOf(deep, kinds).effort).toBe('high');
+    expect(patchBody(formOf(deep, kinds), deep, kinds)).toEqual({});
+    expect(patchBody({ ...formOf(deep, kinds), effort: 'medium' }, deep, kinds)).toEqual({ effort: 'medium' });
+    expect(patchBody({ ...formOf(deep, kinds), effort: null }, deep, kinds)).toEqual({ effort: null });
   });
 
   it('tests an unsaved configuration by kind', () => {
-    expect(testBody(form(), null, kinds)).toEqual({ kind: 'openai_compatible', model: null, baseUrl: null, apiKey: null });
-    expect(testBody(form({ kind: 'gemini', model: 'gemini-3.5-flash', apiKey: 'AIza-1' }), null, kinds)).toEqual({ kind: 'gemini', model: 'gemini-3.5-flash', baseUrl: null, apiKey: 'AIza-1' });
-    expect(testBody(form({ model: 'gpt-4.1', apiKey: 'sk-1' }), null, kinds)).toEqual({ kind: 'openai_compatible', model: 'gpt-4.1', baseUrl: null, apiKey: 'sk-1' });
+    expect(testBody(form(), null, kinds)).toEqual({ kind: 'openai_compatible', model: null, baseUrl: null, apiKey: null, effort: null });
+    expect(testBody(form({ kind: 'gemini', model: 'gemini-3.5-flash', apiKey: 'AIza-1' }), null, kinds)).toEqual({ kind: 'gemini', model: 'gemini-3.5-flash', baseUrl: null, apiKey: 'AIza-1', effort: null });
+    expect(testBody(form({ model: 'gpt-4.1', apiKey: 'sk-1', effort: 'low' }), null, kinds)).toEqual({ kind: 'openai_compatible', model: 'gpt-4.1', baseUrl: null, apiKey: 'sk-1', effort: 'low' });
   });
 
   it('tests a saved provider with the form as overrides, an emptied field meaning the default', () => {
     const saved = provider({ model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org' });
-    expect(testBody(formOf(saved, kinds), saved, kinds)).toEqual({ providerId: 'p1', model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org', apiKey: null });
-    expect(testBody({ ...formOf(saved, kinds), model: '', baseUrl: '', apiKey: 'sk-typed' }, saved, kinds)).toEqual({
+    expect(testBody(formOf(saved, kinds), saved, kinds)).toEqual({ providerId: 'p1', model: 'claude-sonnet-5-5', baseUrl: 'https://gateway.example.org', apiKey: null, effort: null });
+    // The effort level is always sent: null is the model's default, not "as saved".
+    expect(testBody({ ...formOf(saved, kinds), model: '', baseUrl: '', apiKey: 'sk-typed', effort: 'high' }, saved, kinds)).toEqual({
       providerId: 'p1',
       model: 'claude-opus-5-5',
       baseUrl: 'https://api.anthropic.com',
       apiKey: 'sk-typed',
+      effort: 'high',
     });
   });
 
@@ -271,6 +281,24 @@ describe('needsTest', () => {
     expect(needsTest(moved, saved, kinds, null)).toBe(true);
     expect(needsTest({ ...moved, model: 'other' }, saved, kinds, passed(moved))).toBe(false);
     expect(needsTest({ ...formOf(saved, kinds), baseUrl: 'not a url' }, saved, kinds, null)).toBe(true);
+  });
+
+  it('asks for a test of another effort level where the test sends it, and not for Anthropic', () => {
+    for (const kind of ['openai_compatible', 'gemini'] as const) {
+      const saved = provider({ kind, model: 'm', baseUrl: kind === 'gemini' ? null : 'http://localhost:11434/v1' });
+      const deeper = { ...formOf(saved, kinds), effort: 'high' as const };
+      expect(needsTest(deeper, saved, kinds, null)).toBe(true);
+      expect(needsTest(deeper, saved, kinds, passed(deeper))).toBe(false);
+      expect(needsTest({ ...deeper, effort: 'low' }, saved, kinds, passed(deeper))).toBe(true);
+      // A new provider's passed test stands for the level it sent only.
+      const fresh = form({ kind, model: 'm', apiKey: 'k', effort: 'low' });
+      expect(needsTest(fresh, null, kinds, passed(fresh))).toBe(false);
+      expect(needsTest({ ...fresh, effort: null }, null, kinds, passed(fresh))).toBe(true);
+    }
+    const anthropic = provider({ effort: 'high' });
+    expect(needsTest({ ...formOf(anthropic, kinds), effort: 'low' }, anthropic, kinds, null)).toBe(false);
+    const fresh = form({ kind: 'anthropic', apiKey: 'k' });
+    expect(needsTest({ ...fresh, effort: 'medium' }, null, kinds, passed(fresh))).toBe(false);
   });
 });
 

@@ -69,7 +69,7 @@ export type AiProviderKind = 'anthropic' | 'gemini' | 'openai_compatible';
 
 export interface Meta {
   version: string;
-  /** The default AI provider when it is ready; otherwise `enabled` is `false` and the rest is `null`. `model` is the one in effect. */
+  /** The default AI provider when AI features are switched on and it is ready; otherwise `enabled` is `false` and the rest is `null`. `model` is the one in effect. */
   ai: { enabled: boolean; providerId: string | null; providerName: string | null; kind: AiProviderKind | null; model: string | null };
   judge: { enabled: boolean; engine: string; healthy: boolean; languages: JudgeLanguage[] };
   /** `url` is the public MCP URL when the operator configured one; otherwise derive it from the page origin and `path`. */
@@ -723,6 +723,9 @@ export interface TestCasePrompt {
 // ---- AI settings ----------------------------------------------------------
 
 /** A named connection to an AI service. Keys are write-only: only `apiKeySet` and `apiKeyHint` describe one. */
+/** How much effort the model is asked to spend; `null` is the model's own default, and none is asked for. */
+export type AiEffort = 'low' | 'medium' | 'high';
+
 export interface AiProvider {
   id: string;
   name: string;
@@ -733,6 +736,7 @@ export interface AiProvider {
   apiKeySet: boolean;
   /** `…` plus the last four characters, or `null` without a key. */
   apiKeyHint: string | null;
+  effort: AiEffort | null;
   /** `environment`: supplied by the server's environment variables; it cannot be changed or deleted through the API. */
   source: 'settings' | 'environment';
   isDefault: boolean;
@@ -826,7 +830,9 @@ export interface AiKindInfo {
 }
 
 export interface AiSettings {
-  /** The provider the AI endpoints use; `null` means AI features are off. */
+  /** The AI features switch as saved, `true` until it is first saved. AI features are on when it is and the default provider is ready (`Meta.ai.enabled`). */
+  enabled: boolean;
+  /** The provider the AI endpoints use; `null` means there is none, and AI features are off. */
   defaultProviderId: string | null;
   /**
    * How long one request to a provider may take, in seconds: the saved value,
@@ -843,7 +849,9 @@ export interface AiSettings {
 
 /** A merge update: a field left out keeps its value. */
 export interface AiSettingsUpdate {
-  /** `null` turns AI features off. */
+  /** Switches AI features on or off. `false` keeps the default provider; `true` with no default makes the first ready provider the default (`422` when none is). */
+  enabled?: boolean;
+  /** `null` leaves no default, which turns AI features off. Does not change `enabled`. */
   defaultProviderId?: string | null;
   /** `null` removes the saved value, so `defaultTimeoutSeconds` applies. */
   timeoutSeconds?: number | null;
@@ -855,6 +863,8 @@ export interface AiProviderInput {
   model?: string | null;
   baseUrl?: string | null;
   apiKey?: string | null;
+  /** Omitted or `null`: the model's default. */
+  effort?: AiEffort | null;
 }
 
 export interface AiProviderPatch {
@@ -864,6 +874,8 @@ export interface AiProviderPatch {
   baseUrl?: string | null;
   /** Omit (or send an empty string) to keep the stored key, `null` to delete it, a string to replace it. */
   apiKey?: string | null;
+  /** `null` is the model's default. */
+  effort?: AiEffort | null;
 }
 
 /** Exactly one of `providerId` (a saved or environment provider) and `kind` (a configuration not saved yet). */
@@ -874,6 +886,8 @@ export interface AiTestRequest {
   model?: string | null;
   baseUrl?: string | null;
   apiKey?: string | null;
+  /** Unlike the others, an override whenever present: `null` tests the model's default. */
+  effort?: AiEffort | null;
 }
 
 export interface AiTestResponse {
@@ -888,7 +902,7 @@ export interface AiTestResponse {
 }
 
 /** The provider is named as for a test; listing makes no generation request, so there is no model. */
-export type AiModelsRequest = Omit<AiTestRequest, 'model'>;
+export type AiModelsRequest = Omit<AiTestRequest, 'model' | 'effort'>;
 
 export interface AiModelsResponse {
   /** The service's model ids, or `null` when the list could not be fetched; `error` then says why. */

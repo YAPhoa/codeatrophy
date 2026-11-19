@@ -275,16 +275,16 @@ function Generator({ item }: { item: Item }) {
           {!aiEnabled ? (
             <Callout
               tone="info"
-              title="AI is not set up"
+              title="AI is off"
               className="capture-callout"
               actions={
                 <>
-                  <Link to="/settings/ai">Set up an AI provider</Link>
+                  <Link to="/settings/ai">AI settings</Link>
                   <Link to={`/items/${item.id}/tests`}>Add test cases by hand</Link>
                 </>
               }
             >
-              Generating test cases needs an AI provider. Test cases can always be written by hand.
+              Generating test cases needs AI features on. Test cases can always be written by hand.
             </Callout>
           ) : (
             <form

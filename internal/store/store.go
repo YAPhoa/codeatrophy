@@ -52,7 +52,8 @@ type ItemFilter struct {
 
 // AIProvider is a saved AI provider as stored. Model and BaseURL are ""
 // when the kind's default applies. APIKey is ciphertext ("" when no key is
-// stored), bound to the kind and APIKeyOrigin.
+// stored), bound to the kind and APIKeyOrigin. Effort is "low", "medium" or
+// "high", or "" (NULL in the database) for the model's own default.
 type AIProvider struct {
 	ID           string
 	Name         string
@@ -61,6 +62,7 @@ type AIProvider struct {
 	BaseURL      string
 	APIKey       string
 	APIKeyOrigin string
+	Effort       string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

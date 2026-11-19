@@ -58,7 +58,7 @@ func (a *App) migrateLegacyAISettings(ctx context.Context) error {
 			envModel, envBase, envKey := a.envFor(kind)
 			now := a.clock()
 			r := store.AIProvider{ID: newID(), Kind: kind, Model: vals["model"], BaseURL: vals["base_url"],
-				APIKey: vals["api_key"], CreatedAt: now, UpdatedAt: now}
+				APIKey: vals["api_key"], Effort: formerEffort(kind), CreatedAt: now, UpdatedAt: now}
 			if r.Model == "" {
 				r.Model = envModel
 			}

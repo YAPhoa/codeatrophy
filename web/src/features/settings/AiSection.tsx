@@ -30,8 +30,10 @@ type Editing = { provider: AiProvider | null; kind?: AiProviderKind } | null;
 
 /**
  * AI providers: the saved connections to AI services, one of which is the
- * default that drafting, test cases and variants use. AI features are off
- * while none is the default.
+ * default that drafting, test cases and variants use. AI features are on
+ * while they are turned on and the default is ready; turning them off keeps
+ * the default, and turning them on with none makes the first ready provider
+ * the default.
  */
 export function AiSection({ meta }: { meta: Meta }) {
   const qc = useQueryClient();
@@ -41,20 +43,36 @@ export function AiSection({ meta }: { meta: Meta }) {
   const settings = useAiSettings();
   const [editing, setEditing] = useState<Editing>(null);
   const [tests, setTests] = useState<Record<string, RowTest>>({});
+  const [switching, setSwitching] = useState(false);
 
   const data = settings.data;
   const list = data?.providers ?? [];
   const chosen = list.find((p) => p.isDefault) ?? null;
   const maxProviders = limits?.maxAiProviders ?? Infinity;
   const full = list.filter((p) => p.source === 'settings').length >= maxProviders;
+  // Turning on uses the default, or picks a ready provider when there is none.
+  const canTurnOn = chosen ? chosen.ready : list.some((p) => p.ready);
 
-  const choose = async (provider: AiProvider | null) => {
+  const choose = async (provider: AiProvider) => {
     try {
-      qc.setQueryData(qk.aiSettings, await api.settings.putAi({ defaultProviderId: provider?.id ?? null }));
+      qc.setQueryData(qk.aiSettings, await api.settings.putAi({ defaultProviderId: provider.id }));
       await qc.invalidateQueries({ queryKey: qk.meta });
-      toast.success(provider ? `“${provider.name}” is now the default provider` : 'AI features turned off. Your providers and keys are kept.');
+      toast.success(`“${provider.name}” is now the default provider`);
     } catch (e) {
       toast.error(e);
+    }
+  };
+
+  const toggle = async (on: boolean) => {
+    setSwitching(true);
+    try {
+      qc.setQueryData(qk.aiSettings, await api.settings.putAi({ enabled: on }));
+      await qc.invalidateQueries({ queryKey: qk.meta });
+      toast.success(on ? 'AI features turned on' : 'AI features turned off. Your providers and keys are kept.');
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -63,7 +81,7 @@ export function AiSection({ meta }: { meta: Meta }) {
       title: `Delete the provider “${provider.name}”?`,
       body: (
         <>
-          {provider.isDefault && (provider.ready ? 'It is the default provider: deleting it turns AI features off until you make another one the default. ' : 'It is the default provider. ')}
+          {provider.isDefault && (meta.ai.enabled ? 'It is the default provider: deleting it turns AI features off until another provider is the default. ' : 'It is the default provider. ')}
           {provider.apiKeySet ? 'Its saved API key is deleted with it.' : 'Items already drafted with it are not affected.'}
         </>
       ),
@@ -101,18 +119,27 @@ export function AiSection({ meta }: { meta: Meta }) {
           <Badge tone="ok" className="ai-status" title={`${meta.ai.providerName} · ${meta.ai.model}`}>
             On · {meta.ai.providerName} · {meta.ai.model}
           </Badge>
-        ) : chosen ? (
+        ) : chosen && !chosen.ready ? (
           <Badge tone="warn" className="ai-status">
             Off · {chosen.name} is not ready
           </Badge>
         ) : (
-          <Badge>Off</Badge>
+          <Badge tone="warn" className="ai-status">
+            Off
+          </Badge>
         )}
         <span className="spacer" />
-        {meta.ai.enabled && (
-          <Button variant="ghost" icon={<Power size={14} />} onClick={() => void choose(null)}>
+        {meta.ai.enabled ? (
+          <Button variant="ghost" icon={<Power size={14} />} busy={switching} onClick={() => void toggle(false)}>
             Turn AI off
           </Button>
+        ) : (
+          data &&
+          canTurnOn && (
+            <Button variant="ghost" icon={<Power size={14} />} busy={switching} onClick={() => void toggle(true)}>
+              Turn AI on
+            </Button>
+          )
         )}
         <Button icon={<Plus size={14} />} onClick={() => setEditing({ provider: null })} disabled={full || !data}>
           Add provider
@@ -128,11 +155,9 @@ export function AiSection({ meta }: { meta: Meta }) {
           You have reached the limit of {maxProviders} providers. Delete one to add another.
         </p>
       )}
-      {data && list.length > 0 && !meta.ai.enabled && (
+      {data && chosen && !chosen.ready && (
         <p className="settings-note" role="status">
-          {chosen
-            ? `AI features are off: the default provider, “${chosen.name}”, needs ${listNeeds(needsOf(chosen, data.kinds)) || 'attention'}. Complete it, or make another provider the default.`
-            : 'AI features are off: no provider is the default. Choose “Make default” on one that is ready.'}
+          The default provider, “{chosen.name}”, needs {listNeeds(needsOf(chosen, data.kinds)) || 'attention'}. Complete it, or make another provider the default.
         </p>
       )}
 
@@ -146,8 +171,8 @@ export function AiSection({ meta }: { meta: Meta }) {
           <div className="grow">
             <strong>No providers yet</strong>
             <p className="muted">
-              AI features are off. To turn them on, add a provider: an API key for a hosted service, or the address of a server you run yourself. You enter the connection details, test
-              the connection and choose a model.
+              To use AI features, add a provider: an API key for a hosted service, or the address of a server you run yourself. You enter the connection details, test the connection
+              and choose a model.
             </p>
             <div className="form-actions">
               <Button onClick={() => setEditing({ provider: null, kind: 'anthropic' })}>Add Anthropic</Button>
@@ -330,6 +355,7 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
               at <code translate="no">{host}</code>
             </span>
           )}
+          {p.effort !== null && <span>{p.effort} effort</span>}
           {p.apiKeySet ? (
             <span className="provider-key">
               <KeyRound size={12} aria-hidden="true" /> key ending in <code translate="no">{(p.apiKeyHint ?? '').replace(/^…/, '')}</code>

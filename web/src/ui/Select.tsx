@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronsUpDown } from 'lucide-react';
 import { Popover } from './Popover';
 import { cx } from './Button';
 
@@ -143,6 +143,8 @@ export interface SelectProps<T extends string> {
   'aria-label'?: string;
   'aria-describedby'?: string;
   'aria-invalid'?: boolean;
+  /** `combo` draws it like the combo box of a model (settings/ModelField): up-down chevrons, options in the code font with the check after them. */
+  look?: 'menu' | 'combo';
 }
 
 /**
@@ -161,6 +163,7 @@ export function Select<T extends string>({
   className,
   disabled,
   title,
+  look = 'menu',
   autoFocus,
   'aria-label': ariaLabel,
   'aria-describedby': describedBy,
@@ -263,7 +266,7 @@ export function Select<T extends string>({
         disabled={disabled}
         title={title}
         autoFocus={autoFocus}
-        className={cx('input select select-trigger', className)}
+        className={cx('input select select-trigger', look === 'combo' && 'select-combo', className)}
         onClick={() => {
           setKeyed(false);
           if (open) close();
@@ -275,6 +278,7 @@ export function Select<T extends string>({
         onBlur={close}
       >
         <span className="select-value">{options[chosen]?.label}</span>
+        {look === 'combo' && <ChevronsUpDown size={14} className="select-chevrons" aria-hidden="true" />}
         {/* Every option's label, unseen, so that the button is as wide as the longest, like a native select. */}
         <span className="select-sizer" aria-hidden="true">
           {options.map((o) => (
@@ -314,10 +318,17 @@ export function Select<T extends string>({
               }}
             >
               {/* aria-selected already says which is chosen; the check mark is for the eye. */}
-              <span className="menu-item-icon" aria-hidden="true">
-                {i === chosen && <Check size={14} className="menu-item-check" />}
-              </span>
-              <span className="select-option-label">{o.label}</span>
+              {look === 'menu' && (
+                <span className="menu-item-icon" aria-hidden="true">
+                  {i === chosen && <Check size={14} className="menu-item-check" />}
+                </span>
+              )}
+              <span className={cx('select-option-label', look === 'combo' && 'grow mono')}>{o.label}</span>
+              {look === 'combo' && (
+                <span className="menu-item-icon" aria-hidden="true">
+                  {i === chosen && <Check size={14} />}
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -49,6 +49,34 @@ func TestGenerateWithJSONSchema(t *testing.T) {
 	if msgs[0].(map[string]any)["role"] != "system" || msgs[1].(map[string]any)["content"] != "U" {
 		t.Errorf("messages: %v", msgs)
 	}
+	if _, ok := got["reasoning_effort"]; ok {
+		t.Errorf("reasoning_effort sent without an effort level: %v", got["reasoning_effort"])
+	}
+}
+
+// The effort level is sent as reasoning_effort on every request, a light
+// one and the JSON-mode retry included.
+func TestReasoningEffort(t *testing.T) {
+	var sent []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		sent = append(sent, body["reasoning_effort"])
+		if body["response_format"].(map[string]any)["type"] == "json_schema" {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"response_format json_schema is not supported"}}`)
+			return
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"ok\": true}"}}]}`)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{Model: "m", BaseURL: srv.URL})
+	if _, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema(), Light: true, Effort: ai.EffortMedium}); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(sent) != "[medium medium]" {
+		t.Errorf("reasoning_effort sent: %v", sent)
+	}
 }
 
 func TestErrorsCarryTheServiceMessage(t *testing.T) {

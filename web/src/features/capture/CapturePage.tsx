@@ -282,9 +282,9 @@ export default function CapturePage() {
           tone="info"
           title="AI drafting is off"
           className="capture-callout"
-          actions={<Link to="/settings/ai">Set up an AI provider</Link>}
+          actions={<Link to="/settings/ai">AI settings</Link>}
         >
-          No AI provider is configured, so items are written by hand. Note down what you have and continue to the editor.
+          Items are written by hand. Note down what you have and continue to the editor.
         </Callout>
       )}
 

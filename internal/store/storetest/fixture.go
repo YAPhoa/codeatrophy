@@ -28,7 +28,7 @@ func Populate(t *testing.T, db store.Store) {
 	a := app.New(app.Options{Store: db, Secrets: FixtureSecrets})
 	p, err := a.CreateAIProvider(ctx, app.AIProviderInput{Name: domain.Some("Work"), Kind: domain.Some("anthropic"),
 		Model: domain.Some("claude-test"), BaseURL: domain.Some("https://api.anthropic.example"),
-		APIKey: domain.Some("sk-ant-test-key-1234")})
+		APIKey: domain.Some("sk-ant-test-key-1234"), Effort: domain.Some("high")})
 	if err != nil {
 		t.Fatal(err)
 	}

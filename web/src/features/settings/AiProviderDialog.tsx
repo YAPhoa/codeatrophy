@@ -3,22 +3,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, KeyRound, PlugZap, Server } from 'lucide-react';
 import { api, isAbort, isApiError } from '../../api/client';
 import { invalidateAi, useLimits } from '../../api/queries';
-import type { AiProvider, AiProviderKind, AiSettings, AiTestResponse } from '../../api/types';
+import type { AiEffort, AiProvider, AiProviderKind, AiSettings, AiTestResponse } from '../../api/types';
 import { errorLine, sentence } from '../../lib/errors';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatMs, plural, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
-import { Checkbox, Field, TextField } from '../../ui/Field';
+import { Checkbox, Field, SelectField, TextField } from '../../ui/Field';
 import { Callout, ErrorCallout } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { hostOf } from './aiKeyBinding';
 import {
+  EFFORTS,
   KINDS,
   baseUrlProblem,
   baseUrlRequired,
   charLength,
   createBody,
+  effortTested,
   formOf,
   kindName,
   listNeeds,
@@ -39,6 +41,14 @@ import {
 } from './aiProviders';
 import { rememberModels, rememberedModels, type RememberedModels } from './modelCache';
 import { ModelField } from './ModelField';
+
+const MASKED_TEXT = typeof CSS !== 'undefined' && CSS.supports('-webkit-text-security', 'disc');
+
+const DEFAULT_EFFORT = '';
+const EFFORT_OPTIONS: { value: AiEffort | typeof DEFAULT_EFFORT; label: string }[] = [
+  { value: DEFAULT_EFFORT, label: 'Default' },
+  ...EFFORTS.map((e) => ({ value: e, label: e[0]!.toUpperCase() + e.slice(1) })),
+];
 
 interface AiProviderDialogProps {
   settings: AiSettings;
@@ -63,9 +73,10 @@ type LoadFrom = 'open' | 'field' | 'enter' | 'button';
  * Add or edit one provider. The form follows the order of setting one up:
  * the key (and, rarely, another server), loading the models on offer,
  * picking one, a connection test of it, then save. A test covers the
- * endpoint (kind and base URL) and the key: a new provider is added once a
- * test of them has passed, and a saved one given another endpoint or a new
- * key is saved once a test of those has; the model can change freely.
+ * endpoint (kind and base URL) and the key, and the effort level where the
+ * test sends it: a new provider is added once a test of them has passed,
+ * and a saved one given another endpoint, a new key or such a level is
+ * saved once a test of those has; the model can change freely.
  * Loaded models are remembered per endpoint in this browser and offered
  * whenever the form is on that endpoint, until a newer list replaces them.
  */
@@ -77,7 +88,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const adding = provider === null;
 
   const [form, setForm] = useState<ProviderForm>(() =>
-    provider ? formOf(provider, kinds) : { name: suggestName(initialKind, '', settings.providers, kinds), kind: initialKind, model: '', baseUrl: '', apiKey: '', removeKey: false },
+    provider ? formOf(provider, kinds) : { name: suggestName(initialKind, '', settings.providers, kinds), kind: initialKind, model: '', baseUrl: '', apiKey: '', removeKey: false, effort: null },
   );
   // A new provider is named after where it connects until the user names it.
   const [named, setNamed] = useState(!adding);
@@ -170,6 +181,17 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     setSaveError(null);
   };
 
+  /** Where the test sends the level, a result of another level no longer stands; the models loaded still do. */
+  const setEffort = (effort: AiEffort | null) => {
+    if (effortTested(form.kind)) {
+      if (running.current?.what === 'test') stop();
+      setTest(null);
+      setTestError(null);
+    }
+    setForm((f) => ({ ...f, effort }));
+    setSaveError(null);
+  };
+
   const bounds = {
     nameMax: limits?.maxAiProviderNameChars ?? Infinity,
     modelMax: limits?.maxModelIdChars ?? Infinity,
@@ -187,11 +209,11 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const fieldsOf = (error: unknown) => (isApiError(error) && error.code === 'validation_failed' ? error.fields : {});
   const saveFields = fieldsOf(saveError);
   const testFields = fieldsOf(testError);
-  const serverError = (field: 'name' | 'model' | 'baseUrl' | 'apiKey'): string | null => {
+  const serverError = (field: 'name' | 'model' | 'baseUrl' | 'apiKey' | 'effort'): string | null => {
     const problem = saveFields[field] ?? testFields[field];
     return problem != null ? sentence(String(problem)) : null;
   };
-  const onField = (fields: Record<string, unknown>) => ['name', 'model', 'baseUrl', 'apiKey'].some((f) => fields[f] != null);
+  const onField = (fields: Record<string, unknown>) => ['name', 'model', 'baseUrl', 'apiKey', 'effort'].some((f) => fields[f] != null);
   const baseUrlError = (urlChecked ? urlError : null) ?? serverError('baseUrl');
 
   const begin = (what: 'load' | 'test') => {
@@ -447,15 +469,18 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
         <div className="field">
           <TextField
             label={outlook.serverChanges ? `API key for ${host}${outlook.keyRequired ? '' : ' (optional)'}` : outlook.keyRequired ? 'API key' : 'API key (optional)'}
-            type="password"
+            // A text field drawn masked: with a password field in the form, browsers take it for a login and
+            // offer their password manager on the Name field. Where the masking is not supported, a password field.
+            type={MASKED_TEXT ? 'text' : 'password'}
+            className="input-secret"
             value={form.apiKey}
             onChange={(v) => reconnect({ apiKey: v, removeKey: false })}
             onKeyDown={loadOnEnter}
             placeholder={outlook.savedKeyDropped ? 'Paste the key for this server…' : provider?.apiKeySet ? 'Enter a new key to replace the current one…' : 'Paste the key…'}
             name="api-key"
-            // Not a login: browsers ignore "off" on a password field and would offer the site's saved
-            // password, so the field is declared a new secret and password managers are told to pass over it.
-            autoComplete="new-password"
+            // Password managers are told to pass over it; "new-password" for when it is a password field,
+            // where browsers ignore "off".
+            autoComplete={MASKED_TEXT ? 'off' : 'new-password'}
             data-1p-ignore
             data-lpignore="true"
             data-bwignore
@@ -564,6 +589,8 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
                       : undefined
           }
         />
+
+        <SelectField label="Effort level" look="combo" className="effort-select" value={form.effort ?? DEFAULT_EFFORT} onChange={(v) => setEffort(v || null)} options={EFFORT_OPTIONS} error={serverError('effort')} />
 
         <div className="form-actions">
           <Button ref={testRef} icon={<PlugZap size={14} />} onClick={() => void runTest()} busy={testing} disabled={saving}>

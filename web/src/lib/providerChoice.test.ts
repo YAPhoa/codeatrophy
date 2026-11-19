@@ -10,6 +10,7 @@ const provider = (id: string, extra: Partial<AiProvider> = {}): AiProvider => ({
   baseUrl: null,
   apiKeySet: true,
   apiKeyHint: '…abcd',
+  effort: null,
   source: 'settings',
   isDefault: false,
   ready: true,
@@ -20,6 +21,7 @@ const provider = (id: string, extra: Partial<AiProvider> = {}): AiProvider => ({
 });
 
 const settings = (...providers: AiProvider[]): AiSettings => ({
+  enabled: true,
   defaultProviderId: providers.find((p) => p.isDefault)?.id ?? null,
   providers,
   kinds: {

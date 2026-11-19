@@ -77,8 +77,9 @@ function parseProvider(db: MockDb, raw: Record<string, unknown>, v: Validator): 
   return null;
 }
 
-/** The provider a valid request goes to: the one it names, else the default; `503` when there is neither. */
+/** The provider a valid request goes to: the one it names, else the default; `503` when there is neither, or AI features are switched off. */
 function providerFor(db: MockDb, named: StoredAiProvider | null): StoredAiProvider {
+  if (!db.ai.enabled) throw aiUnavailable();
   const provider = named ?? db.activeProvider;
   if (!provider) throw aiUnavailable();
   return provider;
@@ -100,7 +101,7 @@ const SYSTEM_PROMPT =
   'You write entries for a personal library of coding problems and technical readings. Answer with one JSON object that follows the given schema. List everything you inferred or invented under "assumptions".';
 
 /** The request as the server would have sent it; never a key or a header. */
-const requestOf = (call: Call) => ({ system: SYSTEM_PROMPT, messages: [{ role: 'user', content: call.content }], schema: call.schema, maxOutputTokens: 64000 });
+const requestOf = (call: Call) => ({ system: SYSTEM_PROMPT, messages: [{ role: 'user', content: call.content }], schema: call.schema, maxOutputTokens: 64000, effort: call.provider.effort });
 
 const NO_TOKENS = { inputTokens: null, outputTokens: null, reasoningTokens: null, cacheReadTokens: null, cacheWriteTokens: null };
 

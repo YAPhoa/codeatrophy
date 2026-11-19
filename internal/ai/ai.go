@@ -22,6 +22,17 @@ const (
 // ProviderIDs lists every supported provider id.
 var ProviderIDs = []string{ProviderAnthropic, ProviderGemini, ProviderOpenAICompatible}
 
+// Effort levels a provider can be set to. No level ("") leaves the model at
+// its own default.
+const (
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+)
+
+// EffortLevels lists every effort level, lowest first.
+var EffortLevels = []string{EffortLow, EffortMedium, EffortHigh}
+
 // GenerateRequest asks a model for JSON conforming to Schema.
 type GenerateRequest struct {
 	System string
@@ -35,6 +46,9 @@ type GenerateRequest struct {
 	// Light marks a small request (such as a connection test) for which the
 	// provider should spend minimal effort.
 	Light bool
+	// Effort is the provider's effort level, one of EffortLevels, or "" to
+	// send none. Each provider maps it to its own request parameter.
+	Effort string
 }
 
 // GenerateResponse carries the model's JSON output. A provider that fails

@@ -271,8 +271,8 @@ function VariantFlow({ original }: { original: Item }) {
       </p>
 
       {!aiEnabled && (
-        <Callout tone="info" title="Variants are drafted by the AI" className="capture-callout" actions={<Link to="/settings/ai">Set up an AI provider</Link>}>
-          No AI provider is configured. You can still write a variant by hand; it will be linked to the original.
+        <Callout tone="info" title="Variants are drafted by the AI" className="capture-callout" actions={<Link to="/settings/ai">AI settings</Link>}>
+          AI features are off. You can still write a variant by hand; it will be linked to the original.
         </Callout>
       )}
 
