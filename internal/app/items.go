@@ -621,7 +621,7 @@ func (a *App) BulkItems(ctx context.Context, in BulkInput) (BulkResult, error) {
 	return res, err
 }
 
-// ListTags lists every tag with its item count.
+// ListTags lists every tag with its item count, empty tags included.
 func (a *App) ListTags(ctx context.Context) (List[domain.Tag], error) {
 	var out List[domain.Tag]
 	err := a.store.Read(ctx, func(tx store.Tx) error {
@@ -633,7 +633,7 @@ func (a *App) ListTags(ctx context.Context) (List[domain.Tag], error) {
 }
 
 // RenameTag renames a tag on every item, merging with an existing tag of the
-// new name.
+// new name. An empty tag can be renamed too.
 func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Tag, error) {
 	oldName = domain.NormalizeTag(oldName)
 	newName = domain.NormalizeTag(newName)
@@ -642,14 +642,14 @@ func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Ta
 	}
 	var out domain.Tag
 	err := a.store.Write(ctx, func(tx store.Tx) error {
-		ids, err := tx.ItemIDsWithTag(oldName)
-		if err != nil {
+		if err := tagExists(tx, oldName); err != nil {
 			return err
 		}
-		if len(ids) == 0 {
-			return errNotFound("tag")
-		}
 		if oldName != newName {
+			ids, err := tx.ItemIDsWithTag(oldName)
+			if err != nil {
+				return err
+			}
 			for _, id := range ids {
 				cur, err := tx.GetItem(id)
 				if err != nil {
@@ -666,6 +666,12 @@ func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Ta
 					return err
 				}
 			}
+			if err := tx.InsertTag(newName); err != nil {
+				return err
+			}
+			if err := tx.DeleteTag(oldName); err != nil {
+				return err
+			}
 		}
 		withNew, err := tx.ItemIDsWithTag(newName)
 		out = domain.Tag{Name: newName, Count: len(withNew)}
@@ -674,16 +680,16 @@ func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Ta
 	return out, err
 }
 
-// DeleteTag removes a tag from every item.
+// DeleteTag removes a tag from every item, then the tag itself.
 func (a *App) DeleteTag(ctx context.Context, name string) error {
 	name = domain.NormalizeTag(name)
 	return a.store.Write(ctx, func(tx store.Tx) error {
+		if err := tagExists(tx, name); err != nil {
+			return err
+		}
 		ids, err := tx.ItemIDsWithTag(name)
 		if err != nil {
 			return err
-		}
-		if len(ids) == 0 {
-			return errNotFound("tag")
 		}
 		for _, id := range ids {
 			cur, err := tx.GetItem(id)
@@ -696,8 +702,17 @@ func (a *App) DeleteTag(ctx context.Context, name string) error {
 				return err
 			}
 		}
-		return nil
+		return tx.DeleteTag(name)
 	})
+}
+
+// tagExists returns a not-found error unless the tag exists.
+func tagExists(tx store.Tx, name string) error {
+	ok, err := tx.TagExists(name)
+	if err == nil && !ok {
+		err = errNotFound("tag")
+	}
+	return err
 }
 
 // Stats returns library statistics.

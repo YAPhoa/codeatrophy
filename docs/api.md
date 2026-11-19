@@ -238,7 +238,9 @@ Favorites and Uncollected views show: each equals the `total` of `GET /items`
 with only `favorite=true`, or only `uncollected=true`, as the filter.
 `submissions.total` counts `submit`-mode submissions only, and
 `submissions.accepted` those of them whose verdict is `accepted`. Runs are
-not counted: a `run` whose sample cases all pass adds to neither.
+not counted: a `run` whose sample cases all pass adds to neither. `tags`
+counts the tags at least one item carries; empty tags (see [Tags](#tags))
+are left out.
 
 ## Items
 
@@ -765,11 +767,18 @@ To list a collection's items use `GET /items?collectionId={id}&sort=position`.
 
 | Endpoint | Behaviour |
 | --- | --- |
-| `GET /tags` | `{ "items": [ { "name": "array", "count": 7 } ] }` sorted by name |
-| `PATCH /tags/{name}` | Body `{ "name": "new-name" }`. Renames across all items; if the new name already exists the two are merged. Returns `{ "name": "new-name", "count": n }` |
-| `DELETE /tags/{name}` | Removes the tag from all items. `204` |
+| `GET /tags` | `{ "items": [ { "name": "array", "count": 7 }, { "name": "graph", "count": 0 } ] }` sorted by name; every tag, empty ones included |
+| `PATCH /tags/{name}` | Body `{ "name": "new-name" }`. Renames across all items; if the new name already exists the two are merged into one tag. Returns `{ "name": "new-name", "count": n }` |
+| `DELETE /tags/{name}` | Removes the tag from all items and deletes it. `204` |
 
-`{name}` is URL-encoded. Both endpoints are `404` for a tag no item carries.
+A tag exists from the first time an item carries it (however the item was
+written: created, edited, bulk-tagged, imported or drafted) until it is
+deleted. When its last item drops it, it stays as an *empty* tag with
+`count: 0`, which can still be renamed, merged and deleted. Bundles carry
+only the tags of their items, so empty tags are not exported.
+
+`{name}` is URL-encoded. Both endpoints are `404` for a tag that does not
+exist.
 
 ## Submissions
 

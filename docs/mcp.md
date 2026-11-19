@@ -80,7 +80,7 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `get_overview` | Library statistics, the collection tree, the tag list, and which languages the judge offers. A good first call |
+| `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), and which languages the judge offers. A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
 | `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
@@ -109,7 +109,7 @@ expires; open sessions are unaffected. A request body may be at most
 | `add_items_to_collection` | Append items to a collection |
 | `remove_item_from_collection` | Remove one item from a collection |
 | `rename_tag` | Rename a tag everywhere (merging if the new name exists) |
-| `delete_tag` | Remove a tag everywhere |
+| `delete_tag` | Remove a tag everywhere and delete it, so that it is no longer listed |
 
 ### Test cases and execution
 

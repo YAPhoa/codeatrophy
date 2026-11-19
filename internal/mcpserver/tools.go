@@ -54,7 +54,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Reading.
 	t.add(s, "get_overview", "Library overview",
-		"Library statistics, the collection tree, the tag list, and which languages the judge engine offers. A good first call.",
+		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), and which languages the judge engine offers. A good first call.",
 		object(props{}), readOnly, func(ctx context.Context, _ json.RawMessage) (any, error) {
 			return a.Overview(ctx)
 		})
@@ -346,7 +346,7 @@ func (t *tools) register(s *mcp.Server) {
 			return a.RenameTag(ctx, in.Name, in.NewName)
 		})
 
-	t.add(s, "delete_tag", "Delete tag", "Remove a tag from every item.",
+	t.add(s, "delete_tag", "Delete tag", "Remove a tag from every item and delete it, so that it is no longer listed.",
 		object(props{"name": str("Tag name")}, "name"), destructive,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {

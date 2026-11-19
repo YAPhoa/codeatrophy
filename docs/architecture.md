@@ -53,8 +53,9 @@ same change made through the other.
   expected output has been `verified` by executing the reference solution.
 - **Collection** — a named, ordered list of items. Collections nest (a tree via
   `parentId`) and an item may belong to any number of them.
-- **Tag** — a free-form label on an item. Tags are not separate records; they
-  exist while at least one item carries them.
+- **Tag** — a free-form label on items. A tag is recorded the first time an
+  item carries it and stays, as an empty tag, when no item carries it any
+  more, until it is deleted. Bundles carry only the tags of their items.
 - **Submission** — one execution of user code against a problem, with a
   per-test-case result list and an overall verdict. For a function problem
   it keeps the harness it ran in and how many lines that harness put before

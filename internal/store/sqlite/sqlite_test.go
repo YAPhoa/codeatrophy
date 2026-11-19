@@ -93,6 +93,16 @@ var downMigrations = map[int]string{
 		CREATE TRIGGER ai_providers_max_count BEFORE INSERT ON ai_providers
 		WHEN (SELECT COUNT(*) FROM ai_providers) >= 20
 		BEGIN SELECT RAISE(ABORT, 'too many AI providers'); END;`,
+	// The item_tags table of 0001, which referred to no tags table.
+	9: `CREATE TABLE item_tags_old (
+			item_id TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+			tag     TEXT NOT NULL,
+			PRIMARY KEY (item_id, tag)) WITHOUT ROWID;
+		INSERT INTO item_tags_old SELECT item_id, tag FROM item_tags;
+		DROP TABLE item_tags;
+		ALTER TABLE item_tags_old RENAME TO item_tags;
+		CREATE INDEX item_tags_tag ON item_tags (tag);
+		DROP TABLE tags;`,
 }
 
 // undoLatestMigration takes the database back to the version before the
@@ -346,9 +356,21 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	db.Close()
 }
 
+// sqliteObjects lists the names of a table's triggers and indexes.
+func sqliteObjects(t *testing.T, db *DB, table string) string {
+	t.Helper()
+	var names string
+	if err := db.writer.QueryRow(`SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master
+		WHERE tbl_name = ? ORDER BY name)`, table).Scan(&names); err != nil {
+		t.Fatal(err)
+	}
+	return names
+}
+
 // Migration 8 rebuilds ai_providers to allow the gemini kind: a database at
 // version 7 keeps every provider, its usage and log rows and every other
-// row, and the table's rules still hold.
+// row, and the table's rules still hold. The library is written at the
+// current version and taken back, since the store writes the current schema.
 func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "v7.db")
@@ -356,31 +378,23 @@ func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	undoMigrationsFrom(t, db, 8)
 	storetest.Populate(t, db)
+	write(t, db, func(tx store.Tx) error {
+		return tx.InsertAIProvider(&store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
+			BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now})
+	})
+	wantTriggers := sqliteObjects(t, db, "ai_providers")
+	want := storetest.Dump(t, db)
+	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
+		t.Fatalf("the fixture has no providers or usage: %v", want)
+	}
+	undoMigrationsFrom(t, db, 8)
 	gemini := &store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now}
 	insert := func(db *DB, p *store.AIProvider) error {
 		return db.Write(ctx, func(tx store.Tx) error { return tx.InsertAIProvider(p) })
 	}
 	if err := insert(db, gemini); err == nil {
 		t.Fatal("version 7 accepted the gemini kind")
-	}
-	write(t, db, func(tx store.Tx) error {
-		return tx.InsertAIProvider(&store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
-			BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now})
-	})
-	triggers := func(db *DB) string {
-		var names string
-		if err := db.writer.QueryRow(`SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master
-			WHERE tbl_name = 'ai_providers' ORDER BY name)`).Scan(&names); err != nil {
-			t.Fatal(err)
-		}
-		return names
-	}
-	wantTriggers := triggers(db)
-	want := storetest.Dump(t, db)
-	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
-		t.Fatalf("the fixture has no providers or usage: %v", want)
 	}
 	db.Close()
 
@@ -389,11 +403,11 @@ func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != 8 {
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
 		t.Fatalf("version %d after migrating", v)
 	}
 	storetest.SameDump(t, "after migration 8", want, storetest.Dump(t, db))
-	if got := triggers(db); got != wantTriggers {
+	if got := sqliteObjects(t, db, "ai_providers"); got != wantTriggers {
 		t.Errorf("triggers and indexes: %s, want %s", got, wantTriggers)
 	}
 	if err := insert(db, gemini); err != nil {
@@ -417,5 +431,50 @@ func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 		if _, err := db.writer.Exec(q); err == nil {
 			t.Errorf("%s was accepted", what)
 		}
+	}
+}
+
+// Migration 9 makes tags records of their own: every tag an item carries
+// becomes one, every other row is kept, and item_tags refers to tags.
+func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v8.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.Populate(t, db)
+	wantIndexes := sqliteObjects(t, db, "item_tags")
+	want := storetest.Dump(t, db)
+	if len(want["tags"]) < 3 || len(want["item_tags"]) <= len(want["tags"]) {
+		t.Fatalf("the fixture has too few tags: %v %v", want["tags"], want["item_tags"])
+	}
+	undoMigrationsFrom(t, db, 9)
+	var n int
+	if err := db.writer.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'tags'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("version 8 has a tags table: %d %v", n, err)
+	}
+	db.Close()
+
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v, _ := db.SchemaVersion(ctx); v != 9 {
+		t.Fatalf("version %d after migrating", v)
+	}
+	storetest.SameDump(t, "after migration 9", want, storetest.Dump(t, db))
+	if got := sqliteObjects(t, db, "item_tags"); got != wantIndexes {
+		t.Errorf("indexes: %s, want %s", got, wantIndexes)
+	}
+	if _, err := db.writer.Exec(`INSERT INTO item_tags (item_id, tag) VALUES ('origin', 'unregistered')`); err == nil {
+		t.Error("an item carries a tag that is not registered")
+	}
+	if _, err := db.writer.Exec(`DELETE FROM tags WHERE name = 'array'`); err == nil {
+		t.Error("a tag an item carries was deleted")
+	}
+	if _, err := db.writer.Exec(`DELETE FROM items WHERE id = 's7'`); err != nil {
+		t.Errorf("deleting an item with tags: %v", err)
 	}
 }

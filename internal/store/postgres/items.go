@@ -206,6 +206,9 @@ func (t *tx) UpdateItem(it *domain.Item) error {
 
 func (t *tx) writeTags(itemID string, tags []string) error {
 	for _, tag := range tags {
+		if err := t.InsertTag(tag); err != nil {
+			return err
+		}
 		if _, err := t.exec(`INSERT INTO item_tags (item_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING`, itemID, tag); err != nil {
 			return err
 		}
@@ -611,7 +614,7 @@ func (t *tx) CountItemsBy(f store.ItemFilter, group string) (map[string]int, err
 }
 
 func (t *tx) ListTags() ([]domain.Tag, error) {
-	rows, err := t.query(`SELECT tag, COUNT(*) FROM item_tags GROUP BY tag ORDER BY tag`)
+	rows, err := t.query(`SELECT g.name, COUNT(t.tag) FROM tags g LEFT JOIN item_tags t ON t.tag = g.name GROUP BY g.name ORDER BY g.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -625,6 +628,22 @@ func (t *tx) ListTags() ([]domain.Tag, error) {
 		out = append(out, tg)
 	}
 	return out, rows.Err()
+}
+
+func (t *tx) TagExists(name string) (bool, error) {
+	var n int
+	err := t.queryRow(`SELECT COUNT(*) FROM tags WHERE name = $1`, name).Scan(&n)
+	return n > 0, err
+}
+
+func (t *tx) InsertTag(name string) error {
+	_, err := t.exec(`INSERT INTO tags (name) VALUES ($1) ON CONFLICT DO NOTHING`, name)
+	return err
+}
+
+func (t *tx) DeleteTag(name string) error {
+	_, err := t.exec(`DELETE FROM tags WHERE name = $1`, name)
+	return err
 }
 
 func (t *tx) ItemIDsWithTag(name string) ([]string, error) {

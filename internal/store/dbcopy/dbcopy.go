@@ -167,6 +167,7 @@ func Summary(counts []store.TableCount) string {
 		"ai_log_bodies":      {"AI log body", "AI log bodies"},
 		"style_presets":      {"style preset", "style presets"},
 		"items":              {"item", "items"},
+		"tags":               {"tag", "tags"},
 		"item_tags":          {"tag assignment", "tag assignments"},
 		"collections":        {"collection", "collections"},
 		"collection_items":   {"collection entry", "collection entries"},

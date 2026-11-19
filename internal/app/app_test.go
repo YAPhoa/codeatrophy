@@ -373,6 +373,75 @@ func TestBulkActionsAndTags(t *testing.T) {
 	}
 }
 
+// A tag stays when its last item drops it or is deleted, and can still be
+// renamed, merged and deleted; only deleting it removes it for good.
+func TestTagsOutliveTheirItems(t *testing.T) {
+	e := newEnv(t)
+	a := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"A","tags":["solo","shared"]}`)))
+	must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"B","tags":["shared"]}`)))
+	c := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"C","tags":["gone"]}`)))
+	list := func() string {
+		var out []string
+		for _, tg := range must(e.app.ListTags(e.ctx)).Items {
+			out = append(out, fmt.Sprintf("%s=%d", tg.Name, tg.Count))
+		}
+		return strings.Join(out, ",")
+	}
+	must(e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t, `{"ids":["`+a.ID+`"],"action":"removeTags","tags":["solo"]}`)))
+	if err := e.app.DeleteItem(e.ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got != "gone=0,shared=2,solo=0" {
+		t.Errorf("after the last items dropped them: %s", got)
+	}
+	if st := must(e.app.Stats(e.ctx)); st.Tags != 1 {
+		t.Errorf("stats count %d tags, want the one items carry", st.Tags)
+	}
+	if ov := must(e.app.Overview(e.ctx)); len(ov.Tags) != 3 {
+		t.Errorf("overview tags: %+v", ov.Tags)
+	}
+	// An empty tag is renamed, then merged into a tag items carry.
+	if tg := must(e.app.RenameTag(e.ctx, "solo", "lonely")); tg.Name != "lonely" || tg.Count != 0 {
+		t.Errorf("rename of an empty tag: %+v", tg)
+	}
+	if got := list(); got != "gone=0,lonely=0,shared=2" {
+		t.Errorf("after renaming an empty tag: %s", got)
+	}
+	if tg := must(e.app.RenameTag(e.ctx, "lonely", "shared")); tg.Name != "shared" || tg.Count != 2 {
+		t.Errorf("merge of an empty tag: %+v", tg)
+	}
+	// A tag items carry is merged into an empty one.
+	if tg := must(e.app.RenameTag(e.ctx, "shared", "gone")); tg.Name != "gone" || tg.Count != 2 {
+		t.Errorf("merge into an empty tag: %+v", tg)
+	}
+	if got := list(); got != "gone=2" {
+		t.Errorf("after merging: %s", got)
+	}
+	if got := must(e.app.GetItem(e.ctx, a.ID)); strings.Join(got.Tags, ",") != "gone" {
+		t.Errorf("item tags after merging: %v", got.Tags)
+	}
+	// Deleting removes it from its items and for good; an empty one too.
+	if err := e.app.DeleteTag(e.ctx, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got != "" {
+		t.Errorf("after deleting: %s", got)
+	}
+	if got := must(e.app.GetItem(e.ctx, a.ID)); len(got.Tags) != 0 {
+		t.Errorf("item tags after deleting: %v", got.Tags)
+	}
+	wantCode(t, e.app.DeleteTag(e.ctx, "gone"), app.CodeNotFound)
+	wantCode(t, must2(e.app.RenameTag(e.ctx, "gone", "back")), app.CodeNotFound)
+	must(e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t, `{"ids":["`+a.ID+`"],"action":"addTags","tags":["empty"]}`)))
+	must(e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t, `{"ids":["`+a.ID+`"],"action":"removeTags","tags":["empty"]}`)))
+	if err := e.app.DeleteTag(e.ctx, "empty"); err != nil {
+		t.Errorf("deleting an empty tag: %v", err)
+	}
+	if got := list(); got != "" {
+		t.Errorf("after deleting an empty tag: %s", got)
+	}
+}
+
 func TestListItemsQueryValidation(t *testing.T) {
 	e := newEnv(t)
 	e.problem(t, `,"tags":["dp"]`)

@@ -171,8 +171,16 @@ type Tx interface {
 	// collections; new memberships are appended at the end.
 	SetItemCollections(itemID string, collectionIDs []string) error
 
-	// Tags.
+	// Tags are records of their own, and a tag stays when no item carries
+	// it any more. Writing an item registers the tags it carries.
+	// ListTags returns every tag, by name, with the number of items that
+	// carry it (0 for an empty tag).
 	ListTags() ([]domain.Tag, error)
+	TagExists(name string) (bool, error)
+	// InsertTag registers a tag; one that exists is left as it is.
+	InsertTag(name string) error
+	// DeleteTag removes a tag that no item carries.
+	DeleteTag(name string) error
 	ItemIDsWithTag(name string) ([]string, error)
 
 	// Test cases, ordered by position.

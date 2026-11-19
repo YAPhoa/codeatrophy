@@ -36,6 +36,8 @@ func TestCopyRoundTrip(t *testing.T) {
 			ctx := context.Background()
 			src := teststore.OpenSQLite(t)
 			storetest.Populate(t, src)
+			// A tag no item carries is copied too.
+			storetest.Write(t, src, func(tx store.Tx) error { return tx.InsertTag("unused") })
 			want := storetest.Dump(t, src)
 			if len(want["style_presets"]) != 3 || len(want["submission_results"]) != 4 || len(want["settings"]) != 2 {
 				t.Fatalf("the fixture does not use every table as meant: %d presets, %d results, %d settings",

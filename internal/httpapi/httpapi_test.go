@@ -753,8 +753,26 @@ func TestCollectionsAndTagsEndpoints(t *testing.T) {
 	if r["name"] != "systems" || r["count"] != float64(1) {
 		t.Errorf("rename: %v", r)
 	}
-	c.expect("DELETE", api+"/tags/systems", "", 204)
-	c.expect("DELETE", api+"/tags/systems", "", 404)
+	// A tag outlives its last item: listed with count 0 (the stats count
+	// only carried tags), renamed, then deleted for good.
+	c.expect("PATCH", api+"/items/"+item, `{"tags":[]}`, 200)
+	tags := c.expect("GET", api+"/tags", "", 200).json(t)["items"].([]any)
+	if len(tags) != 1 || tags[0].(map[string]any)["name"] != "systems" || tags[0].(map[string]any)["count"] != float64(0) {
+		t.Errorf("tags after the last item dropped one: %v", tags)
+	}
+	if st := c.expect("GET", api+"/stats", "", 200).json(t); st["tags"] != float64(0) {
+		t.Errorf("stats tags: %v", st["tags"])
+	}
+	r = c.expect("PATCH", api+"/tags/systems", `{"name":"empty"}`, 200).json(t)
+	if r["name"] != "empty" || r["count"] != float64(0) {
+		t.Errorf("rename of an empty tag: %v", r)
+	}
+	c.expect("PATCH", api+"/tags/systems", `{"name":"x"}`, 404)
+	c.expect("DELETE", api+"/tags/empty", "", 204)
+	c.expect("DELETE", api+"/tags/empty", "", 404)
+	if tags := c.expect("GET", api+"/tags", "", 200).json(t)["items"].([]any); len(tags) != 0 {
+		t.Errorf("tags after deleting: %v", tags)
+	}
 	c.expect("DELETE", api+"/collections/"+a, "", 204)
 }
 

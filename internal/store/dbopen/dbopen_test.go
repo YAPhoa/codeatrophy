@@ -128,19 +128,25 @@ func db2(t *testing.T, url string) dbopen.DB {
 	return db
 }
 
-// A SQLite database of the previous schema version is migrated, then
-// imported whole, and PostgreSQL then takes the provider kind the migration
-// added.
+// A SQLite database of an older schema version is migrated, then imported
+// whole, and PostgreSQL then takes the provider kind a migration added.
 func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	url := pgtest.URL(t)
 	path, want := sqliteLibrary(t, t.TempDir())
-	// Back to version 7, whose ai_providers knew two kinds. Migration 8
-	// rebuilds the table, so its triggers are not needed here.
+	// Back to version 7: without a tags table, and with an ai_providers that
+	// knew two kinds. Migrations 8 and 9 rebuild ai_providers and item_tags,
+	// so their triggers and indexes are not needed here.
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`CREATE TABLE ai_providers_old (
+	if _, err := raw.Exec(`CREATE TABLE item_tags_old (item_id TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+			tag TEXT NOT NULL, PRIMARY KEY (item_id, tag)) WITHOUT ROWID;
+		INSERT INTO item_tags_old SELECT item_id, tag FROM item_tags;
+		DROP TABLE item_tags;
+		ALTER TABLE item_tags_old RENAME TO item_tags;
+		DROP TABLE tags;
+		CREATE TABLE ai_providers_old (
 			seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
 			kind TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')), model TEXT NOT NULL DEFAULT '',
 			base_url TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '', api_key_origin TEXT NOT NULL DEFAULT '',
@@ -148,7 +154,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 		INSERT INTO ai_providers_old SELECT * FROM ai_providers;
 		DROP TABLE ai_providers;
 		ALTER TABLE ai_providers_old RENAME TO ai_providers;
-		DELETE FROM schema_migrations WHERE version = 8`); err != nil {
+		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
 	raw.Close()
@@ -157,7 +163,8 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	}
 	db, logs := open(t, dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true})
 	defer db.Close()
-	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "imported the SQLite database") {
+	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
+		!strings.Contains(logs, "imported the SQLite database") {
 		t.Errorf("logs:\n%s", logs)
 	}
 	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))

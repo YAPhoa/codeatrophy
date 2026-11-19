@@ -39,6 +39,7 @@ func Run(t *testing.T, open Opener) {
 		{"Collections", testCollections},
 		{"TestCases", testTestCases},
 		{"TagsStatsSettings", testTagsStatsSettings},
+		{"TagsOutliveTheirItems", testTagsOutliveTheirItems},
 		{"StatsMatchListFilters", testStatsMatchListFilters},
 		{"CountItemsBy", testCountItemsBy},
 		{"SubmissionResultsAndUnfinished", testSubmissionResultsAndUnfinished},
@@ -939,6 +940,79 @@ func testTagsStatsSettings(t *testing.T, db store.Store) {
 		return nil
 	}); err != nil || !ok || v != "v2" {
 		t.Errorf("setting: %q %v %v", v, ok, err)
+	}
+}
+
+// A tag is registered by the items that carry it and stays when the last
+// one drops it; it can be registered on its own and deleted only once no
+// item carries it. Stats count only the tags some item carries.
+func testTagsOutliveTheirItems(t *testing.T, db store.Store) {
+	list := func() string {
+		tags := Read(t, db, func(tx store.Tx) ([]domain.Tag, error) { return tx.ListTags() })
+		var got []string
+		for _, tg := range tags {
+			got = append(got, fmt.Sprintf("%s=%d", tg.Name, tg.Count))
+		}
+		return strings.Join(got, ",")
+	}
+	Write(t, db, func(tx store.Tx) error {
+		a, b := Item("a", "A", domain.TypeProblem, "dp", "graph"), Item("b", "B", domain.TypeReading, "dp")
+		if err := tx.InsertItem(&a); err != nil {
+			return err
+		}
+		return tx.InsertItem(&b)
+	})
+	if got := list(); got != "dp=2,graph=1" {
+		t.Fatalf("tags: %s", got)
+	}
+	// The last item drops graph; deleting b leaves dp on a.
+	Write(t, db, func(tx store.Tx) error {
+		a, err := tx.GetItem("a")
+		if err != nil {
+			return err
+		}
+		a.Tags = []string{"dp"}
+		if err := tx.UpdateItem(&a); err != nil {
+			return err
+		}
+		_, err = tx.DeleteItem("b")
+		return err
+	})
+	if got := list(); got != "dp=1,graph=0" {
+		t.Errorf("after the last item dropped graph: %s", got)
+	}
+	exists := func(name string) bool {
+		return Read(t, db, func(tx store.Tx) (bool, error) { return tx.TagExists(name) })
+	}
+	if !exists("graph") || exists("tree") {
+		t.Error("TagExists")
+	}
+	if s := Read(t, db, func(tx store.Tx) (domain.Stats, error) { return tx.Stats() }); s.Tags != 1 {
+		t.Errorf("stats count %d tags, want the one an item carries", s.Tags)
+	}
+	// Registering is idempotent, and a registered tag can be put on an item.
+	Write(t, db, func(tx store.Tx) error {
+		for _, name := range []string{"tree", "tree", "graph"} {
+			if err := tx.InsertTag(name); err != nil {
+				return err
+			}
+		}
+		c := Item("c", "C", domain.TypeProblem, "tree")
+		return tx.InsertItem(&c)
+	})
+	if got := list(); got != "dp=1,graph=0,tree=1" {
+		t.Errorf("after registering: %s", got)
+	}
+	// A tag an item carries cannot be deleted; an empty one can, for good.
+	if err := db.Write(context.Background(), func(tx store.Tx) error { return tx.DeleteTag("dp") }); err == nil {
+		t.Error("a tag an item carries was deleted")
+	}
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteTag("graph") })
+	if got := list(); got != "dp=1,tree=1" || exists("graph") {
+		t.Errorf("after deleting graph: %s", got)
+	}
+	if got := Read(t, db, func(tx store.Tx) ([]string, error) { return tx.ItemIDsWithTag("graph") }); len(got) != 0 {
+		t.Errorf("items with a deleted tag: %v", got)
 	}
 }
 
