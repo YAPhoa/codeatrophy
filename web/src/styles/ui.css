@@ -545,6 +545,54 @@ button.chip:hover {
   color: var(--text);
 }
 
+/* A column's name that sorts a list (SortButton): the size of body text,
+   whatever its head's own type. Its padding is taken back by its margin, so
+   the name starts where the column's content does. */
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
+  margin-left: calc(-1 * var(--space-1));
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sort-button:hover,
+.sort-button.is-active {
+  color: var(--text);
+}
+
+/* The sort in effect shows its direction; another column, on hover, the one a click gives. */
+.sort-arrow {
+  opacity: 0;
+  transition: opacity var(--duration-hover) var(--ease-out);
+}
+
+.sort-button:hover .sort-arrow {
+  opacity: 0.5;
+}
+
+.sort-button.is-active .sort-arrow {
+  opacity: 1;
+}
+
+/* Over a right-aligned column: the arrow still follows the name, and hangs
+   past the column's edge, so the name ends where the column's content does. */
+.sort-button.is-end {
+  margin-right: calc(-1 * (14px + 2 * var(--space-1)));
+  margin-left: 0;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

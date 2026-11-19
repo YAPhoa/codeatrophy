@@ -289,6 +289,11 @@ const DELAYS: Record<'normal' | 'fast' | 'slow', Record<DelayKind, [number, numb
 export class MockDb {
   readonly options: Required<MockOptions>;
   readonly items = new Map<string, StoredItem>();
+  /**
+   * Every tag, as the server records them: a tag stays, empty, when no item
+   * carries it any more, until it is deleted. See `registerTags`.
+   */
+  readonly tags = new Set<string>();
   collections: StoredCollection[] = [];
   testCases: TestCase[] = [];
   solutions: StoredSolution[] = [];
@@ -426,6 +431,15 @@ export class MockDb {
   }
 
   // ---- Items --------------------------------------------------------------
+
+  /**
+   * Record every tag an item carries. Handlers set items' tags directly, so
+   * this runs before and after each request: whichever one put a tag on an
+   * item, the tag is kept when its last item drops it, as on the server.
+   */
+  registerTags(): void {
+    for (const item of this.items.values()) for (const t of item.tags) this.tags.add(t);
+  }
 
   getItem(id: string): StoredItem {
     const item = this.items.get(id);

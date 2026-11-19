@@ -696,7 +696,13 @@ export function seedDatabase(db: MockDb): void {
   }
 
   for (const s of [...SUBMISSIONS].sort((a, b) => b.age - a.age)) addSubmission(db, s, at);
+  // Tags whose items have since been deleted or retagged: kept, with no items.
+  db.registerTags();
+  for (const t of EMPTY_TAGS) db.tags.add(t);
 }
+
+/** Tags of the seed library that no item carries. */
+export const EMPTY_TAGS = ['backtracking', 'trie'];
 
 /** The style presets a seeded instance starts with. */
 export function seedStyles(db: MockDb): void {

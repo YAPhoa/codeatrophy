@@ -9,18 +9,29 @@ import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { tagProblem } from '../../lib/itemForm';
 import { plural } from '../../lib/format';
-import { useUrlText } from '../../lib/urlState';
-import { Button, IconButton, LinkButton } from '../../ui/Button';
+import { naturalTagOrder, nextTagOrder, setHideEmptyTags, sortTags, tagDirectionText, TAG_SORTS, useHideEmptyTags, type TagOrder, type TagSort } from '../../lib/tagList';
+import { useUrlChoice, useUrlText } from '../../lib/urlState';
+import { Button, cx, IconButton, LinkButton } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
-import { SelectField, TextField } from '../../ui/Field';
+import { Checkbox, SelectField, TextField } from '../../ui/Field';
 import { Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
+import { SortButton } from '../../ui/SortButton';
 import { useToast } from '../../ui/Toast';
 
 type Editing = { kind: 'rename'; tag: Tag } | { kind: 'merge'; tag: Tag } | null;
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '-');
 
-/** Every tag with its item count; rename, merge into another tag, or delete. */
+/** `order=` in the URL: left out for a column's natural direction. */
+const ORDER_PARAMS = ['', 'asc', 'desc'] as const;
+
+const COLUMN_LABEL: Record<TagSort, string> = { name: 'Tag', items: 'Items' };
+
+/**
+ * Every tag with its item count, sorted from the column heads; rename,
+ * merge into another tag, or delete. Empty tags, which no item carries, are
+ * hidden unless the user asks for them.
+ */
 export default function TagsPage() {
   useDocumentTitle('Tags');
   const qc = useQueryClient();
@@ -29,6 +40,10 @@ export default function TagsPage() {
   const tags = useTags();
   const limits = useLimits();
   const [filter, setFilter] = useUrlText('q');
+  const [sort, setSort] = useUrlChoice('sort', TAG_SORTS, 'name');
+  const [orderParam, setOrderParam] = useUrlChoice('order', ORDER_PARAMS, '');
+  const order = useMemo<TagOrder>(() => ({ sort, order: orderParam || naturalTagOrder(sort) }), [sort, orderParam]);
+  const hideEmptyPref = useHideEmptyTags();
   const [editing, setEditing] = useState<Editing>(null);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,10 +52,34 @@ export default function TagsPage() {
   const [attempted, setAttempted] = useState(false);
 
   const list = useMemo(() => tags.data ?? [], [tags.data]);
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return q ? list.filter((t) => t.name.includes(q)) : list;
-  }, [list, filter]);
+  const emptyCount = list.filter((t) => t.count === 0).length;
+  const hideEmpty = hideEmptyPref && emptyCount > 0;
+  const q = filter.trim().toLowerCase();
+  const matching = useMemo(() => (q ? list.filter((t) => t.name.includes(q)) : list), [list, q]);
+  const shown = useMemo(() => sortTags(hideEmpty ? matching.filter((t) => t.count > 0) : matching, order), [matching, hideEmpty, order]);
+
+  const sortBy = (column: TagSort) => {
+    const next = nextTagOrder(order, column);
+    setSort(next.sort);
+    setOrderParam(next.order === naturalTagOrder(next.sort) ? '' : next.order);
+  };
+  const head = (column: TagSort) => {
+    const active = order.sort === column;
+    const shownOrder = active ? order.order : naturalTagOrder(column);
+    const next = nextTagOrder(order, column);
+    return (
+      <SortButton
+        label={COLUMN_LABEL[column]}
+        active={active}
+        order={shownOrder}
+        direction={tagDirectionText(column, shownOrder)}
+        title={`Sort by ${COLUMN_LABEL[next.sort].toLowerCase()}, ${tagDirectionText(next.sort, next.order)}`}
+        className={cx(column === 'items' && 'is-end')}
+        onClick={() => sortBy(column)}
+      />
+    );
+  };
+  const ariaSort = (column: TagSort) => (order.sort === column ? (order.order === 'asc' ? 'ascending' : 'descending') : undefined);
 
   const open = (next: NonNullable<Editing>) => {
     setEditing(next);
@@ -79,7 +118,7 @@ export default function TagsPage() {
   const remove = async (tag: Tag) => {
     const ok = await confirm({
       title: `Delete the tag “${tag.name}”?`,
-      body: `It is removed from ${plural(tag.count, 'item')}. The items themselves are not touched.`,
+      body: tag.count === 0 ? 'This tag is currently not attached to any item.' : `This tag would be removed from ${plural(tag.count, 'item')} and deleted. The items themselves are not deleted.`,
       confirmLabel: 'Delete tag',
       danger: true,
     });
@@ -98,7 +137,7 @@ export default function TagsPage() {
       <header className="page-header">
         <div className="grow">
           <h1 className="page-title">Tags</h1>
-          <p className="page-sub">Tags are free-form labels that cut across collections. A tag exists for as long as at least one item carries it.</p>
+          <p className="page-sub">Flexible labels for grouping items across collections.</p>
         </div>
       </header>
 
@@ -112,29 +151,41 @@ export default function TagsPage() {
         </EmptyState>
       ) : (
         <>
-          {list.length > 10 && (
-            <input className="input tags-filter" type="search" name="q" autoComplete="off" placeholder="Filter tags…" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          {(list.length > 10 || emptyCount > 0) && (
+            <div className="tags-toolbar">
+              {list.length > 10 && (
+                <input className="input tags-filter" type="search" name="q" autoComplete="off" placeholder="Filter tags…" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              )}
+              {emptyCount > 0 && <Checkbox className="filter-check tags-hide-empty" label="Hide empty tags" checked={hideEmptyPref} onChange={setHideEmptyTags} />}
+            </div>
           )}
           <div className="card">
-            <table className="table">
+            <table className="table tags-table">
               <thead>
                 <tr>
-                  <th scope="col">Tag</th>
-                  <th scope="col" className="num">
-                    Items
+                  <th scope="col" aria-sort={ariaSort('name')}>
+                    {head('name')}
                   </th>
-                  <th scope="col">
+                  <th scope="col" className="num" aria-sort={ariaSort('items')}>
+                    {head('items')}
+                  </th>
+                  <th scope="col" className="table-actions">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((t) => (
-                  <tr key={t.name}>
+                  <tr key={t.name} className={cx(t.count === 0 && 'is-empty')}>
                     <td>
-                      <Link to={`/?tag=${encodeURIComponent(t.name)}`} className="chip chip-tag">
-                        {t.name}
-                      </Link>
+                      {t.count === 0 ? (
+                        // Nothing to list in the library for it.
+                        <span className="chip chip-tag">{t.name}</span>
+                      ) : (
+                        <Link to={`/?tag=${encodeURIComponent(t.name)}`} className="chip chip-tag">
+                          {t.name}
+                        </Link>
+                      )}
                     </td>
                     <td className="num">{t.count}</td>
                     <td className="table-actions">
@@ -147,7 +198,7 @@ export default function TagsPage() {
                 {shown.length === 0 && (
                   <tr>
                     <td colSpan={3} className="muted">
-                      No tag matches “{filter}”.
+                      {matching.length > 0 ? (q ? `Only empty tags match “${filter}”.` : 'All tags are empty and hidden.') : `No tag matches “${filter}”.`}
                     </td>
                   </tr>
                 )}
@@ -189,7 +240,11 @@ export default function TagsPage() {
               value={value}
               onChange={setValue}
               options={list.filter((t) => t.name !== editing.tag.name).map((t) => ({ value: t.name, label: `${t.name} (${t.count})` }))}
-              hint={`Every item tagged “${editing.tag.name}” gets the target tag instead, and “${editing.tag.name}” disappears.`}
+              hint={
+                editing.tag.count === 0
+                  ? `No item carries “${editing.tag.name}”, so merging just removes it.`
+                  : `Every item tagged “${editing.tag.name}” gets the target tag instead, and “${editing.tag.name}” disappears.`
+              }
             />
           ) : (
             <TextField
@@ -206,7 +261,12 @@ export default function TagsPage() {
           )}
           {existing && editing?.kind === 'rename' && (
             <Callout tone="warn" title={`“${existing.name}” already exists`}>
-              Renaming will merge the two: the {plural(editing.tag.count, 'item')} tagged “{editing.tag.name}” join the {existing.count} already tagged “{existing.name}”. This cannot be undone.
+              {editing.tag.count === 0
+                ? `Renaming will merge the two: no item carries “${editing.tag.name}”, so only “${existing.name}” remains.`
+                : existing.count === 0
+                  ? `Renaming will merge the two: the ${plural(editing.tag.count, 'item')} tagged “${editing.tag.name}” get “${existing.name}” instead.`
+                  : `Renaming will merge the two: the ${plural(editing.tag.count, 'item')} tagged “${editing.tag.name}” join the ${existing.count} already tagged “${existing.name}”.`}{' '}
+              This cannot be undone.
             </Callout>
           )}
           {error != null && <ErrorCallout error={error} />}

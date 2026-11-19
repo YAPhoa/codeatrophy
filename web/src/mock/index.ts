@@ -141,7 +141,12 @@ export function createMockServer(options: MockOptions = {}): MockServer {
         throw badRequest('request body is not valid JSON');
       }
     } else if (body != null && body !== '') throw badRequest('unsupported request body');
-    return toResponse(await route.handler(req));
+    db.registerTags();
+    try {
+      return toResponse(await route.handler(req));
+    } finally {
+      db.registerTags();
+    }
   }
 
   /** The extra second a read takes under a `slow-<segment>` flag. */

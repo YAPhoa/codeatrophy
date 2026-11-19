@@ -170,7 +170,8 @@ export function FilterBar({ filters, onChange, tags, collectionId, searchRef, ch
 
       <FilterButton label="Tags" count={filters.tags.length}>
         {() =>
-          tags.length === 0 ? (
+          // Empty tags (no item carries them) are nothing to filter by.
+          filters.tags.length === 0 && !tags.some((t) => t.count > 0) ? (
             <p className="muted">No tags yet. Add tags when capturing or editing an item.</p>
           ) : (
             <>

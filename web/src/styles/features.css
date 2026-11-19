@@ -696,47 +696,15 @@
 }
 
 /* The columns' names, over the columns; Title, Difficulty and Updated sort
-   the list (SortHeader). Each name starts where its column's content does:
-   a sort button's padding is taken back by its margin. They are the size
-   of the titles under them. */
-.item-col-head,
-.item-sort {
+   the list (SortHeader, a .sort-button). Each name starts where its
+   column's content does. They are the size of the titles under them. */
+.item-col-head {
   font-size: var(--text-md);
   white-space: nowrap;
 }
 
 .item-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
   justify-self: start;
-  padding: 2px var(--space-1);
-  margin-left: calc(-1 * var(--space-1));
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-3);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.item-sort:hover,
-.item-sort.is-active {
-  color: var(--text);
-}
-
-/* The sort in effect shows its direction; another column, on hover, the one a click gives. */
-.sort-arrow {
-  opacity: 0;
-  transition: opacity var(--duration-hover) var(--ease-out);
-}
-
-.item-sort:hover .sort-arrow {
-  opacity: 0.5;
-}
-
-.item-sort.is-active .sort-arrow {
-  opacity: 1;
 }
 
 /* Over the title: the title starts a step into its column. */
@@ -3908,9 +3876,41 @@ button.case-chip:hover {
 
 /* ---- Tags ---- */
 
+/* Above the table: the filter box on the left, "Hide empty tags" on the
+   right, either one alone where it would be. */
+.tags-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-h);
+  margin-bottom: var(--space-3);
+}
+
 .tags-filter {
   max-width: 280px;
-  margin-bottom: var(--space-3);
+}
+
+.tags-hide-empty {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* The heads are sort buttons, the size of the counts under them; their own
+   padding takes the place of some of the cell's. */
+.tags-table th {
+  padding-top: var(--space-1-5);
+  padding-bottom: var(--space-1-5);
+}
+
+/* A tag no item carries: there, but quieter. */
+.tags-table tr.is-empty .chip-tag {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-3);
+}
+
+.tags-table tr.is-empty .num {
+  color: var(--text-3);
 }
 
 /* ---- Import / export ---- */

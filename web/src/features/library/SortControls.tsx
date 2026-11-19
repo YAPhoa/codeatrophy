@@ -1,8 +1,9 @@
-import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import type { ItemSort, SortOrder } from '../../api/types';
 import { defaultOrder, directionText, effectiveSort, nextColumnSort, sortDirections, type LibraryFilters, type SortColumn } from '../../lib/filters';
 import { cx } from '../../ui/Button';
 import { MenuButton, type MenuEntry } from '../../ui/Popover';
+import { SortButton } from '../../ui/SortButton';
 
 const SORT_LABEL: Record<ItemSort, string> = {
   updated: 'Last updated',
@@ -24,9 +25,6 @@ function current(filters: LibraryFilters, collectionId: string | null): { sort: 
   return { sort, order: filters.order ?? defaultOrder(sort) };
 }
 
-const Arrow = ({ order }: { order: SortOrder }) =>
-  order === 'asc' ? <ArrowUp size={14} aria-hidden="true" className="sort-arrow" /> : <ArrowDown size={14} aria-hidden="true" className="sort-arrow" />;
-
 /**
  * A column's name in the list's head, which sorts the list by it: in its
  * natural direction, then the other way, then back to the view's own order.
@@ -40,17 +38,15 @@ export function SortHeader({ column, label, filters, collectionId, onChange, cla
   const next = current(nextColumnSort(filters, collectionId, column), collectionId);
   const nextText = next.sort === column ? `Sort ${directionText(column, next.order)}` : `Back to ${SORT_LABEL[next.sort].toLowerCase()}`;
   return (
-    <button
-      type="button"
-      className={cx('item-sort', active && 'is-active', className)}
-      aria-pressed={active}
-      aria-label={`Sort by ${label.toLowerCase()}, ${directionText(column, shown)}`}
+    <SortButton
+      label={label}
+      active={active}
+      order={shown}
+      direction={directionText(column, shown)}
       title={nextText}
+      className={cx('item-sort', className)}
       onClick={() => onChange(nextColumnSort(filters, collectionId, column))}
-    >
-      {label}
-      <Arrow order={shown} />
-    </button>
+    />
   );
 }
 

@@ -1257,6 +1257,36 @@ describe('collections and tags', () => {
     expect(after).not.toContain('stack');
     expect((await failure(api.tags.remove('dp'))).status).toBe(404);
   });
+
+  it('keeps a tag its last item drops, as an empty tag, until it is deleted', async () => {
+    const counts = async () => Object.fromEntries((await api.tags.list()).items.map((t) => [t.name, t.count]));
+    // The seed library has empty tags; stats count only the tags items carry.
+    expect(await counts()).toMatchObject({ backtracking: 0, trie: 0 });
+    const carried = new Set((await api.items.list({ limit: 200 })).items.flatMap((i) => i.tags)).size;
+    expect((await api.stats()).tags).toBe(carried);
+
+    // "stack" is only on Valid Parentheses.
+    const item = await api.items.get(seedIds.items.validParentheses);
+    await api.items.update(item.id, { tags: item.tags.filter((t) => t !== 'stack'), expectedRevision: item.revision });
+    expect((await counts()).stack).toBe(0);
+    expect((await api.stats()).tags).toBe(carried - 1);
+
+    // An empty tag is renamed, then merged into one items carry.
+    expect(await api.tags.rename('stack', 'stacks')).toEqual({ name: 'stacks', count: 0 });
+    const string = (await counts()).string;
+    expect(await api.tags.rename('stacks', 'string')).toEqual({ name: 'string', count: string });
+    expect(await counts()).not.toHaveProperty('stacks');
+
+    // A bulk add then remove leaves the tag, which deleting removes for good.
+    await api.items.bulk({ ids: [item.id], action: 'addTags', tags: ['fresh'] });
+    await api.items.bulk({ ids: [item.id], action: 'removeTags', tags: ['fresh'] });
+    expect((await counts()).fresh).toBe(0);
+    await api.tags.remove('fresh');
+    await api.tags.remove('trie');
+    expect(await counts()).not.toHaveProperty('fresh');
+    expect(await counts()).not.toHaveProperty('trie');
+    expect((await failure(api.tags.rename('trie', 'x'))).status).toBe(404);
+  });
 });
 
 describe('submissions', () => {

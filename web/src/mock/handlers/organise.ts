@@ -119,37 +119,46 @@ function parseItemIds(db: MockDb, req: Req): string[] {
   return [...new Set(raw.itemIds)];
 }
 
+/** The normalised tag a path names; 404 for one that does not exist. */
+function existingTag(db: MockDb, req: Req): string {
+  const name = normaliseTags([req.params.name!])[0];
+  if (name === undefined || !db.tags.has(name)) throw notFound('tag');
+  return name;
+}
+
 function renameTag(db: MockDb, req: Req) {
-  const old = normaliseTags([req.params.name!])[0];
-  const holders = [...db.items.values()].filter((i) => old !== undefined && i.tags.includes(old));
-  if (old === undefined || holders.length === 0) throw notFound('tag');
+  const old = existingTag(db, req);
   const raw = objectBody(req);
   const next = typeof raw.name === 'string' ? normaliseTags([raw.name])[0] : undefined;
   if (next === undefined) throw invalid('name', 'is required');
   const problem = tagProblem(next);
   if (problem) throw invalid('name', problem);
   if (next !== old) {
-    for (const item of holders) {
+    for (const item of db.items.values()) {
+      if (!item.tags.includes(old)) continue;
       item.tags = normaliseTags(item.tags.map((t) => (t === old ? next : t)));
       db.touch(item);
     }
+    db.tags.delete(old);
+    db.tags.add(next);
   }
   return ok({ name: next, count: [...db.items.values()].filter((i) => i.tags.includes(next)).length });
 }
 
 function deleteTag(db: MockDb, req: Req) {
-  const name = normaliseTags([req.params.name!])[0];
-  const holders = [...db.items.values()].filter((i) => name !== undefined && i.tags.includes(name));
-  if (holders.length === 0) throw notFound('tag');
-  for (const item of holders) {
+  const name = existingTag(db, req);
+  for (const item of db.items.values()) {
+    if (!item.tags.includes(name)) continue;
     item.tags = item.tags.filter((t) => t !== name);
     db.touch(item);
   }
+  db.tags.delete(name);
   return noContent();
 }
 
+/** Every tag, empty ones included with a count of 0. */
 function listTags(db: MockDb) {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, number>([...db.tags].map((t) => [t, 0]));
   for (const item of db.items.values()) for (const t of item.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
   const items = [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => (a.name < b.name ? -1 : 1));
   return ok({ items });
