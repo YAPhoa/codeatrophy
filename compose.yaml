@@ -13,9 +13,9 @@
 name: codeatrophy
 
 x-judge0-env: &judge0-env
-  REDIS_HOST: judge0-redis
+  REDIS_HOST: redis
   REDIS_PORT: "6379"
-  REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:-codeatrophy-judge0-redis}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-codeatrophy-redis}
   POSTGRES_HOST: judge0-db
   POSTGRES_PORT: "5432"
   POSTGRES_DB: judge0
@@ -104,7 +104,7 @@ services:
     depends_on:
       judge0-db:
         condition: service_healthy
-      judge0-redis:
+      redis:
         condition: service_healthy
 
   judge0-workers:
@@ -119,7 +119,7 @@ services:
     depends_on:
       judge0-db:
         condition: service_healthy
-      judge0-redis:
+      redis:
         condition: service_healthy
 
   judge0-db:
@@ -139,13 +139,13 @@ services:
       timeout: 5s
       retries: 20
 
-  judge0-redis:
+  redis:
     image: redis:7.4
     profiles: [judge0]
     restart: unless-stopped
     command: ["sh", "-c", 'exec redis-server --appendonly no --requirepass "$$REDIS_PASSWORD"']
     environment:
-      REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:-codeatrophy-judge0-redis}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-codeatrophy-redis}
     networks: [judge0]
     healthcheck:
       test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
