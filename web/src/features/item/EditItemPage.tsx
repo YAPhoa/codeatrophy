@@ -23,7 +23,7 @@ import {
   type FormErrors,
   type ItemFormState,
 } from '../../lib/itemForm';
-import { Button } from '../../ui/Button';
+import { Button, LinkButton } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { DiffView } from '../../ui/DiffView';
 import { useLeaveGuard } from '../../ui/LeaveGuard';
@@ -179,14 +179,10 @@ function EditForm({ initial }: { initial: Item }) {
           <h1 className="page-title">Edit {base.type === 'problem' ? 'problem' : 'reading'}</h1>
         </div>
         <span className="spacer" />
-        {base.type === 'problem' && (
-          <Link to={`/items/${base.id}/tests`} className="muted">
-            Update test cases and solutions
-          </Link>
-        )}
         <Button variant="ghost" onClick={() => navigate(`/items/${base.id}`)} disabled={saving}>
           Cancel
         </Button>
+        {base.type === 'problem' && <LinkButton to={`/items/${base.id}/tests`}>Update test cases</LinkButton>}
         <Button variant="primary" icon={<Save size={14} />} onClick={() => void save()} busy={saving} title={`${MOD}+S`}>
           Save changes
         </Button>
