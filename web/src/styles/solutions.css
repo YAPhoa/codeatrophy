@@ -7,12 +7,6 @@
   flex-wrap: wrap;
 }
 
-.solutions-intro {
-  max-width: 60ch;
-  margin: -2px 0 var(--space-3);
-  line-height: 1.5;
-}
-
 .solutions > .callout,
 .solutions > .solution-form {
   margin-bottom: var(--space-3);
@@ -155,10 +149,6 @@
 }
 
 .save-solution-code {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--space-0-5) var(--space-2);
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);

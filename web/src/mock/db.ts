@@ -21,6 +21,7 @@ import type {
   Preferences,
   ProblemSpec,
   Solution,
+  SolutionRun,
   SourceCode,
   StylePreset,
   Submission,
@@ -540,7 +541,7 @@ export class MockDb {
    * Save a new solution. Marking it as the reference clears the mark on the
    * item's others. Does not touch the item; see `recordSolutionChange`.
    */
-  insertSolution(itemId: string, fields: SolutionFields, createdAt = this.now()): StoredSolution {
+  insertSolution(itemId: string, fields: SolutionFields, createdAt = this.now(), lastRun: SolutionRun | null = null): StoredSolution {
     if (fields.isReference) this.clearReference(itemId);
     const solution: StoredSolution = {
       id: uuid(),
@@ -548,6 +549,7 @@ export class MockDb {
       ...fields,
       createdAt,
       updatedAt: createdAt,
+      lastRun,
       seq: this.nextSeq(),
     };
     this.solutions.push(solution);
@@ -576,6 +578,8 @@ export class MockDb {
     current.language = value.language;
     current.source = value.source;
     current.updatedAt = this.now();
+    // The figures of the last run belong to the code that ran.
+    current.lastRun = null;
     return true;
   }
 

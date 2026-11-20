@@ -590,9 +590,11 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
       : []),
     ...(set?.others ?? []).map((s) => ({ ...s, isReference: false })),
   ];
-  solutions.forEach((s, i) => {
+  solutions.forEach(({ lastRun: run, ...s }, i) => {
     const createdAt = at(s.isReference ? p.created : p.updated);
-    db.solutions.push({ id: solutionId(p.n, i + 1), itemId: id, ...s, createdAt, updatedAt: createdAt, seq: db.nextSeq() });
+    const total = p.cases.length;
+    const lastRun = run ? { passed: total - (run.failed ?? 0), total, timeMs: run.timeMs, memoryKb: run.memoryKb, ranAt: at(run.ran) } : null;
+    db.solutions.push({ id: solutionId(p.n, i + 1), itemId: id, ...s, createdAt, updatedAt: createdAt, lastRun, seq: db.nextSeq() });
   });
   for (const key of p.collections) collections.get(key)?.push(id);
 }

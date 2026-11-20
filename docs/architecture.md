@@ -46,7 +46,9 @@ same change made through the other.
 - **Solution** — a saved program for a problem: another approach, another
   language, a brute force. At most one per problem is the *reference
   solution*, the one that computes and verifies expected outputs;
-  `problem.referenceSolution` on the item is a view of it.
+  `problem.referenceSolution` on the item is a view of it. A solution keeps
+  the figures of its last run on the test cases (cases passed, slowest case,
+  peak memory) until its code changes.
 - **Test case** — stdin plus expected stdout for a problem. Sample cases are
   shown with the statement and used by "Run"; all cases are used by "Submit".
   Each case records its `origin` (`manual`, `ai`, `import`) and whether its
@@ -639,7 +641,7 @@ out so that it is readable, diffable and hand-editable, and can live unzipped
 in a git repository.
 
 - Bundles carry *content* only — never personal state (status, notes,
-  favorites, submissions) or raw AI input. They are safe to share by default.
+  favorites, submissions, the last runs of solutions) or raw AI input. They are safe to share by default.
 - The format is versioned. Version 2 adds solution-only problems (interface
   and harness); a bundle is written in version 1 unless it holds such a
   problem, so older servers keep importing everything they can represent

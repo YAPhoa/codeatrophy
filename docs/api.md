@@ -647,12 +647,16 @@ another language can be saved but not run.
       "actualStdout": "0 1\n",
       "verdict": "executed",
       "stderr": "",
-      "timeMs": 31
+      "timeMs": 31,
+      "memoryKb": 9120
     }
   ]
 }
 ```
 
+- `timeMs` and `memoryKb` are what the engine measured for the case (`null`
+  when it measured nothing, as on a compile error); `timeMs` is read as for
+  submissions.
 - `ok` — the solution ran to completion within limits. When `false`, `verdict`
   says why (`runtime_error`, `time_limit_exceeded`, `compile_error`, …).
 - `matches` — `actualStdout` equals the stored expected output under the item's
@@ -668,8 +672,17 @@ another language can be saved but not run.
   failed, not because of the program) keeps its flag. A change to that item's
   test cases moves `updatedAt`, never `revision`.
 - With any other solution, the run is a check only: results are returned and
-  nothing is changed. `updateExpected: true` with a non-reference solution is
-  `422`.
+  the test cases are left as they are. `updateExpected: true` with a
+  non-reference solution is `422`.
+- Whichever solution ran, the run becomes its [`lastRun`](#solutions):
+  `passed` counts the cases that are `ok && matches`, `total` is the number
+  of cases, `timeMs` and `memoryKb` are the maximum over the results. It is
+  not recorded when there are no test cases, when any result is
+  `internal_error` (a run the engine cut short says nothing about the
+  solution, so the previous `lastRun` stays), or when the solution's
+  language or source was changed, or the solution deleted, while it ran.
+  Recording it moves neither the solution's `updatedAt` nor the item's
+  `updatedAt` or `revision`.
 
 Synchronous; may take as long as the cases take to run. `503
 judge_unavailable` if no engine is configured or the engine cannot be reached;
@@ -703,15 +716,37 @@ compute and verify expected outputs. It is also what
   "notes": "O(n) time, O(n) space.",
   "isReference": true,
   "createdAt": "...",
-  "updatedAt": "..."
+  "updatedAt": "...",
+  "lastRun": { "passed": 11, "total": 13, "timeMs": 48, "memoryKb": 9120, "ranAt": "..." }
 }
 ```
+
+`lastRun` sums up the latest run of this code on the problem's test cases,
+or is `null` when it has not run since its code last changed: `passed` of
+`total` cases, the slowest case's `timeMs` and the peak `memoryKb` (each
+`null` when the engine measured nothing), and when it ran. It is set by
+[`testcases/verify`](#post-itemsidtestcasesverify) and by saving a solution
+from a submission (below), never from figures a client sends, and cleared
+when the solution's `language` or `source` changes, through `PATCH` or by
+writing `problem.referenceSolution`; a new name, notes or reference mark
+keep it. Like submissions it is local to the instance: bundles do not carry
+it, and imported solutions start without one.
 
 `SolutionInput`: `name` (required, single line, 1–`limits.maxSolutionNameChars`),
 `language` (required; any canonical language id, whether or not the judge
 currently offers it), `source` (required, non-empty, at most
 `limits.maxSourceBytes`), `notes` (Markdown, default `""`, at most
 `limits.maxSolutionNotesChars`), `isReference` (default `false`).
+
+`submissionId` (create only) names the submission the code comes from. When
+it is a completed submission of this item over its test cases (not a run on
+custom input, and not ended by `internal_error`) whose `language` equals the
+solution's and whose `source` equals it once line endings are normalised,
+the new solution's `lastRun` is that submission's `passedCount`,
+`totalCount`, `timeMs`, `memoryKb` and `finishedAt`; a run of the samples
+gives its figures over the samples. Otherwise, including a submission that
+does not exist, it is ignored and the solution is saved without a
+`lastRun`.
 
 Setting `isReference: true` on one solution clears it on the item's others in
 the same transaction. An item holds at most `limits.maxSolutionsPerItem`
@@ -720,8 +755,8 @@ solutions (`409 conflict` beyond that).
 | Endpoint | Behaviour |
 | --- | --- |
 | `GET /items/{id}/solutions` | `{ "items": [Solution] }`, the reference solution first, then oldest first. Not paginated |
-| `POST /items/{id}/solutions` | Body `SolutionInput`. `201` `Solution` |
-| `PATCH /solutions/{id}` | Partial `SolutionInput`. Returns `Solution` |
+| `POST /items/{id}/solutions` | Body `SolutionInput`, optionally with `submissionId` (below). `201` `Solution` |
+| `PATCH /solutions/{id}` | Partial `SolutionInput`. Returns `Solution`. `submissionId` is `422` here |
 | `DELETE /solutions/{id}` | `204`. Deleting the reference solution leaves the item without one |
 
 All of these return `422` for a reading. Changing the reference solution's

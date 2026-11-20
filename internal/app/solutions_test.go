@@ -2,11 +2,13 @@ package app_test
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 func solIn(t *testing.T, js string) domain.ItemSolutionInput {
@@ -108,4 +110,56 @@ func TestSolutionLimitsAndValidation(t *testing.T) {
 	must(struct{}{}, e.app.DeleteItem(e.ctx, it.ID))
 	_, err = e.app.UpdateSolution(e.ctx, sol.ID, solIn(t, `{"name":"x"}`))
 	wantCode(t, err, app.CodeNotFound)
+}
+
+// A solution saved from a submission takes the submission's figures as its
+// last run, as the server stored them, but only when the submission is a
+// judged run of exactly that code on this problem's test cases; otherwise
+// the solution is saved without one.
+func TestSolutionFromSubmissionKeepsItsFigures(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, "")
+	sub := e.submit(t, it.ID, `{"language":"python","source":"sum\r\n","mode":"submit"}`)
+	create := func(js string) domain.ItemSolution {
+		t.Helper()
+		return must(e.app.CreateSolution(e.ctx, it.ID, solIn(t, js)))
+	}
+	// The source matches once line endings are normalised, as every saved source is.
+	s := create(fmt.Sprintf(`{"name":"Sum","language":"python","source":"sum\n","submissionId":%q}`, sub.ID))
+	if r := s.LastRun; r == nil || r.Passed != 2 || r.Total != 2 || *r.TimeMs != *sub.TimeMs || *r.MemoryKb != *sub.MemoryKb ||
+		!r.RanAt.Equal(*sub.FinishedAt) {
+		t.Errorf("from an accepted submission: %+v", r)
+	}
+	if got := must(e.app.ListSolutions(e.ctx, it.ID)).Items[0]; !reflect.DeepEqual(got.LastRun, s.LastRun) {
+		t.Errorf("stored: %+v", got.LastRun)
+	}
+	wrong := e.submit(t, it.ID, `{"language":"python","source":"print 3","mode":"submit"}`)
+	if r := create(fmt.Sprintf(`{"name":"Three","language":"python","source":"print 3","submissionId":%q}`, wrong.ID)).LastRun; r == nil ||
+		r.Passed != 1 || r.Total != 2 {
+		t.Errorf("from a wrong answer: %+v", r)
+	}
+	other := e.problem(t, "")
+	elsewhere := e.submit(t, other.ID, `{"language":"python","source":"sum","mode":"submit"}`)
+	custom := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run","stdin":"1 1"}`)
+	if err := e.db.Write(e.ctx, func(tx store.Tx) error {
+		return tx.InsertSubmission(&domain.Submission{ID: "judging", ItemID: it.ID, Mode: domain.ModeSubmit, Language: "python",
+			Source: "sum", Status: domain.SubmissionRunning, TotalCount: 2, CreatedAt: time.Now()})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for what, js := range map[string]string{
+		"another source":                 fmt.Sprintf(`{"name":"n","language":"python","source":"sum\nx","submissionId":%q}`, sub.ID),
+		"another language":               fmt.Sprintf(`{"name":"n","language":"cpp","source":"sum\n","submissionId":%q}`, sub.ID),
+		"another problem's submission":   fmt.Sprintf(`{"name":"n","language":"python","source":"sum","submissionId":%q}`, elsewhere.ID),
+		"a run on custom input":          fmt.Sprintf(`{"name":"n","language":"python","source":"sum","submissionId":%q}`, custom.ID),
+		"a submission still judged":      `{"name":"n","language":"python","source":"sum","submissionId":"judging"}`,
+		"a submission that is not there": `{"name":"n","language":"python","source":"sum","submissionId":"nope"}`,
+		"figures from the client":        `{"name":"n","language":"python","source":"sum","lastRun":{"passed":9,"total":9,"ranAt":"2026-01-01T00:00:00Z"}}`,
+	} {
+		if s := create(js); s.LastRun != nil {
+			t.Errorf("%s: %+v", what, s.LastRun)
+		}
+	}
+	_, err := e.app.UpdateSolution(e.ctx, s.ID, solIn(t, fmt.Sprintf(`{"submissionId":%q}`, sub.ID)))
+	wantField(t, err, "submissionId")
 }

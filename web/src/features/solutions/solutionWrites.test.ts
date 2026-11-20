@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/client';
 import type { Limits, Solution } from '../../api/types';
-import { defaultSolutionName, isSolutionLimitError, lineCount, savedWithCode, serverFieldErrors, touchesReference, validateSolution } from './solutionWrites';
+import { defaultSolutionName, describeLastRun, describeRunFigures, isSolutionLimitError, lineCount, savedWithCode, serverFieldErrors, touchesReference, validateSolution } from './solutionWrites';
 
 const limits = { maxSolutionNameChars: 10, maxSolutionNotesChars: 20, maxSourceBytes: 16 } as Limits;
 
@@ -15,6 +15,7 @@ const solution = (name: string): Solution => ({
   isReference: false,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+  lastRun: null,
 });
 
 describe('validateSolution', () => {
@@ -101,6 +102,56 @@ describe('lineCount', () => {
     expect(lineCount('a')).toBe(1);
     expect(lineCount('a\nb\n')).toBe(2);
     expect(lineCount('a\n\nb')).toBe(3);
+  });
+});
+
+describe('describeRunFigures', () => {
+  const nb = '\u00a0';
+
+  it('gives the slowest case and the peak memory of a judged run', () => {
+    expect(describeRunFigures({ verdict: 'accepted', timeMs: 48, memoryKb: 9318 }, 2000)).toEqual([`slowest case 48${nb}ms`, `peak 9.1${nb}MB`]);
+    expect(describeRunFigures({ verdict: 'wrong_answer', timeMs: 1500, memoryKb: 512 }, 2000)).toEqual([`slowest case 1.5${nb}s`, `peak 512${nb}KB`]);
+  });
+
+  it('shows a run stopped at the time limit as exceeding it', () => {
+    expect(describeRunFigures({ verdict: 'time_limit_exceeded', timeMs: 3000, memoryKb: 9318 }, 2000)).toEqual([`slowest case > 2${nb}s`, `peak 9.1${nb}MB`]);
+  });
+
+  it('says code that was never run is not judged yet', () => {
+    expect(describeRunFigures(undefined, 2000)).toEqual(['not judged yet']);
+  });
+
+  it('says nothing when the judge measured nothing', () => {
+    expect(describeRunFigures({ verdict: 'compile_error', timeMs: null, memoryKb: null }, 2000)).toEqual([]);
+    expect(describeRunFigures({ verdict: 'internal_error', timeMs: 12, memoryKb: 9318 }, 2000)).toEqual([]);
+    expect(describeRunFigures({ verdict: null, timeMs: null, memoryKb: null }, 2000)).toEqual([]);
+    expect(describeRunFigures({ verdict: 'accepted', timeMs: null, memoryKb: null }, 2000)).toEqual([]);
+  });
+
+  it('gives what was measured when one figure is missing', () => {
+    expect(describeRunFigures({ verdict: 'accepted', timeMs: 48, memoryKb: null }, undefined)).toEqual([`slowest case 48${nb}ms`]);
+    expect(describeRunFigures({ verdict: 'accepted', timeMs: null, memoryKb: 9318 }, undefined)).toEqual([`peak 9.1${nb}MB`]);
+  });
+});
+
+describe('describeLastRun', () => {
+  const nb = '\u00a0';
+  const run = { passed: 13, total: 13, timeMs: 48, memoryKb: 9318, ranAt: '2026-01-01T00:00:00Z' };
+
+  it('gives the cases passed, the slowest case and the peak memory', () => {
+    expect(describeLastRun(run, 2000)).toEqual({ passed: '13/13 passed', failed: false, figures: [`slowest 48${nb}ms`, `peak 9.1${nb}MB`] });
+  });
+
+  it('says when cases failed', () => {
+    expect(describeLastRun({ ...run, passed: 11 }, 2000)).toMatchObject({ passed: '11/13 passed', failed: true });
+  });
+
+  it('shows a run stopped at the time limit as exceeding it', () => {
+    expect(describeLastRun({ ...run, passed: 12, timeMs: 3100 }, 2000).figures).toEqual([`slowest > 2${nb}s`, `peak 9.1${nb}MB`]);
+  });
+
+  it('leaves out what the judge did not measure', () => {
+    expect(describeLastRun({ ...run, passed: 0, timeMs: null, memoryKb: null }, 2000)).toEqual({ passed: '0/13 passed', failed: true, figures: [] });
   });
 });
 

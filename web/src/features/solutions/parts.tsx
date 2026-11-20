@@ -2,15 +2,19 @@ import type { ReactNode } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Limits } from '../../api/types';
 import { Button } from '../../ui/Button';
+import { InfoTip } from '../../ui/InfoTip';
 import { Badge, Callout, ErrorCallout } from '../../ui/misc';
 import { isSolutionLimitError, type SolutionWrite } from './solutionWrites';
 
-/** The marker of the solution that is run to verify expected outputs. */
+/** The marker of the solution that is run to verify expected outputs, with an "i" that says so. */
 export function ReferenceBadge() {
   return (
-    <Badge tone="accent" title="Run to check the expected output of each test case">
-      <ShieldCheck size={12} aria-hidden="true" /> Reference
-    </Badge>
+    <>
+      <Badge tone="accent">
+        <ShieldCheck size={12} aria-hidden="true" /> Reference
+      </Badge>
+      <InfoTip label="About the reference solution">The reference solution is run to check the expected output of each test case.</InfoTip>
+    </>
   );
 }
 

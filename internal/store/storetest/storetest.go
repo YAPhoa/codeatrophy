@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1439,6 +1440,58 @@ func testSolutionConstraints(t *testing.T, db store.Store) {
 			t.Errorf("missing solution: %v", err)
 		}
 	}
+	// The last run: kept as written, and replaced or cleared by an update.
+	ms, kb := 48, 9318
+	run := &domain.SolutionRun{Passed: 11, Total: 13, TimeMs: &ms, MemoryKb: &kb, RanAt: now.Add(time.Hour)}
+	Write(t, db, func(tx store.Tx) error {
+		s, err := tx.GetSolution("s3")
+		if err != nil {
+			return err
+		}
+		s.LastRun = run
+		return tx.UpdateSolution(&s)
+	})
+	if got := Read(t, db, func(tx store.Tx) (domain.ItemSolution, error) { return tx.GetSolution("s3") }); !reflect.DeepEqual(got.LastRun, run) {
+		t.Errorf("last run: %+v", got.LastRun)
+	}
+	Write(t, db, func(tx store.Tx) error {
+		s, err := tx.GetSolution("s3")
+		if err != nil {
+			return err
+		}
+		s.LastRun = &domain.SolutionRun{Passed: 0, Total: 13, RanAt: now.Add(2 * time.Hour)}
+		return tx.UpdateSolution(&s)
+	})
+	if got := Read(t, db, func(tx store.Tx) (domain.ItemSolution, error) { return tx.GetSolution("s3") }); got.LastRun == nil ||
+		got.LastRun.TimeMs != nil || got.LastRun.MemoryKb != nil || got.LastRun.Passed != 0 || !got.LastRun.RanAt.Equal(now.Add(2*time.Hour)) {
+		t.Errorf("last run without figures: %+v", got.LastRun)
+	}
+	Write(t, db, func(tx store.Tx) error {
+		s, err := tx.GetSolution("s3")
+		if err != nil {
+			return err
+		}
+		s.LastRun = nil
+		return tx.UpdateSolution(&s)
+	})
+	if got := Read(t, db, func(tx store.Tx) (domain.ItemSolution, error) { return tx.GetSolution("s3") }); got.LastRun != nil {
+		t.Errorf("cleared last run: %+v", got.LastRun)
+	}
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteSolution("Ac") })
+	withRun := sol("ran", false, "n")
+	withRun.LastRun = run
+	Write(t, db, func(tx store.Tx) error { return tx.InsertSolution(withRun) })
+	if got := Read(t, db, func(tx store.Tx) (domain.ItemSolution, error) { return tx.GetSolution("ran") }); !reflect.DeepEqual(got.LastRun, run) {
+		t.Errorf("inserted last run: %+v", got.LastRun)
+	}
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteSolution("ran") })
+	badRun := sol("bad", false, "n")
+	badRun.LastRun = &domain.SolutionRun{Passed: 3, Total: 2, RanAt: now}
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteSolution("Ad") })
+	reject("more cases passed than ran", badRun)
+	negative := -1
+	badRun.LastRun = &domain.SolutionRun{Passed: 1, Total: 2, TimeMs: &negative, RanAt: now}
+	reject("a negative time", badRun)
 	Write(t, db, func(tx store.Tx) error { return tx.DeleteSolution("s1") })
 	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("i1"); return err })
 	if sols := Read(t, db, func(tx store.Tx) ([]domain.ItemSolution, error) { return tx.ListSolutions("i1") }); len(sols) != 0 {

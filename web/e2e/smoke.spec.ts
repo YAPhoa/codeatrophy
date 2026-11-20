@@ -159,33 +159,6 @@ test('solve: completing a library name adds its import to the solver\'s code, un
   await expect(lines.last()).toHaveText('h = heapq.heappu');
 });
 
-test('solve: completing a library name adds its import to the solver\'s code, undone with it', async ({ page }) => {
-  await open(page, '/');
-  await page.getByRole('link', { name: 'Merge k Sorted Lists' }).click();
-
-  const editor = page.locator('.editor-host');
-  const lines = editor.locator('.cm-line');
-  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
-  await editor.locator('.cm-content').click();
-  await page.keyboard.press('ControlOrMeta+End');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('h = heapq.heappu');
-
-  // The runner imports json and sys, not heapq: the completion says it adds the import.
-  const option = page.locator('.cm-tooltip-autocomplete').getByRole('option', { name: 'heappush(heap, item)' });
-  await expect(option).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('.cm-completionInfo')).toHaveText('Adds import heapq');
-  // Clicked: Enter is ignored for a moment after the list changes, which a busy machine can hit.
-  await option.click();
-  await expect(lines.first()).toHaveText('import heapq');
-  await expect(lines.last()).toHaveText('h = heapq.heappush');
-
-  // One step undoes both.
-  await page.keyboard.press('ControlOrMeta+Z');
-  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
-  await expect(lines.last()).toHaveText('h = heapq.heappu');
-});
-
 test('solve: the lines that read the input open folded, and unfold in place', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Number of Islands' }).click();
@@ -377,13 +350,20 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
 
   await writeCode(page, 'import sys\n\nprint(len(sys.stdin.readline()))\n');
+  // The editor's code has not been judged, so there are no figures to show.
+  const dialog = page.getByRole('dialog', { name: 'Save as a solution' });
+  await page.locator('.editor-save').click();
+  await expect(dialog.locator('.save-solution-code')).toHaveText(/^Python \([\d.]+\) · not judged yet$/);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
   const result = page.getByRole('status').filter({ hasText: /passed/ });
   await expect(result).toContainText('Accepted');
 
-  // An accepted submission asks to be kept, under a name of the solver's choosing.
-  const dialog = page.getByRole('dialog', { name: 'Save as a solution' });
+  // An accepted submission asks to be kept, under a name of the solver's choosing, with the figures of its run.
   await expect(dialog).toContainText('Accepted. Keep this code with the problem?');
+  await expect(dialog.locator('.save-solution-code')).toHaveText(/^Python \([\d.]+\) · slowest case \d+\sms · peak [\d.]+\sMB$/);
   await dialog.getByRole('button', { name: 'Not now' }).click();
   await expect(dialog).toHaveCount(0);
 
@@ -393,10 +373,11 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await dialog.getByRole('button', { name: 'Save solution' }).click();
   await expect(result).toContainText('Saved as a solution');
 
-  // It is listed with the problem's solutions, with its code out of sight until asked for.
+  // It is listed with the problem's solutions, with its code out of sight until asked for, and the figures of the submission it came from.
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Solutions/ }).click();
   const saved = page.getByRole('article').filter({ hasText: 'Smoke test solution' });
   await expect(saved).toBeVisible();
+  await expect(saved.locator('.solution-last-run > *')).toHaveText([/^(\d+)\/\1 passed$/, /^slowest \d+\sms$/, /^peak [\d.]+\sMB$/, 'ran just now']);
   await expect(saved.getByRole('textbox')).toHaveCount(0);
   await saved.getByRole('button', { name: 'Show solution' }).click();
   await expect(saved.getByRole('textbox')).toContainText('sys.stdin.readline');
@@ -414,6 +395,43 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await expect(result.getByRole('link', { name: 'Already saved as “Smoke test solution”' })).toBeVisible();
   await expect(dialog).toHaveCount(0);
   await expect(result.getByRole('button', { name: 'Save as solution' })).toHaveCount(0);
+});
+
+test('solutions: a card shows the figures of its last run, from "Run tests", until its code is edited', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Solutions/ }).click();
+
+  // A run that failed a case says so in the danger tone; a time-out shows as over the limit.
+  const brute = page.getByRole('article', { name: 'Brute force', exact: true });
+  await expect(brute.locator('.solution-last-run > *')).toHaveText([/^(\d+)\/\d+ passed$/, /^slowest > 2\ss$/, /^peak [\d.]+\sMB$/, /^ran /]);
+  await expect(brute.locator('.solution-last-run .tone-danger')).toHaveText(/passed$/);
+
+  // A solution never run shows nothing; "Run tests" records the run, and the card shows what the server kept.
+  const cpp = page.getByRole('article', { name: 'Hash map, one pass (C++)', exact: true });
+  await expect(cpp.locator('.solution-last-run')).toHaveCount(0);
+  await cpp.getByRole('button', { name: 'Run tests' }).click();
+  await expect(cpp.getByRole('status')).toContainText(/Passes (\d+) of \1 test cases/);
+  await expect(cpp.locator('.solution-last-run > *')).toHaveText([/^(\d+)\/\1 passed$/, /^slowest \d+\sms$/, /^peak [\d.]+\sMB$/, 'ran just now']);
+  await expect(cpp.locator('.solution-last-run .tone-danger')).toHaveCount(0);
+
+  // A new name keeps them; edited code has not been run, so they go.
+  await cpp.getByRole('button', { name: 'More actions for Hash map, one pass (C++)' }).click();
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename solution' });
+  await rename.getByLabel('Name').fill('C++, one pass');
+  await rename.getByRole('button', { name: 'Rename' }).click();
+  const renamed = page.getByRole('article', { name: 'C++, one pass', exact: true });
+  await expect(renamed.locator('.solution-last-run')).toBeVisible();
+  await renamed.getByRole('button', { name: 'Edit', exact: true }).click();
+  const form = page.getByRole('form', { name: 'Edit C++, one pass' });
+  await form.getByRole('textbox', { name: 'Solution code' }).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.insertText('\n// tidied\n');
+  await form.getByRole('button', { name: 'Save solution' }).click();
+  await expect(form).toHaveCount(0);
+  await expect(renamed).toBeVisible();
+  await expect(renamed.locator('.solution-last-run')).toHaveCount(0);
 });
 
 test('preferences: hidden test cases and editor options follow the settings', async ({ page }) => {

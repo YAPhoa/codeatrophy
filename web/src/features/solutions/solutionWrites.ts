@@ -7,9 +7,9 @@ import { useNavigate } from 'react-router';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, isApiError } from '../../api/client';
 import { qk } from '../../api/queries';
-import type { Item, Limits, Solution, SolutionPatch } from '../../api/types';
+import type { Item, Limits, Solution, SolutionPatch, SolutionRun, SubmissionSummary } from '../../api/types';
 import { loadCode, rememberLanguage, saveCode } from '../../lib/codeStore';
-import { formatBytes } from '../../lib/format';
+import { formatBytes, formatMemoryKb, formatRunTime } from '../../lib/format';
 import { byteLength, charCount } from '../../lib/itemForm';
 import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
 import { useConfirm } from '../../ui/Dialog';
@@ -179,6 +179,31 @@ export function savedWithCode(solutions: readonly Solution[] | undefined, code: 
 
 export function lineCount(source: string): number {
   return source === '' ? 0 : source.replace(/\n$/, '').split('\n').length;
+}
+
+/** The figures of the run a piece of code comes from. */
+export type RunFigures = Pick<SubmissionSummary, 'verdict' | 'timeMs' | 'memoryKb'>;
+
+/**
+ * What the save dialog says of the run the code comes from: "slowest case
+ * 48 ms", "peak 9.1 MB"; "not judged yet" without a run, and nothing when the
+ * judge measured nothing (a compile or judge error has no meaningful figures).
+ */
+export function describeRunFigures(run: RunFigures | undefined, timeLimitMs: number | undefined): string[] {
+  if (!run) return ['not judged yet'];
+  if (run.verdict === null || run.verdict === 'compile_error' || run.verdict === 'internal_error') return [];
+  const parts: string[] = [];
+  if (run.timeMs !== null) parts.push(`slowest case ${formatRunTime(run.timeMs, run.verdict, timeLimitMs)}`);
+  if (run.memoryKb !== null) parts.push(`peak ${formatMemoryKb(run.memoryKb)}`);
+  return parts;
+}
+
+/** What a solution card says of its last run: "11/13 passed", and "slowest 48 ms", "peak 9.1 MB" for what was measured. */
+export function describeLastRun(run: SolutionRun, timeLimitMs: number | undefined): { passed: string; failed: boolean; figures: string[] } {
+  const figures: string[] = [];
+  if (run.timeMs !== null) figures.push(`slowest ${formatRunTime(run.timeMs, null, timeLimitMs)}`);
+  if (run.memoryKb !== null) figures.push(`peak ${formatMemoryKb(run.memoryKb)}`);
+  return { passed: `${run.passed}/${run.total} passed`, failed: run.passed < run.total, figures };
 }
 
 /** "Python solution", or "Python solution 2" when that name is taken. */

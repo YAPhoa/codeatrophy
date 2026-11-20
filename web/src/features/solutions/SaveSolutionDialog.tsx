@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router';
 import { api } from '../../api/client';
 import { useLimits, useMeta, useSolutions } from '../../api/queries';
 import type { Item, Solution } from '../../api/types';
-import { plural } from '../../lib/format';
 import { charCount, fieldMessage } from '../../lib/itemForm';
 import { languageLabel } from '../../lib/languages';
 import { Button } from '../../ui/Button';
@@ -12,14 +11,18 @@ import { Checkbox, TextAreaField, TextField } from '../../ui/Field';
 import { Callout } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { WriteProblems } from './parts';
-import { defaultSolutionName, lineCount, serverFieldErrors, touchesReference, useSolutionWrite, validateSolution } from './solutionWrites';
+import { defaultSolutionName, describeRunFigures, serverFieldErrors, touchesReference, useSolutionWrite, validateSolution, type RunFigures } from './solutionWrites';
 
 export interface SaveSolutionDialogProps {
   item: Item;
   open: boolean;
   onClose: () => void;
-  /** The code to save. `name` overrides the suggested name. */
-  initial: { language: string; source: string; name?: string };
+  /**
+   * The code to save. `name` overrides the suggested name; `run` is the judged
+   * run it comes from, if any, and `submissionId` that run's submission, whose
+   * figures the server then keeps as the solution's last run.
+   */
+  initial: { language: string; source: string; name?: string; run?: RunFigures; submissionId?: string };
   /** Opened unasked, after an accepted submission: says so, and "Cancel" reads "Not now". */
   accepted?: boolean;
   onSaved?: (solution: Solution) => void;
@@ -65,13 +68,19 @@ function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutio
   const sourceError = local.source ?? (server.fields.source ? fieldMessage(server.fields.source) : null);
   const reference = solutionsQuery.data?.find((s) => s.isReference) ?? null;
   const notesLimit = limits?.maxSolutionNotesChars;
+  const figures = describeRunFigures(initial.run, item.problem?.timeLimitMs);
 
   const save = async () => {
     setAttempted(true);
     if (atLimit || local.name || local.source || local.notes) return;
     const values = { name: name.trim(), language: initial.language, source: initial.source, notes, isReference };
     await write.run({
-      write: (expectedRevision) => api.solutions.create(item.id, { ...values, ...(expectedRevision !== undefined ? { expectedRevision } : {}) }),
+      write: (expectedRevision) =>
+        api.solutions.create(item.id, {
+          ...values,
+          ...(initial.submissionId !== undefined ? { submissionId: initial.submissionId } : {}),
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+        }),
       checked: touchesReference(null, values),
       done: (saved) => {
         toast.success('Saved as a solution', { label: 'Open solutions', onClick: () => navigate(`/items/${item.id}/solutions`) });
@@ -111,7 +120,14 @@ function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutio
         {accepted && <p className="save-solution-accepted">Accepted. Keep this code with the problem?</p>}
         <p className="save-solution-code">
           <span className="save-solution-language">{languageLabel(initial.language, meta?.judge.languages)}</span>
-          <span className="muted">{plural(lineCount(initial.source), 'line')} of code, saved as it is</span>
+          {figures.length > 0 && (
+            <>
+              {' '}
+              <span className="muted" title={initial.run ? 'Time of the slowest test case, and the most memory any case used.' : undefined}>
+                · {figures.join(' · ')}
+              </span>
+            </>
+          )}
         </p>
         {atLimit ? (
           <Callout tone="warn" title={`This problem already has the maximum of ${limits.maxSolutionsPerItem.toLocaleString()} saved solutions`}>

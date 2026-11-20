@@ -140,10 +140,15 @@ func Populate(t *testing.T, db store.Store) {
 				return err
 			}
 		}
+		ms, kb := 48, 9318
 		for i, ref := range []bool{true, false} {
-			if err := tx.InsertSolution(&domain.ItemSolution{ID: fmt.Sprint("sol", i), ItemID: "origin",
+			s := domain.ItemSolution{ID: fmt.Sprint("sol", i), ItemID: "origin",
 				Name: fmt.Sprint("Approach ", i), Language: "python", Source: "print(sum(map(int, input().split())))",
-				Notes: x, IsReference: ref, CreatedAt: now, UpdatedAt: now}); err != nil {
+				Notes: x, IsReference: ref, CreatedAt: now, UpdatedAt: now}
+			if ref {
+				s.LastRun = &domain.SolutionRun{Passed: 2, Total: 3, TimeMs: &ms, MemoryKb: &kb, RanAt: now.Add(time.Hour)}
+			}
+			if err := tx.InsertSolution(&s); err != nil {
 				return err
 			}
 		}
@@ -209,4 +214,24 @@ func SameDump(t *testing.T, what string, want, got map[string][]string) {
 				strings.Join(w, "\n  "), len(g), strings.Join(g, "\n  "))
 		}
 	}
+}
+
+// ClearLastRuns removes the last runs of the solutions Populate stores, for
+// tests that take its database back to a schema version from before
+// solutions had them (11), which loses them.
+func ClearLastRuns(t *testing.T, db store.Store) {
+	t.Helper()
+	Write(t, db, func(tx store.Tx) error {
+		sols, err := tx.ListSolutions("origin")
+		if err != nil {
+			return err
+		}
+		for _, s := range sols {
+			s.LastRun = nil
+			if err := tx.UpdateSolution(&s); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

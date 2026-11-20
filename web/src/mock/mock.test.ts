@@ -927,7 +927,7 @@ describe('solutions', () => {
     const { items } = await api.solutions.list(twoSum);
     expect(items.map((s) => s.id)).toEqual([seedIds.solutions.twoSumHashMap, seedIds.solutions.twoSumBruteForce, seedIds.solutions.twoSumCpp]);
     expect(items.map((s) => s.isReference)).toEqual([true, false, false]);
-    expect(Object.keys(items[0]!).sort()).toEqual(['createdAt', 'id', 'isReference', 'itemId', 'language', 'name', 'notes', 'source', 'updatedAt']);
+    expect(Object.keys(items[0]!).sort()).toEqual(['createdAt', 'id', 'isReference', 'itemId', 'language', 'lastRun', 'name', 'notes', 'source', 'updatedAt']);
     expect(items[0]).toMatchObject({ itemId: twoSum, name: 'Hash map, one pass', language: 'python' });
 
     // Marking another one moves it to the front; the rest keep their age order.
@@ -937,6 +937,65 @@ describe('solutions', () => {
       seedIds.solutions.twoSumHashMap,
       seedIds.solutions.twoSumBruteForce,
     ]);
+  });
+
+  it('keeps the last run of each solution on the test cases, until its code changes', async () => {
+    const [hashMap, brute, cpp] = (await api.solutions.list(twoSum)).items;
+    const cases = (await api.testCases.list(twoSum)).items.length;
+    // The seed has run some of them, and the brute force timed out on one case.
+    expect(hashMap!.lastRun).toMatchObject({ passed: cases, total: cases });
+    expect(brute!.lastRun).toMatchObject({ passed: cases - 1, total: cases });
+    expect(cpp!.lastRun).toBeNull();
+
+    // A verification records it: the cases passed, the slowest case and the peak memory.
+    const { results } = await api.testCases.verify(twoSum, false, cpp!.id);
+    const ran = (await api.solutions.list(twoSum)).items.find((s) => s.id === cpp!.id)!.lastRun;
+    expect(ran).toEqual({
+      passed: results.filter((r) => r.ok && r.matches).length,
+      total: cases,
+      timeMs: Math.max(...results.map((r) => r.timeMs!)),
+      memoryKb: Math.max(...results.map((r) => r.memoryKb!)),
+      ranAt: expect.any(String) as string,
+    });
+    // A new name keeps it; new code clears it.
+    expect((await api.solutions.update(cpp!.id, { name: 'C++' })).lastRun).toEqual(ran);
+    expect((await api.solutions.update(cpp!.id, { source: `${cpp!.source}// tidied\n` })).lastRun).toBeNull();
+    const reference = await api.items.get(twoSum);
+    await api.items.update(twoSum, { problem: { referenceSolution: { language: 'python', source: 'print(0)\n' } }, expectedRevision: reference.revision });
+    expect((await api.solutions.list(twoSum)).items[0]!.lastRun).toBeNull();
+
+    // Code that does not build has no figures; a judge failure is not recorded.
+    const broken = await api.solutions.create(twoSum, { name: 'Broken', language: 'cpp', source: 'int main() { MOCK:CE }' });
+    await api.testCases.verify(twoSum, false, broken.id);
+    expect((await api.solutions.list(twoSum)).items.find((s) => s.id === broken.id)!.lastRun).toMatchObject({ passed: 0, timeMs: null, memoryKb: null });
+    const flaky = await api.solutions.create(twoSum, { name: 'Flaky judge', language: 'python', source: 'print(1)  # MOCK:IE' });
+    await api.testCases.verify(twoSum, false, flaky.id);
+    expect((await api.solutions.list(twoSum)).items.find((s) => s.id === flaky.id)!.lastRun).toBeNull();
+    start({ judge: 'down' });
+    await failure(api.testCases.verify(twoSum, false, brute!.id));
+    expect((await api.solutions.list(twoSum)).items.find((s) => s.id === brute!.id)!.lastRun).toEqual(brute!.lastRun);
+  });
+
+  it('takes the last run of a solution saved from a submission of its code, and only then', async () => {
+    const source = 'import sys\nprint(sys.stdin.read())\n';
+    const created = await api.submissions.create(twoSum, { language: 'python', source, mode: 'submit', stdin: null });
+    const { final } = await judged(created.id);
+    const kept = await api.solutions.create(twoSum, { name: 'Kept', language: 'python', source: source.replace(/\n/g, '\r\n'), submissionId: final.id });
+    expect(kept.lastRun).toEqual({ passed: final.passedCount, total: final.totalCount, timeMs: final.timeMs, memoryKb: final.memoryKb, ranAt: final.finishedAt });
+
+    const custom = await api.submissions.create(twoSum, { language: 'python', source, mode: 'run', stdin: '1 2\n' });
+    await judged(custom.id);
+    const ignored = {
+      'other code': [twoSum, { language: 'python', source: 'print(2)\n', submissionId: final.id }],
+      'another language': [twoSum, { language: 'ruby', source, submissionId: final.id }],
+      "another problem's submission": [seedIds.items.coinChange, { language: 'python', source, submissionId: final.id }],
+      'a run on custom input': [twoSum, { language: 'python', source, submissionId: custom.id }],
+      'no such submission': [twoSum, { language: 'python', source, submissionId: 'nope' }],
+    } as const;
+    for (const [what, [itemId, body]] of Object.entries(ignored)) {
+      expect((await api.solutions.create(itemId, { name: what, ...body })).lastRun, what).toBeNull();
+    }
+    expect(Object.keys((await failure(api.solutions.update(kept.id, { submissionId: final.id } as never))).fields)).toEqual(['submissionId']);
   });
 
   it('reports the reference solution on the item, with its id, and counts solutions', async () => {

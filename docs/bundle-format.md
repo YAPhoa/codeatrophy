@@ -186,6 +186,10 @@ take the language from `language`, never from the extension. At most one
 entry has `reference: true`; if several do, a reader keeps the first and
 reports a warning.
 
+A solution's `lastRun` (see the HTTP API) is a measurement local to the
+instance, like submissions, and is not part of the format: writers leave it
+out, readers ignore it, and an imported solution starts without one.
+
 ## `tests/tests.json`
 
 Present for problems that have test cases.
@@ -239,7 +243,8 @@ with the runner code itself. A full-program problem has neither, so its
 hash is the same in both versions and the hashes of version 1 bundles stay
 valid.
 
-Ids, timestamps, `origin`, `verified` and everything personal are excluded.
+Ids, timestamps, `origin`, `verified`, a solution's `lastRun` and everything
+personal are excluded.
 `problem`, `solutions` and `testCases` are omitted for readings. The hash
 always describes what is *in the bundle*: if solutions or hidden tests were
 left out of the export, they are left out of the hash too (`solutions` is

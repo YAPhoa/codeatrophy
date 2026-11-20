@@ -149,6 +149,7 @@ submission history, which leaves runs out; the custom input kept across a
 reload; the runner rows and folded regions of the solve editor; completing a
 library name with its import;
 keeping an accepted submission as a solution and making it the reference;
+the last run a solution's card shows, until its code is edited;
 preferences taking effect; large test cases, from their preferences to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
 (key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
@@ -229,8 +230,9 @@ A few conventions worth knowing:
 - **A problem keeps any number of solutions; one may be the reference.** Only
   the reference solution verifies test cases: running it sets and clears
   "verified" marks and can replace expected outputs. Any other solution can be
-  run against the cases as a check that changes nothing. Solutions are
-  spoilers, so their code is not rendered until asked for.
+  run against the cases as a check that leaves them alone. Every run is kept
+  as the solution's `lastRun`, which its card shows until its code changes.
+  Solutions are spoilers, so their code is not rendered until asked for.
 - **The editor is the primary surface of the workspace.** It fills the column
   beside the statement; test cases, results and custom input live in a drawer
   below it that is a slim bar until something is run. The statement, the

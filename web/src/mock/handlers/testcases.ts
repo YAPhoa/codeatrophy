@@ -156,6 +156,12 @@ function reorderCases(db: MockDb, req: Req) {
  * with `updateExpected` replaces mismatching expected outputs. A run with
  * another solution is a check that reports results only.
  */
+/** The largest of the figures the judge measured, or `null` when it measured none. */
+function maxOf(values: (number | null)[]): number | null {
+  const measured = values.filter((v): v is number => v !== null);
+  return measured.length > 0 ? Math.max(...measured) : null;
+}
+
 async function verify(db: MockDb, req: Req) {
   const item = problemOf(db, req.params.id!);
   const raw = objectBody(req);
@@ -191,12 +197,12 @@ async function verify(db: MockDb, req: Req) {
   let casesChanged = false;
   const results: VerifyResult[] = cases.map((tc, i) => {
     const usage = resourceUsage(reference.language, hash32(`${tc.id}:verify`));
-    // A solution that does not build, or an engine that fails, fails every case.
+    // A solution that does not build, or an engine that fails, fails every case, and nothing is measured.
     const failure =
       behaviour === 'ce'
-        ? { verdict: 'compile_error' as const, stderr: compileOutputFor(reference.language), timeMs: 0 }
+        ? { verdict: 'compile_error' as const, stderr: compileOutputFor(reference.language), timeMs: null, memoryKb: null }
         : behaviour === 'ie'
-          ? { verdict: 'internal_error' as const, stderr: '', timeMs: 0 }
+          ? { verdict: 'internal_error' as const, stderr: '', timeMs: null, memoryKb: null }
           : failureFor(behaviour, i, cases.length, reference.language, limits);
     if (failure) {
       if (authoritative && tc.verified) {
@@ -210,7 +216,8 @@ async function verify(db: MockDb, req: Req) {
         actualStdout: '',
         verdict: failure.verdict,
         stderr: failure.stderr,
-        timeMs: failure.timeMs ?? usage.timeMs,
+        timeMs: failure.timeMs === undefined ? usage.timeMs : failure.timeMs,
+        memoryKb: failure.memoryKb === undefined ? usage.memoryKb : failure.memoryKb,
       };
     }
     const right = db.truth.get(tc.id) ?? tc.expectedStdout;
@@ -243,9 +250,20 @@ async function verify(db: MockDb, req: Req) {
       verdict: 'executed',
       stderr: '',
       timeMs: usage.timeMs,
+      memoryKb: usage.memoryKb,
     };
   });
   if (casesChanged) db.touchCases(item);
+  // Every run is the solution's last run, unless there was nothing to run or the judge failed on a case.
+  if (results.length > 0 && !results.some((r) => r.verdict === 'internal_error')) {
+    reference.lastRun = {
+      passed: results.filter((r) => r.ok && r.matches).length,
+      total: results.length,
+      timeMs: maxOf(results.map((r) => r.timeMs)),
+      memoryKb: maxOf(results.map((r) => r.memoryKb)),
+      ranAt: db.now(),
+    };
+  }
   return ok({ results });
 }
 

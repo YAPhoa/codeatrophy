@@ -13,11 +13,23 @@ export interface SeedSolution {
   source: string;
   /** Markdown. */
   notes: string;
+  /** Its last run on the problem's test cases; none when absent. */
+  lastRun?: SeedRun;
+}
+
+/** A run of a seed solution on every test case of its problem. */
+export interface SeedRun {
+  /** How many cases did not pass; none by default. */
+  failed?: number;
+  timeMs: number | null;
+  memoryKb: number | null;
+  /** Days ago. */
+  ran: number;
 }
 
 export interface SeedSolutionSet {
-  /** Name and notes of the reference solution. */
-  reference: { name: string; notes: string };
+  /** Name, notes and last run of the reference solution. */
+  reference: { name: string; notes: string; lastRun?: SeedRun };
   /** The other saved solutions, oldest first. */
   others?: SeedSolution[];
 }
@@ -29,6 +41,7 @@ export const SEED_SOLUTIONS: Record<string, SeedSolutionSet> = {
     reference: {
       name: 'Min-heap of list heads',
       notes: '**O(N log k)** time, **O(k)** space. The heap holds `(value, list index)`, so equal values never compare two nodes.',
+      lastRun: { timeMs: 41, memoryKb: 9412, ran: 3 },
     },
     others: [
       {
@@ -44,12 +57,15 @@ export const SEED_SOLUTIONS: Record<string, SeedSolutionSet> = {
       name: 'Hash map, one pass',
       notes:
         '**O(n)** time, **O(n)** space.\n\nLook the complement up *before* storing the current value, so an element is never paired with itself.',
+      lastRun: { timeMs: 48, memoryKb: 9318, ran: 2 },
     },
     others: [
       {
         name: 'Brute force',
         language: 'python',
         notes: '**O(n²)** time, **O(1)** space. Fine for the examples, times out on the large hidden case.',
+        // Stopped at the time limit (2 s) plus the judge's grace period.
+        lastRun: { failed: 1, timeMs: 3100, memoryKb: 9204, ran: 95 },
         source: String.raw`import sys
 
 

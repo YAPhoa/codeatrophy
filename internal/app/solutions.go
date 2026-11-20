@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"codeatrophy/internal/domain"
@@ -67,6 +68,11 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 		if err := checkRevision(in.ExpectedRevision, &it); err != nil {
 			return err
 		}
+		if in.SubmissionID.HasValue() {
+			if s.LastRun, err = submissionRun(tx, &s, in.SubmissionID.Val); err != nil {
+				return err
+			}
+		}
 		existing, err := tx.ListSolutions(itemID)
 		if err != nil {
 			return err
@@ -91,6 +97,9 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 // UpdateSolution applies a partial update to a saved solution.
 func (a *App) UpdateSolution(ctx context.Context, id string, in domain.ItemSolutionInput) (domain.ItemSolution, error) {
 	var out domain.ItemSolution
+	if in.SubmissionID.HasValue() {
+		return out, errField("submissionId", "only applies when creating a solution")
+	}
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		s, err := tx.GetSolution(id)
 		if err != nil {
@@ -149,6 +158,28 @@ func (a *App) DeleteSolution(ctx context.Context, id string) error {
 	})
 }
 
+// submissionRun returns the figures of a submission as the last run of a
+// new solution s, or nil when the submission does not describe s's code:
+// it is missing, of another item, not completed, a run on custom input,
+// stopped by an engine failure, or of another language or source. The
+// figures are always the server's own, never the client's.
+func submissionRun(tx store.Tx, s *domain.ItemSolution, submissionID string) (*domain.SolutionRun, error) {
+	sub, err := tx.GetSubmission(submissionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sub.ItemID != s.ItemID || sub.Status != domain.SubmissionCompleted || sub.FinishedAt == nil || sub.Stdin != nil ||
+		sub.Verdict == nil || *sub.Verdict == domain.VerdictInternalError ||
+		sub.Language != s.Language || domain.NormalizeText(sub.Source) != s.Source {
+		return nil, nil
+	}
+	return &domain.SolutionRun{Passed: sub.PassedCount, Total: sub.TotalCount, TimeMs: sub.TimeMs, MemoryKb: sub.MemoryKb,
+		RanAt: *sub.FinishedAt}, nil
+}
+
 // writeReference persists a write to the problem.referenceSolution view:
 // a value updates the reference solution in place (or creates one named
 // "Reference solution"); nil only clears the reference mark.
@@ -163,6 +194,9 @@ func (a *App) writeReference(tx store.Tx, itemID string, ref *domain.Solution) e
 	now := a.clock()
 	for _, s := range sols {
 		if s.IsReference {
+			if s.Language != ref.Language || s.Source != ref.Source {
+				s.LastRun = nil // the figures belong to the code that ran
+			}
 			s.Language, s.Source, s.UpdatedAt = ref.Language, ref.Source, now
 			return tx.UpdateSolution(&s)
 		}

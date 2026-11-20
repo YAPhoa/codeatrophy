@@ -975,6 +975,55 @@ func TestSolutionsEndpoints(t *testing.T) {
 	c.expect("GET", api+"/items/"+reading+"/solutions", "", 422)
 }
 
+// A solution reports its last run on the test cases: null until it runs,
+// set by a verification and by saving it from a submission of its code, and
+// null again once its code changes.
+func TestSolutionLastRun(t *testing.T) {
+	c := newServer(t)
+	id := c.expect("POST", api+"/items", `{"type":"problem","title":"P","testCases":[
+		{"stdin":"1 2","expectedStdout":"3","isSample":true},{"stdin":"5 5","expectedStdout":"11"}]}`, 201).json(t)["id"].(string)
+	sol := c.expect("POST", api+"/items/"+id+"/solutions", `{"name":"Sum","language":"python","source":"sum"}`, 201).json(t)
+	if v, ok := sol["lastRun"]; !ok || v != nil {
+		t.Errorf("a new solution's lastRun: %v", sol)
+	}
+	sid := sol["id"].(string)
+	res := c.expect("POST", api+"/items/"+id+"/testcases/verify", `{"solutionId":"`+sid+`"}`, 200).json(t)
+	if r := res["results"].([]any)[0].(map[string]any); r["memoryKb"] != float64(1024) || r["timeMs"] != float64(5) {
+		t.Errorf("a verify result: %v", r)
+	}
+	run := c.expect("GET", api+"/items/"+id+"/solutions", "", 200).json(t)["items"].([]any)[0].(map[string]any)["lastRun"].(map[string]any)
+	if len(run) != 5 || run["passed"] != float64(1) || run["total"] != float64(2) || run["timeMs"] != float64(5) ||
+		run["memoryKb"] != float64(1024) || run["ranAt"] == nil {
+		t.Errorf("lastRun after a verify: %v", run)
+	}
+	renamed := c.expect("PATCH", api+"/solutions/"+sid, `{"name":"Sum it up"}`, 200).json(t)
+	if renamed["lastRun"] == nil {
+		t.Error("a new name cleared lastRun")
+	}
+	if edited := c.expect("PATCH", api+"/solutions/"+sid, `{"source":"echo"}`, 200).json(t); edited["lastRun"] != nil {
+		t.Errorf("a new source kept lastRun: %v", edited["lastRun"])
+	}
+	c.expect("PATCH", api+"/solutions/"+sid, `{"submissionId":"x"}`, 422)
+
+	sub := c.expect("POST", api+"/items/"+id+"/submissions", `{"language":"python","source":"sum","mode":"submit"}`, 202).json(t)
+	var done map[string]any
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if done = c.expect("GET", api+"/submissions/"+sub["id"].(string), "", 200).json(t); done["status"] == "completed" {
+			break
+		}
+	}
+	kept := c.expect("POST", api+"/items/"+id+"/solutions",
+		`{"name":"Kept","language":"python","source":"sum","submissionId":"`+sub["id"].(string)+`"}`, 201).json(t)
+	if run, _ := kept["lastRun"].(map[string]any); run == nil || run["passed"] != done["passedCount"] || run["total"] != float64(2) ||
+		run["ranAt"] != done["finishedAt"] || run["memoryKb"] != done["memoryKb"] {
+		t.Errorf("saved from a submission: %v (submission %v)", kept["lastRun"], done)
+	}
+	if other := c.expect("POST", api+"/items/"+id+"/solutions",
+		`{"name":"Other","language":"python","source":"sum\nx","submissionId":"`+sub["id"].(string)+`"}`, 201).json(t); other["lastRun"] != nil {
+		t.Errorf("saved from a submission of other code: %v", other["lastRun"])
+	}
+}
+
 func TestPreferencesEndpoints(t *testing.T) {
 	c := newServer(t)
 	def := c.expect("GET", api+"/settings/preferences", "", 200).json(t)

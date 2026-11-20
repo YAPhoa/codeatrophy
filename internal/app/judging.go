@@ -475,6 +475,28 @@ type VerifyResult struct {
 	Verdict      domain.Verdict `json:"verdict"`
 	Stderr       string         `json:"stderr"`
 	TimeMs       *int           `json:"timeMs"`
+	MemoryKb     *int           `json:"memoryKb"`
+}
+
+// lastRunOf sums up a verification as a solution's last run, or returns
+// nil when it says nothing about the solution: no cases ran, or the engine
+// failed on one, so the run was cut short.
+func lastRunOf(results []VerifyResult, ranAt time.Time) *domain.SolutionRun {
+	if len(results) == 0 {
+		return nil
+	}
+	run := &domain.SolutionRun{Total: len(results), RanAt: ranAt}
+	for _, r := range results {
+		if r.Verdict == domain.VerdictInternalError {
+			return nil
+		}
+		if r.OK && r.Matches {
+			run.Passed++
+		}
+		run.TimeMs = maxPtr(run.TimeMs, r.TimeMs)
+		run.MemoryKb = maxPtr(run.MemoryKb, r.MemoryKb)
+	}
+	return run
 }
 
 // VerifyResponse lists verification results in case order.
@@ -543,7 +565,8 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	resp := VerifyResponse{Results: make([]VerifyResult, len(cases))}
 	for i, c := range cases {
 		e := execs[i]
-		r := VerifyResult{TestCaseID: c.ID, Verdict: grader.Verdict(it.Problem.Compare, e, nil), TimeMs: e.Result.TimeMs}
+		r := VerifyResult{TestCaseID: c.ID, Verdict: grader.Verdict(it.Problem.Compare, e, nil), TimeMs: e.Result.TimeMs,
+			MemoryKb: e.Result.MemoryKb}
 		r.OK = r.Verdict == domain.VerdictExecuted
 		r.ActualStdout = e.Result.Stdout
 		r.Stderr = domain.Truncate(e.Result.Stderr, domain.MaxResultTextBytes)
@@ -558,17 +581,19 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		r.Matches = r.OK && grader.Match(it.Problem.Compare, c.ExpectedStdout, e.Result.Stdout)
 		resp.Results[i] = r
 	}
-	if !isRef {
-		// Any other solution is only checked against the cases.
-		return resp, nil
-	}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
+		now := a.clock()
+		if err := recordLastRun(tx, ref, lastRunOf(resp.Results, now)); err != nil {
+			return err
+		}
+		if !isRef {
+			return nil // any other solution is only checked against the cases
+		}
 		cur, err := tx.GetItem(itemID)
 		if err != nil {
 			return notFoundAs(err, "item")
 		}
 		changed := false
-		now := a.clock()
 		if cur.Problem == nil || !domain.RefEqual(cur.Problem.ReferenceSolution, &ref) {
 			return nil // the reference solution changed meanwhile
 		}
@@ -612,4 +637,34 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		return nil
 	})
 	return resp, err
+}
+
+// recordLastRun stores run as the last run of the solution that ran, unless
+// there is nothing to store or the solution's code changed (or it was
+// deleted) while it ran. The solution's updatedAt and the item are left
+// alone: a run changes no content.
+func recordLastRun(tx store.Tx, ran domain.Solution, run *domain.SolutionRun) error {
+	if run == nil {
+		return nil
+	}
+	s, err := tx.GetSolution(ran.ID)
+	if errors.Is(err, store.ErrNotFound) || err == nil && (s.Language != ran.Language || s.Source != ran.Source) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.LastRun = run
+	return tx.UpdateSolution(&s)
+}
+
+func maxPtr(a, b *int) *int {
+	if b == nil {
+		return a
+	}
+	if a == nil || *b > *a {
+		v := *b
+		return &v
+	}
+	return a
 }

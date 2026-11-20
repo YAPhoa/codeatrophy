@@ -107,12 +107,12 @@ export function summariseVerify(
       failure = `Case ${(at === -1 ? failedAt : at) + 1}${shown ? ` (${testCase.name})` : ''} ${reason}.`;
     }
   }
-  const slowest = results.reduce<VerifyResult | null>((max, r) => (max === null || r.timeMs > max.timeMs ? r : max), null);
+  const slowest = results.reduce<VerifyResult | null>((max, r) => (max === null || (r.timeMs ?? 0) > (max.timeMs ?? 0) ? r : max), null);
   return {
     passed: results.filter(good).length,
     total: results.length,
     // A compile error or an engine failure measures nothing.
-    slowest: slowest && slowest.timeMs > 0 ? formatRunTime(slowest.timeMs, slowest.verdict, timeLimitMs) : null,
+    slowest: slowest?.timeMs ? formatRunTime(slowest.timeMs, slowest.verdict, timeLimitMs) : null,
     failure,
   };
 }

@@ -8,18 +8,33 @@ import (
 	"codeatrophy/internal/store"
 )
 
-const solutionColumns = `id, item_id, name, language, source, notes, is_reference, created_at, updated_at`
+const solutionColumns = `id, item_id, name, language, source, notes, is_reference, created_at, updated_at,
+	last_run_passed, last_run_total, last_run_time_ms, last_run_memory_kb, last_run_at`
 
 func scanSolution(sc interface{ Scan(...any) error }) (domain.ItemSolution, error) {
 	var (
-		s                domain.ItemSolution
-		ref              int
-		created, updated int64
+		s                                   domain.ItemSolution
+		ref                                 int
+		created, updated                    int64
+		passed, total, timeMs, memKb, ranAt sql.NullInt64
 	)
-	err := sc.Scan(&s.ID, &s.ItemID, &s.Name, &s.Language, &s.Source, &s.Notes, &ref, &created, &updated)
+	err := sc.Scan(&s.ID, &s.ItemID, &s.Name, &s.Language, &s.Source, &s.Notes, &ref, &created, &updated,
+		&passed, &total, &timeMs, &memKb, &ranAt)
 	s.IsReference = ref != 0
 	s.CreatedAt, s.UpdatedAt = fromUnix(created), fromUnix(updated)
+	if ranAt.Valid {
+		s.LastRun = &domain.SolutionRun{Passed: int(passed.Int64), Total: int(total.Int64), TimeMs: intPtr(timeMs),
+			MemoryKb: intPtr(memKb), RanAt: fromUnix(ranAt.Int64)}
+	}
 	return s, err
+}
+
+// lastRunArgs are the values of the last_run_* columns, in column order.
+func lastRunArgs(r *domain.SolutionRun) []any {
+	if r == nil {
+		return []any{nil, nil, nil, nil, nil}
+	}
+	return []any{r.Passed, r.Total, nullInt(r.TimeMs), nullInt(r.MemoryKb), toUnix(r.RanAt)}
 }
 
 func (t *tx) ListSolutions(itemID string) ([]domain.ItemSolution, error) {
@@ -48,14 +63,18 @@ func (t *tx) GetSolution(id string) (domain.ItemSolution, error) {
 }
 
 func (t *tx) InsertSolution(s *domain.ItemSolution) error {
-	_, err := t.exec(`INSERT INTO solutions (`+solutionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.ItemID, s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference), toUnix(s.CreatedAt), toUnix(s.UpdatedAt))
+	args := append([]any{s.ID, s.ItemID, s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference),
+		toUnix(s.CreatedAt), toUnix(s.UpdatedAt)}, lastRunArgs(s.LastRun)...)
+	_, err := t.exec(`INSERT INTO solutions (`+solutionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 	return err
 }
 
 func (t *tx) UpdateSolution(s *domain.ItemSolution) error {
-	res, err := t.exec(`UPDATE solutions SET name = ?, language = ?, source = ?, notes = ?, is_reference = ?, updated_at = ?
-		WHERE id = ?`, s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference), toUnix(s.UpdatedAt), s.ID)
+	args := append([]any{s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference), toUnix(s.UpdatedAt)},
+		lastRunArgs(s.LastRun)...)
+	res, err := t.exec(`UPDATE solutions SET name = ?, language = ?, source = ?, notes = ?, is_reference = ?, updated_at = ?,
+		last_run_passed = ?, last_run_total = ?, last_run_time_ms = ?, last_run_memory_kb = ?, last_run_at = ?
+		WHERE id = ?`, append(args, s.ID)...)
 	if err != nil {
 		return err
 	}

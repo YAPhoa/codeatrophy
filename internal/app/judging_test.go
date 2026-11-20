@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -315,6 +316,158 @@ func TestVerifyWithSolutionID(t *testing.T) {
 	cases = must(e.app.ListTestCases(e.ctx, it.ID)).Items
 	if !sols[0].IsReference || !cases[0].Verified || cases[0].ExpectedStdout == "nope" {
 		t.Errorf("verify with the reference id: %+v", cases[0])
+	}
+}
+
+// Every verification records the last run of the solution that ran: the
+// cases passed, the slowest case and the peak memory. A run the engine cut
+// short, or of code that changed while it ran, leaves it as it was, and a
+// run changes neither the solution's updatedAt nor the item's revision.
+func TestVerifyRecordsLastRun(t *testing.T) {
+	clock := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	e := newEnv(t, func(o *app.Options) { o.Now = func() time.Time { return clock } })
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	// The second case is the slower one, the first takes more memory.
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		r := judgetest.Script(req)
+		ms, kb := 7, 2048
+		if req.Stdin == "5 5" {
+			ms, kb = 12, 1024
+		}
+		r.TimeMs, r.MemoryKb = &ms, &kb
+		return r, nil
+	}
+	solution := func(id string) domain.ItemSolution {
+		t.Helper()
+		for _, s := range must(e.app.ListSolutions(e.ctx, it.ID)).Items {
+			if s.ID == id {
+				return s
+			}
+		}
+		t.Fatalf("no solution %s", id)
+		return domain.ItemSolution{}
+	}
+	ref := must(e.app.ListSolutions(e.ctx, it.ID)).Items[0]
+	if ref.LastRun != nil {
+		t.Fatalf("a new solution has a last run: %+v", ref.LastRun)
+	}
+	clock = clock.Add(time.Hour)
+	res := must(e.app.VerifyTestCases(e.ctx, it.ID, false, ""))
+	if res.Results[0].MemoryKb == nil || *res.Results[0].MemoryKb != 2048 || *res.Results[1].TimeMs != 12 {
+		t.Errorf("per-case figures: %+v", res.Results)
+	}
+	got := solution(ref.ID)
+	if r := got.LastRun; r == nil || r.Passed != 2 || r.Total != 2 || *r.TimeMs != 12 || *r.MemoryKb != 2048 || !r.RanAt.Equal(clock) {
+		t.Errorf("reference's last run: %+v", r)
+	}
+	if !got.UpdatedAt.Equal(ref.UpdatedAt) {
+		t.Errorf("a run moved updatedAt: %v", got.UpdatedAt)
+	}
+
+	// Another solution: its own figures, and the reference's are kept.
+	other := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
+		`{"name":"Off by one","language":"python","source":"print 10"}`)))
+	before := must(e.app.GetItem(e.ctx, it.ID))
+	clock = clock.Add(time.Hour)
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, other.ID))
+	if r := solution(other.ID).LastRun; r == nil || r.Passed != 1 || r.Total != 2 || !r.RanAt.Equal(clock) {
+		t.Errorf("other's last run: %+v", r)
+	}
+	if r := solution(ref.ID).LastRun; r == nil || r.RanAt.Equal(clock) {
+		t.Errorf("checking another solution changed the reference's run: %+v", r)
+	}
+	if after := must(e.app.GetItem(e.ctx, it.ID)); after.Revision != before.Revision || !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("a check changed the item: revision %d, updatedAt %v", after.Revision, after.UpdatedAt)
+	}
+	ranAt := clock
+
+	// An engine failure on one case cuts the run short: nothing is recorded.
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		if req.Stdin == "5 5" {
+			return judge.ExecResult{Status: judge.StatusInternalError, Message: "sandbox failed"}, nil
+		}
+		return judgetest.Script(req), nil
+	}
+	clock = clock.Add(time.Hour)
+	res = must(e.app.VerifyTestCases(e.ctx, it.ID, false, other.ID))
+	if res.Results[1].Verdict != domain.VerdictInternalError {
+		t.Fatalf("engine failure: %+v", res.Results[1])
+	}
+	if r := solution(other.ID).LastRun; r == nil || !r.RanAt.Equal(ranAt) || r.Passed != 1 {
+		t.Errorf("an engine failure replaced the last run: %+v", r)
+	}
+
+	// Code that does not build: no figures, every case failed.
+	e.engine.Handler = nil
+	broken := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
+		`{"name":"Broken","language":"cpp","source":"compile_error"}`)))
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, broken.ID))
+	if r := solution(broken.ID).LastRun; r == nil || r.Passed != 0 || r.Total != 2 || r.TimeMs != nil || r.MemoryKb != nil {
+		t.Errorf("compile error's last run: %+v", r)
+	}
+
+	// Code changed while it ran: the figures belong to the old code.
+	var once sync.Once
+	edit := decodeInto[domain.ItemSolutionInput](t, `{"source":"sum"}`)
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		once.Do(func() { must(e.app.UpdateSolution(e.ctx, other.ID, edit)) })
+		return judgetest.Script(req), nil
+	}
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, other.ID))
+	if r := solution(other.ID).LastRun; r != nil {
+		t.Errorf("a run of code since changed was recorded: %+v", r)
+	}
+}
+
+// The last run belongs to the code: changing a solution's language or
+// source clears it, by whichever route; its name, notes and reference mark
+// do not.
+func TestLastRunClearsWithTheCode(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	ref := must(e.app.ListSolutions(e.ctx, it.ID)).Items[0]
+	other := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
+		`{"name":"Echo","language":"python","source":"echo\n"}`)))
+	ran := func(id string) bool {
+		t.Helper()
+		for _, s := range must(e.app.ListSolutions(e.ctx, it.ID)).Items {
+			if s.ID == id {
+				return s.LastRun != nil
+			}
+		}
+		t.Fatalf("no solution %s", id)
+		return false
+	}
+	verify := func(id string) {
+		t.Helper()
+		must(e.app.VerifyTestCases(e.ctx, it.ID, false, id))
+		if !ran(id) {
+			t.Fatalf("%s was not recorded", id)
+		}
+	}
+	verify(other.ID)
+	for _, js := range []string{`{"name":"Echo back"}`, `{"notes":"prints its input"}`, `{"source":"echo\r\n"}`, `{"isReference":false}`} {
+		if s := must(e.app.UpdateSolution(e.ctx, other.ID, decodeInto[domain.ItemSolutionInput](t, js))); s.LastRun == nil {
+			t.Errorf("%s cleared the last run", js)
+		}
+	}
+	if s := must(e.app.UpdateSolution(e.ctx, other.ID, decodeInto[domain.ItemSolutionInput](t, `{"source":"print 3"}`))); s.LastRun != nil {
+		t.Error("a new source kept the last run")
+	}
+	verify(other.ID)
+	must(e.app.UpdateSolution(e.ctx, other.ID, decodeInto[domain.ItemSolutionInput](t, `{"language":"cpp"}`)))
+	if ran(other.ID) {
+		t.Error("a new language kept the last run")
+	}
+	// The reference solution, written through the item.
+	verify(ref.ID)
+	must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"title":"A plus B, again"}`)))
+	if !ran(ref.ID) {
+		t.Error("an item edit that leaves the reference alone cleared its last run")
+	}
+	must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"problem":{"referenceSolution":{"language":"python","source":"echo"}}}`)))
+	if ran(ref.ID) {
+		t.Error("a new reference source kept the last run")
 	}
 }
 

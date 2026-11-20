@@ -1,5 +1,6 @@
 // Saved solutions of a problem.
 
+import type { SolutionRun } from '../../api/types';
 import type { MockDb, SolutionFields, StoredItem } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
 import type { Handler, Req } from '../http';
@@ -61,11 +62,27 @@ function parseSolutionInput(raw: Record<string, unknown>, v: Validator): Partial
   return out;
 }
 
+/**
+ * The figures of a submission as the last run of a new solution, or `null`
+ * when it did not judge exactly that code on the item's test cases: missing,
+ * of another item, still being judged, on custom input, ended by a judge
+ * error, or of another language or source.
+ */
+function submissionRun(db: MockDb, itemId: string, fields: Pick<SolutionFields, 'language' | 'source'>, submissionId: unknown): SolutionRun | null {
+  if (typeof submissionId !== 'string') return null;
+  const s = db.submissions.find((x) => x.id === submissionId);
+  if (!s || s.itemId !== itemId || s.status !== 'completed' || s.finishedAt === null) return null;
+  if (s.verdict === null || s.verdict === 'internal_error' || s.results.some((r) => r.testCaseId === null)) return null;
+  if (s.language !== fields.language || normaliseText(s.source) !== fields.source) return null;
+  return { passed: s.passedCount, total: s.totalCount, timeMs: s.timeMs, memoryKb: s.memoryKb, ranAt: s.finishedAt };
+}
+
 function createSolution(db: MockDb, req: Req) {
   const raw = objectBody(req);
   const v = new Validator();
   for (const key of ['name', 'language', 'source'] as const) if (raw[key] === undefined) v.add(key, 'is required');
   const input = parseSolutionInput(raw, v);
+  if (raw.submissionId !== undefined && raw.submissionId !== null && typeof raw.submissionId !== 'string') v.add('submissionId', 'must be a string');
   v.check();
 
   const item = problemOf(db, req.params.id!);
@@ -73,13 +90,15 @@ function createSolution(db: MockDb, req: Req) {
   db.requireSolutionRoom(item.id);
 
   const before = db.referenceView(item.id);
-  const solution = db.insertSolution(item.id, {
+  const fields = {
     name: input.name!,
     language: input.language!,
     source: input.source!,
     notes: input.notes ?? '',
     isReference: input.isReference ?? false,
-  });
+  };
+  // Figures a client sends are never taken; only those of a submission the mock judged.
+  const solution = db.insertSolution(item.id, fields, db.now(), submissionRun(db, item.id, fields, raw.submissionId));
   db.recordSolutionChange(item, before);
   return created(db.solutionView(solution));
 }
@@ -91,6 +110,7 @@ function patchSolution(db: MockDb, req: Req) {
   checkRevision(item, raw);
   const v = new Validator();
   const input = parseSolutionInput(raw, v);
+  if (raw.submissionId !== undefined && raw.submissionId !== null) v.add('submissionId', 'only applies when creating a solution');
   v.check();
 
   // A request that leaves every field as it was changes nothing, not even a timestamp.
@@ -99,6 +119,10 @@ function patchSolution(db: MockDb, req: Req) {
 
   const before = db.referenceView(item.id);
   if (input.isReference === true && !solution.isReference) db.clearReference(item.id);
+  // The figures of the last run belong to the code that ran.
+  if ((input.language !== undefined && input.language !== solution.language) || (input.source !== undefined && input.source !== solution.source)) {
+    solution.lastRun = null;
+  }
   Object.assign(solution, input);
   solution.updatedAt = db.now();
   db.recordSolutionChange(item, before);

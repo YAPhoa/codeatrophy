@@ -371,7 +371,9 @@ export interface VerifyResult {
   actualStdout: string;
   verdict: Verdict;
   stderr: string;
-  timeMs: number;
+  /** What the engine measured for the case; `null` when it measured nothing (a compile error). */
+  timeMs: number | null;
+  memoryKb: number | null;
 }
 
 // ---- Solutions --------------------------------------------------------------
@@ -388,6 +390,19 @@ export interface Solution {
   isReference: boolean;
   createdAt: string;
   updatedAt: string;
+  /** The latest run of this code on the test cases; `null` until it runs after its code last changed. */
+  lastRun: SolutionRun | null;
+}
+
+/** A run of a saved solution on the test cases, as the server measured it. */
+export interface SolutionRun {
+  passed: number;
+  total: number;
+  /** The slowest case; `null` when the judge measured nothing. */
+  timeMs: number | null;
+  /** The peak over the cases; `null` when the judge measured nothing. */
+  memoryKb: number | null;
+  ranAt: string;
 }
 
 export interface SolutionInput {
@@ -402,9 +417,15 @@ export interface SolutionInput {
    * because that is item content.
    */
   expectedRevision?: number;
+  /**
+   * Create only: the submission the code comes from. When it judged exactly
+   * this code, its figures become the new solution's `lastRun`; otherwise it
+   * is ignored.
+   */
+  submissionId?: string;
 }
 
-export type SolutionPatch = Partial<SolutionInput>;
+export type SolutionPatch = Partial<Omit<SolutionInput, 'submissionId'>>;
 
 // ---- Collections and tags -------------------------------------------------
 

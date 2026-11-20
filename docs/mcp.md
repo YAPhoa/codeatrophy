@@ -118,8 +118,8 @@ expires; open sessions are unaffected. A request body may be at most
 | `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only) |
 | `update_test_case` | Change one test case |
 | `delete_test_case` | Delete one test case |
-| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and changes nothing. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
-| `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only |
+| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and leaves the cases alone. Either way the run becomes the solution's `lastRun`, unless the engine failed on a case. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
+| `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only. When creating, `submissionId` of a completed `run_code` submission of the same language and source makes its figures the solution's `lastRun`; a new language or source clears `lastRun` |
 | `delete_solution` | Delete one saved solution; deleting the reference leaves the problem without one |
 | `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). A run replaces the problem's earlier completed runs; only submits are kept. For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected |
 
@@ -134,7 +134,9 @@ solution rather than from the model's own arithmetic.
 A problem can keep several saved solutions — other approaches, other
 languages, a brute force — of which at most one is the reference solution
 (see "Solutions" in `docs/api.md`). To check another one against the tests,
-pass its id as `solutionId` to `verify_test_cases`.
+pass its id as `solutionId` to `verify_test_cases`. Each solution reports
+its latest run on the test cases as `lastRun` (see "Solutions" in
+`docs/api.md`).
 
 ### Solution-only problems
 

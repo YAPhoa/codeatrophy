@@ -60,7 +60,7 @@ describe('summariseVerify', () => {
     { id: 'b', name: 'Example 2', isSample: true },
     { id: 'c', name: 'All negative', isSample: false },
   ];
-  const result = (testCaseId: string, change: Partial<VerifyResult> = {}): VerifyResult => ({ testCaseId, ok: true, matches: true, actualStdout: '', verdict: 'executed', stderr: '', timeMs: 20, ...change });
+  const result = (testCaseId: string, change: Partial<VerifyResult> = {}): VerifyResult => ({ testCaseId, ok: true, matches: true, actualStdout: '', verdict: 'executed', stderr: '', timeMs: 20, memoryKb: 9000, ...change });
 
   it('counts the cases that passed and finds the slowest', () => {
     const summary = summariseVerify([result('a'), result('b', { timeMs: 41 }), result('c')], cases, true);

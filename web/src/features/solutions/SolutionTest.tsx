@@ -23,8 +23,9 @@ export interface SolutionTest {
 
 /**
  * Run one of a problem's saved solutions on its test cases and report how it
- * went, without showing its code. With the reference solution the run also
- * refreshes the cases' "verified" marks; with any other it only checks.
+ * went, without showing its code. The server keeps the run as the solution's
+ * last run. With the reference solution the run also refreshes the cases'
+ * "verified" marks; with any other it only checks.
  */
 export function useSolutionTest(item: Item, solution: { id?: string; language: string; isReference: boolean }): SolutionTest {
   const qc = useQueryClient();
@@ -37,6 +38,8 @@ export function useSolutionTest(item: Item, solution: { id?: string; language: s
     api.testCases.verify(item.id, false, isReference ? null : (id ?? null)).then(
       ({ results }) => {
         setState({ status: 'done', results });
+        // The run is the solution's last run, as the server recorded it.
+        void qc.invalidateQueries({ queryKey: qk.solutions(item.id) });
         if (isReference) void qc.invalidateQueries({ queryKey: qk.testCases(item.id) });
       },
       (error: unknown) => setState({ status: 'failed', error }),

@@ -28,7 +28,7 @@ import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
 import { Variants } from '../item/Related';
 import { SaveSolutionDialog } from '../solutions/SaveSolutionDialog';
-import { savedWithCode } from '../solutions/solutionWrites';
+import { savedWithCode, type RunFigures } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
 import { HistoryList } from './HistoryList';
 import { ResultPanel } from './ResultPanel';
@@ -119,7 +119,7 @@ export function SolveView({ item }: { item: Item }) {
   const statementMin = panes.statement && !narrow;
   const reveal = useReveal();
   const shell = useShellLayout();
-  const [saving, setSaving] = useState<{ language: string; source: string; name?: string; submissionId?: string; accepted?: boolean } | null>(null);
+  const [saving, setSaving] = useState<{ language: string; source: string; name?: string; run?: RunFigures; submissionId?: string; accepted?: boolean } | null>(null);
   const [savedFrom, setSavedFrom] = useState<ReadonlySet<string>>(() => new Set());
   const [customInput, setCustomInput] = useState(() => loadCustomInput(item.id));
   const [historic, setHistoric] = useState(false);
@@ -337,12 +337,12 @@ export function SolveView({ item }: { item: Item }) {
     const name = `${summary.verdict === 'accepted' ? 'Accepted' : languageName(summary.language)} ${summary.mode === 'submit' ? 'submission' : 'run'}, ${new Date(summary.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
     const shown = runner.submission;
     if (shown && shown.id === summary.id) {
-      setSaving({ language: shown.language, source: shown.source, name, submissionId: shown.id });
+      setSaving({ language: shown.language, source: shown.source, name, run: shown, submissionId: shown.id });
       return;
     }
     // The history lists submissions without their code; fetch the one that was picked.
     api.submissions.get(summary.id).then(
-      (full) => setSaving({ language: full.language, source: full.source, name, submissionId: full.id }),
+      (full) => setSaving({ language: full.language, source: full.source, name, run: full, submissionId: full.id }),
       (error: unknown) => toast.error(errorLine(error)),
     );
   };
@@ -358,7 +358,7 @@ export function SolveView({ item }: { item: Item }) {
     if (solutions === undefined || offered.current.has(s.id)) return;
     offered.current.add(s.id);
     if (savedWithCode(solutions, s)) return;
-    setSaving((open) => open ?? { language: s.language, source: s.source, submissionId: s.id, accepted: true });
+    setSaving((open) => open ?? { language: s.language, source: s.source, run: s, submissionId: s.id, accepted: true });
   }, [justJudged, historic, solutions]);
 
   const loadSubmissionCode = () => {

@@ -29,6 +29,21 @@ type ItemSolution struct {
 	IsReference bool      `json:"isReference"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	// LastRun is what the latest run of this code on the test cases
+	// measured, or nil when it has not been run since it was last changed.
+	// It is local to the instance, like submissions, and not content.
+	LastRun *SolutionRun `json:"lastRun"`
+}
+
+// SolutionRun sums up one run of a saved solution on a problem's test
+// cases. TimeMs is the slowest case and MemoryKb the peak; either is nil
+// when the judge measured nothing (a compile error).
+type SolutionRun struct {
+	Passed   int       `json:"passed"`
+	Total    int       `json:"total"`
+	TimeMs   *int      `json:"timeMs"`
+	MemoryKb *int      `json:"memoryKb"`
+	RanAt    time.Time `json:"ranAt"`
 }
 
 // ItemSolutionInput is the body of solution create and update requests.
@@ -39,6 +54,9 @@ type ItemSolutionInput struct {
 	Notes            Opt[string] `json:"notes"`
 	IsReference      Opt[bool]   `json:"isReference"`
 	ExpectedRevision Opt[int]    `json:"expectedRevision"`
+	// SubmissionID, on create only, names the submission the code comes
+	// from, whose figures become the new solution's LastRun.
+	SubmissionID Opt[string] `json:"submissionId"`
 }
 
 // ApplyItemSolutionInput merges in onto s.
@@ -54,6 +72,7 @@ func ApplyItemSolutionInput(s *ItemSolution, in ItemSolutionInput) FieldErrors {
 		}
 		*dst = o.Val
 	}
+	language, source := s.Language, s.Source
 	str("name", in.Name, &s.Name)
 	str("language", in.Language, &s.Language)
 	str("source", in.Source, &s.Source)
@@ -64,6 +83,10 @@ func ApplyItemSolutionInput(s *ItemSolution, in ItemSolutionInput) FieldErrors {
 		} else {
 			s.IsReference = in.IsReference.Val
 		}
+	}
+	// The figures of the last run belong to the code that ran.
+	if s.Language != language || NormalizeText(s.Source) != source {
+		s.LastRun = nil
 	}
 	return errs
 }

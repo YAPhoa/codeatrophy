@@ -132,11 +132,20 @@ func db2(t *testing.T, url string) dbopen.DB {
 // whole, and PostgreSQL then takes the provider kind a migration added.
 func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	url := pgtest.URL(t)
-	path, want := sqliteLibrary(t, t.TempDir())
-	// Back to version 7: without a tags table, and with an ai_providers that
-	// knew two kinds and no effort levels. Migrations 8 and 9 rebuild
-	// ai_providers and item_tags, so their triggers and indexes are not
-	// needed here.
+	path, _ := sqliteLibrary(t, t.TempDir())
+	// Back to version 7: without a tags table, with an ai_providers that
+	// knew two kinds and no effort levels, and with solutions that have no
+	// last run. Migrations 8 and 9 rebuild ai_providers and item_tags, so
+	// their triggers and indexes are not needed here.
+	lite, err := sqlite.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.ClearLastRuns(t, lite)
+	want := storetest.Dump(t, lite)
+	if err := lite.Close(); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +165,11 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 			created_at, updated_at FROM ai_providers;
 		DROP TABLE ai_providers;
 		ALTER TABLE ai_providers_old RENAME TO ai_providers;
+		ALTER TABLE solutions DROP COLUMN last_run_at;
+		ALTER TABLE solutions DROP COLUMN last_run_passed;
+		ALTER TABLE solutions DROP COLUMN last_run_total;
+		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
+		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;
 		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +180,8 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	db, logs := open(t, dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true})
 	defer db.Close()
 	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
-		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "imported the SQLite database") {
+		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "0011_solution_last_run.sql") ||
+		!strings.Contains(logs, "imported the SQLite database") {
 		t.Errorf("logs:\n%s", logs)
 	}
 	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))

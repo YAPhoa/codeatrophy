@@ -57,6 +57,11 @@ func TestExportScopesAndContentOnly(t *testing.T) {
 	e.enableAI(t)
 	dp, easy, p, _, _ := e.library(t)
 	e.submit(t, p.ID, `{"language":"python","source":"SUBMITTED-SOURCE","mode":"run"}`)
+	// A solution's last run is instance-local, like submissions.
+	must(e.app.VerifyTestCases(e.ctx, p.ID, false, ""))
+	if sols := must(e.app.ListSolutions(e.ctx, p.ID)).Items; sols[0].LastRun == nil {
+		t.Fatal("the reference solution has no last run")
+	}
 
 	res := must(e.app.Export(e.ctx, decodeInto[app.ExportInput](t, `{"scope":"all"}`)))
 	if res.Filename != "codeatrophy-library.codeatrophy.zip" || res.Items != 3 {
@@ -64,7 +69,7 @@ func TestExportScopesAndContentOnly(t *testing.T) {
 	}
 	text := zipText(t, res.Data)
 	for _, secret := range []string{"PRIVATE-NOTES", "RAW-AI-INPUT", "SUBMITTED-SOURCE", "PRESET-NAME", "PRESET-INSTRUCTIONS",
-		"sk-ant-test-1234", `"status"`, `"favorite"`} {
+		"sk-ant-test-1234", `"status"`, `"favorite"`, "lastRun", "ranAt", "passed"} {
 		if strings.Contains(text, secret) {
 			t.Errorf("bundle contains %q", secret)
 		}
@@ -116,7 +121,9 @@ func TestImportIntoEmptyLibraryAndIdempotence(t *testing.T) {
 	if c.ParentID == nil || *c.ParentID != dp.ID || c.ItemCount != 2 {
 		t.Errorf("collection nesting: %+v", c)
 	}
-	// Importing the same bundle again changes nothing.
+	// Importing the same bundle again changes nothing, a solution's last
+	// run included: it is not content.
+	must(dst.app.VerifyTestCases(dst.ctx, p.ID, false, ""))
 	pre = must(dst.app.PreviewImport(dst.ctx, data))
 	if pre.Counts.Unchanged != 3 || pre.Counts.New != 0 || pre.Collections[0].State != "existing" {
 		t.Errorf("second preview: %+v", pre.Counts)
@@ -127,6 +134,9 @@ func TestImportIntoEmptyLibraryAndIdempotence(t *testing.T) {
 	}
 	if again := must(dst.app.GetItem(dst.ctx, p.ID)); again.Revision != got.Revision {
 		t.Error("an unchanged import must not touch items")
+	}
+	if sols := must(dst.app.ListSolutions(dst.ctx, p.ID)).Items; sols[0].LastRun == nil {
+		t.Error("an unchanged import cleared a last run")
 	}
 }
 

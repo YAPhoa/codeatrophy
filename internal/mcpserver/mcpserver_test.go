@@ -427,6 +427,18 @@ func TestSolutionTools(t *testing.T) {
 		res["error"].(map[string]any)["code"] != "validation_failed" {
 		t.Errorf("updateExpected with a non-reference solution: %v", res)
 	}
+	// The check is the solution's last run.
+	list, _ = call(t, s, "list_solutions", map[string]any{"itemId": id})
+	if run, _ := list["items"].([]any)[1].(map[string]any)["lastRun"].(map[string]any); run == nil || run["passed"] != float64(0) || run["total"] != float64(1) {
+		t.Errorf("lastRun after verify_test_cases: %v", list)
+	}
+	// Code run with run_code keeps its figures when saved with its submission.
+	sub, _ := call(t, s, "run_code", map[string]any{"itemId": id, "language": "python", "source": "echo", "mode": "submit"})
+	kept, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Echo", "language": "python", "source": "echo",
+		"submissionId": sub["id"]})
+	if run, _ := kept["lastRun"].(map[string]any); isErr || run == nil || run["ranAt"] != sub["finishedAt"] || run["total"] != float64(1) {
+		t.Errorf("saved from a submission: %v", kept)
+	}
 	if res, isErr := call(t, s, "delete_solution", map[string]any{"id": other["id"]}); isErr || res["deleted"] != other["id"] {
 		t.Errorf("delete_solution: %v", res)
 	}

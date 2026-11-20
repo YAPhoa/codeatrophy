@@ -415,7 +415,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "verify_test_cases", "Verify test cases",
-		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and changes nothing. For a function problem the solution runs inside its language's harness, and a language without one is rejected. Needs a judge engine.",
+		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and leaves the cases alone. Either way the run becomes the solution's lastRun, unless the engine failed on a case. For a function problem the solution runs inside its language's harness, and a language without one is rejected. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
 			"solutionId":     str("Solution to run; omit for the reference solution"),
@@ -433,7 +433,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "save_solution", "Save solution",
-		"Create a saved solution on a problem (give itemId), or change one (give its id; omitted fields are kept). isReference: true makes it the reference solution used to compute and verify expected outputs, clearing the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then.",
+		"Create a saved solution on a problem (give itemId), or change one (give its id; omitted fields are kept). isReference: true makes it the reference solution used to compute and verify expected outputs, clearing the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then. A solution reports its last run on the test cases as lastRun; changing its language or source clears it. When creating one from code you ran with run_code, pass that submission's id as submissionId to keep its figures as lastRun.",
 		object(props{
 			"itemId":           str("Problem id, to create a solution"),
 			"id":               str("Solution id, to change an existing solution"),
@@ -443,6 +443,7 @@ func (t *tools) register(s *mcp.Server) {
 			"notes":            str("Markdown notes, e.g. complexity"),
 			"isReference":      boolean("Make this the reference solution"),
 			"expectedRevision": expectedRevision,
+			"submissionId":     str("When creating: a completed submission of this problem with the same language and source, whose figures become lastRun; ignored otherwise"),
 		}), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID string `json:"itemId"`

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash, Code2, Eye, EyeOff, Lightbulb, MoreHorizontal, Pencil, Plus, ShieldCheck } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { useItem, useLimits, useMeta, useSolutions } from '../../api/queries';
-import type { Item, Solution } from '../../api/types';
+import type { Item, Solution, SolutionRun } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { absoluteTime, plural, relativeTime } from '../../lib/format';
 import { fieldMessage } from '../../lib/itemForm';
@@ -23,7 +23,7 @@ import { ItemMissing } from '../item/ItemPage';
 import { ReferenceBadge, WriteProblems } from './parts';
 import { SolutionForm } from './SolutionForm';
 import { TestButton, TestOutcome, useSolutionTest } from './SolutionTest';
-import { lineCount, refreshSolutions, serverFieldErrors, useOpenInEditor, useSolutionWrite, validateSolution } from './solutionWrites';
+import { describeLastRun, lineCount, refreshSolutions, serverFieldErrors, useOpenInEditor, useSolutionWrite, validateSolution } from './solutionWrites';
 
 export default function SolutionsPage() {
   const { id = '' } = useParams();
@@ -184,13 +184,6 @@ function SolutionsManager({ item }: { item: Item }) {
             <ErrorState compact error={solutionsQuery.error} onRetry={() => void solutionsQuery.refetch()} />
           ) : (
             <>
-              {solutions.length > 0 && (
-                <p className="solutions-intro muted">
-                  Code stays hidden until you ask for it, so the page does not spoil a problem you are about to solve again.{' '}
-                  {reference ? 'The reference solution is run to check the expected output of each test case.' : 'Mark one as the reference to verify the expected outputs of test cases with it.'}
-                </p>
-              )}
-
               <WriteProblems write={referenceWrite} limits={limits} title="Could not change the reference solution" consequence="Saving anyway changes the reference solution as you asked." />
 
               {adding && <SolutionForm item={item} reference={reference} onCancel={closeForm} onSaved={saved} onDirty={setFormDirty} />}
@@ -288,6 +281,7 @@ function SolutionCard({ item, solution, languageName, revealed, busy, onReveal, 
           Updated {relativeTime(solution.updatedAt)}
         </time>
       </p>
+      {solution.lastRun && <LastRun run={solution.lastRun} timeLimitMs={item.problem?.timeLimitMs} />}
       {solution.notes.trim() !== '' && <Markdown source={solution.notes} className="solution-notes" />}
       <TestOutcome item={item} test={test} className="solution-outcome" />
       <div className="solution-actions">
@@ -335,6 +329,22 @@ function SolutionCard({ item, solution, languageName, revealed, busy, onReveal, 
         </div>
       )}
     </article>
+  );
+}
+
+/** The figures of a solution's last run on the test cases, in one line under its meta line. */
+function LastRun({ run, timeLimitMs }: { run: SolutionRun; timeLimitMs: number | undefined }) {
+  const { passed, failed, figures } = describeLastRun(run, timeLimitMs);
+  return (
+    <p className="solution-meta solution-last-run">
+      <span className={failed ? 'tone-danger' : undefined}>{passed}</span>
+      {figures.map((figure) => (
+        <span key={figure}>{figure}</span>
+      ))}
+      <time dateTime={run.ranAt} title={absoluteTime(run.ranAt)}>
+        ran {relativeTime(run.ranAt)}
+      </time>
+    </p>
   );
 }
 

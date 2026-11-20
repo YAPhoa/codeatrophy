@@ -322,6 +322,9 @@ function TestsManager({ item }: { item: Item }) {
         // Verified marks were set and cleared, and outputs possibly replaced.
         await Promise.all([refresh(), qc.invalidateQueries({ queryKey: qk.solutions(item.id) })]);
         if (updateExpected) toast.success('Expected outputs updated from the reference solution');
+      } else {
+        // The run is the solution's last run.
+        void qc.invalidateQueries({ queryKey: qk.solutions(item.id) });
       }
     } catch (e) {
       setVerify(null);

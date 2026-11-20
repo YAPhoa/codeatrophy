@@ -104,6 +104,11 @@ var downMigrations = map[int]string{
 		CREATE INDEX item_tags_tag ON item_tags (tag);
 		DROP TABLE tags;`,
 	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
+	11: `ALTER TABLE solutions DROP COLUMN last_run_at;
+		ALTER TABLE solutions DROP COLUMN last_run_passed;
+		ALTER TABLE solutions DROP COLUMN last_run_total;
+		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
+		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;`,
 }
 
 // undoLatestMigration takes the database back to the version before the
@@ -385,6 +390,7 @@ func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 			BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now})
 	})
 	wantTriggers := sqliteObjects(t, db, "ai_providers")
+	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
 	want := storetest.Dump(t, db)
 	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
 		t.Fatalf("the fixture has no providers or usage: %v", want)
@@ -446,6 +452,7 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 	}
 	storetest.Populate(t, db)
 	wantIndexes := sqliteObjects(t, db, "item_tags")
+	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
 	want := storetest.Dump(t, db)
 	if len(want["tags"]) < 3 || len(want["item_tags"]) <= len(want["tags"]) {
 		t.Fatalf("the fixture has too few tags: %v %v", want["tags"], want["item_tags"])
@@ -504,6 +511,7 @@ func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
 		}
 		return nil
 	})
+	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
 	want := storetest.Dump(t, db)
 	undoMigrationsFrom(t, db, 10)
 	db.Close()
@@ -529,5 +537,51 @@ func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
 	}
 	if _, err := db.writer.Exec(`UPDATE ai_providers SET effort = 'max' WHERE id = 'a'`); err == nil {
 		t.Error("an unknown effort was accepted")
+	}
+}
+
+// Migration 11 gives saved solutions a last run: every existing solution
+// starts without one, every other row is kept, and the figures are checked.
+func TestLastRunMigrationStartsEverySolutionWithoutARun(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v10.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.Populate(t, db)
+	want := storetest.Dump(t, db)
+	undoMigrationsFrom(t, db, 11)
+	db.Close()
+
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
+		t.Fatalf("version %d after migrating", v)
+	}
+	got := storetest.Dump(t, db)
+	delete(want, "solutions")
+	delete(got, "solutions")
+	storetest.SameDump(t, "after migration 11", want, got)
+	sols := read(t, db, func(tx store.Tx) ([]domain.ItemSolution, error) { return tx.ListSolutions("origin") })
+	if len(sols) != 2 || sols[0].LastRun != nil || sols[1].LastRun != nil || sols[0].Notes != storetest.ArbitraryText {
+		t.Errorf("solutions after migrating: %+v", sols)
+	}
+	for what, set := range map[string]string{
+		"a run without its time":       `last_run_passed = 1, last_run_total = 2`,
+		"a time without a run":         `last_run_time_ms = 5`,
+		"more passed than ran":         `last_run_passed = 3, last_run_total = 2, last_run_at = 1`,
+		"a run without its case count": `last_run_passed = 1, last_run_at = 1`,
+		"a negative memory":            `last_run_passed = 1, last_run_total = 2, last_run_memory_kb = -1, last_run_at = 1`,
+	} {
+		if _, err := db.writer.Exec(`UPDATE solutions SET ` + set + ` WHERE id = 'sol0'`); err == nil {
+			t.Errorf("%s was accepted", what)
+		}
+	}
+	if _, err := db.writer.Exec(`UPDATE solutions SET last_run_passed = 2, last_run_total = 2, last_run_at = 1 WHERE id = 'sol0'`); err != nil {
+		t.Errorf("a run without figures: %v", err)
 	}
 }
