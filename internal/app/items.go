@@ -196,6 +196,28 @@ func (a *App) GetItem(ctx context.Context, id string) (domain.Item, error) {
 // CreateItem creates an item, optionally with test cases and collection
 // memberships, in one transaction.
 func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item, error) {
+	n, err := a.newItem(in)
+	if err != nil {
+		return domain.Item{}, err
+	}
+	var out domain.Item
+	err = a.store.Write(ctx, func(tx store.Tx) (err error) {
+		out, err = a.insertNewItem(tx, n)
+		return err
+	})
+	return out, err
+}
+
+// newItemRecords is a new item as it is written: the item, its test cases
+// and the collections it goes into.
+type newItemRecords struct {
+	item    domain.Item
+	cases   []domain.TestCase
+	collIDs []string
+}
+
+// newItem validates the input of a new item and builds its records.
+func (a *App) newItem(in domain.ItemInput) (newItemRecords, error) {
 	fe := domain.FieldErrors{}
 	if !in.Type.HasValue() {
 		fe.Add("type", "is required")
@@ -209,7 +231,7 @@ func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item,
 		fe.Add("expectedRevision", "is not accepted on create")
 	}
 	if len(fe) > 0 {
-		return domain.Item{}, errValidation(fe)
+		return newItemRecords{}, errValidation(fe)
 	}
 	now := a.clock()
 	it := domain.Item{ItemSummary: domain.ItemSummary{
@@ -246,39 +268,40 @@ func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item,
 		collIDs = dedupe(in.CollectionIDs.Val)
 	}
 	if err := errValidation(fe); err != nil {
+		return newItemRecords{}, err
+	}
+	return newItemRecords{item: it, cases: cases, collIDs: collIDs}, nil
+}
+
+// insertNewItem writes a new item built by newItem and returns it as
+// stored.
+func (a *App) insertNewItem(tx store.Tx, n newItemRecords) (domain.Item, error) {
+	it := n.item
+	if err := checkVariantOf(tx, it.ID, it.VariantOf); err != nil {
 		return domain.Item{}, err
 	}
-	var out domain.Item
-	err := a.store.Write(ctx, func(tx store.Tx) error {
-		if err := checkVariantOf(tx, it.ID, it.VariantOf); err != nil {
-			return err
+	if err := checkCollections(tx, n.collIDs); err != nil {
+		return domain.Item{}, err
+	}
+	if err := tx.InsertItem(&it); err != nil {
+		return domain.Item{}, err
+	}
+	if ref := refOf(&it); ref != nil {
+		if err := a.writeReference(tx, it.ID, ref); err != nil {
+			return domain.Item{}, err
 		}
-		if err := checkCollections(tx, collIDs); err != nil {
-			return err
+	}
+	for i := range n.cases {
+		if err := tx.InsertTestCase(&n.cases[i]); err != nil {
+			return domain.Item{}, err
 		}
-		if err := tx.InsertItem(&it); err != nil {
-			return err
+	}
+	if len(n.collIDs) > 0 {
+		if err := tx.SetItemCollections(it.ID, n.collIDs); err != nil {
+			return domain.Item{}, err
 		}
-		if ref := refOf(&it); ref != nil {
-			if err := a.writeReference(tx, it.ID, ref); err != nil {
-				return err
-			}
-		}
-		for i := range cases {
-			if err := tx.InsertTestCase(&cases[i]); err != nil {
-				return err
-			}
-		}
-		if len(collIDs) > 0 {
-			if err := tx.SetItemCollections(it.ID, collIDs); err != nil {
-				return err
-			}
-		}
-		var err error
-		out, err = tx.GetItem(it.ID)
-		return err
-	})
-	return out, err
+	}
+	return tx.GetItem(it.ID)
 }
 
 func dedupe(ids []string) []string {

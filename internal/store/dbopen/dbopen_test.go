@@ -70,7 +70,7 @@ func TestAutomaticImport(t *testing.T) {
 
 	db, logs := open(t, cfg)
 	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))
-	if !strings.Contains(logs, "imported the SQLite database into PostgreSQL: 2 settings, 1 AI provider, 3 days of AI usage, 3 AI log entries, 2 AI log texts, 3 AI log bodies, 3 style presets") ||
+	if !strings.Contains(logs, "imported the SQLite database into PostgreSQL: 2 settings, 1 AI provider, 3 days of AI usage, 3 AI log entries, 2 AI log texts, 3 AI log bodies, 2 AI jobs, 2 drafts, 3 style presets") ||
 		!strings.Contains(logs, "renamed the imported SQLite database") || !strings.Contains(logs, "backend=PostgreSQL") {
 		t.Errorf("logs:\n%s", logs)
 	}
@@ -135,13 +135,13 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	path, _ := sqliteLibrary(t, t.TempDir())
 	// Back to version 7: without a tags table, with an ai_providers that
 	// knew two kinds and no effort levels, and with solutions that have no
-	// last run. Migrations 8 and 9 rebuild ai_providers and item_tags, so
+	// last run, AI jobs nor drafts. Migrations 8 and 9 rebuild ai_providers and item_tags, so
 	// their triggers and indexes are not needed here.
 	lite, err := sqlite.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.ClearLastRuns(t, lite)
+	storetest.ClearNewerData(t, lite) // older schemas lack some of it
 	want := storetest.Dump(t, lite)
 	if err := lite.Close(); err != nil {
 		t.Fatal(err)
@@ -170,6 +170,8 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 		ALTER TABLE solutions DROP COLUMN last_run_total;
 		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
 		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;
+		DROP TABLE ai_jobs;
+		DROP TABLE drafts;
 		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +183,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	defer db.Close()
 	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
 		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "0011_solution_last_run.sql") ||
+		!strings.Contains(logs, "0012_ai_jobs.sql") ||
 		!strings.Contains(logs, "imported the SQLite database") {
 		t.Errorf("logs:\n%s", logs)
 	}

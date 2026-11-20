@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpen,
+  FilePen,
   Code2,
   Download,
   FolderPlus,
@@ -26,7 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { invalidateLibrary, useCollections, useStats } from '../api/queries';
+import { invalidateLibrary, useCollections, useDrafts, useStats } from '../api/queries';
 import type { Collection, Meta } from '../api/types';
 import { useCollectionActions } from '../features/collections/CollectionActions';
 import { MOD } from '../lib/hotkeys';
@@ -39,7 +40,7 @@ import { NumberChange } from '../ui/Animated';
 import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
 import { Kbd } from '../ui/misc';
-import { SettingsPage, TagsPage } from './screens';
+import { DraftsPage, SettingsPage, TagsPage } from './screens';
 import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
@@ -65,6 +66,8 @@ interface NavEntryProps {
   icon: ReactNode;
   label: string;
   count?: number;
+  /** A count that asks for attention, in a filled circle; nothing at zero. */
+  badge?: number;
   active: boolean;
   /** Loads the screen the entry leads to, once the pointer or focus rests on it. */
   preload?: () => void;
@@ -72,7 +75,17 @@ interface NavEntryProps {
 
 const nothing = () => undefined;
 
-function NavEntry({ to, icon, label, count, active, preload }: NavEntryProps) {
+/** A count that asks to be noticed: a filled circle, a pill from two digits up. */
+function NavBadge({ value, className }: { value: number; className?: string }) {
+  if (value <= 0) return null;
+  return (
+    <span className={cx('nav-badge', value >= 10 && 'is-wide', className)}>
+      <NumberChange value={value} />
+    </span>
+  );
+}
+
+function NavEntry({ to, icon, label, count, badge, active, preload }: NavEntryProps) {
   const intent = useIntent(preload ?? nothing);
   return (
     <Link to={to} className={cx('nav-item', active && 'is-active')} aria-current={active ? 'page' : undefined} {...(preload && intent)}>
@@ -80,6 +93,7 @@ function NavEntry({ to, icon, label, count, active, preload }: NavEntryProps) {
         {icon}
       </span>
       <span className="grow truncate">{label}</span>
+      {badge != null && <NavBadge value={badge} />}
       {count != null && (
         <span className="nav-count">
           <NumberChange value={count} />
@@ -90,11 +104,13 @@ function NavEntry({ to, icon, label, count, active, preload }: NavEntryProps) {
 }
 
 /** One destination in the minimised navigation: an icon whose name is its tooltip and accessible name. */
-function RailEntry({ to, icon, label, active, preload }: Omit<NavEntryProps, 'count'>) {
+function RailEntry({ to, icon, label, badge, active, preload }: Omit<NavEntryProps, 'count'>) {
   const intent = useIntent(preload ?? nothing);
+  const named = badge ? `${label} (${badge})` : label;
   return (
-    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={label} title={label} {...(preload && intent)}>
+    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={named} title={named} {...(preload && intent)}>
       {icon}
+      {badge != null && <NavBadge value={badge} className="rail-badge" />}
     </Link>
   );
 }
@@ -221,6 +237,9 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const { collectionId } = useParams();
   const stats = useStats();
   const collections = useCollections();
+  const drafts = useDrafts();
+  const draftCount = drafts.data?.length ?? 0;
+  const onDrafts = location.pathname === '/drafts' || location.pathname.startsWith('/drafts/');
   const actions = useCollectionActions();
   const theme = useThemePreference();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readJson<string[]>('sidebar:collapsed', [])));
@@ -293,6 +312,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <RailEntry to="/?type=problem" icon={<Code2 size={16} />} label="Problems" active={onLibrary && type === 'problem' && !fav && !uncollected} />
           <RailEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" active={onLibrary && type === 'reading' && !fav && !uncollected} />
           <RailEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
+          <RailEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />
           <span className="rail-sep" aria-hidden="true" />
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} preload={TagsPage.preload} />
           <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} preload={SettingsPage.preload} />
@@ -350,6 +370,9 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           </li>
           <li>
             <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={onLibrary && fav} />
+          </li>
+          <li>
+            <NavEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />
           </li>
         </ul>
 

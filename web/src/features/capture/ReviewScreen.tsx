@@ -53,7 +53,11 @@ interface ReviewScreenProps {
   revising: boolean;
   reviseStartedAt: number | null;
   reviseError: unknown;
+  /** Offered with a revision that failed on the server. */
+  onRetryRevise?: () => void;
   onCancelRevise: () => void;
+  /** One short line about the draft itself (reloaded, not saved yet). */
+  notice?: string | null;
 
   onSave: () => void;
   saving: boolean;
@@ -167,6 +171,16 @@ export function ReviewScreen(props: ReviewScreenProps) {
         </Button>
       </div>
 
+      <Collapse open={props.notice != null}>
+        <div className="review-slot">
+          {props.notice != null && (
+            <p className="check-line tone-neutral review-notice" role="status">
+              {props.notice}
+            </p>
+          )}
+        </div>
+      </Collapse>
+
       <Collapse open={props.saveError != null}>
         <div className="review-slot">{props.saveError != null && <ErrorCallout error={props.saveError} title="Could not save" onRetry={props.onSave} />}</div>
       </Collapse>
@@ -239,7 +253,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
         </div>
       </Collapse>
       <Collapse open={props.reviseError != null}>
-        <div className="review-slot">{props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed" />}</div>
+        <div className="review-slot">{props.reviseError != null && <ErrorCallout error={props.reviseError} title="The revision failed" onRetry={props.onRetryRevise} />}</div>
       </Collapse>
 
       {props.originalText && (

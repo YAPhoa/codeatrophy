@@ -195,18 +195,17 @@ export function describeUsage(usage: GenerationUsage): string {
 }
 
 /**
- * One line about a problem's test cases. While hidden cases are concealed
- * the line says how many there are and how many are shown as examples —
- * "7 test cases · 2 shown as examples" — without implying anything about the
- * rest.
+ * One line about a problem's test cases, the same whether hidden ones are
+ * concealed or not: "13 test cases · 2 samples · 11 hidden". A part with
+ * nothing in it is left out ("5 test cases · all samples").
  */
-export function describeCases(total: number, samples: number, hiding: boolean): string {
+export function describeCases(total: number, samples: number): string {
   if (total === 0) return 'No test cases';
+  const hidden = total - samples;
   const count = plural(total, 'test case');
-  if (!hiding) return `${count} · ${plural(samples, 'sample')}, ${total - samples} hidden`;
-  if (samples === 0) return `${count} · none shown as examples`;
-  if (samples === total) return `${count} · ${total === 1 ? 'shown as an example' : 'all shown as examples'}`;
-  return `${count} · ${samples} shown as ${samples === 1 ? 'an example' : 'examples'}`;
+  if (hidden === 0) return `${count} · ${total === 1 ? '1 sample' : 'all samples'}`;
+  if (samples === 0) return `${count} · ${total === 1 ? '1 hidden' : 'all hidden'}`;
+  return `${count} · ${plural(samples, 'sample')} · ${hidden} hidden`;
 }
 
 /** "Ran 7 test cases — 5 passed": what a finished run or submission covered. */

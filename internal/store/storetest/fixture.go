@@ -177,6 +177,32 @@ func Populate(t *testing.T, db store.Store) {
 			Status: domain.SubmissionQueued, CreatedAt: now}); err != nil {
 			return err
 		}
+		// AI jobs: one finished with a result and arbitrary text, one
+		// waiting.
+		back, origin2, result, fin := "/capture?collection="+x, "origin", `{"text":"`+x+`"}`, now.Add(time.Minute)
+		for _, j := range []store.AIJob{
+			{ID: "job0", CreatedAt: now, Kind: "draft", Title: x, Status: store.JobSucceeded, Origin: &back,
+				Request: `{"text":"` + x + `"}`, Result: &result, StartedAt: &now, FinishedAt: &fin},
+			{ID: "job1", CreatedAt: now, Kind: "testcases", ItemID: &origin2, Title: "Two Sum", Status: store.JobQueued, Request: `{}`},
+		} {
+			if err := tx.InsertAIJob(&j); err != nil {
+				return err
+			}
+		}
+		// Drafts: a variant with everything set, and a capture written by
+		// hand.
+		variantOf, content, errBody, job := "origin", `{"form":"`+x+`"}`, `{"code":"upstream_error","message":"`+x+`"}`, "job1"
+		for _, d := range []store.Draft{
+			{ID: "draft0", CreatedAt: now, UpdatedAt: fin, Kind: "variant", VariantOf: &variantOf, Title: x, ClientTitle: &back,
+				Revision: 3, Request: &result, JobID: &job, Error: &errBody, Generation: &result, GenerationSeq: 2,
+				Content: &content, BasedOn: 1},
+			{ID: "draft1", CreatedAt: now, UpdatedAt: now, Kind: "capture", Title: "Untitled draft", Revision: 1, Edited: true,
+				Content: &content},
+		} {
+			if err := tx.InsertDraft(&d); err != nil {
+				return err
+			}
+		}
 		in := "custom"
 		return tx.InsertSubmission(&domain.Submission{ID: "run", ItemID: "origin", Mode: domain.ModeRun, Language: "cpp",
 			Source: "int main(){}", Stdin: &in, Status: domain.SubmissionQueued, CreatedAt: now})
@@ -216,12 +242,22 @@ func SameDump(t *testing.T, what string, want, got map[string][]string) {
 	}
 }
 
-// ClearLastRuns removes the last runs of the solutions Populate stores, for
-// tests that take its database back to a schema version from before
-// solutions had them (11), which loses them.
-func ClearLastRuns(t *testing.T, db store.Store) {
+// ClearNewerData removes what Populate stores that older schema versions
+// cannot hold, for tests that take its database back to one: the last runs
+// of solutions (version 11), AI jobs and drafts (version 12).
+func ClearNewerData(t *testing.T, db store.Store) {
 	t.Helper()
 	Write(t, db, func(tx store.Tx) error {
+		for _, id := range []string{"job0", "job1"} {
+			if _, err := tx.DeleteAIJob(id); err != nil {
+				return err
+			}
+		}
+		for _, id := range []string{"draft0", "draft1"} {
+			if _, err := tx.DeleteDraft(id); err != nil {
+				return err
+			}
+		}
 		sols, err := tx.ListSolutions("origin")
 		if err != nil {
 			return err

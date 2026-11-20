@@ -1,24 +1,26 @@
 import { useSyncExternalStore } from 'react';
 import { readString, writeString } from './storage';
 
-// The library lists one page at a time. The page is in the URL (`page=`,
-// left out for the first), so back, forward and reload keep it; how many
-// items a page holds is kept per browser.
+// The library, like the AI activity log, lists one page at a time. The page
+// is in the URL (`page=`, left out for the first), so back, forward and
+// reload keep it; how many items a page holds is kept per browser, for each
+// list on its own (`key`).
 
 export const PAGE_SIZES = [25, 50, 100, 200] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
 const DEFAULT_PAGE_SIZE: PageSize = 50;
 
+/** The library's page size; another list passes a key of its own. */
 const KEY = 'libraryPageSize';
 const listeners = new Set<() => void>();
 
-export function getPageSize(): PageSize {
-  const n = Number(readString(KEY));
+export function getPageSize(key = KEY): PageSize {
+  const n = Number(readString(key));
   return (PAGE_SIZES as readonly number[]).includes(n) ? (n as PageSize) : DEFAULT_PAGE_SIZE;
 }
 
-export function setPageSize(size: PageSize): void {
-  writeString(KEY, String(size));
+export function setPageSize(size: PageSize, key = KEY): void {
+  writeString(key, String(size));
   listeners.forEach((fn) => fn());
 }
 
@@ -27,8 +29,8 @@ function subscribe(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-export function usePageSize(): PageSize {
-  return useSyncExternalStore(subscribe, getPageSize);
+export function usePageSize(key = KEY): PageSize {
+  return useSyncExternalStore(subscribe, () => getPageSize(key));
 }
 
 /** The page a URL asks for: a whole number from 1, and 1 for anything else. */

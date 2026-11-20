@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { setTransport } from '../../api/client';
+import { api, setTransport } from '../../api/client';
 import type { ItemDraft } from '../../api/types';
-import { checkedState, formFromDraft, type CheckedDraft } from '../../lib/itemForm';
-import { readJson, writeJson } from '../../lib/storage';
+import { checkedState, formFromDraft, type ItemFormState } from '../../lib/itemForm';
 import { createMockServer } from '../../mock';
+import { readContent } from '../drafts/draftContent';
 import { cancelDraftCheck, getDraftCheck, startDraftCheck } from './draftChecks';
 
 const draft: ItemDraft = {
@@ -21,59 +21,57 @@ const draft: ItemDraft = {
   assumptions: [],
 };
 
-function memoryStorage(): Storage {
-  const data = new Map<string, string>();
-  return {
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => void data.set(k, v),
-    removeItem: (k: string) => void data.delete(k),
-  } as unknown as Storage;
-}
-
 async function settled(key: string): Promise<void> {
   for (let i = 0; i < 100 && getDraftCheck(key).running; i++) await new Promise((r) => setTimeout(r, 5));
 }
 
+/** A draft on the server holding this form. */
+async function stored(form: ItemFormState): Promise<string> {
+  return (await api.drafts.create({ kind: 'capture', content: { v: 1, form, check: null } })).id;
+}
+
+const contentOf = async (id: string) => readContent(await api.drafts.get(id));
+
 describe('a draft check with its page closed', () => {
   beforeEach(() => {
-    Object.defineProperty(globalThis, 'localStorage', { value: memoryStorage(), configurable: true });
     setTransport(createMockServer({ speed: 'instant' }).fetch);
   });
   afterEach(() => {
-    Reflect.deleteProperty(globalThis, 'localStorage');
     setTransport(() => Promise.reject(new Error('no transport')));
   });
 
-  it('writes its answer into the stored draft', async () => {
+  it('writes its answer into the draft on the server', async () => {
     const form = formFromDraft(draft);
-    writeJson('capture:test', { form, check: null } satisfies CheckedDraft);
-    startDraftCheck('capture:test', form);
-    expect(getDraftCheck('capture:test')).toMatchObject({ running: true, total: 2 });
-    await settled('capture:test');
-    const stored = readJson<CheckedDraft | null>('capture:test', null)!;
-    expect(stored.form!.testCases.map((t) => t.verified)).toEqual([true, false]);
-    expect(stored.check).toMatchObject({ attempted: true, passed: 1, total: 2 });
-    expect(stored.checked).toBe(checkedState(stored.form!));
-    expect(getDraftCheck('capture:test')).toMatchObject({ running: false, outdated: false, error: null });
+    const id = await stored(form);
+    startDraftCheck(id, form);
+    expect(getDraftCheck(id)).toMatchObject({ running: true, total: 2 });
+    await settled(id);
+    const content = await contentOf(id);
+    expect(content.form!.testCases.map((t) => t.verified)).toEqual([true, false]);
+    expect(content.check).toMatchObject({ attempted: true, passed: 1, total: 2 });
+    expect(content.checked).toBe(checkedState(content.form!));
+    expect(getDraftCheck(id)).toMatchObject({ running: false, outdated: false, error: null });
   });
 
   it('leaves a draft that changed meanwhile alone, and says so', async () => {
     const form = formFromDraft(draft);
-    startDraftCheck('capture:test', form);
+    const id = await stored(form);
+    startDraftCheck(id, form);
     const edited = { ...form, testCases: form.testCases.slice(0, 1) };
-    writeJson('capture:test', { form: edited } satisfies CheckedDraft);
-    await settled('capture:test');
-    expect(readJson<CheckedDraft | null>('capture:test', null)).toEqual({ form: edited });
-    expect(getDraftCheck('capture:test').outdated).toBe(true);
+    await api.drafts.update(id, { content: { v: 1, form: edited } });
+    await settled(id);
+    expect((await contentOf(id)).form!.testCases).toHaveLength(1);
+    expect((await contentOf(id)).check).toBeUndefined();
+    expect(getDraftCheck(id).outdated).toBe(true);
   });
 
   it('can be cancelled', async () => {
     const form = formFromDraft(draft);
-    writeJson('capture:test', { form } satisfies CheckedDraft);
-    startDraftCheck('capture:test', form);
-    cancelDraftCheck('capture:test');
+    const id = await stored(form);
+    startDraftCheck(id, form);
+    cancelDraftCheck(id);
     await new Promise((r) => setTimeout(r, 20));
-    expect(getDraftCheck('capture:test')).toMatchObject({ running: false, error: null, outdated: false });
-    expect(readJson<CheckedDraft | null>('capture:test', null)!.form!.testCases.map((t) => t.verified)).toEqual([false, true]);
+    expect(getDraftCheck(id)).toMatchObject({ running: false, error: null, outdated: false });
+    expect((await contentOf(id)).form!.testCases.map((t) => t.verified)).toEqual([false, true]);
   });
 });

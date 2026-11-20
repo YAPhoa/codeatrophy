@@ -91,22 +91,32 @@ func apiError(code app.Code, format string, args ...any) error {
 
 // decode reads a JSON body into v. An empty body decodes as {}.
 func decode(r *http.Request, v any) error {
-	body := http.MaxBytesReader(nil, r.Body, maxJSONBody)
-	data, err := io.ReadAll(body)
+	data, err := readBody(r)
 	if err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			return apiError(app.CodeTooLarge, "request body exceeds %d bytes", maxJSONBody)
-		}
-		return apiError(app.CodeBadRequest, "could not read the request body")
-	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		data = []byte("{}")
+		return err
 	}
 	if err := domain.DecodeJSON(data, v); err != nil {
 		return decodeError(err)
 	}
 	return nil
+}
+
+// readBody reads a JSON body without decoding it, for services that keep
+// it as sent. An empty body is {}.
+func readBody(r *http.Request) (json.RawMessage, error) {
+	body := http.MaxBytesReader(nil, r.Body, maxJSONBody)
+	data, err := io.ReadAll(body)
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			return nil, apiError(app.CodeTooLarge, "request body exceeds %d bytes", maxJSONBody)
+		}
+		return nil, apiError(app.CodeBadRequest, "could not read the request body")
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		data = []byte("{}")
+	}
+	return data, nil
 }
 
 // decodeError maps a JSON decoding error to an API error.

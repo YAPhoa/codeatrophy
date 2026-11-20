@@ -82,6 +82,7 @@ bundle update existing items instead of duplicating them.
 | `internal/store` | Persistence interface and logical schema; `sqlite` and `postgres` implementations with their migrations; `dbcopy` (copying between stores), `dbopen` (choosing and opening the configured one); `storetest` (the conformance suite) |
 | `internal/ai` | `Provider` interface, provider implementations, prompt and schema definitions |
 | `internal/judge` | `Engine` interface and engine implementations |
+| `internal/jobqueue` | `Queue` interface that schedules AI jobs, and its in-process implementation |
 | `internal/grader` | Runs submissions through an engine, compares output, assigns verdicts |
 | `internal/harness` | Assembles the program of a solution-only problem and maps line numbers in toolchain output back to the solver's code; no I/O |
 | `internal/bundle` | Bundle reading, writing, validation and import planning |
@@ -206,7 +207,8 @@ every table has the same row count on both sides, and it refuses a
 destination that already holds library data unless told to replace it.
 "Holds no library data" means every table is empty except style presets, and
 those are only built-in presets exactly as seeded, never edited; any setting,
-provider, usage count, AI log entry, item, collection or submission counts. The destination's own seeded
+provider, usage count, AI log entry, AI job, draft, item, collection or
+submission counts. The destination's own seeded
 presets are replaced by the source's. Stored API keys travel as ciphertext,
 so the destination needs the same secret key.
 
@@ -443,6 +445,67 @@ The two features built on it are provider independent:
   problem the server then proves each runner on the first sample as the
   draft check does. Nothing is saved; the code goes into the form.
 
+### AI jobs
+
+Every generation — draft, variant, test cases, code — runs as a **job** on
+the server, not inside the HTTP request that asked for it. The service
+validates the request as before (a bad field, AI switched off, an unusable
+provider or style is refused at once, and no job exists), stores the job in
+`ai_jobs` with the request body as sent, answers `202` with it, and hands
+its id to a queue. A worker runs the generation with a context of its own,
+derived from the server's and cancelled by `POST /ai/jobs/{id}/cancel`, so
+navigating away or closing the browser changes nothing, and cancelling
+aborts the provider call (the AI log records it as `cancelled`). When it
+ends, one transaction stores the outcome — the exact body the old
+synchronous endpoint answered with, or its error in the same shape — and
+runs the completion step of the job's kind, if it has one.
+
+```go
+type Queue interface {
+    Start(ctx context.Context, run Run)
+    Push(id string)
+    Cancel(id string)
+    Stop()
+}
+```
+
+The queue only schedules: what a job is and what state it is in live in the
+database, which the service writes before telling the queue, and a worker
+reads the stored status before it starts and again before it writes the
+outcome, so a cancelled or deleted job is never overwritten. The one
+implementation, `jobqueue.Local`, is a FIFO slice with a fixed pool of
+`CODEATROPHY_AI_WORKERS` goroutines (default 2); nothing in it survives the
+process. On start, jobs a previous process left `running` become `failed`
+with code `interrupted`, and `queued` ones are queued again; on shutdown the
+running ones are left as they are, for the next start to report. At most 20
+jobs may be active. Finished jobs are kept for 3 days, and only while among
+the newest 200; pruning runs when a job is inserted, at start and hourly.
+Nothing assumes a job finishes while one request is open, so a queue that
+hands work to a provider's batch API can replace `Local` without the
+services or the API changing.
+
+### Drafts
+
+A **draft** is a new item in progress, kept in `drafts` until it is saved or
+discarded; drafts never expire, are not part of bundles and are not reachable
+over MCP. The client's review form is an opaque JSON document (`content`) the
+server stores as given; the server owns the rest: the latest generation
+request, the latest job, the latest `generation` (a `DraftResponse`) with a
+counter `generationSeq`, the generation the form was last based on
+(`basedOn`), whether the user has edited it, the last error, a revision and a
+title. Starting a capture or a variant with AI creates a draft and its job
+together; the job's completion step (kinds `draft` and `variant`) writes the
+result into the draft and increments `generationSeq`, or sets the error, so
+a draft is complete even when no browser was open. A job that is no longer
+its draft's latest, or whose draft is gone, changes nothing. Revising and
+retrying are new jobs on the same draft, one at a time. The state the UI
+shows (`drafting`, `failed`, `ready`, `edited`, `new`) is derived on read,
+never stored. Autosaves carry the revision they were based on and are
+refused with a conflict when the draft has moved on. Saving runs the
+ordinary item creation and deletes the draft in the same transaction;
+discarding deletes it and cancels its job. An instance keeps at most 500
+drafts.
+
 ### Accounting for AI requests
 
 Every request the server sends to a provider — draft, variant, test
@@ -462,8 +525,8 @@ server cannot use) it writes, in one transaction:
   response gzip-compressed in `ai_log_bodies`, and each distinct system
   text once in `ai_log_texts`. The log is append-only and keeps every
   request with its content until the user clears or prunes it; it outlives
-  providers and items, is paged by a keyset cursor over (created time, id),
-  and is not part of bundles or MCP. What it stores of a request is built
+  providers and items, is paged by number or by a keyset cursor over
+  (created time, id), and is not part of bundles or MCP. What it stores of a request is built
   from the server's own provider-neutral request, never from the HTTP call,
   so no key or header can get in; request and response are each cut at
   256 KiB.

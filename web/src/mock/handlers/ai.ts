@@ -1,14 +1,15 @@
-// The AI endpoints. They never write to the library.
+// The AI generations. Each runs as a job (../jobs.ts); none writes to the library.
 
-import type { AppliedStyle, CodeCheck, HarnessCode, CodeSample, DraftCheck, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
+import type { AiCodeResponse, AiTestCasesResponse, AppliedStyle, CodeCheck, HarnessCode, CodeSample, DraftCheck, DraftResponse, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
 import { applyStyle, breakRunner, checkDraft, checkRunners, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface } from '../ai';
 import { writeCode } from '../code';
 import type { MockDb, StoredAiProvider } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
-import type { Handler, Req } from '../http';
-import { aiUnavailable, invalid, isRecord, objectBody, ok, upstream, Validator } from '../http';
+import type { Handler } from '../http';
+import type { JobRunner } from '../jobs';
+import { accepted, aiUnavailable, invalid, isRecord, objectBody, upstream, Validator } from '../http';
 import { buildLargeCases, largeForPrompt, promptCase } from '../largeCase';
-import { isLanguage, sleep } from '../util';
+import { isLanguage } from '../util';
 import { resolveStyle } from './styles';
 
 const MODES: readonly VariantMode[] = ['similar', 'easier', 'harder', 'twist'];
@@ -76,6 +77,14 @@ function parseProvider(db: MockDb, raw: Record<string, unknown>, v: Validator): 
   else if (!db.isReady(provider)) v.add('providerId', 'names a provider that is not ready');
   else return provider;
   return null;
+}
+
+/** The provider a job uses once it starts, checked again: AI features may have been switched off, or the provider removed, meanwhile. */
+function providerAtRun(db: MockDb, named: StoredAiProvider | null): StoredAiProvider {
+  if (named === null) return providerFor(db, null);
+  const current = db.ai.providers.find((p) => p.id === named.id);
+  if (!db.ai.enabled || !current || !db.isReady(current)) throw aiUnavailable();
+  return current;
 }
 
 /** The provider a valid request goes to: the one it names, else the default; `503` when there is neither, or AI features are switched off. */
@@ -183,8 +192,8 @@ function addLargeCases(db: MockDb, draft: ItemDraft, check: DraftCheck, count: n
   check.largeCases = built.map((one) => one.report);
 }
 
-/** The response of a draft or variant call: the draft in the chosen style, with its reference solution and runners checked. */
-function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: number, ...texts: (string | null)[]) {
+/** The result of a draft or variant generation: the draft in the chosen style, with its reference solution and runners checked. */
+function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: number, ...texts: (string | null)[]): DraftResponse {
   const styled = applyStyle(result, style);
   // After the style, which decides the languages that are left to break and to check.
   const draft = asks(RUNNER_MARKER, ...texts) ? breakRunner(styled) : styled;
@@ -193,14 +202,13 @@ function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call:
   // wrote does not include the large cases, which the server builds.
   const usage = spend(db, call, draft, call.title ?? (draft.title || null));
   if (large > 0 && check) addLargeCases(db, draft, check, large, texts);
-  return ok({ draft, style: applied(style), check, usage });
+  return { draft, style: applied(style), check, usage };
 }
 
 // The request is validated before the provider is looked at, so an invalid
 // request is a `422` even on an instance with no provider configured.
 
-async function draft(db: MockDb, req: Req) {
-  const raw = objectBody(req);
+export function prepareDraft(db: MockDb, raw: Record<string, unknown>): Prepared<DraftResponse> {
   const v = new Validator();
   const text = typeof raw.text === 'string' ? normaliseText(raw.text) : raw.text;
   if (typeof text !== 'string' || text.trim() === '') v.add('text', 'is required');
@@ -220,17 +228,22 @@ async function draft(db: MockDb, req: Req) {
   v.check();
   const style = resolveStyle(db, raw);
   const provider = providerFor(db, named);
-
-  await sleep(db.delay('aiDraft'));
-  const call: Call = { provider, operation: 'draft', itemId: null, title: null, schema: 'item_draft', content: said(text as string, instruction, previousDraft, style) };
-  failIfAsked(db, call, text as string, instruction);
-  const result = draftFromText(text as string, typeHint as 'auto' | 'problem' | 'reading', instruction, previousDraft, interfaceHint as InterfaceHint);
-  return drafted(db, result, style, call, large, text as string, instruction);
+  return {
+    itemId: null,
+    title: shortTitle(text as string),
+    provider,
+    delay: delayOf(db, 'aiDraft', text as string, instruction),
+    run: () => {
+      const call: Call = { provider: providerAtRun(db, named), operation: 'draft', itemId: null, title: null, schema: 'item_draft', content: said(text as string, instruction, previousDraft, style) };
+      failIfAsked(db, call, text as string, instruction);
+      const result = draftFromText(text as string, typeHint as 'auto' | 'problem' | 'reading', instruction, previousDraft, interfaceHint as InterfaceHint);
+      return drafted(db, result, style, call, large, text as string, instruction);
+    },
+  };
 }
 
-async function variant(db: MockDb, req: Req) {
-  const item = db.getItem(req.params.id!);
-  const raw = objectBody(req);
+export function prepareVariant(db: MockDb, itemId: string, raw: Record<string, unknown>): Prepared<DraftResponse> {
+  const item = db.getItem(itemId);
   const v = new Validator();
   const mode = (raw.mode ?? 'similar') as VariantMode;
   if (!MODES.includes(mode)) v.add('mode', 'must be similar, easier, harder or twist');
@@ -246,23 +259,30 @@ async function variant(db: MockDb, req: Req) {
   v.check();
   const style = resolveStyle(db, raw);
   const provider = providerFor(db, named);
-
-  await sleep(db.delay('aiDraft'));
-  const call: Call = { provider, operation: 'variant', itemId: item.id, title: item.title, schema: 'item_draft', content: said(`Write a variant (${mode}) of this item.\n\n# ${item.title}\n\n${item.body}`, instruction, previousDraft, style) };
-  failIfAsked(db, call, instruction);
-  // With an earlier variant draft and an instruction this is a revision of
-  // that draft, not a fresh variant.
-  const result =
-    previousDraft != null && instruction ? reviseDraft(previousDraft, instruction) : variantOfItem(db, item, mode, instruction);
-  // A variant keeps the original's interface unless the request asks for the other one.
-  const shaped = interfaceHint === null ? result : withInterface(result, interfaceHint as ProblemInterface);
-  return drafted(db, shaped, style, call, large, instruction);
+  return {
+    itemId: item.id,
+    title: item.title,
+    provider,
+    delay: delayOf(db, 'aiDraft', instruction),
+    run: () => {
+      // The original may have been deleted while the job waited.
+      const original = db.getItem(itemId);
+      const call: Call = { provider: providerAtRun(db, named), operation: 'variant', itemId: original.id, title: original.title, schema: 'item_draft', content: said(`Write a variant (${mode}) of this item.\n\n# ${original.title}\n\n${original.body}`, instruction, previousDraft, style) };
+      failIfAsked(db, call, instruction);
+      // With an earlier variant draft and an instruction this is a revision of
+      // that draft, not a fresh variant.
+      const result =
+        previousDraft != null && instruction ? reviseDraft(previousDraft, instruction) : variantOfItem(db, original, mode, instruction);
+      // A variant keeps the original's interface unless the request asks for the other one.
+      const shaped = interfaceHint === null ? result : withInterface(result, interfaceHint as ProblemInterface);
+      return drafted(db, shaped, style, call, large, instruction);
+    },
+  };
 }
 
-async function testCases(db: MockDb, req: Req) {
-  const item = db.getItem(req.params.id!);
+export function prepareTestCases(db: MockDb, itemId: string, raw: Record<string, unknown>): Prepared<AiTestCasesResponse> {
+  const item = db.getItem(itemId);
   if (item.type !== 'problem') throw invalid('item', 'is a reading; only problems have test cases');
-  const raw = objectBody(req);
   const v = new Validator();
   const count = raw.count ?? 8;
   if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > LIMITS.maxGeneratedTestCases) {
@@ -275,57 +295,65 @@ async function testCases(db: MockDb, req: Req) {
   }
   const instruction = parseInstruction(raw, v);
   const large = parseLargeTestCases(raw, v);
+  parseOrigin(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const provider = providerFor(db, named);
-
-  await sleep(db.delay('aiTests'));
-  // Large test data is never sent to the model.
-  const inputs = db.casesOf(item.id).map(promptCase).join('\n---\n');
-  const call: Call = {
-    provider,
-    operation: 'testcases',
+  return {
     itemId: item.id,
     title: item.title,
-    schema: 'test_cases',
-    content: said(`Write a reference solution in ${language as string} and ${count as number} test cases for this problem.\n\n# ${item.title}\n\n${item.body}\n\nInputs it already has:\n${inputs || '(none)'}`, instruction, null, null),
+    provider,
+    delay: delayOf(db, 'aiTests', instruction),
+    run: () => {
+      const item = db.getItem(itemId);
+      // Large test data is never sent to the model.
+      const inputs = db.casesOf(item.id).map(promptCase).join('\n---\n');
+      const call: Call = {
+        provider: providerAtRun(db, named),
+        operation: 'testcases',
+        itemId: item.id,
+        title: item.title,
+        schema: 'test_cases',
+        content: said(`Write a reference solution in ${language as string} and ${count as number} test cases for this problem.\n\n# ${item.title}\n\n${item.body}\n\nInputs it already has:\n${inputs || '(none)'}`, instruction, null, null),
+      };
+      failIfAsked(db, call, instruction);
+      const proposal = proposeTestCases(db, item, count as number, language as string, asks(REPEAT_ALL_MARKER, instruction) ? (count as number) : asks(REPEAT_MARKER, instruction) ? Math.min(2, (count as number) - 1) : 0);
+      // The model answers with the solution and the cases; running them is the server's part.
+      const answered = { referenceSolution: proposal.referenceSolution, cases: proposal.cases.map((c) => ({ name: c.name, rationale: c.rationale, stdin: c.stdin, predictedStdout: c.predictedStdout })) };
+      const usage = spend(db, call, answered);
+      if (large > 0) {
+        const built = buildLargeCases(db, {
+          count: large,
+          title: item.title,
+          face: item.problem?.interface ?? 'program',
+          timeLimitMs: item.problem?.timeLimitMs ?? 2000,
+          referenceSolution: proposal.referenceSolution,
+          existing: [...db.casesOf(item.id).map((c) => c.stdin), ...proposal.cases.map((c) => c.stdin)],
+          index: proposal.cases.length,
+          blocked: null,
+          texts: [instruction],
+          operation: 'testcases',
+        });
+        for (const one of built) {
+          if (one.stdin === null || one.expectedStdout === null) continue;
+          // The model has not seen the input, so there is no prediction to compare.
+          proposal.cases.push({
+            name: one.report.name ?? 'Large input',
+            rationale: 'As large as the constraints allow; a solution of the wrong complexity runs out of time.',
+            stdin: one.stdin,
+            expectedStdout: one.expectedStdout,
+            predictedStdout: null,
+            isSample: false,
+            verified: true,
+            predictionMatched: null,
+            error: null,
+          });
+        }
+        proposal.largeCases = built.map((one) => one.report);
+      }
+      return { ...proposal, usage };
+    },
   };
-  failIfAsked(db, call, instruction);
-  const proposal = proposeTestCases(db, item, count as number, language as string, asks(REPEAT_ALL_MARKER, instruction) ? (count as number) : asks(REPEAT_MARKER, instruction) ? Math.min(2, (count as number) - 1) : 0);
-  // The model answers with the solution and the cases; running them is the server's part.
-  const answered = { referenceSolution: proposal.referenceSolution, cases: proposal.cases.map((c) => ({ name: c.name, rationale: c.rationale, stdin: c.stdin, predictedStdout: c.predictedStdout })) };
-  const usage = spend(db, call, answered);
-  if (large > 0) {
-    const built = buildLargeCases(db, {
-      count: large,
-      title: item.title,
-      face: item.problem?.interface ?? 'program',
-      timeLimitMs: item.problem?.timeLimitMs ?? 2000,
-      referenceSolution: proposal.referenceSolution,
-      existing: [...db.casesOf(item.id).map((c) => c.stdin), ...proposal.cases.map((c) => c.stdin)],
-      index: proposal.cases.length,
-      blocked: null,
-      texts: [instruction],
-      operation: 'testcases',
-    });
-    for (const one of built) {
-      if (one.stdin === null || one.expectedStdout === null) continue;
-      // The model has not seen the input, so there is no prediction to compare.
-      proposal.cases.push({
-        name: one.report.name ?? 'Large input',
-        rationale: 'As large as the constraints allow; a solution of the wrong complexity runs out of time.',
-        stdin: one.stdin,
-        expectedStdout: one.expectedStdout,
-        predictedStdout: null,
-        isSample: false,
-        verified: true,
-        predictionMatched: null,
-        error: null,
-      });
-    }
-    proposal.largeCases = built.map((one) => one.report);
-  }
-  return ok({ ...proposal, usage });
 }
 
 /** An optional text field; anything but a string or null is a `422`. */
@@ -369,8 +397,7 @@ function checkCode(db: MockDb, code: { starterCode: Record<string, string>; harn
   return { attempted: true, engine: 'judge0', runners: checkRunners(draft, judge === 'down') };
 }
 
-async function code(db: MockDb, req: Req) {
-  const raw = objectBody(req);
+export function prepareCode(db: MockDb, raw: Record<string, unknown>): Prepared<AiCodeResponse> {
   const v = new Validator();
   const title = parseText(raw, 'title', v).trim();
   const body = parseText(raw, 'body', v);
@@ -390,39 +417,104 @@ async function code(db: MockDb, req: Req) {
   const samples = parseSamples(raw, v);
   const itemId = raw.itemId ?? null;
   if (itemId !== null && (typeof itemId !== 'string' || !db.items.has(itemId))) v.add('itemId', 'item does not exist');
+  parseOrigin(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
   const provider = providerFor(db, named);
-
-  await sleep(db.delay('aiTests'));
-  const item = itemId === null ? null : db.getItem(itemId as string);
-  const shown = samples.slice(0, 5).map((s) => promptCase({ name: '', ...s })).join('\n---\n');
-  const call: Call = {
+  const labelItem = itemId === null ? null : db.getItem(itemId as string);
+  return {
+    itemId: (itemId as string | null),
+    title: title || shortTitle(body) || labelItem?.title || 'Untitled problem',
     provider,
-    operation: 'code',
-    itemId: item?.id ?? null,
-    title: title || item?.title || null,
-    schema: 'code',
-    content: said(`Write the ${face === 'function' ? 'stub and the runner' : 'starter code'} of this problem in ${languages.join(', ')}.\n\n# ${title}\n\n${body}\n\nSamples:\n${shown || '(none)'}`, null, null, style),
+    delay: delayOf(db, 'aiTests', title, body),
+    run: () => {
+      const item = itemId === null ? null : (db.items.get(itemId as string) ?? null);
+      const shown = samples.slice(0, 5).map((s) => promptCase({ name: '', ...s })).join('\n---\n');
+      const call: Call = {
+        provider: providerAtRun(db, named),
+        operation: 'code',
+        itemId: item?.id ?? null,
+        title: title || item?.title || null,
+        schema: 'code',
+        content: said(`Write the ${face === 'function' ? 'stub and the runner' : 'starter code'} of this problem in ${languages.join(', ')}.\n\n# ${title}\n\n${body}\n\nSamples:\n${shown || '(none)'}`, null, null, style),
+      };
+      failIfAsked(db, call, title, body);
+      let written = writeCode({ title, body, face: face as 'program' | 'function', languages, samples });
+      if (face === 'function' && asks(RUNNER_MARKER, title, body)) {
+        // As a model can leave one runner broken; the pretend judge reads the marker as a compile error.
+        const broken = breakRunner({ type: 'problem', title, summary: '', body, difficulty: null, tags: [], testCases: [], assumptions: [],
+          problem: { interface: 'function', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', ...written, referenceSolution: null } });
+        written = { starterCode: broken.problem!.starterCode, harness: broken.problem!.harness };
+      }
+      const usage = spend(db, call, { code: languages.filter((l) => l in written.starterCode).map((l) => ({ language: l, starterCode: written.starterCode[l], ...written.harness[l] })) });
+      return { ...written, check: face === 'function' ? checkCode(db, written, samples) : null, style: applied(style), usage };
+    },
   };
-  failIfAsked(db, call, title, body);
-  let written = writeCode({ title, body, face: face as 'program' | 'function', languages, samples });
-  if (face === 'function' && asks(RUNNER_MARKER, title, body)) {
-    // As a model can leave one runner broken; the pretend judge reads the marker as a compile error.
-    const broken = breakRunner({ type: 'problem', title, summary: '', body, difficulty: null, tags: [], testCases: [], assumptions: [],
-      problem: { interface: 'function', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', ...written, referenceSolution: null } });
-    written = { starterCode: broken.problem!.starterCode, harness: broken.problem!.harness };
-  }
-  const usage = spend(db, call, { code: languages.filter((l) => l in written.starterCode).map((l) => ({ language: l, starterCode: written.starterCode[l], ...written.harness[l] })) });
-  return ok({ ...written, check: face === 'function' ? checkCode(db, written, samples) : null, style: applied(style), usage });
 }
 
-export function aiRoutes(db: MockDb): [string, string, Handler][] {
+/**
+ * What a generation does once its job runs, prepared when it is asked for:
+ * the request is validated then, and `run` generates (or throws the error the
+ * job fails with). `delay` is how long the pretend provider takes.
+ */
+export interface Prepared<R> {
+  itemId: string | null;
+  /** The job's label. */
+  title: string;
+  provider: StoredAiProvider;
+  delay: number;
+  run: () => R;
+}
+
+/** `MOCK:SLOW` anywhere in a request's text makes its generation take a minute, at any speed: time to look at it running, or cancel it. */
+export const SLOW_MARKER = 'MOCK:SLOW';
+
+function delayOf(db: MockDb, kind: 'aiDraft' | 'aiTests', ...texts: (string | null)[]): number {
+  return asks(SLOW_MARKER, ...texts) ? 60_000 : db.delay(kind);
+}
+
+/** The start of a text, as a label: its first line, cut at a word near 60 characters. */
+export function shortTitle(text: string): string {
+  const line = text.trim().split('\n')[0]?.trim() ?? '';
+  if (line.length <= 60) return line;
+  const cut = line.slice(0, 60);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 30 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** `origin`: an opaque single line of at most 2000 characters, kept on the job. */
+export function parseOrigin(raw: Record<string, unknown>, v: Validator): string | null {
+  const value = raw.origin;
+  if (value == null) return null;
+  if (typeof value !== 'string') v.add('origin', 'must be a string or null');
+  else if (value.length > 2000) v.add('origin', atMostChars(2000));
+  // eslint-disable-next-line no-control-regex -- control characters are what is refused
+  else if (/[\u0000-\u001f\u007f\u0085\u2028\u2029]/.test(value)) v.add('origin', 'must be a single line');
+  else return value;
+  return null;
+}
+
+export function aiRoutes(db: MockDb, jobs: JobRunner): [string, string, Handler][] {
   return [
-    ['POST', '/ai/draft', (req) => draft(db, req)],
-    ['POST', '/items/:id/ai/variant', (req) => variant(db, req)],
-    ['POST', '/items/:id/ai/testcases', (req) => testCases(db, req)],
-    ['POST', '/ai/code', (req) => code(db, req)],
+    [
+      'POST',
+      '/items/:id/ai/testcases',
+      (req) => {
+        const raw = objectBody(req);
+        const job = jobs.start({ kind: 'testcases', request: raw, itemId: req.params.id!, origin: typeof raw.origin === 'string' ? raw.origin : null, draftId: null }, prepareTestCases(db, req.params.id!, raw));
+        return accepted(jobs.view(job));
+      },
+    ],
+    [
+      'POST',
+      '/ai/code',
+      (req) => {
+        const raw = objectBody(req);
+        const prepared = prepareCode(db, raw);
+        const job = jobs.start({ kind: 'code', request: raw, itemId: prepared.itemId, origin: typeof raw.origin === 'string' ? raw.origin : null, draftId: null }, prepared);
+        return accepted(jobs.view(job));
+      },
+    ],
   ];
 }

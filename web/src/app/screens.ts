@@ -5,6 +5,8 @@ import { lazyScreen } from '../lib/newBuild';
 // the routes so that links can preload the screen they lead to.
 export const CapturePage = lazyScreen(() => import('../features/capture/CapturePage'));
 export const VariantPage = lazyScreen(() => import('../features/capture/VariantPage'));
+export const DraftsPage = lazyScreen(() => import('../features/drafts/DraftsPage'));
+export const DraftPage = lazyScreen(() => import('../features/drafts/DraftPage'));
 export const SavedPage = lazyScreen(() => import('../features/capture/SavedPage'));
 export const ItemPage = lazyScreen(() => import('../features/item/ItemPage'));
 export const EditItemPage = lazyScreen(() => import('../features/item/EditItemPage'));

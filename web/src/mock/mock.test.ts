@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, setTransport } from '../api/client';
-import type { Submission } from '../api/types';
+import type { AiCodeRequest, AiCodeResponse, AiJob, AiJobDetail, AiTestCasesRequest, AiTestCasesResponse, Draft, DraftRequest, DraftResponse, Submission, VariantRequest } from '../api/types';
 import type { MockOptions, MockServer } from './index';
 import { DEFAULT_PREFERENCES, envProviderId, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
 import { assemble, functionKit, KIT_LANGUAGES } from './harness';
@@ -41,6 +41,41 @@ async function judged(id: string): Promise<{ final: Submission; seen: Submission
   }
   throw new Error('submission never completed');
 }
+
+/** Poll a job until it has finished. */
+async function finished<R = unknown>(id: string): Promise<AiJobDetail<R>> {
+  for (let i = 0; i < 500; i++) {
+    const job = await api.ai.job<R>(id);
+    if (job.status !== 'queued' && job.status !== 'running') return job;
+    await tick();
+  }
+  throw new Error('job never finished');
+}
+
+const STATUS_OF: Record<string, number> = { upstream_error: 502, not_found: 404, ai_unavailable: 503, validation_failed: 422 };
+
+/** A finished job's result, or the error it failed with, thrown as the request used to throw it. */
+function resultOf<R>(job: AiJobDetail<R>): R {
+  if (job.status === 'succeeded') return job.result!;
+  if (job.error) throw new ApiError(STATUS_OF[job.error.code] ?? 500, job.error.code === 'interrupted' ? 'internal' : job.error.code, job.error.message, job.error.fields);
+  throw new Error(`the job ended ${job.status}`);
+}
+
+/** Start a generation and wait for what it produced. */
+async function outcome<R>(started: Promise<AiJob>): Promise<R> {
+  return resultOf(await finished<R>((await started).id));
+}
+
+/** The generation of a new draft, once its job has finished. */
+async function generated(created: Promise<Draft>): Promise<DraftResponse> {
+  const draft = await created;
+  return resultOf(await finished<DraftResponse>(draft.job!.id));
+}
+
+const aiDraft = (body: DraftRequest) => generated(api.drafts.create({ kind: 'capture', generate: body }));
+const aiVariant = (itemId: string, body: VariantRequest) => generated(api.drafts.create({ kind: 'variant', variantOf: itemId, generate: body }));
+const aiTestCases = (itemId: string, body: AiTestCasesRequest) => outcome<AiTestCasesResponse>(api.ai.testCases(itemId, body));
+const aiCode = (body: AiCodeRequest) => outcome<AiCodeResponse>(api.ai.code(body));
 
 const zipFile = (bytes: Uint8Array<ArrayBuffer>, name = 'bundle.codeatrophy.zip') =>
   new File([bytes], name, { type: 'application/zip' });
@@ -1567,7 +1602,7 @@ describe('submissions', () => {
 
 describe('AI drafting', () => {
   it('drafts a recognisable problem in the default style', async () => {
-    const { draft, style } = await api.ai.draft({ text: 'two sum, array + target, return indices' });
+    const { draft, style } = await aiDraft({ text: 'two sum, array + target, return indices' });
     expect(style).toEqual({ id: seedIds.styles.leetcode, name: 'LeetCode style' });
     expect(draft).toMatchObject({ type: 'problem', title: 'Two Sum', difficulty: 'easy' });
     expect(draft.assumptions.length).toBeGreaterThanOrEqual(3);
@@ -1581,26 +1616,26 @@ describe('AI drafting', () => {
 
   it('resolves styleId: null for none, an id for that preset, 422 for an unknown id', async () => {
     const text = 'valid parentheses';
-    const plain = await api.ai.draft({ text, styleId: null, interfaceHint: 'program' });
+    const plain = await aiDraft({ text, styleId: null, interfaceHint: 'program' });
     expect(plain.style).toBeNull();
     expect(Object.keys(plain.draft.problem!.starterCode)).toHaveLength(5);
     expect(plain.draft.body).toContain('## Examples');
 
-    const terse = await api.ai.draft({ text: 'two sum', styleId: seedIds.styles.terse, interfaceHint: 'program' });
+    const terse = await aiDraft({ text: 'two sum', styleId: seedIds.styles.terse, interfaceHint: 'program' });
     expect(terse.style?.name).toBe('Terse contest style');
     expect(Object.keys(terse.draft.problem!.starterCode).sort()).toEqual(['cpp', 'python']);
     expect(terse.draft.body).not.toContain('## Follow-up');
 
-    const err = await failure(api.ai.draft({ text, styleId: 'nope' }));
+    const err = await failure(aiDraft({ text, styleId: 'nope' }));
     expect(err.status).toBe(422);
     expect(err.fields).toHaveProperty('styleId');
 
     await api.styles.remove(seedIds.styles.leetcode);
-    expect((await api.ai.draft({ text })).style).toBeNull();
+    expect((await aiDraft({ text })).style).toBeNull();
   });
 
   it('chooses the interface itself: a function for one routine, a program when input and output are the task', async () => {
-    const algorithm = await api.ai.draft({ text: 'two sum, array + target, return indices', styleId: null });
+    const algorithm = await aiDraft({ text: 'two sum, array + target, return indices', styleId: null });
     expect(algorithm.draft.problem!.interface).toBe('function');
     expect(Object.keys(algorithm.draft.problem!.harness)).toEqual([...KIT_LANGUAGES]);
     expect(Object.keys(algorithm.draft.problem!.starterCode)).toEqual([...KIT_LANGUAGES]);
@@ -1613,64 +1648,64 @@ describe('AI drafting', () => {
     expect(algorithm.draft.problem!.referenceSolution!.source).not.toContain('stdin');
 
     for (const text of ['Design an LRU cache with get and put', 'Parse a log file and print the busiest hour', 'simulate a bank queue; the input format is one event per line']) {
-      const { draft } = await api.ai.draft({ text, styleId: null });
+      const { draft } = await aiDraft({ text, styleId: null });
       expect(draft.problem, text).toMatchObject({ interface: 'program', harness: {} });
       expect(draft.problem!.referenceSolution!.source, text).toContain('sys.stdin');
     }
-    const generic = (await api.ai.draft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
+    const generic = (await aiDraft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
     expect(generic.problem!.interface).toBe('function');
     expect(generic.problem!.starterCode.python).toContain('def solve(self, nums: list[int]) -> int:');
   });
 
   it('follows interfaceHint when it gives one', async () => {
-    const program = (await api.ai.draft({ text: 'two sum', interfaceHint: 'program', styleId: null })).draft;
+    const program = (await aiDraft({ text: 'two sum', interfaceHint: 'program', styleId: null })).draft;
     expect(program.problem).toMatchObject({ interface: 'program', harness: {} });
     expect(program.testCases[0]!.stdin).toBe('4\n2 7 11 15\n9\n');
     // Written up only as a program in the mock: drafted from the text instead.
-    const fn = (await api.ai.draft({ text: 'Design an LRU cache with get and put', interfaceHint: 'function', styleId: null })).draft;
+    const fn = (await aiDraft({ text: 'Design an LRU cache with get and put', interfaceHint: 'function', styleId: null })).draft;
     expect(fn.problem!.interface).toBe('function');
     expect(Object.keys(fn.problem!.harness).length).toBeGreaterThan(0);
     // It says nothing for a reading.
-    expect((await api.ai.draft({ text: 'two sum', typeHint: 'reading', interfaceHint: 'function' })).draft.problem).toBeNull();
-    const err = await failure(api.ai.draft({ text: 'two sum', interfaceHint: 'class' as never }));
+    expect((await aiDraft({ text: 'two sum', typeHint: 'reading', interfaceHint: 'function' })).draft.problem).toBeNull();
+    const err = await failure(aiDraft({ text: 'two sum', interfaceHint: 'class' as never }));
     expect(err.status).toBe(422);
     expect(err.fields).toHaveProperty('interfaceHint');
   });
 
   it('keeps a stub and its runner together when a style narrows the languages', async () => {
     // The default preset asks for Python and Go only.
-    const { draft } = await api.ai.draft({ text: 'valid parentheses' });
+    const { draft } = await aiDraft({ text: 'valid parentheses' });
     expect(draft.problem!.interface).toBe('function');
     expect(Object.keys(draft.problem!.starterCode).sort()).toEqual(['go', 'python']);
     expect(Object.keys(draft.problem!.harness).sort()).toEqual(['go', 'python']);
     // The terse one asks for C++ and Python; there is no C++ runner, so Python it is.
-    const terse = (await api.ai.draft({ text: 'valid parentheses', styleId: seedIds.styles.terse })).draft;
+    const terse = (await aiDraft({ text: 'valid parentheses', styleId: seedIds.styles.terse })).draft;
     expect(Object.keys(terse.problem!.starterCode)).toEqual(['python']);
     expect(Object.keys(terse.problem!.harness)).toEqual(['python']);
   });
 
   it('checks the reference solution against the draft\'s test cases', async () => {
-    const good = await api.ai.draft({ text: 'two sum', styleId: null });
+    const good = await aiDraft({ text: 'two sum', styleId: null });
     expect(good.check).toEqual({ attempted: true, engine: 'judge0', passed: 2, total: 2, error: null, runners: KIT_LANGUAGES.map((language) => ({ language, status: 'ok', error: null })).sort((a, b) => a.language.localeCompare(b.language)), largeCases: [] });
     expect(good.draft.testCases.every((c) => c.verified)).toBe(true);
 
     // The mock can be asked for an example its own solution disagrees with.
-    const bad = await api.ai.draft({ text: 'two sum MOCK:MISMATCH', styleId: null });
+    const bad = await aiDraft({ text: 'two sum MOCK:MISMATCH', styleId: null });
     expect(bad.check).toMatchObject({ attempted: true, passed: 1, total: 2 });
     expect(bad.check!.error).toMatch(/^Example 2: expected \[1,2\], but the reference solution printed /);
     expect(bad.draft.testCases.map((c) => c.verified)).toEqual([true, false]);
 
-    expect((await api.ai.draft({ text: 'Notes on how vector clocks work. Each process keeps a counter per process.' })).check).toBeNull();
+    expect((await aiDraft({ text: 'Notes on how vector clocks work. Each process keeps a counter per process.' })).check).toBeNull();
 
     start({ judge: 'none' });
-    const none = await api.ai.draft({ text: 'two sum', styleId: null });
+    const none = await aiDraft({ text: 'two sum', styleId: null });
     expect(none.check).toEqual({ attempted: false, engine: null, passed: 0, total: 2, error: null, runners: [], largeCases: [] });
     expect(none.draft.testCases.some((c) => c.verified)).toBe(false);
     expect(none.draft.problem!.referenceSolution).not.toBeNull();
 
     // An engine that cannot be reached is reported in the check, not as a failed request.
     start({ judge: 'down' });
-    const down = await api.ai.draft({ text: 'two sum', styleId: null });
+    const down = await aiDraft({ text: 'two sum', styleId: null });
     expect(down.check).toMatchObject({ passed: 0, total: 2 });
     expect(down.check!.error).toMatch(/unreachable/);
     expect(down.draft.testCases.some((c) => c.verified)).toBe(false);
@@ -1678,7 +1713,7 @@ describe('AI drafting', () => {
 
   it('proves every runner of a "solution only" draft, not only the reference solution\'s', async () => {
     // The default preset keeps Python and Go; the mock can be asked to leave Go's runner broken.
-    const { draft, check } = await api.ai.draft({ text: 'two sum MOCK:RUNNER' });
+    const { draft, check } = await aiDraft({ text: 'two sum MOCK:RUNNER' });
     expect(check).toMatchObject({ attempted: true, passed: 2, total: 2, error: null });
     expect(check!.runners).toEqual([
       { language: 'go', status: 'failed', error: expect.stringMatching(/^the go starter code did not compile inside its harness: /) },
@@ -1689,38 +1724,38 @@ describe('AI drafting', () => {
     const go = await judged((await api.submissions.create(item.id, { language: 'go', source: 'func twoSum() {}', mode: 'run', stdin: null })).id);
     expect(go.final.verdict).toBe('compile_error');
     // A revision does not break it twice.
-    const revised = await api.ai.draft({ text: 'two sum MOCK:RUNNER', previousDraft: draft, instruction: 'shorter' });
+    const revised = await aiDraft({ text: 'two sum MOCK:RUNNER', previousDraft: draft, instruction: 'shorter' });
     expect(revised.draft.problem!.harness.go).toEqual(draft.problem!.harness.go);
 
     // A runner without starter code is not tried, and neither is one the engine has no language for.
-    const first = (await api.ai.draft({ text: 'two sum', styleId: null })).draft;
+    const first = (await aiDraft({ text: 'two sum', styleId: null })).draft;
     const partial = { ...first, problem: { ...first.problem!, starterCode: { ...first.problem!.starterCode, java: '' } } };
-    const skipped = await api.ai.draft({ text: 'two sum', previousDraft: partial, instruction: 'shorter', styleId: null });
+    const skipped = await aiDraft({ text: 'two sum', previousDraft: partial, instruction: 'shorter', styleId: null });
     expect(skipped.check!.runners.find((r) => r.language === 'java')).toEqual({ language: 'java', status: 'skipped', error: null });
     expect(skipped.check!.runners.filter((r) => r.status === 'ok').map((r) => r.language)).toEqual(['go', 'javascript', 'python']);
 
     // A program has none, and nothing is tried without an engine or when it cannot be reached.
-    expect((await api.ai.draft({ text: 'two sum', interfaceHint: 'program', styleId: null })).check!.runners).toEqual([]);
+    expect((await aiDraft({ text: 'two sum', interfaceHint: 'program', styleId: null })).check!.runners).toEqual([]);
     start({ judge: 'down' });
-    expect((await api.ai.draft({ text: 'two sum', styleId: null })).check!.runners.every((r) => r.status === 'skipped')).toBe(true);
+    expect((await aiDraft({ text: 'two sum', styleId: null })).check!.runners.every((r) => r.status === 'skipped')).toBe(true);
     start({ judge: 'none' });
-    expect((await api.ai.draft({ text: 'two sum', styleId: null })).check!.runners).toEqual([]);
+    expect((await aiDraft({ text: 'two sum', styleId: null })).check!.runners).toEqual([]);
   });
 
   it('reports what each generation cost, and counts it towards the default provider', async () => {
     const before = (await api.settings.getAi()).providers[0]!;
-    const { usage, draft } = await api.ai.draft({ text: 'two sum', styleId: null });
+    const { usage, draft } = await aiDraft({ text: 'two sum', styleId: null });
     expect(usage.model).toBe('claude-opus-5-5');
     expect(usage.inputTokens).toBeGreaterThan(1800);
     expect(usage.outputTokens).toBe(Math.ceil(JSON.stringify(draft).length / 4));
     expect(usage.durationMs).toBeGreaterThan(0);
 
-    const variant = await api.ai.variant(seedIds.items.coinChange, { styleId: null });
-    const tests = await api.ai.testCases(seedIds.items.twoSum, { count: 3 });
+    const variant = await aiVariant(seedIds.items.coinChange, { styleId: null });
+    const tests = await aiTestCases(seedIds.items.twoSum, { count: 3 });
     expect(variant.usage.model).toBe('claude-opus-5-5');
     expect(tests.usage.outputTokens).toBeGreaterThan(0);
     // A failed request is counted too, with no tokens.
-    await failure(api.ai.draft({ text: 'anything MOCK:FAIL' }));
+    await failure(aiDraft({ text: 'anything MOCK:FAIL' }));
 
     const [after, ...others] = (await api.settings.getAi()).providers;
     const spent = [usage, variant.usage, tests.usage];
@@ -1738,25 +1773,25 @@ describe('AI drafting', () => {
   });
 
   it('keeps the interface, the harness and the reference solution through a revision, and checks again', async () => {
-    const first = (await api.ai.draft({ text: 'two sum', styleId: null })).draft;
+    const first = (await aiDraft({ text: 'two sum', styleId: null })).draft;
     const edited = { ...first, problem: { ...first.problem!, harness: { python: first.problem!.harness.python! }, starterCode: { python: '# mine' } } };
-    const revised = await api.ai.draft({ text: 'two sum', previousDraft: edited, instruction: 'make it harder', interfaceHint: 'function', styleId: null });
+    const revised = await aiDraft({ text: 'two sum', previousDraft: edited, instruction: 'make it harder', interfaceHint: 'function', styleId: null });
     expect(revised.draft.problem).toMatchObject({ interface: 'function', harness: edited.problem.harness, starterCode: { python: '# mine' }, referenceSolution: first.problem!.referenceSolution });
     expect(revised.check).toMatchObject({ attempted: true, passed: 2, total: 2 });
     expect(revised.draft.testCases.every((c) => c.verified)).toBe(true);
 
     // Without the runner of the solution's language there is nothing to run it with.
     const noRunner = { ...first, problem: { ...first.problem!, harness: { go: first.problem!.harness.go! } } };
-    const unrun = await api.ai.draft({ text: 'two sum', previousDraft: noRunner, instruction: 'shorter', styleId: null });
+    const unrun = await aiDraft({ text: 'two sum', previousDraft: noRunner, instruction: 'shorter', styleId: null });
     expect(unrun.check).toMatchObject({ passed: 0, total: 2 });
     expect(unrun.check!.error).toMatch(/no harness/);
     // A draft that went back as a program carries no harness.
     const asProgram = { ...first, problem: { ...first.problem!, interface: 'program' as const, harness: {} } };
-    expect((await api.ai.draft({ text: 'two sum', previousDraft: asProgram, instruction: 'shorter', styleId: null })).draft.problem).toMatchObject({ interface: 'program', harness: {} });
+    expect((await aiDraft({ text: 'two sum', previousDraft: asProgram, instruction: 'shorter', styleId: null })).draft.problem).toMatchObject({ interface: 'program', harness: {} });
   });
 
   it('saves a reviewed draft with its harness, its reference solution and the verified marks', async () => {
-    const { draft } = await api.ai.draft({ text: 'two sum', styleId: null });
+    const { draft } = await aiDraft({ text: 'two sum', styleId: null });
     const item = await api.items.create({
       type: 'problem',
       title: draft.title,
@@ -1775,7 +1810,7 @@ describe('AI drafting', () => {
   });
 
   it('builds a generic problem or a reading from unrecognised text', async () => {
-    const problem = (await api.ai.draft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
+    const problem = (await aiDraft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
     expect(problem.type).toBe('problem');
     expect(problem.title).toBe('Given a List of Temperatures');
     expect(problem.body).toContain('longest warm streak');
@@ -1784,35 +1819,35 @@ describe('AI drafting', () => {
 
     const prose =
       'Notes on how vector clocks work. Each process keeps a counter per process. Counters are merged element-wise when a message arrives.';
-    const reading = (await api.ai.draft({ text: prose })).draft;
+    const reading = (await aiDraft({ text: prose })).draft;
     expect(reading).toMatchObject({ type: 'reading', problem: null, testCases: [], difficulty: null });
 
-    expect((await api.ai.draft({ text: prose, typeHint: 'problem' })).draft.type).toBe('problem');
-    expect((await api.ai.draft({ text: 'two sum', typeHint: 'reading' })).draft.type).toBe('reading');
+    expect((await aiDraft({ text: prose, typeHint: 'problem' })).draft.type).toBe('problem');
+    expect((await aiDraft({ text: 'two sum', typeHint: 'reading' })).draft.type).toBe('reading');
   });
 
   it('revises a previous draft according to the instruction', async () => {
-    const first = (await api.ai.draft({ text: 'two sum', styleId: null })).draft;
-    const harder = (await api.ai.draft({ text: 'two sum', previousDraft: first, instruction: 'make it harder', styleId: null })).draft;
+    const first = (await aiDraft({ text: 'two sum', styleId: null })).draft;
+    const harder = (await aiDraft({ text: 'two sum', previousDraft: first, instruction: 'make it harder', styleId: null })).draft;
     expect(harder.difficulty).toBe('medium');
     expect(harder.body).toContain('10^6');
     expect(harder.assumptions.length).toBe(first.assumptions.length + 1);
 
-    const other = (await api.ai.draft({ text: 'two sum', previousDraft: first, instruction: 'mention overflow', styleId: null })).draft;
+    const other = (await aiDraft({ text: 'two sum', previousDraft: first, instruction: 'mention overflow', styleId: null })).draft;
     expect(other.body).toContain('mention overflow');
     expect(other.title).toBe(first.title);
   });
 
   it('validates input and reports provider failures', async () => {
-    expect((await failure(api.ai.draft({ text: '   ' }))).fields).toHaveProperty('text');
-    expect((await failure(api.ai.draft({ text: 'x'.repeat(50001) }))).status).toBe(422);
-    expect((await failure(api.ai.draft({ text: 'x', instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
+    expect((await failure(aiDraft({ text: '   ' }))).fields).toHaveProperty('text');
+    expect((await failure(aiDraft({ text: 'x'.repeat(50001) }))).status).toBe(422);
+    expect((await failure(aiDraft({ text: 'x', instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
     const twoSum = seedIds.items.twoSum;
-    expect((await failure(api.ai.variant(twoSum, { instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
-    expect((await failure(api.ai.testCases(twoSum, { instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
-    const hugeDraft = { ...(await api.ai.draft({ text: 'two sum' })).draft, body: 'b'.repeat(LIMITS.maxPreviousDraftBytes) };
-    expect((await failure(api.ai.draft({ text: 'x', instruction: 'shorter', previousDraft: hugeDraft }))).fields).toHaveProperty('previousDraft');
-    const upstream = await failure(api.ai.draft({ text: 'anything MOCK:FAIL' }));
+    expect((await failure(aiVariant(twoSum, { instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
+    expect((await failure(aiTestCases(twoSum, { instruction: 'y'.repeat(2001) }))).fields).toHaveProperty('instruction');
+    const hugeDraft = { ...(await aiDraft({ text: 'two sum' })).draft, body: 'b'.repeat(LIMITS.maxPreviousDraftBytes) };
+    expect((await failure(aiDraft({ text: 'x', instruction: 'shorter', previousDraft: hugeDraft }))).fields).toHaveProperty('previousDraft');
+    const upstream = await failure(aiDraft({ text: 'anything MOCK:FAIL' }));
     expect(upstream.status).toBe(502);
     expect(upstream.code).toBe('upstream_error');
   });
@@ -1820,25 +1855,293 @@ describe('AI drafting', () => {
   it('is unavailable when no provider is configured', async () => {
     start({ ai: false });
     for (const call of [
-      api.ai.draft({ text: 'two sum' }),
-      api.ai.variant(seedIds.items.twoSum, {}),
-      api.ai.testCases(seedIds.items.twoSum, {}),
+      aiDraft({ text: 'two sum' }),
+      aiVariant(seedIds.items.twoSum, {}),
+      aiTestCases(seedIds.items.twoSum, {}),
     ]) {
       const err = await failure(call);
       expect(err.status).toBe(503);
       expect(err.code).toBe('ai_unavailable');
     }
     // The request is validated first, so a bad one is a 422 even here.
-    expect((await failure(api.ai.draft({ text: '' }))).status).toBe(422);
-    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { count: 99 }))).status).toBe(422);
+    expect((await failure(aiDraft({ text: '' }))).status).toBe(422);
+    expect((await failure(aiTestCases(seedIds.items.twoSum, { count: 99 }))).status).toBe(422);
   });
 
-  it('can be cancelled', async () => {
-    start({ speed: 'fast' });
-    const controller = new AbortController();
-    const pending = failure(api.ai.draft({ text: 'two sum' }, controller.signal));
-    controller.abort();
-    expect((await pending).code).toBe('aborted');
+});
+
+describe('AI jobs', () => {
+  const slow = { count: 2, instruction: 'MOCK:SLOW' };
+
+  it('runs a test-case generation in the background and keeps its outcome until it is collected', async () => {
+    const started = await api.ai.testCases(seedIds.items.twoSum, { count: 3, origin: '/items/x/tests/generate' });
+    expect(started).toMatchObject({ kind: 'testcases', itemId: seedIds.items.twoSum, draftId: null, title: 'Two Sum', origin: '/items/x/tests/generate', error: null, pickedUp: false, finishedAt: null });
+    expect(['queued', 'running']).toContain(started.status);
+    expect((await api.ai.jobs()).items.map((j) => j.id)).toEqual([started.id]);
+
+    const done = await finished<AiTestCasesResponse>(started.id);
+    expect(done.status).toBe('succeeded');
+    expect(done.request).toEqual({ count: 3, origin: '/items/x/tests/generate' });
+    expect(done.result!.cases).toHaveLength(3);
+    expect(done.startedAt).not.toBeNull();
+    expect(done.finishedAt).not.toBeNull();
+
+    // Collected once, it leaves the default list; doing it again is harmless.
+    expect((await api.ai.pickup(started.id)).pickedUp).toBe(true);
+    expect((await api.ai.pickup<AiTestCasesResponse>(started.id)).result!.cases).toHaveLength(3);
+    expect((await api.ai.jobs()).items).toEqual([]);
+    expect((await api.ai.jobs({ pickedUp: true })).items.map((j) => j.id)).toEqual([started.id]);
+  });
+
+  it('runs two at a time, the others waiting their turn', async () => {
+    const jobs = [];
+    for (let i = 0; i < 3; i++) jobs.push(await api.ai.testCases(seedIds.items.twoSum, slow));
+    await tick();
+    const listed = (await api.ai.jobs({ active: true })).items;
+    // Newest first.
+    expect(listed.map((j) => j.id)).toEqual(jobs.map((j) => j.id).reverse());
+    expect(listed.map((j) => j.status)).toEqual(['queued', 'running', 'running']);
+    expect((await failure(api.ai.pickup(jobs[0]!.id))).status).toBe(409);
+    // Cancelling one frees its worker for the next.
+    expect((await api.ai.cancel(jobs[0]!.id)).status).toBe('cancelled');
+    expect((await api.ai.job(jobs[2]!.id)).status).toBe('running');
+    for (const job of jobs) await api.ai.dismiss(job.id);
+    expect((await api.ai.jobs()).items).toEqual([]);
+  });
+
+  it('records a cancelled generation in the activity log, and leaves a finished one alone', async () => {
+    const job = await api.ai.testCases(seedIds.items.twoSum, slow);
+    await tick();
+    await api.ai.cancel(job.id);
+    expect((await api.settings.log({ limit: 1 })).items[0]).toMatchObject({ operation: 'testcases', status: 'cancelled', title: 'Two Sum' });
+    const detail = await api.ai.job(job.id);
+    expect(detail).toMatchObject({ status: 'cancelled', error: null, result: null });
+    expect((await api.ai.cancel(job.id)).status).toBe('cancelled');
+
+    const done = await finished((await api.ai.code({ title: 'T', body: 'b', interface: 'program', languages: ['python'] })).id);
+    expect((await api.ai.cancel(done.id)).status).toBe('succeeded');
+  });
+
+  it('ends a job as failed with the error the request would have answered', async () => {
+    const failed = await finished((await api.ai.testCases(seedIds.items.twoSum, { instruction: 'MOCK:FAIL' })).id);
+    expect(failed).toMatchObject({ status: 'failed', result: null, error: { code: 'upstream_error' } });
+    expect(failed.error!.message).toMatch(/overloaded/);
+
+    // The item deleted while the job waited.
+    const blockers = [await api.ai.testCases(seedIds.items.twoSum, slow), await api.ai.testCases(seedIds.items.twoSum, slow)];
+    const waiting = await api.ai.testCases(seedIds.items.coinChange, { count: 2 });
+    await api.items.remove(seedIds.items.coinChange);
+    for (const job of blockers) await api.ai.cancel(job.id);
+    expect((await finished(waiting.id)).error).toMatchObject({ code: 'not_found' });
+
+    // AI switched off before the job started.
+    const more = [await api.ai.testCases(seedIds.items.twoSum, slow), await api.ai.testCases(seedIds.items.twoSum, slow)];
+    const queued = await api.ai.code({ title: 'T', body: 'b', interface: 'program', languages: ['python'] });
+    await api.settings.putAi({ enabled: false });
+    for (const job of more) await api.ai.cancel(job.id);
+    expect((await finished(queued.id)).error).toMatchObject({ code: 'ai_unavailable' });
+  });
+
+  it('answers what can be checked at once: a bad request, an unknown item, no AI, too many jobs', async () => {
+    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { count: 99 }))).status).toBe(422);
+    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { origin: 'a\nb' }))).fields).toHaveProperty('origin');
+    expect((await failure(api.ai.code({ title: 'T', body: 'b', interface: 'program', languages: ['python'], origin: 'x'.repeat(2001) }))).fields).toHaveProperty('origin');
+    expect((await failure(api.ai.testCases('nope', {}))).status).toBe(404);
+    for (let i = 0; i < 20; i++) await api.ai.testCases(seedIds.items.twoSum, slow);
+    const tooMany = await failure(api.ai.testCases(seedIds.items.twoSum, {}));
+    expect(tooMany.status).toBe(409);
+    expect(tooMany.isRevisionConflict).toBe(false);
+    expect((await api.ai.jobs({ limit: 200 })).items).toHaveLength(20);
+    start({ ai: false });
+    expect((await failure(api.ai.code({ title: 'T', body: 'b', interface: 'program', languages: ['python'] }))).code).toBe('ai_unavailable');
+    expect((await api.ai.jobs()).items).toEqual([]);
+  });
+
+  it('filters the list, and refuses a bad query or an unknown job', async () => {
+    const tests = await api.ai.testCases(seedIds.items.twoSum, { count: 2 });
+    const code = await api.ai.code({ itemId: seedIds.items.coinChange, title: 'Coin Change', body: 'b', interface: 'program', languages: ['python'] });
+    await finished(tests.id);
+    await finished(code.id);
+    expect((await api.ai.jobs({ kind: 'code' })).items.map((j) => j.id)).toEqual([code.id]);
+    expect((await api.ai.jobs({ itemId: seedIds.items.twoSum })).items.map((j) => j.id)).toEqual([tests.id]);
+    expect((await api.ai.jobs({ active: true })).items).toEqual([]);
+    expect((await api.ai.jobs({ limit: 1 })).items.map((j) => j.id)).toEqual([code.id]);
+    expect((await failure(api.ai.jobs({ kind: 'poem' as never }))).status).toBe(400);
+    expect((await failure(api.ai.jobs({ limit: 201 }))).status).toBe(400);
+    for (const call of [api.ai.job('nope'), api.ai.cancel('nope'), api.ai.pickup('nope'), api.ai.dismiss('nope')]) expect((await failure(call)).status).toBe(404);
+    await api.ai.dismiss(tests.id);
+    expect((await failure(api.ai.job(tests.id))).status).toBe(404);
+  });
+
+  it('fails a running job as interrupted when the server restarts, and queues the waiting ones again', async () => {
+    const jobs = [];
+    for (let i = 0; i < 3; i++) jobs.push(await api.ai.testCases(seedIds.items.twoSum, slow));
+    await tick();
+    server.restart();
+    const after = await Promise.all(jobs.map((j) => api.ai.job(j.id)));
+    expect(after.map((j) => j.status)).toEqual(['failed', 'failed', 'running']);
+    expect(after[0]!.error).toMatchObject({ code: 'interrupted' });
+  });
+});
+
+describe('drafts', () => {
+  const capture = (generate: DraftRequest = { text: 'two sum, array + target, return indices', styleId: null }) => api.drafts.create({ kind: 'capture', generate });
+  /** Wait until the draft's generation has finished, and read it. */
+  const settled = async (draft: Draft) => {
+    await finished(draft.job!.id);
+    return api.drafts.get(draft.id);
+  };
+
+  it('drafts a capture in the background and writes the result into the draft', async () => {
+    const created = await capture();
+    expect(created).toMatchObject({ kind: 'capture', variantOf: null, state: 'drafting', edited: false, generation: null, generationSeq: 0, basedOn: 0, content: null, error: null });
+    expect(created.title).toBe('two sum, array + target, return indices');
+    expect(created.request).toEqual({ text: 'two sum, array + target, return indices', styleId: null });
+    expect(created.job).toMatchObject({ kind: 'draft', draftId: created.id, origin: null, title: 'two sum, array + target, return indices' });
+
+    const ready = await settled(created);
+    expect(ready).toMatchObject({ state: 'ready', title: 'Two Sum', generationSeq: 1, basedOn: 0 });
+    expect(ready.revision).toBeGreaterThan(created.revision);
+    expect(ready.generation!.draft.title).toBe('Two Sum');
+    expect(ready.job).toMatchObject({ status: 'succeeded', title: 'Two Sum', pickedUp: false });
+    expect((await api.drafts.list()).items.map((d) => d.id)).toEqual([created.id]);
+    expect((await api.drafts.list()).items[0]).not.toHaveProperty('content');
+  });
+
+  it('takes the client\'s content, collects the job with basedOn, and becomes edited when changed', async () => {
+    const draft = await settled(await capture());
+    const taken = await api.drafts.update(draft.id, { content: { form: 1 }, basedOn: 1, edited: false, title: 'My Two Sum', expectedRevision: draft.revision });
+    expect(taken).toMatchObject({ state: 'ready', basedOn: 1, title: 'My Two Sum', content: { form: 1 }, revision: draft.revision + 1 });
+    expect(taken.job!.pickedUp).toBe(true);
+    expect((await api.ai.jobs()).items).toEqual([]);
+
+    const edited = await api.drafts.update(draft.id, { content: { form: 2 }, edited: true, expectedRevision: taken.revision });
+    expect(edited.state).toBe('edited');
+    // A stale revision changes nothing.
+    const stale = await failure(api.drafts.update(draft.id, { content: { form: 3 }, expectedRevision: taken.revision }));
+    expect(stale.isRevisionConflict).toBe(true);
+    expect(stale.currentRevision).toBe(edited.revision);
+    expect((await api.drafts.get(draft.id)).content).toEqual({ form: 2 });
+    // An empty title falls back to the server's label.
+    expect((await api.drafts.update(draft.id, { title: '' })).title).toBe('Two Sum');
+
+    expect((await failure(api.drafts.update(draft.id, { basedOn: 2 }))).fields).toHaveProperty('basedOn');
+    expect((await failure(api.drafts.update(draft.id, { content: [] as never }))).fields).toHaveProperty('content');
+    expect((await failure(api.drafts.update(draft.id, { title: 'a\nb' }))).fields).toHaveProperty('title');
+    expect((await failure(api.drafts.update(draft.id, { edited: 'yes' as never }))).fields).toHaveProperty('edited');
+  });
+
+  it('revises a draft as another generation, one at a time, and keeps a failure until the next', async () => {
+    const draft = await settled(await capture());
+    const revising = await api.drafts.generate(draft.id, { text: 'two sum', previousDraft: draft.generation!.draft, instruction: 'make it harder', styleId: null });
+    expect(revising.state).toBe('drafting');
+    expect((await failure(api.drafts.generate(draft.id, { text: 'two sum' }))).status).toBe(409);
+    expect((await failure(api.drafts.retry(draft.id))).status).toBe(409);
+    // The finished job before it counts as collected.
+    expect((await api.ai.jobs({ draftId: draft.id })).items.map((j) => j.id)).toEqual([revising.job!.id]);
+    const revised = await settled(revising);
+    expect(revised).toMatchObject({ state: 'ready', generationSeq: 2 });
+    expect(revised.generation!.draft.difficulty).toBe('medium');
+
+    const failing = await settled(await api.drafts.generate(draft.id, { text: 'two sum', instruction: 'MOCK:FAIL', previousDraft: revised.generation!.draft }));
+    expect(failing).toMatchObject({ state: 'failed', generationSeq: 2, error: { code: 'upstream_error' } });
+    // The draft keeps what the last success produced.
+    expect(failing.generation!.draft.difficulty).toBe('medium');
+    // Retrying sends the same request again; setting content clears the error.
+    expect((await settled(await api.drafts.retry(draft.id))).state).toBe('failed');
+    expect((await api.drafts.update(draft.id, { content: { a: 1 }, edited: true })).error).toBeNull();
+    // The request is validated as a draft request.
+    expect((await failure(api.drafts.generate(draft.id, { text: '' }))).fields).toHaveProperty('text');
+  });
+
+  it('can be written by hand, kept empty, or left with a cancelled generation', async () => {
+    const byHand = await api.drafts.create({ kind: 'capture', content: { form: 'mine' }, title: 'Mine' });
+    expect(byHand).toMatchObject({ state: 'edited', edited: true, job: null, request: null, title: 'Mine' });
+    expect((await failure(api.drafts.retry(byHand.id))).status).toBe(422);
+    const empty = await api.drafts.create({ kind: 'capture' });
+    expect(empty).toMatchObject({ state: 'new', title: 'Untitled draft' });
+
+    const cancelled = await capture({ text: 'two sum MOCK:SLOW' });
+    await api.ai.cancel(cancelled.job!.id);
+    expect(await api.drafts.get(cancelled.id)).toMatchObject({ state: 'new', generation: null, job: { status: 'cancelled' } });
+  });
+
+  it('drafts a variant of an item, and saves it linked to the original', async () => {
+    const created = await api.drafts.create({ kind: 'variant', variantOf: seedIds.items.coinChange, generate: { mode: 'easier', styleId: null } });
+    expect(created).toMatchObject({ kind: 'variant', variantOf: seedIds.items.coinChange, title: 'Variant of Coin Change' });
+    expect(created.job).toMatchObject({ kind: 'variant', itemId: seedIds.items.coinChange, title: 'Coin Change' });
+    const ready = await settled(created);
+    const gen = ready.generation!.draft;
+    const item = await api.drafts.save(ready.id, {
+      item: { type: 'problem', title: gen.title, body: gen.body, problem: gen.problem!, testCases: gen.testCases.map((c) => ({ ...c, origin: 'ai' as const })) },
+      expectedRevision: ready.revision,
+    });
+    expect(item).toMatchObject({ title: gen.title, variantOf: seedIds.items.coinChange });
+    expect((await failure(api.drafts.get(ready.id))).status).toBe(404);
+    expect((await api.drafts.list()).items).toEqual([]);
+  });
+
+  it('saves nothing when the item does not validate or the draft changed, and cancels a running generation', async () => {
+    const draft = await settled(await capture());
+    expect((await failure(api.drafts.save(draft.id, { item: { type: 'problem' } as never }))).fields).toHaveProperty('title');
+    expect((await failure(api.drafts.save(draft.id, { item: { type: 'problem', title: 'T' }, expectedRevision: draft.revision - 1 }))).isRevisionConflict).toBe(true);
+    expect((await api.drafts.get(draft.id)).id).toBe(draft.id);
+
+    const running = await capture({ text: 'two sum MOCK:SLOW' });
+    await api.drafts.save(running.id, { item: { type: 'problem', title: 'Saved while drafting' } });
+    expect((await api.ai.job(running.job!.id)).status).toBe('cancelled');
+  });
+
+  it('is discarded with its generation', async () => {
+    const running = await capture({ text: 'two sum MOCK:SLOW' });
+    await api.drafts.remove(running.id);
+    expect((await api.ai.job(running.job!.id)).status).toBe('cancelled');
+    expect((await failure(api.drafts.remove(running.id))).status).toBe(404);
+  });
+
+  it('lists the most recently changed first, by kind or original', async () => {
+    const a = await api.drafts.create({ kind: 'capture', content: {} });
+    const b = await api.drafts.create({ kind: 'variant', variantOf: seedIds.items.twoSum, content: {} });
+    await api.drafts.update(a.id, { content: { x: 1 } });
+    expect((await api.drafts.list()).items.map((d) => d.id)).toEqual([a.id, b.id]);
+    expect((await api.drafts.list({ kind: 'variant' })).items.map((d) => d.id)).toEqual([b.id]);
+    expect((await api.drafts.list({ variantOf: seedIds.items.twoSum })).items.map((d) => d.id)).toEqual([b.id]);
+    expect((await failure(api.drafts.list({ kind: 'other' as never }))).status).toBe(400);
+  });
+
+  it('validates a new draft and its generation before creating anything', async () => {
+    const bad = [
+      api.drafts.create({ kind: 'idea' as never }),
+      api.drafts.create({ kind: 'variant' }),
+      api.drafts.create({ kind: 'variant', variantOf: 'nope' }),
+      api.drafts.create({ kind: 'capture', variantOf: seedIds.items.twoSum }),
+      api.drafts.create({ kind: 'capture', generate: { text: ' ' } }),
+      api.drafts.create({ kind: 'variant', variantOf: seedIds.items.capTheorem, generate: { mode: 'harder' } }),
+    ];
+    const fields = [];
+    for (const call of bad) {
+      const err = await failure(call);
+      expect(err.status).toBe(422);
+      fields.push(Object.keys(err.fields)[0]);
+    }
+    expect(fields).toEqual(['kind', 'variantOf', 'variantOf', 'variantOf', 'text', 'mode']);
+    expect((await api.drafts.list()).items).toEqual([]);
+    start({ ai: false });
+    expect((await failure(capture())).code).toBe('ai_unavailable');
+    expect((await api.drafts.list()).items).toEqual([]);
+  });
+
+  it('are kept with their jobs across a reload of the page', async () => {
+    const ready = await settled(await capture());
+    await api.drafts.update(ready.id, { content: { kept: true }, basedOn: 1 });
+    const running = await capture({ text: 'two sum, again' });
+    const kept = server.snapshot();
+    start();
+    server.restore(kept);
+    expect((await api.drafts.get(ready.id)).content).toEqual({ kept: true });
+    // A generation under way when the page went starts again, and finishes.
+    expect((await settled(running)).state).toBe('ready');
+    expect((await api.drafts.list()).items).toHaveLength(2);
   });
 });
 
@@ -1846,25 +2149,25 @@ describe('AI variants', () => {
   it('drafts every mode for a problem', async () => {
     const origin = await api.items.get(seedIds.items.coinChange);
     for (const mode of ['similar', 'easier', 'harder', 'twist'] as const) {
-      const { draft, style } = await api.ai.variant(origin.id, { mode, instruction: 'keep it short' });
+      const { draft, style } = await aiVariant(origin.id, { mode, instruction: 'keep it short' });
       expect(style?.id).toBe(seedIds.styles.leetcode);
       expect(draft.type).toBe('problem');
       expect(draft.title).not.toBe(origin.title);
       expect(draft.assumptions.length).toBeGreaterThanOrEqual(2);
       expect(draft.assumptions.join(' ')).toContain('keep it short');
     }
-    const easier = (await api.ai.variant(origin.id, { mode: 'easier', styleId: null })).draft;
+    const easier = (await aiVariant(origin.id, { mode: 'easier', styleId: null })).draft;
     expect(easier.difficulty).toBe('easy');
-    const twist = (await api.ai.variant(origin.id, { mode: 'twist', styleId: null })).draft;
+    const twist = (await aiVariant(origin.id, { mode: 'twist', styleId: null })).draft;
     expect(twist.body).toContain('## The twist');
     expect(twist.testCases).toEqual([]);
   });
 
   it('revises an earlier variant draft through previousDraft', async () => {
     const id = seedIds.items.twoSum;
-    const first = await api.ai.variant(id, { mode: 'similar', styleId: null });
+    const first = await aiVariant(id, { mode: 'similar', styleId: null });
     const edited = { ...first.draft, title: 'My own title' };
-    const revised = await api.ai.variant(id, {
+    const revised = await aiVariant(id, {
       mode: 'similar',
       instruction: 'make it harder',
       previousDraft: edited,
@@ -1875,14 +2178,14 @@ describe('AI variants', () => {
     expect(revised.draft.assumptions[0]).toMatch(/harder/i);
     expect(revised.style?.id).toBe(seedIds.styles.terse);
     // Without an instruction the draft is ignored and a new variant is written.
-    expect((await api.ai.variant(id, { previousDraft: edited, styleId: null })).draft.title).not.toBe('My own title');
-    expect((await failure(api.ai.variant(id, { instruction: 'x', previousDraft: { nope: true } as never }))).status).toBe(422);
+    expect((await aiVariant(id, { previousDraft: edited, styleId: null })).draft.title).not.toBe('My own title');
+    expect((await failure(aiVariant(id, { instruction: 'x', previousDraft: { nope: true } as never }))).status).toBe(422);
   });
 
   it('keeps the original\'s interface, with its stubs, runners and a checked reference solution', async () => {
     const lists = seedIds.items.mergeKLists;
     const origin = await api.items.get(lists);
-    const { draft, check } = await api.ai.variant(lists, { mode: 'similar', styleId: null });
+    const { draft, check } = await aiVariant(lists, { mode: 'similar', styleId: null });
     expect(draft.problem).toMatchObject({ interface: 'function', harness: origin.problem!.harness, starterCode: origin.problem!.starterCode });
     expect(draft.problem!.referenceSolution).toEqual({ language: 'python', source: MERGE_K_LISTS_REFERENCE });
     expect(check).toMatchObject({ attempted: true, engine: 'judge0', passed: 3, total: 3, error: null });
@@ -1892,34 +2195,34 @@ describe('AI variants', () => {
     ]);
     expect(draft.testCases.every((c) => c.verified)).toBe(true);
 
-    const program = await api.ai.variant(seedIds.items.coinChange, { mode: 'easier', styleId: null });
+    const program = await aiVariant(seedIds.items.coinChange, { mode: 'easier', styleId: null });
     expect(program.draft.problem).toMatchObject({ interface: 'program', harness: {} });
     expect(program.check).toMatchObject({ attempted: true, error: null });
     // A twist has no examples, so there is nothing to check.
-    expect((await api.ai.variant(lists, { mode: 'twist', styleId: null })).check).toMatchObject({ attempted: false, total: 0 });
-    expect((await api.ai.variant(seedIds.items.capTheorem, {})).check).toBeNull();
+    expect((await aiVariant(lists, { mode: 'twist', styleId: null })).check).toMatchObject({ attempted: false, total: 0 });
+    expect((await aiVariant(seedIds.items.capTheorem, {})).check).toBeNull();
   });
 
   it('takes the other interface when interfaceHint asks for it', async () => {
     const lists = seedIds.items.mergeKLists;
-    const { draft, check } = await api.ai.variant(lists, { interfaceHint: 'program', styleId: null });
+    const { draft, check } = await aiVariant(lists, { interfaceHint: 'program', styleId: null });
     expect(draft.problem).toMatchObject({ interface: 'program', harness: {}, referenceSolution: null });
     expect(check).toMatchObject({ attempted: false });
-    expect((await api.ai.variant(lists, { interfaceHint: 'function', styleId: null })).draft.problem!.interface).toBe('function');
-    expect((await api.ai.variant(seedIds.items.coinChange, { interfaceHint: 'function', styleId: null })).draft.problem).toMatchObject({ interface: 'function', harness: {} });
+    expect((await aiVariant(lists, { interfaceHint: 'function', styleId: null })).draft.problem!.interface).toBe('function');
+    expect((await aiVariant(seedIds.items.coinChange, { interfaceHint: 'function', styleId: null })).draft.problem).toMatchObject({ interface: 'function', harness: {} });
 
-    const err = await failure(api.ai.variant(lists, { interfaceHint: 'auto' as never }));
+    const err = await failure(aiVariant(lists, { interfaceHint: 'auto' as never }));
     expect(err.status).toBe(422);
     expect(err.fields).toHaveProperty('interfaceHint');
-    expect((await failure(api.ai.variant(seedIds.items.capTheorem, { interfaceHint: 'function' }))).status).toBe(422);
+    expect((await failure(aiVariant(seedIds.items.capTheorem, { interfaceHint: 'function' }))).status).toBe(422);
   });
 
   it('only offers "similar" for a reading', async () => {
     const id = seedIds.items.capTheorem;
-    const err = await failure(api.ai.variant(id, { mode: 'harder' }));
+    const err = await failure(aiVariant(id, { mode: 'harder' }));
     expect(err.status).toBe(422);
     expect(err.fields).toHaveProperty('mode');
-    const { draft } = await api.ai.variant(id, { mode: 'similar', instruction: 'as interview questions' });
+    const { draft } = await aiVariant(id, { mode: 'similar', instruction: 'as interview questions' });
     expect(draft).toMatchObject({ type: 'reading', problem: null, testCases: [] });
     expect(draft.body).toContain('as interview questions');
   });
@@ -1927,7 +2230,7 @@ describe('AI variants', () => {
 
 describe('AI test cases', () => {
   it('verifies proposals by execution when a judge is available', async () => {
-    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 8 });
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 8 });
     expect(res.verification).toEqual({ attempted: true, engine: 'judge0', error: null });
     expect(res.referenceSolution.language).toBe('python');
     expect(res.cases).toHaveLength(8);
@@ -1944,44 +2247,44 @@ describe('AI test cases', () => {
     expect(failed[0]!.expectedStdout).toBe(failed[0]!.predictedStdout);
     expect(res.cases.filter((c) => c.verified && c.predictionMatched)).toHaveLength(6);
 
-    const small = await api.ai.testCases(seedIds.items.twoSum, { count: 3, language: 'go' });
+    const small = await aiTestCases(seedIds.items.twoSum, { count: 3, language: 'go' });
     expect(small.referenceSolution.language).toBe('go');
     expect(small.cases.filter((c) => c.error !== null)).toHaveLength(0);
   });
 
   it('writes only the solution part for a "solution only" problem, in a language that has a harness', async () => {
     const lists = seedIds.items.mergeKLists;
-    const python = await api.ai.testCases(lists, { count: 4 });
+    const python = await aiTestCases(lists, { count: 4 });
     expect(python.referenceSolution).toEqual({ language: 'python', source: MERGE_K_LISTS_REFERENCE });
     expect(python.cases.every((c) => c.stdin.startsWith('['))).toBe(true);
-    const java = await api.ai.testCases(lists, { count: 4, language: 'java' });
+    const java = await aiTestCases(lists, { count: 4, language: 'java' });
     expect(java.referenceSolution).toEqual({ language: 'java', source: MERGE_K_LISTS_JAVA });
 
-    const err = await failure(api.ai.testCases(lists, { language: 'go' }));
+    const err = await failure(aiTestCases(lists, { language: 'go' }));
     expect(err.status).toBe(422);
     expect(err.fields).toEqual({ language: 'has no harness on this problem' });
     // The same language is fine for a full program.
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, language: 'go' })).referenceSolution.language).toBe('go');
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 2, language: 'go' })).referenceSolution.language).toBe('go');
   });
 
   it('leaves out proposals that repeat an input, and says how many', async () => {
-    const plain = await api.ai.testCases(seedIds.items.twoSum, { count: 6 });
+    const plain = await aiTestCases(seedIds.items.twoSum, { count: 6 });
     expect(plain.duplicatesDropped).toBe(0);
     expect(plain.cases).toHaveLength(6);
     // The mock can be asked for two repeats.
-    const repeated = await api.ai.testCases(seedIds.items.twoSum, { count: 6, instruction: 'stress the limits MOCK:REPEAT' });
+    const repeated = await aiTestCases(seedIds.items.twoSum, { count: 6, instruction: 'stress the limits MOCK:REPEAT' });
     expect(repeated.duplicatesDropped).toBe(2);
     expect(repeated.cases).toHaveLength(4);
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 1, instruction: 'MOCK:REPEAT' })).cases).toHaveLength(1);
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 1, instruction: 'MOCK:REPEAT' })).cases).toHaveLength(1);
     // All of them can be repeats: the answer is still a proposal, with nothing in it.
-    const none = await api.ai.testCases(seedIds.items.twoSum, { count: 8, instruction: 'MOCK:REPEAT-ALL' });
+    const none = await aiTestCases(seedIds.items.twoSum, { count: 8, instruction: 'MOCK:REPEAT-ALL' });
     expect(none).toMatchObject({ cases: [], duplicatesDropped: 8 });
     expect(none.usage.logId).not.toBeNull();
   });
 
   it('keeps predictions unverified without a judge', async () => {
     start({ judge: 'none' });
-    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 6 });
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 6 });
     expect(res.verification).toEqual({ attempted: false, engine: null, error: null });
     for (const c of res.cases) {
       expect(c).toMatchObject({ verified: false, predictionMatched: null, error: null });
@@ -1989,20 +2292,20 @@ describe('AI test cases', () => {
     }
 
     start({ judge: 'down' });
-    const down = await api.ai.testCases(seedIds.items.twoSum, {});
+    const down = await aiTestCases(seedIds.items.twoSum, {});
     expect(down.verification.error).not.toBeNull();
     expect(down.cases.every((c) => !c.verified)).toBe(true);
   });
 
   it('rejects readings and bad counts', async () => {
-    expect((await failure(api.ai.testCases(seedIds.items.bTrees, {}))).status).toBe(422);
-    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { count: 31 }))).fields).toEqual({ count: 'must be between 1 and 30' });
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 30 })).cases).toHaveLength(30);
+    expect((await failure(aiTestCases(seedIds.items.bTrees, {}))).status).toBe(422);
+    expect((await failure(aiTestCases(seedIds.items.twoSum, { count: 31 }))).fields).toEqual({ count: 'must be between 1 and 30' });
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 30 })).cases).toHaveLength(30);
   });
 
   it('still returns the proposal, unverified, when the engine cannot be reached', async () => {
     start({ judge: 'down' });
-    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 6 });
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 6 });
     expect(res.verification.attempted).toBe(true);
     expect(res.verification.error).toMatch(/unreachable/);
     expect(res.cases).toHaveLength(6);
@@ -2022,7 +2325,7 @@ describe('AI code', () => {
 
   it('writes starter code that reads the documented input, for the languages asked for only', async () => {
     const { item, samples } = await coinChange();
-    const res = await api.ai.code({ itemId: item.id, title: item.title, body: item.body, interface: 'program', languages: ['python', 'cpp', 'java', 'javascript', 'go', 'kotlin'], samples });
+    const res = await aiCode({ itemId: item.id, title: item.title, body: item.body, interface: 'program', languages: ['python', 'cpp', 'java', 'javascript', 'go', 'kotlin'], samples });
     expect(Object.keys(res.starterCode).sort()).toEqual(['cpp', 'go', 'java', 'javascript', 'python']);
     expect(res.harness).toEqual({});
     expect(res.check).toBeNull();
@@ -2034,7 +2337,7 @@ describe('AI code', () => {
   });
 
   it('writes stubs and runners for a solution-only problem, and checks the runners on the first sample', async () => {
-    const res = await api.ai.code({
+    const res = await aiCode({
       title: 'Max Subarray',
       body: '## Input\n\n- `nums`, an array of integers.',
       interface: 'function',
@@ -2048,24 +2351,24 @@ describe('AI code', () => {
     expect(res.harness.python!.prefix.startsWith('from __future__ import annotations')).toBe(true);
     expect(res.check).toEqual({ attempted: true, engine: 'judge0', runners: ['cpp', 'go', 'python'].map((language) => ({ language, status: 'ok', error: null })) });
 
-    const broken = await api.ai.code({ title: 'Max Subarray MOCK:RUNNER', body: 'x', interface: 'function', languages: ['python', 'go'], samples: [{ stdin: '[1]\n', expectedStdout: '1\n' }] });
+    const broken = await aiCode({ title: 'Max Subarray MOCK:RUNNER', body: 'x', interface: 'function', languages: ['python', 'go'], samples: [{ stdin: '[1]\n', expectedStdout: '1\n' }] });
     expect(broken.check!.runners.map((r) => r.status)).toEqual(['failed', 'ok']);
     // Without a sample, or a judge, nothing runs.
-    expect((await api.ai.code({ title: 'x', body: '', interface: 'function', languages: ['python'] })).check).toEqual({ attempted: false, engine: null, runners: [] });
+    expect((await aiCode({ title: 'x', body: '', interface: 'function', languages: ['python'] })).check).toEqual({ attempted: false, engine: null, runners: [] });
     start({ judge: 'none' });
-    expect((await api.ai.code({ title: 'x', body: '', interface: 'function', languages: ['python'], samples: [{ stdin: '1\n', expectedStdout: '1\n' }] })).check!.attempted).toBe(false);
+    expect((await aiCode({ title: 'x', body: '', interface: 'function', languages: ['python'], samples: [{ stdin: '1\n', expectedStdout: '1\n' }] })).check!.attempted).toBe(false);
   });
 
   it('validates the request, and fails like the other generations', async () => {
     const form = { title: 'T', body: 'b', interface: 'program' as const, languages: ['python'] };
-    expect((await failure(api.ai.code({ ...form, languages: [] }))).fields).toEqual({ languages: 'is required' });
-    expect((await failure(api.ai.code({ ...form, languages: ['cobol'] }))).fields).toHaveProperty('languages');
-    expect((await failure(api.ai.code({ ...form, title: ' ', body: '' }))).fields).toEqual({ body: 'is required' });
-    expect((await failure(api.ai.code({ ...form, itemId: 'nope' }))).fields).toEqual({ itemId: 'item does not exist' });
-    expect((await failure(api.ai.code({ ...form, interface: 'api' as never }))).fields).toHaveProperty('interface');
-    expect((await failure(api.ai.code({ ...form, body: 'MOCK:FAIL' }))).status).toBe(502);
+    expect((await failure(aiCode({ ...form, languages: [] }))).fields).toEqual({ languages: 'is required' });
+    expect((await failure(aiCode({ ...form, languages: ['cobol'] }))).fields).toHaveProperty('languages');
+    expect((await failure(aiCode({ ...form, title: ' ', body: '' }))).fields).toEqual({ body: 'is required' });
+    expect((await failure(aiCode({ ...form, itemId: 'nope' }))).fields).toEqual({ itemId: 'item does not exist' });
+    expect((await failure(aiCode({ ...form, interface: 'api' as never }))).fields).toHaveProperty('interface');
+    expect((await failure(aiCode({ ...form, body: 'MOCK:FAIL' }))).status).toBe(502);
     start(optionsFromFlags(['no-ai', 'instant']));
-    expect((await failure(api.ai.code(form))).code).toBe('ai_unavailable');
+    expect((await failure(aiCode(form))).code).toBe('ai_unavailable');
   });
 });
 
@@ -2082,15 +2385,15 @@ describe('choosing the provider of a request', () => {
     const { personal, ollama, gateway } = await providers();
     const before = { personal: await requestsOf(personal.id), ollama: await requestsOf(ollama.id), gateway: await requestsOf(gateway.id) };
 
-    const drafted = await api.ai.draft({ text: 'two sum, array + target, return indices', providerId: ollama.id });
+    const drafted = await aiDraft({ text: 'two sum, array + target, return indices', providerId: ollama.id });
     expect(drafted.usage.model).toBe('qwen2.5-coder:14b');
     expect(await latestLog()).toMatchObject({ operation: 'draft', providerId: ollama.id, providerName: 'Local Ollama', model: 'qwen2.5-coder:14b' });
 
-    const variant = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', providerId: gateway.id });
+    const variant = await aiVariant(seedIds.items.twoSum, { mode: 'harder', providerId: gateway.id });
     expect(variant.usage.model).toBe('llama3.1:70b');
     expect(await latestLog()).toMatchObject({ operation: 'variant', providerId: gateway.id, model: 'llama3.1:70b' });
 
-    const cases = await api.ai.testCases(seedIds.items.twoSum, { count: 3, providerId: ollama.id });
+    const cases = await aiTestCases(seedIds.items.twoSum, { count: 3, providerId: ollama.id });
     expect(cases.usage.model).toBe('qwen2.5-coder:14b');
     expect(await latestLog()).toMatchObject({ operation: 'testcases', providerId: ollama.id });
 
@@ -2101,15 +2404,15 @@ describe('choosing the provider of a request', () => {
     expect((await api.meta()).ai.providerId).toBe(personal.id);
 
     // Without one, or with `null`, the default answers.
-    expect((await api.ai.draft({ text: 'two sum', providerId: null })).usage.model).toBe('claude-opus-5-5');
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2 })).usage.model).toBe('claude-opus-5-5');
+    expect((await aiDraft({ text: 'two sum', providerId: null })).usage.model).toBe('claude-opus-5-5');
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 2 })).usage.model).toBe('claude-opus-5-5');
     expect(await requestsOf(personal.id)).toBe(before.personal + 2);
   });
 
   it('logs a failed request against the named provider', async () => {
     const { ollama } = await providers();
     const before = await requestsOf(ollama.id);
-    expect((await failure(api.ai.draft({ text: 'MOCK:FAIL', providerId: ollama.id }))).code).toBe('upstream_error');
+    expect((await failure(aiDraft({ text: 'MOCK:FAIL', providerId: ollama.id }))).code).toBe('upstream_error');
     expect(await latestLog()).toMatchObject({ providerId: ollama.id, status: 'failed' });
     expect(await requestsOf(ollama.id)).toBe(before + 1);
   });
@@ -2118,13 +2421,13 @@ describe('choosing the provider of a request', () => {
     const notReady = await api.settings.createProvider({ name: 'Bare', kind: 'openai_compatible' });
     const logged = (await api.settings.log()).total;
     const requests = [
-      () => api.ai.draft({ text: 'two sum', providerId: 'nope' }),
-      () => api.ai.draft({ text: 'two sum', providerId: notReady.id }),
-      () => api.ai.variant(seedIds.items.twoSum, { providerId: 'nope' }),
-      () => api.ai.variant(seedIds.items.twoSum, { providerId: notReady.id }),
-      () => api.ai.testCases(seedIds.items.twoSum, { providerId: 'nope' }),
-      () => api.ai.testCases(seedIds.items.twoSum, { providerId: notReady.id }),
-      () => api.ai.draft({ text: 'two sum', providerId: 42 as never }),
+      () => aiDraft({ text: 'two sum', providerId: 'nope' }),
+      () => aiDraft({ text: 'two sum', providerId: notReady.id }),
+      () => aiVariant(seedIds.items.twoSum, { providerId: 'nope' }),
+      () => aiVariant(seedIds.items.twoSum, { providerId: notReady.id }),
+      () => aiTestCases(seedIds.items.twoSum, { providerId: 'nope' }),
+      () => aiTestCases(seedIds.items.twoSum, { providerId: notReady.id }),
+      () => aiDraft({ text: 'two sum', providerId: 42 as never }),
     ];
     for (const request of requests) {
       const err = await failure(request());
@@ -2137,11 +2440,11 @@ describe('choosing the provider of a request', () => {
   it('works with a named provider when there is no default, environment providers included', async () => {
     const { ollama } = await providers();
     await api.settings.putAi({ defaultProviderId: null });
-    expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
-    expect((await api.ai.draft({ text: 'two sum', providerId: ollama.id })).usage.model).toBe('qwen2.5-coder:14b');
+    expect((await failure(aiDraft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+    expect((await aiDraft({ text: 'two sum', providerId: ollama.id })).usage.model).toBe('qwen2.5-coder:14b');
 
     start(optionsFromFlags(['ai-env', 'no-ai', 'instant']));
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, providerId: 'env-anthropic' })).usage.model).toBe('claude-opus-5-5');
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 2, providerId: 'env-anthropic' })).usage.model).toBe('claude-opus-5-5');
     expect(await latestLog()).toMatchObject({ providerId: 'env-anthropic' });
     expect((await api.settings.getAi()).defaultProviderId).toBeNull();
   });
@@ -2207,11 +2510,11 @@ describe('large test cases', () => {
   const large = (text: string) => text.length > 100_000;
 
   it('are built only when asked for, as many as asked, appended to a draft and counted in its check', async () => {
-    const plain = await api.ai.draft({ text: 'two sum', interfaceHint: 'program' });
+    const plain = await aiDraft({ text: 'two sum', interfaceHint: 'program' });
     expect(plain.check!.largeCases).toEqual([]);
     expect(plain.draft.testCases.some((c) => large(c.stdin))).toBe(false);
 
-    const res = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 3 });
+    const res = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 3 });
     const cases = res.draft.testCases;
     const reports = res.check!.largeCases;
     expect(reports).toHaveLength(3);
@@ -2236,24 +2539,24 @@ describe('large test cases', () => {
     // The model did not write them, so they do not count towards the tokens.
     expect(res.usage.outputTokens).toBeLessThan(plain.usage.outputTokens! * 2);
     // The same inputs every time.
-    const again = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 3 });
+    const again = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 3 });
     expect(again.draft.testCases.slice(-3).map((c) => c.stdin)).toEqual(cases.slice(-3).map((c) => c.stdin));
 
-    const most = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCases: LIMITS.maxLargeTestCases });
+    const most = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: LIMITS.maxLargeTestCases });
     expect(most.check!.largeCases.filter((r) => r.status === 'added')).toHaveLength(LIMITS.maxLargeTestCases);
     expect(new Set(most.draft.testCases.filter((c) => large(c.stdin)).map((c) => c.stdin)).size).toBe(LIMITS.maxLargeTestCases);
   });
 
   it('take the problem\'s input convention, and are ignored for a reading', async () => {
-    const fn = await api.ai.draft({ text: 'two sum', interfaceHint: 'function', largeTestCases: 1 });
+    const fn = await aiDraft({ text: 'two sum', interfaceHint: 'function', largeTestCases: 1 });
     expect(fn.draft.testCases.at(-1)!.stdin).toMatch(/^\[-?\d+,/);
-    const reading = await api.ai.draft({ text: 'notes on consistent hashing', typeHint: 'reading', largeTestCases: 2 });
+    const reading = await aiDraft({ text: 'notes on consistent hashing', typeHint: 'reading', largeTestCases: 2 });
     expect(reading.check).toBeNull();
     expect(reading.draft.testCases).toEqual([]);
   });
 
   it('report failed or skipped cases, and add nothing for them', async () => {
-    const failed = await api.ai.draft({ text: 'two sum MOCK:LARGE-FAIL', interfaceHint: 'program', largeTestCases: 2 });
+    const failed = await aiDraft({ text: 'two sum MOCK:LARGE-FAIL', interfaceHint: 'program', largeTestCases: 2 });
     expect(failed.check!.largeCases).toHaveLength(2);
     for (const report of failed.check!.largeCases) {
       expect(report).toMatchObject({ status: 'failed', index: null, inputBytes: null, timeMs: null });
@@ -2265,22 +2568,22 @@ describe('large test cases', () => {
     expect(failed.check!.passed).toBe(failed.check!.total);
     expect(failed.draft.testCases.some((c) => large(c.stdin))).toBe(false);
 
-    const skipped = await api.ai.draft({ text: 'two sum MOCK:LARGE-SKIP', interfaceHint: 'program', largeTestCases: 1 });
+    const skipped = await aiDraft({ text: 'two sum MOCK:LARGE-SKIP', interfaceHint: 'program', largeTestCases: 1 });
     expect(skipped.check!.largeCases[0]).toMatchObject({ status: 'skipped', index: null });
     expect(skipped.check!.largeCases[0]!.error).toMatch(/ran out of time/);
 
     start({ judge: 'none' });
-    const noJudge = await api.ai.draft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 2 });
+    const noJudge = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 2 });
     expect(noJudge.check!.largeCases).toMatchObject([
       { status: 'skipped', error: 'there is no judge engine' },
       { status: 'skipped', error: 'there is no judge engine' },
     ]);
     start({ judge: 'down' });
-    expect((await api.ai.draft({ text: 'two sum', largeTestCases: 1 })).check!.largeCases).toMatchObject([{ status: 'skipped', error: 'the judge engine could not be reached' }]);
+    expect((await aiDraft({ text: 'two sum', largeTestCases: 1 })).check!.largeCases).toMatchObject([{ status: 'skipped', error: 'the judge engine could not be reached' }]);
   });
 
   it('can be cut short by the model: the others are added, the last one reported without a name or generator', async () => {
-    const res = await api.ai.draft({ text: 'two sum MOCK:LARGE-SHORT', interfaceHint: 'program', largeTestCases: 3 });
+    const res = await aiDraft({ text: 'two sum MOCK:LARGE-SHORT', interfaceHint: 'program', largeTestCases: 3 });
     const reports = res.check!.largeCases;
     expect(reports.map((r) => r.status)).toEqual(['added', 'added', 'failed']);
     expect(reports[2]).toEqual({ status: 'failed', error: 'the model wrote fewer generators than asked for', index: null, name: null, inputBytes: null, timeMs: null, generator: null });
@@ -2289,7 +2592,7 @@ describe('large test cases', () => {
   });
 
   it('are skipped in a draft whose reference solution does not pass its other cases', async () => {
-    const res = await api.ai.draft({ text: 'two sum MOCK:MISMATCH', interfaceHint: 'program', largeTestCases: 2 });
+    const res = await aiDraft({ text: 'two sum MOCK:MISMATCH', interfaceHint: 'program', largeTestCases: 2 });
     expect(res.check!.largeCases).toMatchObject([
       { status: 'skipped', error: 'the reference solution did not pass the other test cases' },
       { status: 'skipped', error: 'the reference solution did not pass the other test cases' },
@@ -2298,15 +2601,15 @@ describe('large test cases', () => {
   });
 
   it('are asked for on a variant and its revision too', async () => {
-    const res = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', largeTestCases: 2 });
+    const res = await aiVariant(seedIds.items.twoSum, { mode: 'harder', largeTestCases: 2 });
     expect(res.check!.largeCases.map((r) => r.status)).toEqual(['added', 'added']);
     expect(res.draft.testCases.slice(-2).every((c) => large(c.stdin))).toBe(true);
-    const revised = await api.ai.variant(seedIds.items.twoSum, { mode: 'harder', instruction: 'shorter', previousDraft: res.draft, largeTestCases: 0 });
+    const revised = await aiVariant(seedIds.items.twoSum, { mode: 'harder', instruction: 'shorter', previousDraft: res.draft, largeTestCases: 0 });
     expect(revised.check!.largeCases).toEqual([]);
   });
 
   it('are proposed after the counted cases, without a prediction', async () => {
-    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 4, largeTestCases: 2 });
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 4, largeTestCases: 2 });
     expect(res.cases).toHaveLength(6);
     expect(res.largeCases).toMatchObject([
       { status: 'added', index: 4 },
@@ -2316,24 +2619,24 @@ describe('large test cases', () => {
       expect(res.cases[report.index!]).toMatchObject({ name: report.name, isSample: false, verified: true, predictedStdout: null, predictionMatched: null, error: null });
       expect(large(res.cases[report.index!]!.stdin)).toBe(true);
     }
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 4 })).largeCases).toEqual([]);
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 4 })).largeCases).toEqual([]);
 
-    const failed = await api.ai.testCases(seedIds.items.twoSum, { count: 2, largeTestCases: 1, instruction: 'MOCK:LARGE-FAIL' });
+    const failed = await aiTestCases(seedIds.items.twoSum, { count: 2, largeTestCases: 1, instruction: 'MOCK:LARGE-FAIL' });
     expect(failed.largeCases[0]!.status).toBe('failed');
     expect(failed.cases).toHaveLength(2);
-    const short = await api.ai.testCases(seedIds.items.twoSum, { count: 2, largeTestCases: 2, instruction: 'MOCK:LARGE-SHORT' });
+    const short = await aiTestCases(seedIds.items.twoSum, { count: 2, largeTestCases: 2, instruction: 'MOCK:LARGE-SHORT' });
     expect(short.largeCases.map((r) => r.status)).toEqual(['added', 'failed']);
     expect(short.cases).toHaveLength(3);
     start({ judge: 'none' });
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 2, largeTestCases: 1 })).largeCases[0]!.status).toBe('skipped');
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 2, largeTestCases: 1 })).largeCases[0]!.status).toBe('skipped');
   });
 
   it('are saved like any case, never sent to the model, and cut to 64 KiB in results', async () => {
-    const res = await api.ai.testCases(seedIds.items.twoSum, { count: 1, largeTestCases: 1 });
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 1, largeTestCases: 1 });
     const big = res.cases[1]!;
     await api.testCases.bulk(seedIds.items.twoSum, { cases: [{ name: big.name, stdin: big.stdin, expectedStdout: big.expectedStdout, origin: 'ai', verified: true }] });
     // The next generation lists the stored case by its name and size only.
-    const next = await api.ai.testCases(seedIds.items.twoSum, { count: 1 });
+    const next = await aiTestCases(seedIds.items.twoSum, { count: 1 });
     const entry = await api.settings.logEntry(next.usage.logId!);
     const prompt = JSON.stringify(entry.request);
     expect(prompt).toContain(big.name);
@@ -2349,12 +2652,12 @@ describe('large test cases', () => {
 
   it('rejects a count that is not a whole number within the bound', async () => {
     const bound = { largeTestCases: `must be between 0 and ${LIMITS.maxLargeTestCases}` };
-    expect((await failure(api.ai.draft({ text: 'two sum', largeTestCases: true as never }))).fields).toEqual(bound);
-    expect((await failure(api.ai.draft({ text: 'two sum', largeTestCases: LIMITS.maxLargeTestCases + 1 }))).fields).toEqual(bound);
-    expect((await failure(api.ai.variant(seedIds.items.twoSum, { largeTestCases: 1.5 }))).fields).toEqual(bound);
-    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { count: 1, largeTestCases: -1 }))).fields).toEqual(bound);
+    expect((await failure(aiDraft({ text: 'two sum', largeTestCases: true as never }))).fields).toEqual(bound);
+    expect((await failure(aiDraft({ text: 'two sum', largeTestCases: LIMITS.maxLargeTestCases + 1 }))).fields).toEqual(bound);
+    expect((await failure(aiVariant(seedIds.items.twoSum, { largeTestCases: 1.5 }))).fields).toEqual(bound);
+    expect((await failure(aiTestCases(seedIds.items.twoSum, { count: 1, largeTestCases: -1 }))).fields).toEqual(bound);
     // Null counts as absent.
-    expect((await api.ai.testCases(seedIds.items.twoSum, { count: 1, largeTestCases: null as never })).largeCases).toEqual([]);
+    expect((await aiTestCases(seedIds.items.twoSum, { count: 1, largeTestCases: null as never })).largeCases).toEqual([]);
   });
 });
 
@@ -2390,9 +2693,22 @@ describe('AI activity log', () => {
     expect((await failure(api.settings.log({ before: 'yesterday' }))).status).toBe(400);
   });
 
+  it('lists numbered pages by offset, never with a cursor too', async () => {
+    const { items } = await all({ status: 'failed' });
+    const third = await api.settings.log({ status: 'failed', limit: 2, offset: 4 });
+    expect(third.items.map((e) => e.id)).toEqual(items.slice(4, 6).map((e) => e.id));
+    expect(third.total).toBe(items.length);
+    const past = await api.settings.log({ status: 'failed', limit: 2, offset: items.length });
+    expect(past.items).toEqual([]);
+    expect(past.next).toBeNull();
+    expect((await failure(api.settings.log({ offset: -1 }))).status).toBe(400);
+    const first = await api.settings.log({ limit: 10 });
+    expect((await failure(api.settings.log({ offset: 0, before: first.next! }))).status).toBe(400);
+  });
+
   it('keeps a cursor valid while new requests arrive', async () => {
     const first = await api.settings.log({ limit: 10 });
-    await api.ai.draft({ text: 'two sum', styleId: null });
+    await aiDraft({ text: 'two sum', styleId: null });
     const second = await api.settings.log({ limit: 10, before: first.next! });
     // Nothing repeats and nothing is skipped: the new entry belongs before the first batch.
     const again = await api.settings.log({ limit: 21 });
@@ -2436,7 +2752,7 @@ describe('AI activity log', () => {
 
   it('writes an entry for every request to a provider, with the id the generation reports', async () => {
     const before = (await api.settings.log()).total;
-    const { usage, draft } = await api.ai.draft({ text: 'two sum, array + target', styleId: null });
+    const { usage, draft } = await aiDraft({ text: 'two sum, array + target', styleId: null });
     expect(usage).toMatchObject({ reasoningTokens: null, cacheReadTokens: 0, cacheWriteTokens: 0 });
     const entry = await api.settings.logEntry(usage.logId!);
     expect(entry).toMatchObject({ operation: 'draft', itemId: null, title: 'Two Sum', status: 'ok', model: usage.model, durationMs: usage.durationMs });
@@ -2445,11 +2761,11 @@ describe('AI activity log', () => {
     expect(JSON.parse(entry.response!)).toMatchObject({ title: draft.title });
 
     const twoSum = seedIds.items.twoSum;
-    const tests = await api.ai.testCases(twoSum, { count: 2 });
+    const tests = await aiTestCases(twoSum, { count: 2 });
     expect(await api.settings.logEntry(tests.usage.logId!)).toMatchObject({ operation: 'testcases', itemId: twoSum, title: 'Two Sum' });
-    const variant = await api.ai.variant(twoSum, { styleId: null });
+    const variant = await aiVariant(twoSum, { styleId: null });
     expect(await api.settings.logEntry(variant.usage.logId!)).toMatchObject({ operation: 'variant', itemId: twoSum, title: 'Two Sum' });
-    await failure(api.ai.variant(twoSum, { instruction: 'MOCK:FAIL' }));
+    await failure(aiVariant(twoSum, { instruction: 'MOCK:FAIL' }));
     const personal = (await api.settings.getAi()).providers[0]!;
     await api.settings.testAi({ providerId: personal.id });
     // Settings that are not saved belong to no provider, and are not logged.
@@ -2463,7 +2779,7 @@ describe('AI activity log', () => {
     // An entry outlives its item and its provider; a service that reports reasoning has it counted.
     const ollama = (await api.settings.getAi()).providers[1]!;
     await api.settings.putAi({ defaultProviderId: ollama.id });
-    const viaOllama = await api.ai.draft({ text: 'two sum', styleId: null });
+    const viaOllama = await aiDraft({ text: 'two sum', styleId: null });
     expect(viaOllama.usage).toMatchObject({ model: 'qwen2.5-coder:14b', cacheReadTokens: null, cacheWriteTokens: null });
     expect(viaOllama.usage.reasoningTokens).toBeGreaterThan(0);
     await api.settings.removeProvider(ollama.id);
@@ -2563,7 +2879,7 @@ describe('style presets', () => {
   it('can start with none', async () => {
     start({ styles: 'none' });
     expect((await api.styles.list()).items).toEqual([]);
-    expect((await api.ai.draft({ text: 'two sum' })).style).toBeNull();
+    expect((await aiDraft({ text: 'two sum' })).style).toBeNull();
   });
 });
 
@@ -2723,7 +3039,7 @@ describe('AI settings', () => {
     expect(off.providers[0]).toMatchObject({ id: personal.id, isDefault: true });
     expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
     const logged = (await api.settings.log()).total;
-    for (const request of [() => api.ai.draft({ text: 'two sum' }), () => api.ai.draft({ text: 'two sum', providerId: personal.id })]) {
+    for (const request of [() => aiDraft({ text: 'two sum' }), () => aiDraft({ text: 'two sum', providerId: personal.id })]) {
       expect(await failure(request())).toMatchObject({ status: 503, code: 'ai_unavailable' });
     }
     expect((await api.settings.log()).total).toBe(logged);
@@ -2842,7 +3158,7 @@ describe('AI settings', () => {
 
     // Requests carry it; a test of an Anthropic provider asks for low, other kinds' tests for the level given or saved.
     const latest = async () => api.settings.logEntry((await api.settings.log({ limit: 1 })).items[0]!.id);
-    await api.ai.draft({ text: 'two sum' });
+    await aiDraft({ text: 'two sum' });
     expect(((await latest()).request as { effort: unknown }).effort).toBe('high');
     await api.settings.testAi({ providerId: before.id });
     expect(((await latest()).request as { effort: unknown }).effort).toBe('low');
@@ -2913,7 +3229,7 @@ describe('AI settings', () => {
     expect(keyless).toMatchObject({ apiKeySet: false, apiKeyHint: null, ready: false, isDefault: true });
     expect((await api.settings.getAi()).defaultProviderId).toBe(id);
     expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
-    expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+    expect((await failure(aiDraft({ text: 'two sum' }))).code).toBe('ai_unavailable');
 
     await api.settings.updateProvider(id, { apiKey: 'sk-ant-back-0000WXYZ' });
     expect((await api.meta()).ai.enabled).toBe(true);
@@ -2942,7 +3258,7 @@ describe('AI settings', () => {
     expect(off.providers).toHaveLength(5);
     expect(off.providers.every((p) => !p.isDefault)).toBe(true);
     expect((await api.meta()).ai.enabled).toBe(false);
-    expect((await failure(api.ai.draft({ text: 'two sum' }))).code).toBe('ai_unavailable');
+    expect((await failure(aiDraft({ text: 'two sum' }))).code).toBe('ai_unavailable');
 
     err = await failure(api.settings.putAi({ defaultProviderId: notReady.id }));
     expect(err.status).toBe(422);
@@ -3072,7 +3388,7 @@ describe('AI settings', () => {
     expect(gemini).toMatchObject({ ready: true, apiKeyHint: '…Gm1n' });
     await api.settings.putAi({ defaultProviderId: gemini.id });
     expect((await api.meta()).ai).toEqual({ enabled: true, providerId: gemini.id, providerName: 'Gemini', kind: 'gemini', model: 'gemini-3.5-flash' });
-    const { usage } = await api.ai.draft({ text: 'two sum' });
+    const { usage } = await aiDraft({ text: 'two sum' });
     expect(usage).toMatchObject({ model: 'gemini-3.5-flash', cacheReadTokens: 0, cacheWriteTokens: null });
     expect(usage.reasoningTokens).toBeGreaterThan(0);
     expect((await api.settings.getAi()).providers.find((p) => p.id === gemini.id)!.usage.allTime.requests).toBe(1);

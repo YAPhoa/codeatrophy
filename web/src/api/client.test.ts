@@ -105,7 +105,7 @@ describe('request', () => {
 
   it('keeps the two 503 codes apart', async () => {
     stub(() => json({ error: { code: 'ai_unavailable', message: 'no provider' } }, 503));
-    expect((await failure(api.ai.draft({ text: 'x' }))).code).toBe('ai_unavailable');
+    expect((await failure(api.drafts.create({ kind: 'capture', generate: { text: 'x' } }))).code).toBe('ai_unavailable');
     stub(() => json({ error: { code: 'judge_unavailable', message: 'no engine' } }, 503));
     expect((await failure(api.testCases.verify('x', false))).code).toBe('judge_unavailable');
   });
@@ -139,7 +139,7 @@ describe('request', () => {
           init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
         }),
     );
-    const pending = failure(api.ai.draft({ text: 'x' }, controller.signal));
+    const pending = failure(api.drafts.get('d1', controller.signal));
     controller.abort();
     const err = await pending;
     expect(err.code).toBe('aborted');
@@ -170,17 +170,43 @@ describe('request', () => {
   });
 
   it('sends an explicit null styleId rather than omitting it', async () => {
-    const calls = stub(() => json({ draft: {}, style: null }));
-    await api.ai.draft({ text: 'x', styleId: null });
-    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ text: 'x', styleId: null });
+    const calls = stub(() => json({ id: 'd1' }, 202));
+    await api.drafts.create({ kind: 'capture', generate: { text: 'x', styleId: null } });
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ kind: 'capture', generate: { text: 'x', styleId: null } });
   });
 
-  it('revises a variant through the variant endpoint, with the draft under review', async () => {
-    const calls = stub(() => json({ draft: {}, style: null }));
+  it('revises a variant draft through its generate endpoint, with the draft under review', async () => {
+    const calls = stub(() => json({ id: 'd1' }, 202));
     const previousDraft = { type: 'problem' as const, title: 'T', summary: '', body: '', difficulty: null, tags: [], problem: null, testCases: [], assumptions: [] };
-    await api.ai.variant('i1', { mode: 'harder', instruction: 'on a grid', previousDraft, styleId: 's1' });
-    expect(calls[0]?.url).toBe('/api/v1/items/i1/ai/variant');
+    await api.drafts.generate('d 1', { mode: 'harder', instruction: 'on a grid', previousDraft, styleId: 's1' });
+    expect(calls[0]?.url).toBe('/api/v1/drafts/d%201/generate');
+    expect(calls[0]?.init.method).toBe('POST');
     expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ mode: 'harder', instruction: 'on a grid', previousDraft, styleId: 's1' });
+  });
+
+  it('lists the jobs not collected yet, and filters them in the query', async () => {
+    const calls = stub(() => json({ items: [] }));
+    await api.ai.jobs();
+    await api.ai.jobs({ kind: 'testcases', itemId: 'i1', active: true, pickedUp: false });
+    expect(calls.map((c) => c.url)).toEqual(['/api/v1/ai/jobs', '/api/v1/ai/jobs?kind=testcases&itemId=i1&active=true&pickedUp=false']);
+  });
+
+  it('cancels, collects and dismisses a job at its own address', async () => {
+    const calls = stub(() => json({ id: 'j1' }));
+    await api.ai.cancel('j1');
+    await api.ai.pickup('j1');
+    stub(() => new Response(null, { status: 204 }));
+    await api.ai.dismiss('j1');
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(['POST /api/v1/ai/jobs/j1/cancel', 'POST /api/v1/ai/jobs/j1/pickup']);
+  });
+
+  it('updates a draft with the revision it was based on, and reads a refusal as a revision conflict', async () => {
+    const calls = stub(() => json({ error: { code: 'conflict', message: 'revision mismatch', fields: { revision: 5 } } }, 409));
+    const err = await failure(api.drafts.update('d1', { content: { v: 1 }, edited: true, expectedRevision: 4 }));
+    expect(calls[0]?.init.method).toBe('PATCH');
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ content: { v: 1 }, edited: true, expectedRevision: 4 });
+    expect(err.isRevisionConflict).toBe(true);
+    expect(err.currentRevision).toBe(5);
   });
 
   it('fetches specific items with a repeated id filter', async () => {

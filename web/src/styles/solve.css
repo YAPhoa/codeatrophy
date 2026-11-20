@@ -109,11 +109,6 @@
   font-weight: 600;
 }
 
-.tcases-note {
-  color: var(--text-3);
-  font-size: var(--text-sm);
-}
-
 /* Concealed cases, one numbered chip each, on a single row. */
 .tcases-hidden {
   display: flex;
@@ -322,8 +317,4 @@ a.result-saved:hover {
   .editor-toolbar .editor-saved {
     display: none;
   }
-}
-
-.tcases-note a {
-  text-decoration: underline;
 }

@@ -155,6 +155,7 @@ func serve() error {
 		Limits:           domain.Limits{MaxImportBytes: cfg.MaxImportBytes, MaxSourceBytes: cfg.MaxSourceBytes},
 		JudgeWorkers:     cfg.Judge.Workers,
 		JudgeConcurrency: cfg.Judge.Concurrency,
+		AIWorkers:        cfg.AI.Workers,
 		Version:          version,
 		MCP: app.MCPInfo{Enabled: cfg.MCP.Enabled, Path: "/mcp", AuthRequired: cfg.MCP.Token != "",
 			PublicURL: cfg.PublicURL},

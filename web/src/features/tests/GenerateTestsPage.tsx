@@ -20,7 +20,7 @@ import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { useToast } from '../../ui/Toast';
 import { modelOptions, useProviderChoice, type ProviderChoice } from '../capture/ModelPicker';
 import { GeneratingPanel, UsageLine } from '../capture/parts';
-import { useGeneration } from '../capture/useGeneration';
+import { useScreenJob } from '../jobs/useScreenJob';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { Output } from '../solve/ResultPanel';
@@ -104,7 +104,16 @@ function Generator({ item }: { item: Item }) {
   // Replacing keeps the sample cases, so only the others can go.
   const sampleCount = existing.data?.filter((c) => c.isSample).length ?? 0;
   const replaceableCount = existingCount - sampleCount;
-  const generation = useGeneration();
+  // The proposal comes from a job on the server: leaving does not stop it, and coming back finds it.
+  const generation = useScreenJob<AiTestCasesResponse>({
+    kind: 'testcases',
+    itemId: item.id,
+    origin: `/items/${item.id}/tests/generate`,
+    onResult: ({ result }) => {
+      show(result);
+      return true;
+    },
+  });
 
   // A "Solution only" problem takes a reference solution only in a language it has a runner for.
   const solutionOnly = item.problem?.interface === 'function';
@@ -170,10 +179,12 @@ function Generator({ item }: { item: Item }) {
     leaveLabel: 'Discard proposals',
   });
 
-  const generate = async () => {
+  const generate = () => {
     if (noRunner) return;
-    const res = await generation.run((signal) => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCases: large ? largeCount : 0, ...provider.request }, signal));
-    if (!res) return;
+    void generation.start(() => api.ai.testCases(item.id, { count, language, instruction: instruction.trim() || null, largeTestCases: large ? largeCount : 0, ...provider.request, origin: `/items/${item.id}/tests/generate` }));
+  };
+
+  function show(res: AiTestCasesResponse) {
     setProposal(res);
     // Cases whose run failed have no trustworthy expected output; leave them out by default.
     setKeep(res.cases.map((c) => !c.error));
@@ -185,7 +196,7 @@ function Generator({ item }: { item: Item }) {
     setKeepSolution(true);
     setShowSolution(false);
     setSaveError(null);
-  };
+  }
 
   // `revision` is the item revision the save is made against. Storing a
   // reference solution changes the item's content, so it is checked.
@@ -364,7 +375,7 @@ function Generator({ item }: { item: Item }) {
               className="card card-pad generate-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                void generate();
+                generate();
               }}
             >
               <div className="generate-fields">
@@ -420,9 +431,11 @@ function Generator({ item }: { item: Item }) {
           )}
 
           {generation.running && (
-            <GeneratingPanel title="Writing a solution and test cases…" startedAt={generation.startedAt} onCancel={generation.cancel} />
+            <GeneratingPanel title="Writing a solution and test cases…" startedAt={generation.startedAt} onCancel={() => void generation.cancel()}>
+              This usually takes a few seconds. You can leave this page.
+            </GeneratingPanel>
           )}
-          {generation.error != null && <ErrorCallout error={generation.error} title="Generation failed" onRetry={() => void generate()} />}
+          {generation.error != null && !generation.running && <ErrorCallout error={generation.error} title="Generation failed" onRetry={generate} />}
 
           {allRepeats && proposal && !generation.running && (
             <>

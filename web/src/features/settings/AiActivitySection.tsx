@@ -7,6 +7,7 @@ import { qk, useAiLog, useAiLogEntry, useAiSettings } from '../../api/queries';
 import type { AiLogDetail, AiLogEntry, AiLogFilters, AiLogStatus, AiOperation } from '../../api/types';
 import { OPERATIONS, OPERATION_LABEL, entryFacts, exportName, filterParams, filtersFrom, logProviders, rawRequest, rawResponse, thirtyDaysBefore, type RawText } from '../../lib/aiLog';
 import { saveJson } from '../../lib/download';
+import { parsePage, setPageSize, usePageSize, withPage } from '../../lib/paging';
 import { errorLine, sentence } from '../../lib/errors';
 import { absoluteTime, formatDuration, formatTokens, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
@@ -16,6 +17,7 @@ import { Dialog } from '../../ui/Dialog';
 import { SelectField } from '../../ui/Field';
 import { Badge, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
+import { Pager } from '../library/Pager';
 
 const ANY = '';
 
@@ -27,27 +29,52 @@ const STATUS_OPTIONS: { value: AiLogStatus | typeof ANY; label: string }[] = [
 
 const OPERATION_OPTIONS: { value: AiOperation | typeof ANY; label: string }[] = [{ value: ANY, label: 'All requests' }, ...OPERATIONS.map((o) => ({ value: o, label: OPERATION_LABEL[o] }))];
 
+/** The log's page size, kept apart from the library's. */
+const PAGE_SIZE_KEY = 'aiLogPageSize';
+
 /**
- * The requests sent to AI providers, newest first. Rows are plain and of one
- * height, so the list stays light however long it gets; more of it loads as
- * the end comes into view, and what was sent and what came back is fetched
- * only for a row that is opened.
+ * The requests sent to AI providers, newest first, a numbered page at a
+ * time like the library: the page is in the address with the filters, and
+ * changing a filter goes back to the first. Rows are plain and of one
+ * height; what was sent and what came back is fetched only for a row that
+ * is opened.
  */
 export function AiActivitySection() {
   const [params, setParams] = useSearchParams();
   const filters = filtersFrom(params);
   // An entry linked to from where it was generated arrives opened.
   const linked = params.get('entry');
-  const log = useAiLog(filters);
+  const pageSize = usePageSize(PAGE_SIZE_KEY);
+  const page = parsePage(params);
+  const offset = (page - 1) * pageSize;
+  const log = useAiLog(filters, pageSize, offset);
   const providers = useAiSettings().data?.providers;
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(linked ? [linked] : []));
   const [clearing, setClearing] = useState(false);
 
-  const entries = log.data?.pages.flatMap((p) => p.items) ?? [];
-  const total = log.data?.pages[0]?.total ?? 0;
+  const entries = log.data?.items ?? [];
+  const total = log.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const filtered = Object.keys(filters).length > 0;
-  // Shown on its own while the part of the list that is loaded does not hold it.
+  // Shown on its own while the page shown does not hold it.
   const apart = linked !== null && log.data !== undefined && !entries.some((e) => e.id === linked);
+
+  // A page past the end (entries cleared, a link kept from a longer log) shows the last one instead.
+  const pastEnd = log.isSuccess && !log.isPlaceholderData && page > pageCount;
+  useEffect(() => {
+    if (pastEnd) setParams((sp) => withPage(sp, pageCount), { replace: true });
+  }, [pastEnd, pageCount, setParams]);
+
+  // Another page starts at the list's top: brought into view if it is scrolled past.
+  const top = useRef<HTMLDivElement>(null);
+  const shownPage = useRef(page);
+  useEffect(() => {
+    if (shownPage.current === page) return;
+    shownPage.current = page;
+    const el = top.current;
+    const scroller = el?.closest('.main');
+    if (el && scroller && el.getBoundingClientRect().top < scroller.getBoundingClientRect().top) el.scrollIntoView({ block: 'start' });
+  }, [page]);
 
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -55,18 +82,8 @@ export function AiActivitySection() {
       if (!next.delete(id)) next.add(id);
       return next;
     });
+  // New filters start again from the first page.
   const setFilters = (next: AiLogFilters) => setParams(filterParams(next), { replace: true });
-
-  // The next batch is asked for when the end of the list comes into view.
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = log;
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const target = end.current;
-    if (!target || !hasNextPage || isFetchingNextPage || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver((seen) => seen.some((s) => s.isIntersecting) && void fetchNextPage(), { rootMargin: '400px' });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, entries.length]);
 
   return (
     <section className="settings-section" aria-labelledby="ai-activity-title">
@@ -75,7 +92,7 @@ export function AiActivitySection() {
           AI activity
         </h1>
         <span className="spacer" />
-        <Button variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(entries, 'ai-activity.json')} disabled={entries.length === 0} title="The entries loaded so far">
+        <Button variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(entries, 'ai-activity.json')} disabled={entries.length === 0} title="The entries on this page">
           Export list
         </Button>
         <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => setClearing(true)}>
@@ -84,7 +101,7 @@ export function AiActivitySection() {
       </div>
       <p className="settings-lead">Logs for every request sent to AI providers.</p>
 
-      <div className="row log-filters">
+      <div className="row log-filters" ref={top}>
         <SelectField
           label="Provider"
           hideLabel
@@ -110,7 +127,7 @@ export function AiActivitySection() {
           {entries.length === 0 ? (
             <p className="editor-empty">{filtered ? 'No requests match.' : 'No requests yet.'}</p>
           ) : (
-            <div className="card log-table">
+            <div className={cx('card log-table', log.isPlaceholderData && 'is-stale')}>
               <div className="log-row log-head" aria-hidden="true">
                 <span />
                 <span>Request</span>
@@ -126,13 +143,20 @@ export function AiActivitySection() {
                   <LogRow key={e.id} entry={e} open={open.has(e.id)} onToggle={() => toggle(e.id)} />
                 ))}
               </ul>
-            </div>
-          )}
-          {hasNextPage && (
-            <div className="item-list-more" ref={end}>
-              <Button busy={isFetchingNextPage} onClick={() => void fetchNextPage()}>
-                Load more ({total - entries.length} remaining)
-              </Button>
+              <div className="item-list-foot">
+                <Pager
+                  page={page}
+                  pageCount={pageCount}
+                  offset={offset}
+                  shown={entries.length}
+                  total={total}
+                  pageSize={pageSize}
+                  onPageSize={(size) => {
+                    setPageSize(size, PAGE_SIZE_KEY);
+                    setParams((sp) => withPage(sp, 1), { replace: true });
+                  }}
+                />
+              </div>
             </div>
           )}
         </>

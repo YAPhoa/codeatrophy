@@ -466,7 +466,7 @@ function listItems(db: MockDb, req: Req) {
 
 // ---- Create, update, delete ---------------------------------------------------
 
-function createItem(db: MockDb, req: Req) {
+export function createItem(db: MockDb, req: Req) {
   const raw = objectBody(req);
   const v = new Validator();
   if (!TYPES.includes(raw.type as ItemType)) v.add('type', 'must be problem or reading');

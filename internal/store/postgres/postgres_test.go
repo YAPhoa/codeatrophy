@@ -227,6 +227,7 @@ var downMigrations = map[int]string{
 	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
 	11: `ALTER TABLE solutions DROP COLUMN last_run_passed, DROP COLUMN last_run_total, DROP COLUMN last_run_time_ms,
 		DROP COLUMN last_run_memory_kb, DROP COLUMN last_run_at;`,
+	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
 }
 
 // undoMigrationsFrom takes the database back to the version before from.
@@ -261,7 +262,7 @@ func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
 		BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
+	storetest.ClearNewerData(t, db) // older schemas lack some of it
 	want := storetest.Dump(t, db)
 	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
 		t.Fatalf("the fixture has no providers or usage: %v", want)
@@ -296,7 +297,7 @@ func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
 	url := pgtest.URL(t)
 	db := open(t, url, nil)
 	storetest.Populate(t, db)
-	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
+	storetest.ClearNewerData(t, db) // older schemas lack some of it
 	want := storetest.Dump(t, db)
 	if len(want["tags"]) < 3 || len(want["item_tags"]) <= len(want["tags"]) {
 		t.Fatalf("the fixture has too few tags: %v %v", want["tags"], want["item_tags"])
@@ -348,7 +349,7 @@ func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	storetest.ClearLastRuns(t, db) // the schema before version 11 has none
+	storetest.ClearNewerData(t, db) // older schemas lack some of it
 	want := storetest.Dump(t, db)
 	undoMigrationsFrom(t, db, 10)
 	db.Close()
@@ -393,8 +394,11 @@ func TestLastRunMigrationStartsEverySolutionWithoutARun(t *testing.T) {
 		t.Fatalf("version %d after migrating", v)
 	}
 	got := storetest.Dump(t, db)
-	delete(want, "solutions")
-	delete(got, "solutions")
+	// Undoing migration 12 dropped the AI jobs and the drafts.
+	for _, table := range []string{"solutions", "ai_jobs", "drafts"} {
+		delete(want, table)
+		delete(got, table)
+	}
 	storetest.SameDump(t, "after migration 11", want, got)
 	var sols []domain.ItemSolution
 	if err := db.Read(ctx, func(tx store.Tx) (err error) { sols, err = tx.ListSolutions("origin"); return err }); err != nil {

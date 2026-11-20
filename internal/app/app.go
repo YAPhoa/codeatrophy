@@ -14,6 +14,7 @@ import (
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/grader"
+	"codeatrophy/internal/jobqueue"
 	"codeatrophy/internal/judge"
 	"codeatrophy/internal/secrets"
 	"codeatrophy/internal/store"
@@ -60,9 +61,14 @@ type Options struct {
 	Limits           domain.Limits
 	JudgeWorkers     int
 	JudgeConcurrency int
-	Version          string
-	MCP              MCPInfo
-	Logger           *slog.Logger
+	// AIWorkers is how many AI jobs run at once (default 2).
+	AIWorkers int
+	// AIQueue schedules AI jobs; nil means an in-process queue with
+	// AIWorkers workers.
+	AIQueue jobqueue.Queue
+	Version string
+	MCP     MCPInfo
+	Logger  *slog.Logger
 	// Now returns the current time; tests may override it.
 	Now func() time.Time
 	// HealthInterval is how often the judge engine is probed.
@@ -92,6 +98,11 @@ type App struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 
+	aiQueue jobqueue.Queue
+	// completions are the steps that run, per job kind, in the transaction
+	// that finishes a job (see finishJob).
+	completions map[string]func(tx store.Tx, j *store.AIJob) error
+
 	judgeMu      sync.Mutex
 	judgeHealthy bool
 	judgeLangs   []judge.Language
@@ -116,6 +127,19 @@ func New(opts Options) *App {
 		healthInterval: opts.HealthInterval,
 		queue:          make(chan string, 4096),
 		stop:           make(chan struct{}),
+		aiQueue:        opts.AIQueue,
+	}
+	if a.aiQueue == nil {
+		workers := opts.AIWorkers
+		if workers <= 0 {
+			workers = 2
+		}
+		a.aiQueue = jobqueue.NewLocal(workers)
+	}
+	// A draft's generation writes its outcome into the draft.
+	a.completions = map[string]func(store.Tx, *store.AIJob) error{
+		JobDraft:   a.completeDraftJob,
+		JobVariant: a.completeDraftJob,
 	}
 	if a.log == nil {
 		a.log = slog.New(slog.DiscardHandler)
@@ -158,8 +182,8 @@ func (a *App) Version() string { return a.version }
 func (a *App) Limits() domain.Limits { return a.limits }
 
 // Start carries settings of earlier versions over, recovers submissions
-// interrupted by a previous process, starts the judging workers and the
-// engine health probe.
+// and AI jobs interrupted by a previous process, starts the judging
+// workers, the AI queue and the engine health probe.
 func (a *App) Start(ctx context.Context) error {
 	if err := a.migrateLegacyAISettings(ctx); err != nil {
 		return err
@@ -167,6 +191,16 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.recoverSubmissions(ctx); err != nil {
 		return err
 	}
+	queued, err := a.recoverAIJobs(ctx)
+	if err != nil {
+		return err
+	}
+	a.aiQueue.Start(a.ctx, a.runJob)
+	for _, id := range queued {
+		a.aiQueue.Push(id)
+	}
+	a.wg.Add(1)
+	go a.pruneJobsLoop()
 	for range a.workers {
 		a.wg.Add(1)
 		go a.worker()
@@ -188,6 +222,7 @@ func (a *App) Stop() {
 	}
 	close(a.stop)
 	a.cancel()
+	a.aiQueue.Stop()
 	a.wg.Wait()
 }
 

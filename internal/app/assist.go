@@ -117,7 +117,7 @@ type DraftResponse struct {
 	Usage Usage       `json:"usage"`
 }
 
-// DraftInput is the body of POST /ai/draft.
+// DraftInput is the request of a capture draft's generation.
 type DraftInput struct {
 	Text          string             `json:"text"`
 	TypeHint      string             `json:"typeHint"`
@@ -151,6 +151,17 @@ func checkInstruction(o domain.Opt[string]) (string, error) {
 
 // Draft turns rough input into a complete item draft. Nothing is saved.
 func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
+	t, err := a.prepareDraft(ctx, in)
+	if err != nil {
+		return DraftResponse{}, err
+	}
+	return t.run(ctx)
+}
+
+// prepareDraft validates a draft request and resolves its style and
+// provider; the generation itself is left to the task's run.
+func (a *App) prepareDraft(ctx context.Context, in DraftInput) (task[DraftResponse], error) {
+	type T = task[DraftResponse]
 	fe := domain.FieldErrors{}
 	// Line endings are normalized before counting, like every stored text.
 	text := domain.NormalizeText(in.Text)
@@ -177,7 +188,7 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 	}
 	instruction, err := checkInstruction(in.Instruction)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	prev, msg := previousDraft(in.PreviousDraft)
 	if msg != "" {
@@ -187,45 +198,49 @@ func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
 		fe.Add("largeTestCases", msg)
 	}
 	if err := errValidation(fe); err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	preset, err := a.resolveStyle(ctx, in.StyleID)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
-	conventions, err := a.Conventions(ctx)
-	if err != nil {
-		return DraftResponse{}, err
-	}
-	style, ref := styleOf(preset)
 	large := in.LargeTestCases
 	if hint == "reading" {
 		large = 0
 	}
-	system, user := ai.DraftPrompt{Conventions: conventions, Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
-		PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
-	var draft ItemDraft
-	var gens []*ai.ModelLargeCase
-	subject := &logSubject{}
-	usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
-		System:     system,
-		User:       user,
-		Schema:     ai.DraftSchema(large),
-		SchemaName: "item_draft",
-	}, func(raw json.RawMessage) (err error) {
-		if draft, gens, err = a.parseDraft(raw, hint, iface); err == nil {
-			subject.Title = &draft.Title
+	run := func(ctx context.Context) (DraftResponse, error) {
+		conventions, err := a.Conventions(ctx)
+		if err != nil {
+			return DraftResponse{}, err
 		}
-		return err
-	})
-	if err != nil {
-		return DraftResponse{}, err
+		style, ref := styleOf(preset)
+		system, user := ai.DraftPrompt{Conventions: conventions, Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
+			PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
+		var draft ItemDraft
+		var gens []*ai.ModelLargeCase
+		subject := &logSubject{}
+		usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
+			System:     system,
+			User:       user,
+			Schema:     ai.DraftSchema(large),
+			SchemaName: "item_draft",
+		}, func(raw json.RawMessage) (err error) {
+			if draft, gens, err = a.parseDraft(raw, hint, iface); err == nil {
+				subject.Title = &draft.Title
+			}
+			return err
+		})
+		if err != nil {
+			return DraftResponse{}, err
+		}
+		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
+	// A draft is about the text until it has a title of its own.
+	return T{title: jobTitle(text), run: run, retitle: func(r DraftResponse) string { return r.Draft.Title }}, nil
 }
 
 // previousDraft re-encodes an optional previous ItemDraft compactly for the
@@ -409,7 +424,7 @@ func withFutureAnnotations(prefix string) string {
 	return futureAnnotations + "\n" + prefix
 }
 
-// VariantInput is the body of POST /items/{id}/ai/variant.
+// VariantInput is the request of a variant draft's generation.
 type VariantInput struct {
 	Mode           string             `json:"mode"`
 	InterfaceHint  string             `json:"interfaceHint"`
@@ -422,42 +437,53 @@ type VariantInput struct {
 
 // Variant drafts a new item derived from an existing one. Nothing is saved.
 func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (DraftResponse, error) {
+	t, err := a.prepareVariant(ctx, itemID, in)
+	if err != nil {
+		return DraftResponse{}, err
+	}
+	return t.run(ctx)
+}
+
+// prepareVariant validates a variant request and reads its original; the
+// generation is left to the task's run.
+func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput) (task[DraftResponse], error) {
+	type T = task[DraftResponse]
 	mode := in.Mode
 	if mode == "" {
 		mode = "similar"
 	}
 	if _, ok := ai.VariantModes[mode]; !ok {
-		return DraftResponse{}, errField("mode", "must be similar, easier, harder or twist")
+		return T{}, errField("mode", "must be similar, easier, harder or twist")
 	}
 	instruction, err := checkInstruction(in.Instruction)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	prev, msg := previousDraft(in.PreviousDraft)
 	if msg != "" {
-		return DraftResponse{}, errField("previousDraft", msg)
+		return T{}, errField("previousDraft", msg)
 	}
 	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
-		return DraftResponse{}, errField("largeTestCases", msg)
+		return T{}, errField("largeTestCases", msg)
 	}
 	it, err := a.GetItem(ctx, itemID)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	if it.Type == domain.TypeReading && mode != "similar" {
-		return DraftResponse{}, errField("mode", "readings only support the similar mode")
+		return T{}, errField("mode", "readings only support the similar mode")
 	}
 	// A variant keeps the original's interface unless asked for the other.
 	iface := ""
 	switch {
 	case in.InterfaceHint != "" && it.Type == domain.TypeReading:
-		return DraftResponse{}, errField("interfaceHint", "does not apply to a reading")
+		return T{}, errField("interfaceHint", "does not apply to a reading")
 	case in.InterfaceHint == "" || in.InterfaceHint == "auto":
 		if it.Problem != nil {
 			iface = string(it.Problem.Interface)
 		}
 	case !domain.ProblemInterface(in.InterfaceHint).Valid():
-		return DraftResponse{}, errField("interfaceHint", "must be auto, program or function")
+		return T{}, errField("interfaceHint", "must be auto, program or function")
 	default:
 		iface = in.InterfaceHint
 	}
@@ -465,7 +491,7 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	if it.Type == domain.TypeProblem {
 		cases, err := a.ListTestCases(ctx, itemID)
 		if err != nil {
-			return DraftResponse{}, err
+			return T{}, err
 		}
 		for _, c := range cases.Items {
 			if !c.IsSample || len(samples) >= 3 {
@@ -480,11 +506,11 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 	}
 	preset, err := a.resolveStyle(ctx, in.StyleID)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
-		return DraftResponse{}, err
+		return T{}, err
 	}
 	orig := map[string]any{
 		"type": it.Type, "title": it.Title, "summary": it.Summary, "body": it.Body,
@@ -508,36 +534,39 @@ func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (Draf
 		orig["sampleTestCases"] = samples
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
-	conventions, err := a.Conventions(ctx)
-	if err != nil {
-		return DraftResponse{}, err
-	}
-	style, ref := styleOf(preset)
 	large := in.LargeTestCases
 	if it.Type != domain.TypeProblem {
 		large = 0
 	}
-	system, user := ai.VariantPrompt{Conventions: conventions, Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
-		Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
 	forced := iface
 	if forced == "" {
 		forced = "auto"
 	}
-	var draft ItemDraft
-	var gens []*ai.ModelLargeCase
-	usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
-		System:     system,
-		User:       user,
-		Schema:     ai.DraftSchema(large),
-		SchemaName: "item_draft",
-	}, func(raw json.RawMessage) (err error) {
-		draft, gens, err = a.parseDraft(raw, string(it.Type), forced)
-		return err
-	})
-	if err != nil {
-		return DraftResponse{}, err
+	run := func(ctx context.Context) (DraftResponse, error) {
+		conventions, err := a.Conventions(ctx)
+		if err != nil {
+			return DraftResponse{}, err
+		}
+		style, ref := styleOf(preset)
+		system, user := ai.VariantPrompt{Conventions: conventions, Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
+			Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
+		var draft ItemDraft
+		var gens []*ai.ModelLargeCase
+		usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
+			System:     system,
+			User:       user,
+			Schema:     ai.DraftSchema(large),
+			SchemaName: "item_draft",
+		}, func(raw json.RawMessage) (err error) {
+			draft, gens, err = a.parseDraft(raw, string(it.Type), forced)
+			return err
+		})
+		if err != nil {
+			return DraftResponse{}, err
+		}
+		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
 	}
-	return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
+	return T{itemID: &it.ID, title: it.Title, run: run}, nil
 }
 
 // GenerateTestCasesInput is the body of POST /items/{id}/ai/testcases.
@@ -588,45 +617,56 @@ type GenerateTestCasesResponse struct {
 // available. Nothing is saved. Style presets and the custom system prompt
 // do not apply; a custom test case prompt does.
 func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateTestCasesInput) (GenerateTestCasesResponse, error) {
+	t, err := a.prepareTestCases(ctx, itemID, in)
+	if err != nil {
+		return GenerateTestCasesResponse{}, err
+	}
+	return t.run(ctx)
+}
+
+// prepareTestCases validates a test generation request and reads the
+// problem; the generation is left to the task's run.
+func (a *App) prepareTestCases(ctx context.Context, itemID string, in GenerateTestCasesInput) (task[GenerateTestCasesResponse], error) {
+	type T = task[GenerateTestCasesResponse]
 	count := DefaultGeneratedCases
 	if in.Count.HasValue() {
 		count = in.Count.Val
 	}
 	if count < 1 || count > MaxGeneratedCases {
-		return GenerateTestCasesResponse{}, errField("count", fmt.Sprintf("must be between 1 and %d", MaxGeneratedCases))
+		return T{}, errField("count", fmt.Sprintf("must be between 1 and %d", MaxGeneratedCases))
 	}
 	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
-		return GenerateTestCasesResponse{}, errField("largeTestCases", msg)
+		return T{}, errField("largeTestCases", msg)
 	}
 	lang := in.Language
 	if lang == "" {
 		lang = "python"
 	}
 	if !domain.KnownLanguage(lang) {
-		return GenerateTestCasesResponse{}, errField("language", "unknown language")
+		return T{}, errField("language", "unknown language")
 	}
 	instruction, err := checkInstruction(in.Instruction)
 	if err != nil {
-		return GenerateTestCasesResponse{}, err
+		return T{}, err
 	}
 	it, err := a.GetItem(ctx, itemID)
 	if err != nil {
-		return GenerateTestCasesResponse{}, err
+		return T{}, err
 	}
 	if it.Type != domain.TypeProblem {
-		return GenerateTestCasesResponse{}, errField("type", "readings have no test cases")
+		return T{}, errField("type", "readings have no test cases")
 	}
 	h, err := harnessFor(it.Problem, lang, "language")
 	if err != nil {
-		return GenerateTestCasesResponse{}, err
+		return T{}, err
 	}
 	existingCases, err := a.ListTestCases(ctx, itemID)
 	if err != nil {
-		return GenerateTestCasesResponse{}, err
+		return T{}, err
 	}
 	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
-		return GenerateTestCasesResponse{}, err
+		return T{}, err
 	}
 	function := it.Problem.Interface == domain.InterfaceFunction
 	problem := map[string]any{
@@ -641,54 +681,57 @@ func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateT
 	if rs := it.Problem.ReferenceSolution; rs != nil {
 		existing = "language: " + rs.Language + "\n" + rs.Source
 	}
-	guidance, err := a.testCaseGuidance(ctx)
-	if err != nil {
-		return GenerateTestCasesResponse{}, err
-	}
-	system, user := ai.TestCasesPrompt{Guidance: guidance, Problem: string(problemJSON), Function: function, Count: count, Language: lang,
-		ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
-		Toolchains: a.toolchains(ctx), Large: largeAsk(in.LargeTestCases)}.Build()
-	out := GenerateTestCasesResponse{Cases: []GeneratedCase{}, LargeCases: []*LargeCaseReport{}}
-	var gens []*ai.ModelLargeCase
-	out.Usage, err = a.generate(ctx, "testcases", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
-		System:     system,
-		User:       user,
-		Schema:     ai.TestCasesSchema(lang, function, in.LargeTestCases),
-		SchemaName: "test_cases",
-	}, func(raw json.RawMessage) error {
-		var err error
-		gens, err = a.parseTestCases(raw, lang, count, existingCases.Items, &out)
-		return err
-	})
-	if err != nil {
-		return GenerateTestCasesResponse{}, err
-	}
-	if len(out.Cases) > 0 {
-		a.verifyGenerated(ctx, it, h, &out)
-	}
-	if in.LargeTestCases > 0 {
-		// After the proposed cases, never repeating them or the stored ones.
-		var known []namedInput
-		for _, c := range existingCases.Items {
-			known = append(known, namedInput{c.Name, c.Stdin})
+	run := func(ctx context.Context) (GenerateTestCasesResponse, error) {
+		guidance, err := a.testCaseGuidance(ctx)
+		if err != nil {
+			return GenerateTestCasesResponse{}, err
 		}
-		for _, c := range out.Cases {
-			known = append(known, namedInput{c.Name, c.Stdin})
+		system, user := ai.TestCasesPrompt{Guidance: guidance, Problem: string(problemJSON), Function: function, Count: count, Language: lang,
+			ExistingSolution: existing, ExistingCases: existingCasesText(existingCases.Items), Instruction: instruction,
+			Toolchains: a.toolchains(ctx), Large: largeAsk(in.LargeTestCases)}.Build()
+		out := GenerateTestCasesResponse{Cases: []GeneratedCase{}, LargeCases: []*LargeCaseReport{}}
+		var gens []*ai.ModelLargeCase
+		out.Usage, err = a.generate(ctx, "testcases", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
+			System:     system,
+			User:       user,
+			Schema:     ai.TestCasesSchema(lang, function, in.LargeTestCases),
+			SchemaName: "test_cases",
+		}, func(raw json.RawMessage) error {
+			var err error
+			gens, err = a.parseTestCases(raw, lang, count, existingCases.Items, &out)
+			return err
+		})
+		if err != nil {
+			return GenerateTestCasesResponse{}, err
 		}
-		ref := out.ReferenceSolution
-		reports, built := a.buildLargeCases(ctx, it.Problem, gens, in.LargeTestCases, &ref, known)
-		for i, lc := range built {
-			if lc == nil {
-				continue
+		if len(out.Cases) > 0 {
+			a.verifyGenerated(ctx, it, h, &out)
+		}
+		if in.LargeTestCases > 0 {
+			// After the proposed cases, never repeating them or the stored ones.
+			var known []namedInput
+			for _, c := range existingCases.Items {
+				known = append(known, namedInput{c.Name, c.Stdin})
 			}
-			out.Cases = append(out.Cases, GeneratedCase{Name: lc.Name, Rationale: lc.Rationale, Stdin: lc.Stdin,
-				ExpectedStdout: lc.Expected, Verified: true})
-			at := len(out.Cases) - 1
-			reports[i].Index = &at
+			for _, c := range out.Cases {
+				known = append(known, namedInput{c.Name, c.Stdin})
+			}
+			ref := out.ReferenceSolution
+			reports, built := a.buildLargeCases(ctx, it.Problem, gens, in.LargeTestCases, &ref, known)
+			for i, lc := range built {
+				if lc == nil {
+					continue
+				}
+				out.Cases = append(out.Cases, GeneratedCase{Name: lc.Name, Rationale: lc.Rationale, Stdin: lc.Stdin,
+					ExpectedStdout: lc.Expected, Verified: true})
+				at := len(out.Cases) - 1
+				reports[i].Index = &at
+			}
+			out.LargeCases = reports
 		}
-		out.LargeCases = reports
+		return out, nil
 	}
-	return out, nil
+	return T{itemID: &it.ID, title: it.Title, run: run}, nil
 }
 
 // parseTestCases decodes the model's test cases into out, leaving out those

@@ -64,6 +64,8 @@ type JudgeConfig struct {
 type AIConfig struct {
 	Provider string // kind whose environment provider is the initial default, "" for none
 	Timeout  time.Duration
+	// Workers is how many AI jobs run at once.
+	Workers int
 
 	AnthropicAPIKey  string
 	AnthropicModel   string
@@ -232,6 +234,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	c.AI = AIConfig{
 		Provider:         strings.ToLower(get("CODEATROPHY_AI_PROVIDER", "")),
 		Timeout:          getDur("CODEATROPHY_AI_TIMEOUT", 5*time.Minute),
+		Workers:          getInt("CODEATROPHY_AI_WORKERS", 2),
 		AnthropicAPIKey:  get("CODEATROPHY_ANTHROPIC_API_KEY", get("ANTHROPIC_API_KEY", "")),
 		AnthropicModel:   get("CODEATROPHY_ANTHROPIC_MODEL", ""),
 		AnthropicBaseURL: get("CODEATROPHY_ANTHROPIC_BASE_URL", ""),
@@ -249,6 +252,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	if c.AI.Provider == "none" {
 		c.AI.Provider = ""
+	}
+	if c.AI.Workers < 1 {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_AI_WORKERS must be at least 1"))
 	}
 
 	c.MCP = MCPConfig{

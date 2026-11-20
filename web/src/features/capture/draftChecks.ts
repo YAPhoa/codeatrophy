@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { api, isAbort } from '../../api/client';
 import type { ItemCheckResponse } from '../../api/types';
 import { checkedState, checkRequestFromForm, restoreCases, withCheck, withoutCases, type CheckedDraft, type ItemFormState } from '../../lib/itemForm';
-import { readJson, writeJson } from '../../lib/storage';
+import { readContent } from '../drafts/draftContent';
 
 // "Verify all" on a draft under review: its reference solution is run on
 // every test case by `POST /items/check`, which can take minutes. The check
-// belongs to the stored draft, not to the page, so it keeps running when the
-// page is left: its answer goes to the page if it is open, and otherwise
-// into the draft kept in localStorage, where the page finds it on return.
+// belongs to the draft, not to the page, so it keeps running when the page
+// is left: its answer goes to the page if it is open, and otherwise into the
+// draft on the server (keyed by its id), where the page finds it on return.
 
 export interface DraftCheckState {
   running: boolean;
@@ -25,7 +25,7 @@ const IDLE: DraftCheckState = { running: false, startedAt: null, total: 0, error
 
 const states = new Map<string, DraftCheckState>();
 const controllers = new Map<string, AbortController>();
-/** Pages that are open, by storage key: they take the answer themselves. */
+/** Pages that are open, by draft id: they take the answer themselves. */
 const receivers = new Map<string, (sent: string, answer: ItemCheckResponse) => boolean>();
 const listeners = new Set<() => void>();
 
@@ -34,13 +34,19 @@ function set(key: string, state: DraftCheckState): void {
   listeners.forEach((fn) => fn());
 }
 
-function deliver(key: string, sent: string, answer: ItemCheckResponse): boolean {
-  const receive = receivers.get(key);
+async function deliver(id: string, sent: string, answer: ItemCheckResponse): Promise<boolean> {
+  const receive = receivers.get(id);
   if (receive) return receive(sent, answer);
-  const stored = readJson<CheckedDraft | null>(key, null);
-  const next = stored && withCheck(stored, sent, answer);
-  if (next) writeJson(key, next);
-  return next !== null;
+  try {
+    const draft = await api.drafts.get(id);
+    const next = withCheck(readContent(draft), sent, answer);
+    if (!next) return false;
+    await api.drafts.update(id, { content: { ...next }, expectedRevision: draft.revision });
+    return true;
+  } catch {
+    // Gone, or changed in the meantime: the answer no longer fits it.
+    return false;
+  }
 }
 
 /** Check a draft's form; a check already running for the same draft is cancelled. */
@@ -51,10 +57,10 @@ export function startDraftCheck(key: string, form: ItemFormState): void {
   const sent = checkedState(form);
   set(key, { running: true, startedAt: Date.now(), total: form.testCases.length, error: null, outdated: false });
   api.items.check(checkRequestFromForm(form), controller.signal).then(
-    (answer) => {
+    async (answer) => {
       if (controllers.get(key) !== controller) return;
       controllers.delete(key);
-      set(key, { ...IDLE, outdated: !deliver(key, sent, answer) });
+      set(key, { ...IDLE, outdated: !(await deliver(key, sent, answer)) });
     },
     (error: unknown) => {
       if (controllers.get(key) !== controller) return;
@@ -82,7 +88,7 @@ const subscribe = (fn: () => void) => {
 };
 
 /**
- * The check of the draft stored under `key`, for its page. While the page is
+ * The check of the draft with the id `key`, for its page. While the page is
  * open, an answer is applied through `setDraft`; one for a draft that has
  * changed since is dropped and reported as `outdated`.
  */

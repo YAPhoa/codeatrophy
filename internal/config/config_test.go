@@ -16,7 +16,7 @@ func TestDefaults(t *testing.T) {
 	}
 	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
 		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
-		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" {
+		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" || c.AI.Workers != 2 {
 		t.Errorf("defaults: %+v", c)
 	}
 }
@@ -39,18 +39,20 @@ func TestParsing(t *testing.T) {
 		"CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java=1048576, go=262144",
 		"CODEATROPHY_MCP_ALLOWED_ORIGINS":      "https://a.example/, https://b.example",
 		"CODEATROPHY_AI_PROVIDER":              "none",
+		"CODEATROPHY_AI_WORKERS":               "3",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Judge.Engine != "judge0" || !c.Judge.Judge0Cgroups || c.Judge.Judge0MemoryAllowanceKb["go"] != 262144 ||
-		len(c.MCP.AllowedOrigins) != 2 || c.MCP.AllowedOrigins[0] != "https://a.example" || c.AI.Provider != "" {
+		len(c.MCP.AllowedOrigins) != 2 || c.MCP.AllowedOrigins[0] != "https://a.example" || c.AI.Provider != "" ||
+		c.AI.Workers != 3 {
 		t.Errorf("parsed: %+v", c)
 	}
 	for k, v := range map[string]string{
 		"CODEATROPHY_JUDGE_ENGINE": "docker", "CODEATROPHY_LOG_LEVEL": "loud", "CODEATROPHY_MCP_ENABLED": "maybe",
 		"CODEATROPHY_JUDGE0_TIMEOUT": "soon", "CODEATROPHY_AI_PROVIDER": "mistral", "CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java",
-		"CODEATROPHY_MAX_SOURCE_BYTES": "10",
+		"CODEATROPHY_MAX_SOURCE_BYTES": "10", "CODEATROPHY_AI_WORKERS": "0",
 	} {
 		if _, err := LoadFrom(env(map[string]string{k: v})); err == nil {
 			t.Errorf("%s=%s should be rejected", k, v)

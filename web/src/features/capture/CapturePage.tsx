@@ -1,289 +1,112 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
-import { PenLine, Sparkles } from 'lucide-react';
-import { ApiError, api } from '../../api/client';
-import { useCollections, useLargeTestCaseCount, useMeta, usePreferences, useStyles, useTags } from '../../api/queries';
-import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemType } from '../../api/types';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { PenLine, Sparkles, Trash2 } from 'lucide-react';
+import { api, jobError } from '../../api/client';
+import { invalidateJobs, qk, useLargeTestCaseCount, useMeta, usePreferences, useStyles } from '../../api/queries';
+import type { DraftRequest } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { finePointer } from '../../lib/pointer';
-import { useHotkeys } from '../../lib/hotkeys';
-import { charCount, checkedState, draftFromForm, emptyForm, formFromDraft, revisionProblem, upgradeForm, type ItemFormState } from '../../lib/itemForm';
-import { useUrlMirror } from '../../lib/urlState';
+import { charCount, emptyForm, type ItemFormState } from '../../lib/itemForm';
+import { remove } from '../../lib/storage';
 import { useStoredState } from '../../lib/useStoredState';
 import { Button } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Segmented } from '../../ui/Field';
 import { Callout, ErrorCallout } from '../../ui/misc';
-import { useCollectionActions } from '../collections/CollectionActions';
+import { emptyContent, type CaptureInput, type DraftContent } from '../drafts/draftContent';
+import { DraftReview } from '../drafts/DraftReview';
+import type { ServerDraft } from '../drafts/useServerDraft';
 import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
-import { ReviewScreen } from './ReviewScreen';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
-import { useGeneration } from './useGeneration';
-import { useDraftCheck } from './draftChecks';
-import { useSaveDraft } from './useSaveDraft';
-
-interface CaptureSession {
-  stage: 'input' | 'review';
-  text: string;
-  typeHint: 'auto' | ItemType;
-  /** What a drafted problem should have the solver write. Absent in a session stored before the choice existed. */
-  interfaceHint?: InterfaceHint;
-  /** `undefined` until the user picks one; then a preset id or `null` for none. */
-  styleChoice?: StyleChoice;
-  /** `undefined` until the user picks one: the default provider. Kept for the revisions of this draft. */
-  providerChoice?: ProviderChoice;
-  form: ItemFormState | null;
-  assumptions: string[];
-  aiDrafted: boolean;
-  appliedStyle: AppliedStyle | null;
-  /** What running the draft's reference solution found, and the state of the form it was run on. */
-  check?: DraftCheck | null;
-  usage?: GenerationUsage | null;
-  checked?: string;
-}
-
-const fresh = (): CaptureSession => ({ stage: 'input', text: '', typeHint: 'auto', form: null, assumptions: [], aiDrafted: false, appliedStyle: null });
 
 const STEPS = ['Capture', 'Review', 'Save'] as const;
 
-/** Where the capture flow keeps its work in progress. */
-const SESSION_KEY = 'capture:new';
+const freshInput = (): CaptureInput => ({ text: '', typeHint: 'auto', interfaceHint: 'auto' });
 
-/**
- * The capture flow: paste or type anything → the AI drafts a complete item →
- * review and edit → save. Works as a plain authoring form when AI is off.
- * Work in progress is kept in localStorage, so a reload or a detour to
- * Settings does not lose it.
- */
-export default function CapturePage() {
-  useDocumentTitle('Capture');
-  const [searchParams, setSearchParams] = useSearchParams();
+/** What the capture page holds before a draft exists: kept in this browser, so a reload or a detour does not lose it. */
+interface Unsent extends CaptureInput {
+  styleChoice?: StyleChoice;
+  providerChoice?: ProviderChoice;
+}
+
+const UNSENT_KEY = 'capture:input';
+
+/** The draft request for a capture's input. */
+function draftRequest(input: CaptureInput, styleId: StyleChoice, largeTestCases: number, provider: { providerId?: string | null }): DraftRequest {
+  return { text: input.text, typeHint: input.typeHint, ...(input.typeHint !== 'reading' ? { interfaceHint: input.interfaceHint } : {}), styleId, largeTestCases, ...provider };
+}
+
+/** A form written by hand from the input: what was typed becomes the statement. */
+function handForm(input: CaptureInput, collectionIds: string[]): ItemFormState {
+  const type = input.typeHint === 'reading' ? 'reading' : 'problem';
+  return { ...emptyForm(type), collectionIds, body: input.text, interface: input.interfaceHint === 'function' ? 'function' : 'program' };
+}
+
+interface CaptureFormProps {
+  input: CaptureInput;
+  onInput: (change: Partial<CaptureInput>) => void;
+  styleChoice: StyleChoice | undefined;
+  onStyleChange: (choice: StyleChoice) => void;
+  providerChoice: ProviderChoice;
+  onProviderChange: (id: string) => void;
+  /** A generation under way: when it started, and how to stop it. */
+  running: { startedAt: number | null; onCancel: () => void } | null;
+  /** The request is on its way. */
+  starting: boolean;
+  error: unknown;
+  onDraft: () => void;
+  onWriteByHand: () => void;
+  onDiscard?: () => void;
+  /** Shown under the actions. */
+  footer?: ReactNode;
+}
+
+/** The capture's input: the text, what kind of item it is, and how to write it. */
+function CaptureForm(props: CaptureFormProps) {
   const meta = useMeta();
   const aiEnabled = meta.data?.ai.enabled ?? false;
-  const { data: collections = [] } = useCollections();
-  const { data: tags = [] } = useTags();
   const stylesQuery = useStyles();
   const styles = stylesQuery.data ?? [];
-  const collectionActions = useCollectionActions();
-  const confirm = useConfirm();
-  const [session, setSession, clearSession] = useStoredState<CaptureSession>(SESSION_KEY, fresh);
-  const verify = useDraftCheck(SESSION_KEY, session, setSession);
-  const generation = useGeneration();
-  const saver = useSaveDraft(clearSession);
+  const styleChoice = resolveStyleChoice(props.styleChoice, styles);
+  const provider = useProviderChoice(props.providerChoice, props.error);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  // Whether to ask for large test cases, and how many, is the user's standing choice; a revision asks again.
-  const largeCount = useLargeTestCaseCount();
-  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
+  const { input, running } = props;
+  const busy = running !== null || props.starting;
 
-  const presetCollection = searchParams.get('collection');
-  const defaults = (): Partial<ItemFormState> => ({ collectionIds: presetCollection ? [presetCollection] : [] });
-  const styleChoice = resolveStyleChoice(session.styleChoice, styles);
-  const provider = useProviderChoice(session.providerChoice, generation.error);
-  const patch = (change: Partial<CaptureSession>) => setSession((s) => ({ ...s, ...change }));
-  // The step is part of the address (`?step=review`) and of the history, so Back returns from the review to the input.
-  useUrlMirror('step', session.stage === 'review' && session.form ? 'review' : null, (raw) => setSession((s) => ({ ...s, stage: raw === 'review' ? 'review' : 'input' })), true);
-  const form = useMemo(() => (session.form ? upgradeForm(session.form) : null), [session.form]);
-  const interfaceHint = session.interfaceHint ?? 'auto';
+  useEffect(() => {
+    if (finePointer()) textRef.current?.focus();
+  }, []);
+
+  const interfaceHint = input.interfaceHint;
   // Without AI there is nothing to detect: the choices are the two interfaces.
-  const kind = !aiEnabled && session.typeHint === 'auto' ? 'problem' : session.typeHint;
+  const kind = !aiEnabled && input.typeHint === 'auto' ? 'problem' : input.typeHint;
   const writes = !aiEnabled && interfaceHint === 'auto' ? 'program' : interfaceHint;
-
-  // Arriving from a library view filtered to one type starts the new item as
-  // that type. The parameter is used once and then dropped, so the choice
-  // stays the user's to change and a reload does not undo it.
-  const presetType = searchParams.get('type');
-  useEffect(() => {
-    if (presetType == null) return;
-    if (presetType === 'problem' || presetType === 'reading') setSession((s) => ({ ...s, typeHint: presetType }));
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete('type');
-        return next;
-      },
-      { replace: true },
-    );
-  }, [presetType, setSession, setSearchParams]);
-
-  useEffect(() => {
-    if (session.stage === 'input' && finePointer()) textRef.current?.focus();
-  }, [session.stage]);
-
-  const text = session.text;
+  const text = input.text;
   const maxText = meta.data?.limits.maxDraftTextChars ?? Infinity;
   const textLength = charCount(text);
   const tooLong = textLength > maxText;
-  const canDraft = aiEnabled && text.trim().length > 0 && !tooLong && !generation.running && !stylesQuery.isPending;
+  const canDraft = aiEnabled && text.trim().length > 0 && !tooLong && !busy && !stylesQuery.isPending;
   // Asked to draft from nothing: say so by the text, until something is typed.
   const [askedEmpty, setAskedEmpty] = useState(false);
   const needsText = askedEmpty && text.trim() === '';
 
-  const draft = async () => {
+  const draft = () => {
     if (!canDraft) {
-      if (aiEnabled && !generation.running && !stylesQuery.isPending) {
+      if (aiEnabled && !busy && !stylesQuery.isPending) {
         setAskedEmpty(true);
         textRef.current?.focus();
       }
       return;
     }
-    verify.cancel();
-    const res = await generation.run((signal) =>
-      api.ai.draft({ text, typeHint: session.typeHint, ...(session.typeHint !== 'reading' ? { interfaceHint } : {}), styleId: styleChoice, largeTestCases, ...provider.request }, signal),
-    );
-    if (!res) return;
-    const drafted = formFromDraft(res.draft, defaults(), res.check?.largeCases);
-    patch({
-      stage: 'review',
-      form: drafted,
-      assumptions: res.draft.assumptions,
-      aiDrafted: true,
-      appliedStyle: res.style,
-      styleChoice: res.style?.id ?? null,
-      check: res.check,
-      usage: res.usage,
-      checked: checkedState(drafted),
-    });
+    props.onDraft();
   };
-
-  const revise = async (instruction: string) => {
-    if (!form) return;
-    const current = form;
-    const previousDraft = draftFromForm(current, session.assumptions);
-    verify.cancel();
-    const res = await generation.run((signal) => {
-      const problem = revisionProblem(previousDraft, meta.data?.limits);
-      if (problem) throw new ApiError(413, 'too_large', problem);
-      // The form's own choice of interface is the one a revision keeps.
-      const hint = current.type === 'problem' ? { interfaceHint: current.interface } : {};
-      return api.ai.draft({ text, typeHint: current.type, ...hint, instruction, previousDraft, styleId: styleChoice, largeTestCases, ...provider.request }, signal);
-    });
-    if (!res) return;
-    // Keep what the model does not produce: where the item is filed and where it came from.
-    const revised = { ...formFromDraft(res.draft, { collectionIds: current.collectionIds }, res.check?.largeCases), sourceUrl: current.sourceUrl, sourceNote: current.sourceNote };
-    patch({
-      form: revised,
-      assumptions: res.draft.assumptions,
-      appliedStyle: res.style,
-      styleChoice: res.style?.id ?? null,
-      check: res.check,
-      usage: res.usage,
-      checked: checkedState(revised),
-    });
-  };
-
-  const writeByHand = () => {
-    verify.cancel();
-    const type: ItemType = session.typeHint === 'reading' ? 'reading' : 'problem';
-    patch({
-      stage: 'review',
-      form: { ...emptyForm(type), ...defaults(), body: text, interface: interfaceHint === 'function' ? 'function' : 'program' },
-      assumptions: [],
-      aiDrafted: false,
-      appliedStyle: null,
-      check: null,
-      usage: null,
-    });
-  };
-
-  const discard = async () => {
-    const ok = await confirm({
-      title: 'Discard this draft?',
-      body: 'The draft and your original input are thrown away. Nothing has been saved to the library.',
-      confirmLabel: 'Discard draft',
-      danger: true,
-    });
-    if (ok) {
-      generation.cancel();
-      verify.cancel();
-      clearSession();
-    }
-  };
-
-  const save = () => {
-    if (form) void saver.save(form, { rawInput: session.aiDrafted ? text : null });
-  };
-
-  useHotkeys(
-    {
-      'mod+s': (e) => {
-        if (session.stage !== 'review') return;
-        e.preventDefault();
-        save();
-      },
-    },
-    { enabled: session.stage === 'review' },
-  );
-
-  if (session.stage === 'review' && form) {
-    return (
-      <div className="page page-wide">
-        <ReviewScreen
-          header={
-            <div>
-              <Steps current={1} labels={STEPS} />
-              <h1 className="page-title">{session.aiDrafted ? 'Review the draft' : `New ${form.type}`}</h1>
-            </div>
-          }
-          form={form}
-          onFormChange={(next) => patch({ form: next })}
-          errors={saver.errors}
-          collections={collections}
-          tagSuggestions={tags.map((t) => t.name)}
-          judgeLanguages={meta.data?.judge.languages.map((l) => l.id) ?? []}
-          onCreateCollection={() => collectionActions.create(null, (c) => setSession((s) => (s.form ? { ...s, form: { ...s.form, collectionIds: [...s.form.collectionIds, c.id] } } : s)))}
-          aiDrafted={session.aiDrafted}
-          kind="draft"
-          assumptions={session.assumptions}
-          appliedStyle={session.appliedStyle}
-          check={session.check ?? null}
-          usage={session.usage ?? null}
-          verify={verify}
-          checkStale={session.checked !== undefined && session.checked !== checkedState(form)}
-          originalText={session.aiDrafted ? text : undefined}
-          aiEnabled={aiEnabled}
-          styles={styles}
-          styleChoice={styleChoice}
-          onStyleChange={(c) => patch({ styleChoice: c })}
-          aiSettings={provider.settings}
-          providerChoice={provider.value}
-          onProviderChange={(id) => patch({ providerChoice: id })}
-          onRevise={(instruction) => void revise(instruction)}
-          revising={generation.running}
-          reviseStartedAt={generation.startedAt}
-          reviseError={generation.error}
-          onCancelRevise={generation.cancel}
-          onSave={save}
-          saving={saver.saving}
-          saveError={saver.error}
-          saveLabel="Save to library"
-          onBack={() => {
-            generation.cancel();
-            patch({ stage: 'input' });
-          }}
-          backLabel="Back to input"
-          onDiscard={() => void discard()}
-        />
-      </div>
-    );
-  }
 
   return (
-    <div className="page page-narrow capture">
-      <Steps current={0} labels={STEPS} />
-      <h1 className="page-title">Capture</h1>
-      <p className="page-sub">
-        Paste or type what you have: part of a problem statement, a few lines from memory, or an article.
-        {aiEnabled ? ' The AI turns it into a complete entry and tells you what it had to assume. Nothing is saved until you have reviewed it.' : ''}
-      </p>
-
+    <>
       {!aiEnabled && (
-        <Callout
-          tone="info"
-          title="AI drafting is off"
-          className="capture-callout"
-          actions={<Link to="/settings/ai">AI settings</Link>}
-        >
+        <Callout tone="info" title="AI drafting is off" className="capture-callout" actions={<Link to="/settings/ai">AI settings</Link>}>
           Items are written by hand. Note down what you have and continue to the editor.
         </Callout>
       )}
@@ -299,14 +122,14 @@ export default function CapturePage() {
           className="capture-text"
           autoComplete="off"
           value={text}
-          readOnly={generation.running}
-          onChange={(e) => patch({ text: e.target.value })}
+          readOnly={busy}
+          onChange={(e) => props.onInput({ text: e.target.value })}
           placeholder={'e.g. “that interview question: array of ints and a target, return the two indices that add up to it, should be O(n)”…'}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              if (aiEnabled) void draft();
-              else writeByHand();
+              if (aiEnabled) draft();
+              else props.onWriteByHand();
             }
           }}
           aria-describedby="capture-count"
@@ -317,7 +140,7 @@ export default function CapturePage() {
             size="sm"
             label="Kind of item"
             value={kind}
-            onChange={(v) => patch({ typeHint: v })}
+            onChange={(v) => props.onInput({ typeHint: v })}
             options={[
               ...(aiEnabled ? [{ value: 'auto' as const, label: 'Auto-detect' }] : []),
               { value: 'problem' as const, label: 'Problem' },
@@ -329,15 +152,15 @@ export default function CapturePage() {
             size="sm"
             label="What you write"
             value={writes}
-            onChange={(v) => patch({ interfaceHint: v })}
+            onChange={(v) => props.onInput({ interfaceHint: v })}
             options={[
               ...(aiEnabled ? [{ value: 'auto' as const, label: 'Auto', title: 'Let the AI choose' }] : []),
               { value: 'function' as const, label: 'Solution only', title: 'You write a function or class; a hidden runner does the rest' },
               { value: 'program' as const, label: 'Full program', title: 'You write the whole program, input and output included' },
             ].map((o) => (kind === 'reading' ? { ...o, title: 'Only for problems', disabled: true } : o))}
           />
-          {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={(c) => patch({ styleChoice: c })} disabled={generation.running} />}
-          {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={(id) => patch({ providerChoice: id })} disabled={generation.running} />}
+          {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={props.onStyleChange} disabled={busy} />}
+          {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={props.onProviderChange} disabled={busy} />}
           <span className="spacer" />
           {/* An alert only while something is wrong, so the running count is not read out on every keystroke. */}
           <span id="capture-count" className={tooLong || needsText ? 'field-error' : 'muted capture-count'} role={tooLong || needsText ? 'alert' : undefined}>
@@ -346,46 +169,281 @@ export default function CapturePage() {
               : needsText
                 ? 'Type or paste something to draft from.'
                 : textLength > 0
-                ? `${textLength.toLocaleString()} characters`
-                : ''}
+                  ? `${textLength.toLocaleString()} characters`
+                  : ''}
           </span>
         </div>
       </div>
 
-      {generation.running ? (
-        <GeneratingPanel title="Drafting…" startedAt={generation.startedAt} onCancel={generation.cancel} />
+      {running ? (
+        <GeneratingPanel title="Drafting…" startedAt={running.startedAt} onCancel={running.onCancel}>
+          This usually takes a few seconds. You can leave this page.
+        </GeneratingPanel>
       ) : (
         <>
-          {generation.error != null && <ErrorCallout error={generation.error} title="Drafting failed" onRetry={() => void draft()} />}
+          {props.error != null && <ErrorCallout error={props.error} title="Drafting failed" onRetry={draft} />}
           <div className="capture-actions">
             {aiEnabled ? (
               <>
-                <Button variant="ghost" icon={<PenLine size={14} />} onClick={writeByHand}>
+                <Button variant="ghost" icon={<PenLine size={14} />} onClick={props.onWriteByHand} disabled={props.starting}>
                   Write it by hand
                 </Button>
+                {props.onDiscard && (
+                  <Button variant="ghost" icon={<Trash2 size={14} />} onClick={props.onDiscard} disabled={props.starting}>
+                    Discard
+                  </Button>
+                )}
                 <span className="spacer" />
-                <Button variant="primary" icon={<Sparkles size={16} />} onClick={() => void draft()} disabled={generation.running || stylesQuery.isPending}>
+                <Button variant="primary" icon={<Sparkles size={16} />} onClick={draft} busy={props.starting} disabled={stylesQuery.isPending}>
                   Draft with AI
                 </Button>
               </>
             ) : (
-              <Button variant="primary" icon={<PenLine size={16} />} onClick={writeByHand}>
+              <Button variant="primary" icon={<PenLine size={16} />} onClick={props.onWriteByHand} busy={props.starting}>
                 Continue to the editor
               </Button>
             )}
           </div>
         </>
       )}
+      {props.footer}
+    </>
+  );
+}
 
-      {session.form && !generation.running && (
-        <p className="capture-resume">
-          You have a draft in review.{' '}
-          <button type="button" className="link-btn" onClick={() => patch({ stage: 'review' })}>
-            Return to it
-          </button>{' '}
-          or draft again to replace it.
-        </p>
-      )}
+function CaptureIntro() {
+  const aiEnabled = useMeta().data?.ai.enabled ?? false;
+  return (
+    <>
+      <Steps current={0} labels={STEPS} />
+      <h1 className="page-title">Capture</h1>
+      <p className="page-sub">
+        Paste or type what you have: part of a problem statement, a few lines from memory, or an article.
+        {aiEnabled ? ' The AI turns it into a complete entry and tells you what it had to assume. Nothing is saved until you have reviewed it.' : ''}
+      </p>
+    </>
+  );
+}
+
+/**
+ * The capture flow's start: paste or type anything, then the AI drafts a
+ * complete item, or it is written by hand. Either way it becomes a draft on
+ * the server, which the review continues from.
+ */
+export default function CapturePage() {
+  useDocumentTitle('Capture');
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [unsent, setUnsent, clearUnsent] = useStoredState<Unsent>(UNSENT_KEY, freshInput);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const styles = useStyles().data ?? [];
+  const provider = useProviderChoice(unsent.providerChoice, error);
+  const largeCount = useLargeTestCaseCount();
+  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
+  const presetCollection = searchParams.get('collection');
+  const collectionIds = presetCollection ? [presetCollection] : [];
+
+  // The capture session of earlier versions was kept whole in this browser; drafts now live on the server.
+  useEffect(() => remove('capture:new'), []);
+
+  // Arriving from a library view filtered to one type starts the new item as
+  // that type. The parameter is used once and then dropped, so the choice
+  // stays the user's to change and a reload does not undo it.
+  const presetType = searchParams.get('type');
+  useEffect(() => {
+    if (presetType == null) return;
+    if (presetType === 'problem' || presetType === 'reading') setUnsent((s) => ({ ...s, typeHint: presetType }));
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete('type');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [presetType, setUnsent, setSearchParams]);
+
+  const input: CaptureInput = { text: unsent.text, typeHint: unsent.typeHint, interfaceHint: unsent.interfaceHint ?? 'auto' };
+  const content = (form: ItemFormState | null): DraftContent => ({
+    ...emptyContent(),
+    form,
+    input,
+    styleChoice: unsent.styleChoice,
+    providerChoice: unsent.providerChoice,
+    ...(collectionIds.length > 0 ? { collectionIds } : {}),
+  });
+
+  const start = async (create: () => Promise<{ id: string }>) => {
+    setStarting(true);
+    setError(null);
+    try {
+      const created = await create();
+      void invalidateJobs(qc);
+      clearUnsent();
+      navigate(`/drafts/${created.id}`, { replace: true });
+    } catch (e) {
+      setError(e);
+      setStarting(false);
+    }
+  };
+
+  const draft = () =>
+    void start(async () => {
+      const created = await api.drafts.create({ kind: 'capture', content: { ...content(null) }, generate: draftRequest(input, resolveStyleChoice(unsent.styleChoice, styles), largeTestCases, provider.request) });
+      qc.setQueryData(qk.draft(created.id), created);
+      return created;
+    });
+
+  const writeByHand = () => void start(() => api.drafts.create({ kind: 'capture', content: { ...content(handForm(input, collectionIds)) } }));
+
+  return (
+    <div className="page page-narrow capture">
+      <CaptureIntro />
+      <CaptureForm
+        input={input}
+        onInput={(change) => setUnsent((s) => ({ ...s, ...change }))}
+        styleChoice={unsent.styleChoice}
+        onStyleChange={(c) => setUnsent((s) => ({ ...s, styleChoice: c }))}
+        providerChoice={unsent.providerChoice}
+        onProviderChange={(id) => setUnsent((s) => ({ ...s, providerChoice: id }))}
+        running={null}
+        starting={starting}
+        error={error}
+        onDraft={draft}
+        onWriteByHand={writeByHand}
+      />
+    </div>
+  );
+}
+
+/** A capture draft: its input until there is a form (or the user goes back to it), then the review. */
+export function CaptureDraft({ sd, content }: { sd: ServerDraft; content: DraftContent }) {
+  const draft = sd.draft!;
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const styles = useStyles().data ?? [];
+  const largeCount = useLargeTestCaseCount();
+  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
+  const [askError, setAskError] = useState<unknown>(null);
+  const provider = useProviderChoice(content.providerChoice, askError);
+  const form = content.form;
+  const backToInput = searchParams.get('step') === 'input';
+  const requested = draft.request && 'text' in draft.request ? draft.request : null;
+  const input: CaptureInput = content.input ?? { ...freshInput(), text: requested?.text ?? '', typeHint: requested?.typeHint ?? 'auto', interfaceHint: requested?.interfaceHint ?? 'auto' };
+  useDocumentTitle(form ? (form.title.trim() ? `Draft: ${form.title}` : 'Draft') : 'Capture');
+
+  // A new generation taken in leads back to the review.
+  const seq = draft.generationSeq;
+  const seenSeq = useRef(seq);
+  useEffect(() => {
+    if (seq === seenSeq.current) return;
+    seenSeq.current = seq;
+    if (backToInput) setSearchParams({}, { replace: true });
+  }, [seq, backToInput, setSearchParams]);
+
+  const goToInput = () => setSearchParams({ step: 'input' });
+  const toReview = () => setSearchParams({}, { replace: true });
+
+  if (form && !backToInput) {
+    return (
+      <div className="page page-wide">
+        <DraftReview
+          sd={sd}
+          content={{ ...content, form }}
+          kind="draft"
+          header={
+            <div>
+              <Steps current={1} labels={STEPS} />
+              <h1 className="page-title">{content.aiDrafted ? 'Review the draft' : `New ${form.type}`}</h1>
+            </div>
+          }
+          originalText={content.aiDrafted ? input.text : undefined}
+          revision={(ask) => ({
+            text: input.text,
+            typeHint: ask.form.type,
+            // The form's own choice of interface is the one a revision keeps.
+            ...(ask.form.type === 'problem' ? { interfaceHint: ask.form.interface } : {}),
+            instruction: ask.instruction,
+            previousDraft: ask.previousDraft,
+            styleId: ask.styleId,
+            largeTestCases: ask.largeTestCases,
+            ...ask.provider,
+          })}
+          extras={{ rawInput: content.aiDrafted ? input.text : null }}
+          saveLabel="Save to library"
+          backLabel="Back to input"
+          onBack={goToInput}
+          discardTitle="Discard this draft?"
+          discardBody="The draft and your original input are thrown away. Nothing has been saved to the library."
+          discardLabel="Discard draft"
+          afterDiscard="/new"
+        />
+      </div>
+    );
+  }
+
+  const running = draft.state === 'drafting' ? { startedAt: draft.job ? Date.parse(draft.job.startedAt ?? draft.job.createdAt) : null, onCancel: () => void sd.cancel() } : null;
+  const failed = draft.state === 'failed' && draft.error && !form ? jobError(draft.error) : null;
+  const error = askError ?? failed;
+
+  const draftAgain = async () => {
+    setAskError(null);
+    try {
+      await sd.generate(draftRequest(input, resolveStyleChoice(content.styleChoice, styles), largeTestCases, provider.request));
+    } catch (e) {
+      setAskError(e);
+    }
+  };
+
+  const writeByHand = () => {
+    sd.update((c) => ({ ...c, form: handForm(input, c.form?.collectionIds ?? c.collectionIds ?? []), assumptions: [], aiDrafted: false, appliedStyle: null, check: null, checked: undefined, usage: null }));
+    if (backToInput) toReview();
+  };
+
+  const discard = async () => {
+    const ok = await confirm({ title: 'Discard this draft?', body: 'Your input is thrown away. Nothing has been saved to the library.', confirmLabel: 'Discard draft', danger: true });
+    if (!ok) return;
+    sd.forget();
+    await api.drafts.remove(draft.id).catch(() => undefined);
+    if (draft.job) await api.ai.dismiss(draft.job.id).catch(() => undefined);
+    qc.removeQueries({ queryKey: qk.draft(draft.id) });
+    void invalidateJobs(qc);
+    navigate('/new', { replace: true });
+  };
+
+  return (
+    <div className="page page-narrow capture">
+      <CaptureIntro />
+      <CaptureForm
+        input={input}
+        onInput={(change) => sd.update((c) => ({ ...c, input: { ...input, ...change } }))}
+        styleChoice={content.styleChoice}
+        onStyleChange={(choice) => sd.update((c) => ({ ...c, styleChoice: choice }))}
+        providerChoice={content.providerChoice}
+        onProviderChange={(id) => sd.update((c) => ({ ...c, providerChoice: id }))}
+        running={running}
+        starting={false}
+        error={error}
+        onDraft={() => void draftAgain()}
+        onWriteByHand={writeByHand}
+        onDiscard={form ? undefined : () => void discard()}
+        footer={
+          form &&
+          !running && (
+            <p className="capture-resume">
+              You have a draft in review.{' '}
+              <button type="button" className="link-btn" onClick={toReview}>
+                Return to it
+              </button>{' '}
+              or draft again to replace it.
+            </p>
+          )
+        }
+      />
     </div>
   );
 }

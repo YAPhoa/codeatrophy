@@ -1,16 +1,18 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, isApiError } from '../../api/client';
-import { storeItem, useLimits } from '../../api/queries';
+import { isApiError } from '../../api/client';
+import { invalidateJobs, qk, storeItem, useLimits } from '../../api/queries';
+import type { Item, ItemInput } from '../../api/types';
 import { formErrorsFromFields, inputFromForm, validateForm, type CreateExtras, type FormErrors, type ItemFormState } from '../../lib/itemForm';
 import { useToast } from '../../ui/Toast';
 
 /**
- * Saves a reviewed form as a new item, then leads on: problems go to the
- * "what next" screen, readings straight to the reader.
+ * Saves a reviewed draft as a new item through `create` (the draft's save,
+ * which also deletes the draft), then leads on: problems go to the "what
+ * next" screen, readings straight to the reader.
  */
-export function useSaveDraft(onSaved: () => void) {
+export function useSaveDraft(draftId: string, create: (input: ItemInput) => Promise<Item>) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
@@ -31,9 +33,10 @@ export function useSaveDraft(onSaved: () => void) {
       setSaving(true);
       setError(null);
       try {
-        const item = await api.items.create(inputFromForm(form, extras));
+        const item = await create(inputFromForm(form, extras));
         storeItem(qc, item);
-        onSaved();
+        qc.removeQueries({ queryKey: qk.draft(draftId) });
+        void invalidateJobs(qc);
         if (item.type === 'problem') {
           navigate(`/items/${item.id}/saved`, { replace: true });
         } else {
@@ -47,7 +50,7 @@ export function useSaveDraft(onSaved: () => void) {
         setSaving(false);
       }
     },
-    [qc, navigate, toast, onSaved, limits],
+    [qc, navigate, toast, limits, create, draftId],
   );
 
   return { save, saving, error, errors, clearErrors: () => setErrors({}) };

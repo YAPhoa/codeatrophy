@@ -53,6 +53,8 @@ func Run(t *testing.T, open Opener) {
 		{"AIProviderConstraints", testAIProviderConstraints},
 		{"AIUsage", testAIUsage},
 		{"AILog", testAILog},
+		{"AIJobs", testAIJobs},
+		{"Drafts", testDrafts},
 		{"RollbackOnError", testRollbackOnError},
 		{"ReadIsReadOnly", testReadIsReadOnly},
 		{"WritesAreSerialised", testWritesAreSerialised},
@@ -1793,6 +1795,19 @@ func testAILog(t *testing.T, db store.Store) {
 		*items[0].Title != "Item 30" || items[0].OutputTokens != nil {
 		t.Errorf("newest: %d %+v", total, items[0])
 	}
+	// Numbered pages: an offset into the filtered, newest-first list.
+	if l, n := list(store.AILogFilter{Limit: 3, Offset: 2}); n != 31 || len(l) != 3 || l[0].ID != "log028" || l[2].ID != "log026" {
+		t.Errorf("offset page: %d %+v", n, l)
+	}
+	if l, n := list(store.AILogFilter{Status: "failed", Limit: 2, Offset: 1}); n != 6 || len(l) != 2 || l[0].ID != "log023" {
+		t.Errorf("filtered offset page: %d %+v", n, l)
+	}
+	if l, _ := list(store.AILogFilter{Offset: 29}); len(l) != 2 || l[1].ID != "log000" {
+		t.Errorf("offset without a limit: %+v", l)
+	}
+	if l, n := list(store.AILogFilter{Limit: 5, Offset: 40}); n != 31 || len(l) != 0 {
+		t.Errorf("offset past the end: %d %+v", n, l)
+	}
 	if _, n := list(store.AILogFilter{ProviderID: "p2", Operation: "draft"}); n != 5 {
 		t.Errorf("provider and operation filter: %d", n)
 	}
@@ -1856,5 +1871,236 @@ func testAILog(t *testing.T, db store.Store) {
 	}
 	if n := texts(); n != 0 {
 		t.Errorf("%d system texts after clearing", n)
+	}
+}
+
+// AI jobs keep their request and result as given, are listed newest first
+// without them, filter by state, kind and item, and are pruned by age and
+// by count, never while active.
+func testAIJobs(t *testing.T, db store.Store) {
+	const odd = "a\x00b\x01\r\n\t\ufeff \U0001F642 end"
+	at := func(s int) *time.Time { v := now.Add(time.Duration(s) * time.Second); return &v }
+	item, draft := "item-1", "draft-1"
+	origin := "/capture?collection=" + odd
+	result := `{"draft":"` + strings.Repeat(odd, 50) + `"}`
+	errBody := `{"code":"upstream_error","message":"` + odd + `"}`
+	jobs := []store.AIJob{
+		{ID: "job0", CreatedAt: now, Kind: "draft", Title: odd, Status: store.JobSucceeded, Origin: &origin,
+			Request: `{"text":"` + odd + `"}`, Result: &result, StartedAt: at(1), FinishedAt: at(9)},
+		{ID: "job1", CreatedAt: now, Kind: "testcases", ItemID: &item, DraftID: &draft, Title: "Two Sum", Status: store.JobFailed,
+			Request: `{"count":8}`, Error: &errBody, StartedAt: at(2), FinishedAt: at(3), PickedUpAt: at(4)},
+		{ID: "job2", CreatedAt: now.Add(time.Second), Kind: "variant", ItemID: &item, Title: "Two Sum", Status: store.JobRunning,
+			Request: `{}`, StartedAt: at(2)},
+		{ID: "job3", CreatedAt: now.Add(2 * time.Second), Kind: "code", Title: "", Status: store.JobQueued, Request: `{}`},
+	}
+	Write(t, db, func(tx store.Tx) error {
+		for i := range jobs {
+			if err := tx.InsertAIJob(&jobs[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	// A finished job needs a finish time, an active one none.
+	if err := db.Write(context.Background(), func(tx store.Tx) error {
+		return tx.InsertAIJob(&store.AIJob{ID: "bad", CreatedAt: now, Kind: "draft", Status: store.JobSucceeded, Request: "{}"})
+	}); err == nil {
+		t.Error("a finished job without a finish time was stored")
+	}
+	if err := db.Write(context.Background(), func(tx store.Tx) error {
+		return tx.InsertAIJob(&store.AIJob{ID: "bad", CreatedAt: now, Kind: "chat", Status: store.JobQueued, Request: "{}"})
+	}); err == nil {
+		t.Error("an unknown kind was stored")
+	}
+	get := func(id string) (store.AIJob, error) {
+		var j store.AIJob
+		err := db.Read(context.Background(), func(tx store.Tx) (err error) { j, err = tx.GetAIJob(id); return err })
+		return j, err
+	}
+	j, err := get("job0")
+	if err != nil || !reflect.DeepEqual(j, jobs[0]) {
+		t.Errorf("round trip:\n got %+v %v\nwant %+v", j, err, jobs[0])
+	}
+	if j, _ := get("job1"); !reflect.DeepEqual(j, jobs[1]) {
+		t.Errorf("round trip:\n got %+v\nwant %+v", j, jobs[1])
+	}
+	if _, err := get("nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown job: %v", err)
+	}
+	list := func(f store.AIJobFilter) []string {
+		l := Read(t, db, func(tx store.Tx) ([]store.AIJob, error) { return tx.ListAIJobs(f) })
+		ids := []string{}
+		for _, j := range l {
+			if j.Request != "" || j.Result != nil {
+				t.Errorf("a list carries bodies: %+v", j)
+			}
+			ids = append(ids, j.ID)
+		}
+		return ids
+	}
+	no, yes := false, true
+	for _, c := range []struct {
+		f    store.AIJobFilter
+		want string
+	}{
+		{store.AIJobFilter{}, "[job3 job2 job1 job0]"},
+		{store.AIJobFilter{Limit: 2}, "[job3 job2]"},
+		{store.AIJobFilter{Active: true}, "[job3 job2]"},
+		{store.AIJobFilter{ItemID: item}, "[job2 job1]"},
+		{store.AIJobFilter{Kind: "draft"}, "[job0]"},
+		{store.AIJobFilter{DraftID: draft}, "[job1]"},
+		{store.AIJobFilter{PickedUp: &no}, "[job3 job2 job0]"},
+		{store.AIJobFilter{PickedUp: &yes}, "[job1]"},
+	} {
+		if got := fmt.Sprint(list(c.f)); got != c.want {
+			t.Errorf("%+v: %s, want %s", c.f, got, c.want)
+		}
+	}
+	// An update keeps the request and may clear the result.
+	up := jobs[2]
+	up.Status, up.FinishedAt, up.Title = store.JobSucceeded, at(30), "Renamed"
+	up.Result = &result
+	Write(t, db, func(tx store.Tx) error { return tx.UpdateAIJob(&up) })
+	if j, _ := get("job2"); j.Request != "{}" || j.Title != "Renamed" || *j.Result != result || !j.FinishedAt.Equal(*at(30)) {
+		t.Errorf("updated: %+v", j)
+	}
+	up.Result = nil
+	Write(t, db, func(tx store.Tx) error { return tx.UpdateAIJob(&up) })
+	if j, _ := get("job2"); j.Result != nil {
+		t.Errorf("result not cleared: %+v", j)
+	}
+	if err := db.Write(context.Background(), func(tx store.Tx) error {
+		return tx.UpdateAIJob(&store.AIJob{ID: "nope", Status: store.JobQueued})
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("updating an unknown job: %v", err)
+	}
+
+	// Pruning by age: job0 finished at +9 s, job1 at +3 s, job2 at +30 s.
+	prune := func(before time.Time, keep int) int {
+		var n int
+		Write(t, db, func(tx store.Tx) (err error) { n, err = tx.PruneAIJobs(before, keep); return err })
+		return n
+	}
+	if n := prune(*at(5), 100); n != 1 || fmt.Sprint(list(store.AIJobFilter{})) != "[job3 job2 job0]" {
+		t.Errorf("pruned %d by age: %v", n, list(store.AIJobFilter{}))
+	}
+	// By count: the newest two stay, and an active job is never removed.
+	if n := prune(*at(0), 2); n != 1 || fmt.Sprint(list(store.AIJobFilter{})) != "[job3 job2]" {
+		t.Errorf("pruned %d by count: %v", n, list(store.AIJobFilter{}))
+	}
+	if n := prune(*at(100), 0); n != 1 || fmt.Sprint(list(store.AIJobFilter{})) != "[job3]" {
+		t.Errorf("pruned %d with keep 0: %v", n, list(store.AIJobFilter{}))
+	}
+	var deleted, again bool
+	Write(t, db, func(tx store.Tx) (err error) {
+		if deleted, err = tx.DeleteAIJob("job3"); err != nil {
+			return err
+		}
+		again, err = tx.DeleteAIJob("job3")
+		return err
+	})
+	if !deleted || again || len(list(store.AIJobFilter{})) != 0 {
+		t.Errorf("delete: %v %v", deleted, again)
+	}
+}
+
+// Drafts keep every field as given, are listed most recently changed first
+// without their documents, filter by kind and original, and keep their
+// generation counters consistent.
+func testDrafts(t *testing.T, db store.Store) {
+	const odd = "a\x00b\x01\r\n\t\ufeff \U0001F642 end"
+	orig, job, title := "item-1", "job-1", odd
+	content, gen, req, errBody := `{"form":"`+strings.Repeat(odd, 40)+`"}`, `{"draft":{"title":"T"}}`, `{"text":"`+odd+`"}`,
+		`{"code":"upstream_error","message":"`+odd+`"}`
+	drafts := []store.Draft{
+		{ID: "d0", CreatedAt: now, UpdatedAt: now.Add(time.Minute), Kind: "variant", VariantOf: &orig, Title: odd,
+			ClientTitle: &title, Revision: 5, Edited: true, Request: &req, JobID: &job, Error: &errBody, Generation: &gen,
+			GenerationSeq: 2, Content: &content, BasedOn: 2},
+		{ID: "d1", CreatedAt: now, UpdatedAt: now.Add(2 * time.Minute), Kind: "capture", Title: "", Revision: 1},
+		{ID: "d2", CreatedAt: now, UpdatedAt: now, Kind: "capture", Title: "Third", Revision: 1, Content: &content},
+	}
+	Write(t, db, func(tx store.Tx) error {
+		for i := range drafts {
+			if err := tx.InsertDraft(&drafts[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	for _, bad := range []store.Draft{
+		{ID: "x", CreatedAt: now, UpdatedAt: now, Kind: "variant", Revision: 1},
+		{ID: "x", CreatedAt: now, UpdatedAt: now, Kind: "capture", VariantOf: &orig, Revision: 1},
+		{ID: "x", CreatedAt: now, UpdatedAt: now, Kind: "capture", Revision: 1, BasedOn: 1},
+		{ID: "x", CreatedAt: now, UpdatedAt: now, Kind: "note", Revision: 1},
+	} {
+		if err := db.Write(context.Background(), func(tx store.Tx) error { return tx.InsertDraft(&bad) }); err == nil {
+			t.Errorf("stored %+v", bad)
+		}
+	}
+	get := func(id string) (store.Draft, error) {
+		var d store.Draft
+		err := db.Read(context.Background(), func(tx store.Tx) (err error) { d, err = tx.GetDraft(id); return err })
+		return d, err
+	}
+	for i := range drafts {
+		if d, err := get(drafts[i].ID); err != nil || !reflect.DeepEqual(d, drafts[i]) {
+			t.Errorf("round trip:\n got %+v %v\nwant %+v", d, err, drafts[i])
+		}
+	}
+	if _, err := get("nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown draft: %v", err)
+	}
+	list := func(f store.DraftFilter) string {
+		l := Read(t, db, func(tx store.Tx) ([]store.Draft, error) { return tx.ListDrafts(f) })
+		ids := []string{}
+		for _, d := range l {
+			if d.Request != nil || d.Generation != nil || d.Content != nil {
+				t.Errorf("a list carries documents: %+v", d)
+			}
+			ids = append(ids, d.ID)
+		}
+		return fmt.Sprint(ids)
+	}
+	if got := list(store.DraftFilter{}); got != "[d1 d0 d2]" {
+		t.Errorf("list: %s", got)
+	}
+	if got := list(store.DraftFilter{Kind: "capture"}); got != "[d1 d2]" {
+		t.Errorf("capture drafts: %s", got)
+	}
+	if got := list(store.DraftFilter{VariantOf: orig}); got != "[d0]" {
+		t.Errorf("variants: %s", got)
+	}
+	if l := Read(t, db, func(tx store.Tx) ([]store.Draft, error) { return tx.ListDrafts(store.DraftFilter{VariantOf: orig}) }); !l[0].Edited || *l[0].Error != errBody {
+		t.Errorf("list fields: %+v", l[0])
+	}
+	// An update changes the documents and may clear them.
+	up := drafts[0]
+	up.UpdatedAt, up.Revision, up.Content, up.Error, up.JobID, up.Edited = now.Add(time.Hour), 6, nil, nil, nil, false
+	Write(t, db, func(tx store.Tx) error { return tx.UpdateDraft(&up) })
+	if d, _ := get("d0"); !reflect.DeepEqual(d, up) {
+		t.Errorf("updated:\n got %+v\nwant %+v", d, up)
+	}
+	if got := list(store.DraftFilter{}); got != "[d0 d1 d2]" {
+		t.Errorf("list after the update: %s", got)
+	}
+	up.BasedOn = 3
+	if err := db.Write(context.Background(), func(tx store.Tx) error { return tx.UpdateDraft(&up) }); err == nil {
+		t.Error("based on a generation that does not exist")
+	}
+	if err := db.Write(context.Background(), func(tx store.Tx) error {
+		return tx.UpdateDraft(&store.Draft{ID: "nope", Kind: "capture", Revision: 1})
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("updating an unknown draft: %v", err)
+	}
+	var deleted, again bool
+	Write(t, db, func(tx store.Tx) (err error) {
+		if deleted, err = tx.DeleteDraft("d1"); err != nil {
+			return err
+		}
+		again, err = tx.DeleteDraft("d1")
+		return err
+	})
+	if !deleted || again || list(store.DraftFilter{}) != "[d0 d2]" {
+		t.Errorf("delete: %v %v", deleted, again)
 	}
 }

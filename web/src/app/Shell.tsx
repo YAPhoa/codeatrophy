@@ -16,6 +16,7 @@ import { CommandPalette } from './CommandPalette';
 import { ShellLayoutContext, isRememberedReading, type ShellLayout } from './shellLayout';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Sidebar } from './Sidebar';
+import { JobsTray } from '../features/jobs/JobsTray';
 
 /** Routes that show a problem workspace: the coding page and the pages that share its header. */
 const WORKSPACE_ROUTES = ['/items/:id', '/items/:id/tests', '/items/:id/tests/generate', '/items/:id/solutions'];
@@ -167,6 +168,7 @@ export function Shell() {
           </Suspense>
         </main>
       </div>
+      <JobsTray />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </CollectionActionsProvider>

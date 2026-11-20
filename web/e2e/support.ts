@@ -114,3 +114,15 @@ export async function choose(select: Locator, option: string | RegExp): Promise<
   const list = await openList(select);
   await list.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
 }
+
+/** Call the mock's API from the page, as a script would, and read the JSON answer (`null` for none). */
+export async function mockApi<T = unknown>(page: Page, path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  return page.evaluate(
+    async ({ path, init }) => {
+      const mock = (window as unknown as { __codeatrophyMock: { fetch: (p: string, i?: RequestInit) => Promise<Response> } }).__codeatrophyMock;
+      const res = await mock.fetch(`/api/v1${path}`, init ? { method: init.method, body: init.body === undefined ? undefined : JSON.stringify(init.body) } : undefined);
+      return res.status === 204 ? null : res.json();
+    },
+    { path, init },
+  ) as Promise<T>;
+}

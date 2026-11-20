@@ -131,6 +131,8 @@ export function describeError(err: unknown): ErrorView {
       };
     case 'aborted':
       return { title: 'Cancelled', message: 'The request was cancelled.' };
+    case 'interrupted':
+      return { title: 'The server restarted', message: 'It stopped before this finished. Start it again.', action: 'retry' };
     default:
       return { title: 'Unexpected response', message: err.message, action: 'retry' };
   }

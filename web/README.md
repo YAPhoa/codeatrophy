@@ -44,7 +44,10 @@ validation, the asynchronous submission lifecycle, AI endpoints with realistic
 delays — seeded with a believable library. Keep it faithful to the contract
 when the contract changes; its own tests are in `src/mock/mock.test.ts`.
 
-State lives in memory only: **reloading the page resets it** to the seed.
+State lives in memory: **reloading the page resets it** to the seed, except
+for the drafts and AI jobs, which the tab keeps in `sessionStorage` as the
+server keeps them across page loads. A job that was running when the page
+reloaded starts its generation over.
 
 The mock server forwards nothing to a backend: a request that bypasses the
 mock's client, such as a plain `fetch('/api/…')` from a script, gets
@@ -98,8 +101,14 @@ The mock's starter code, in the seed and in drafts, marks the lines that read
 the input as a [folded region](../docs/api.md#folded-regions); "Number of
 Islands" has starter code of its own with a larger one in Python and C++.
 
-For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
-`502 upstream_error`, `MOCK:MISMATCH` a draft whose reference solution
+Every generation runs as an AI job, two at a time, taking a few seconds as a
+provider would. `MOCK:SLOW` in the input text, instruction or problem makes
+it take a minute, at any speed: time to leave its page or cancel it.
+`__codeatrophyMock.restart()` in the console does what a server restart does
+to the jobs: running ones fail as `interrupted`, queued ones wait again.
+
+For the AI endpoints, `MOCK:FAIL` in the input text or instruction ends the
+job as failed with `upstream_error`, `MOCK:MISMATCH` a draft whose reference solution
 disagrees with its last example, and `MOCK:RUNNER` a "solution only" draft
 with one runner that does not compile. "Generate code" (`POST /ai/code`)
 reads those two from the problem's title or statement: its starter code
@@ -155,7 +164,10 @@ Test cases page; "Verify all" on a draft and on a saved problem; the pages of Se
 (key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
 editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; filing selected items
 into a collection; the library's views, row verdicts and sort menu; and Import and Export as pages of Settings, reached from their old addresses too.
-It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
+`e2e/jobs.spec.ts` covers AI jobs and drafts: leaving a running capture,
+the jobs window and the Drafts count, a draft's edits through a reload,
+cancelling a job, and test cases and code that finish after their page was
+left. It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
 default writing style (`e2e/styles.spec.ts`), "Generate code" on the edit
 page of a problem (`e2e/generate-code.spec.ts`), and the system prompt and
 test case prompt, each edited only after a confirm, reset, and guarded when
@@ -190,6 +202,8 @@ src/
     library/      browse, search, filter, sort, select, bulk actions, reorder
     collections/  create / rename / move / delete dialogs
     capture/      paste → AI draft → review → save; variants; "what next"
+    drafts/       drafts on the server: the list, a draft's page, autosave
+    jobs/         the jobs window, and following a screen's AI job
     item/         item page dispatch, shared header and controls, editor form,
                   edit page with revision-conflict handling, notes, variants
     solve/        problem workspace: editor, run / submit, the tests and
@@ -271,9 +285,18 @@ A few conventions worth knowing:
   Markdown renderer never turns raw HTML into elements, drops unsafe URLs,
   and does not load remote images until asked. `src/ui/Markdown.test.tsx`
   guards this; do not add `rehype-raw`.
+- **AI work runs on the server.** Every generation is a job
+  (`docs/api.md`, "AI jobs"): leaving a screen never stops one, only Cancel
+  does. A new item in progress is a draft on the server, saved shortly after
+  each change with the revision it was based on (`features/drafts`); the
+  Drafts page lists them, and the sidebar counts them. Test-case and code
+  generation find their job again on return by kind, item and `origin`
+  (`features/jobs/useScreenJob.ts`). The jobs window (`features/jobs`),
+  bottom right, lists what no open screen has collected, and polls only
+  while a job runs or it is open.
 - **Work in progress is kept locally.** Solution code is stored per item and
   language in `localStorage`, and the custom input per item (up to 64 KB);
-  capture input and drafts under review survive a reload the same way. The
+  so is the capture text typed before a draft exists. The
   model names loaded for a provider, by Refresh models
   or a connection test, are remembered there too, per kind and base URL
   (`features/settings/modelCache.ts`): the Model field of the provider form

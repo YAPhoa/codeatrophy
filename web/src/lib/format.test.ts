@@ -26,21 +26,21 @@ describe('formatRunTime', () => {
 });
 
 describe('describeCases', () => {
-  it('says how many cases there are and how many are examples while the rest are concealed', () => {
-    expect(describeCases(7, 2, true)).toBe('7 test cases · 2 shown as examples');
-    expect(describeCases(7, 1, true)).toBe('7 test cases · 1 shown as an example');
-    expect(describeCases(5, 0, true)).toBe('5 test cases · none shown as examples');
-    expect(describeCases(2, 2, true)).toBe('2 test cases · all shown as examples');
-    expect(describeCases(1, 1, true)).toBe('1 test case · shown as an example');
+  it('counts the cases, the samples and the hidden ones', () => {
+    expect(describeCases(13, 2)).toBe('13 test cases · 2 samples · 11 hidden');
+    expect(describeCases(7, 1)).toBe('7 test cases · 1 sample · 6 hidden');
+    expect(describeCases(2, 1)).toBe('2 test cases · 1 sample · 1 hidden');
   });
 
-  it('splits samples and hidden cases when nothing is concealed', () => {
-    expect(describeCases(7, 2, false)).toBe('7 test cases · 2 samples, 5 hidden');
-    expect(describeCases(1, 1, false)).toBe('1 test case · 1 sample, 0 hidden');
+  it('leaves out a part with nothing in it', () => {
+    expect(describeCases(5, 5)).toBe('5 test cases · all samples');
+    expect(describeCases(5, 0)).toBe('5 test cases · all hidden');
+    expect(describeCases(1, 1)).toBe('1 test case · 1 sample');
+    expect(describeCases(1, 0)).toBe('1 test case · 1 hidden');
   });
 
   it('handles a problem without cases', () => {
-    expect(describeCases(0, 0, true)).toBe('No test cases');
+    expect(describeCases(0, 0)).toBe('No test cases');
   });
 });
 

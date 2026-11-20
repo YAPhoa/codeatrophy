@@ -53,6 +53,8 @@ type AILogQuery struct {
 	// Before is a cursor from an earlier page's Next.
 	Before string
 	Limit  *int
+	// Offset skips that many entries; it cannot be combined with Before.
+	Offset *int
 }
 
 // AILogPage is one page of the AI log, newest first.
@@ -110,10 +112,18 @@ func (a *App) ListAILog(ctx context.Context, q AILogQuery) (AILogPage, error) {
 		}
 		f.Before = c
 	}
-	limit, _, err := pageBounds(q.Limit, 0)
+	offset := 0
+	if q.Offset != nil {
+		if q.Before != "" {
+			return AILogPage{}, errBadRequest("give offset or before, not both")
+		}
+		offset = *q.Offset
+	}
+	limit, offset, err := pageBounds(q.Limit, offset)
 	if err != nil {
 		return AILogPage{}, err
 	}
+	f.Offset = offset
 	// One more than a page says whether there is a next one.
 	f.Limit = limit + 1
 	out := AILogPage{Items: []AILogEntry{}}

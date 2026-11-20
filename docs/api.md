@@ -101,6 +101,10 @@ and `\r` count as newlines.
 | `SubmissionMode` | `run`, `submit` |
 | `SubmissionStatus` | `queued`, `running`, `completed` |
 | `Verdict` | `accepted`, `wrong_answer`, `time_limit_exceeded`, `memory_limit_exceeded`, `runtime_error`, `compile_error`, `internal_error`, `executed` |
+| `AiJobKind` | `draft`, `variant`, `testcases`, `code` (see [AI jobs](#ai-jobs)) |
+| `AiJobStatus` | `queued`, `running`, `succeeded`, `failed`, `cancelled` |
+| `DraftKind` | `capture`, `variant` |
+| `DraftState` | `new`, `drafting`, `ready`, `edited`, `failed` (see [Drafts](#drafts)) |
 
 `executed` is the verdict of a run that had no expected output to compare
 against (custom stdin).
@@ -487,7 +491,7 @@ Body `ItemInput`. Returns `201` `Item`.
 ### `POST /items/check`
 
 Check a problem that is not saved yet: run its reference solution on its test
-cases. This is the [check a draft gets](#post-aidraft) when it arrives, made
+cases. This is the [check a draft gets](#draft-requests) when it arrives, made
 available for the problem as it stands after editing. Nothing is stored and
 no AI provider is involved.
 
@@ -944,31 +948,171 @@ any still being judged.
 
 ## AI
 
-These endpoints call an AI provider (see [AI settings](#ai-settings))
-synchronously and can take from a few seconds to a couple of minutes. They
-never write to the library; the client saves results through the item and
-test-case endpoints after the user has reviewed them. All return
-`502 upstream_error` when the provider fails or returns output that does not
-validate.
+Generating with an AI provider takes from a few seconds to a few minutes, so
+every generation runs on the server as an [AI job](#ai-jobs): the request is
+checked and answered at once, the job runs in the background, and its result
+is kept until the client collects it. A job keeps running when the page that
+started it is left or closed; only cancelling it (or dismissing it) stops it.
+Four kinds of generation exist:
 
-Each of them takes an optional `providerId`: the provider to use for this
-request, with the model saved on it. It must name a provider that is
-`ready` (`422` on `providerId` otherwise), and it does not change the
-default. Without it, or with `null`, the default provider is used, and the
-answer is `503 ai_unavailable` when no default is chosen and ready. A
-request that names a provider works whether or not there is a default.
-While AI features are switched off (`enabled: false` in
+| Kind | Started by | Result |
+| --- | --- | --- |
+| `draft` | [`POST /drafts`](#post-drafts) or [`POST /drafts/{id}/generate`](#post-draftsidgenerate) on a `capture` draft, with a [draft request](#draft-requests) | `DraftResponse`, also written into the [draft](#drafts) |
+| `variant` | The same on a `variant` draft, with a [variant request](#variant-requests) | `DraftResponse`, also written into the draft |
+| `testcases` | [`POST /items/{id}/ai/testcases`](#post-itemsidaitestcases) | `TestCasesResponse` |
+| `code` | [`POST /ai/code`](#post-aicode) | `CodeResponse` |
+
+Generations never write to the library; the client saves results through the
+item and test-case endpoints (or [saves the draft](#post-draftsidsave)) after
+the user has reviewed them.
+
+Every request that starts a generation is validated before anything is
+queued, and the answers that used to come back synchronously still do:
+`400`/`422` for a bad request, `404` for an unknown item, `503
+ai_unavailable` when AI features are off or there is no usable provider,
+`409 conflict` when [too many jobs](#limits-and-retention) are active.
+Anything that can only go wrong while generating — the provider failing or
+returning output that does not validate (`upstream_error`), the item being
+deleted meanwhile (`not_found`), AI features being switched off before the
+job started (`ai_unavailable`) — ends the job as `failed` with that error.
+
+Each request that starts a generation takes an optional `providerId`: the
+provider to use for this request, with the model saved on it. It must name a
+provider that is `ready` (`422` on `providerId` otherwise), and it does not
+change the default. Without it, or with `null`, the default provider is used,
+and the answer is `503 ai_unavailable` when no default is chosen and ready. A
+request that names a provider works whether or not there is a default. While
+AI features are switched off (`enabled: false` in
 [AI settings](#get-settingsai)) every request is `503 ai_unavailable`, one
-that names a provider too.
+that names a provider too. The provider is checked again when the job
+starts.
 
-If the client disconnects, the server cancels the provider request. Operators
-who put a reverse proxy in front of the server must raise its read timeout for
-`/api/v1/ai/`, `/api/v1/items/*/ai/` and `/api/v1/items/check` to at least six
-minutes.
+None of these requests holds the connection open for the generation, so a
+reverse proxy needs no special timeout for them. `POST /items/check` and
+`POST /items/{id}/testcases/verify` still run synchronously; a proxy in front
+of the server must allow them at least six minutes.
 
-### `POST /ai/draft`
+### AI jobs
 
-Turn rough input into a complete item draft.
+`AiJob`:
+
+```json
+{
+  "id": "...",
+  "kind": "testcases",
+  "itemId": "...",
+  "draftId": null,
+  "title": "Two Sum",
+  "status": "running",
+  "origin": "/items/.../tests/generate",
+  "error": null,
+  "pickedUp": false,
+  "createdAt": "...",
+  "startedAt": "...",
+  "finishedAt": null
+}
+```
+
+- `kind` — `draft`, `variant`, `testcases` or `code` (see the table above).
+- `itemId` — the item the job is about: the problem for `testcases`, the
+  original for `variant`, the `itemId` of a `code` request; `null` otherwise.
+- `draftId` — the [draft](#drafts) a `draft` or `variant` job generates
+  for, `null` for the other kinds. The job's result is written into that
+  draft, so a client goes to the draft, not to the job, for it.
+- `title` — a short label for lists, fixed by the server: the item's title;
+  for a `code` request its `title` (or the start of its `body`); for a
+  `draft` job the start of the input text, replaced by the drafted item's
+  title once it succeeds.
+- `status`:
+
+  | `status` | Meaning |
+  | --- | --- |
+  | `queued` | Waiting for a free worker (see `CODEATROPHY_AI_WORKERS`) |
+  | `running` | The provider request (and then the checks that follow it) is under way |
+  | `succeeded` | Finished; `result` holds the response body |
+  | `failed` | Finished with `error` |
+  | `cancelled` | Cancelled or dismissed before it finished; no result, `error` is `null` |
+
+  `queued` and `running` are *active*; the others are *finished*. A job only
+  moves forward: `queued` → `running` → one of the finished states, or
+  straight from `queued` to `cancelled`.
+- `origin` — the `origin` the starting request gave, unchanged: an opaque
+  string for the client, meant as the screen to go back to for the result
+  (`null` if none was given). It is a single line of at most 2000
+  characters (`422` on `origin` otherwise). Requests that start a draft's
+  generation take no `origin`; the draft is the place to go back to.
+- `error` — for `failed`, the error the request would have answered with,
+  in the shape of an error body's `error` (`{ "code", "message", "fields"? }`,
+  see [Errors](#errors)); otherwise `null`. One code appears only here:
+  `interrupted`, for a job that was running when the server stopped.
+- `pickedUp` — whether the client has collected the outcome (see
+  `POST /ai/jobs/{id}/pickup`).
+- `startedAt` and `finishedAt` are `null` until the job starts and
+  finishes. Elapsed time for a running job is the current time minus
+  `startedAt` (or `createdAt` while queued).
+
+`AiJobDetail` is `AiJob` plus:
+
+```json
+{
+  "request": { "count": 8, "language": "python", "origin": "/items/.../tests/generate" },
+  "result": { "referenceSolution": { "language": "python", "source": "..." }, "cases": [ ... ] }
+}
+```
+
+`request` is the body the job was started with, as it was sent (for a
+draft's job, the [draft request](#draft-requests) or
+[variant request](#variant-requests)). `result` is, for a `succeeded` job,
+exactly the body the request's synchronous endpoint used to answer with
+(`DraftResponse`, `TestCasesResponse` or `CodeResponse`); `null` otherwise.
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /ai/jobs` | Query: `active` (`true`: only queued and running jobs), `kind`, `itemId`, `draftId`, `pickedUp` (`false` by default: only jobs whose outcome has not been collected; `true`: only those that have), `limit` (default 50, max 200). Newest first. `{ "items": [AiJob] }` |
+| `GET /ai/jobs/{id}` | `AiJobDetail` |
+| `POST /ai/jobs/{id}/cancel` | Cancels a `queued` or `running` job: it becomes `cancelled` at once and its provider request is aborted (the [AI activity log](#ai-activity-log) records it as `cancelled`). A finished job is left as it is. Returns `AiJob` |
+| `POST /ai/jobs/{id}/pickup` | Marks a finished job's outcome as collected, so it leaves the default list, and returns `AiJobDetail`. `409` while the job is active. Picking up twice is harmless |
+| `DELETE /ai/jobs/{id}` | Dismisses a job: cancels it first if it is active, then removes it. `204` |
+
+An unknown or removed job is `404` on every endpoint. A bad query value is
+`400`.
+
+#### How a client follows a job
+
+- Starting a generation answers `202` with the `AiJob` (`queued`), or with
+  the draft that carries it. Poll `GET /ai/jobs/{id}` (or the draft) every
+  one to two seconds while the job is active, and stop once it is finished.
+  There is no push channel.
+- A screen that is left keeps nothing running in the browser. A client that
+  wants to come back to a result remembers the job's id (or uses `origin`
+  and the job list), and on return reads the job, applies `result` once if
+  it `succeeded` (or shows `error` if it `failed`), and then calls
+  `POST /ai/jobs/{id}/pickup`, so that the outcome is not offered again.
+- An overview of jobs (a notification area) polls `GET /ai/jobs` every few
+  seconds while one of them is active, and otherwise only on demand; the
+  default list is what has not been collected yet.
+- The server never needs the client to collect anything: an uncollected job
+  is just listed until it is dismissed or [pruned](#limits-and-retention).
+
+#### Limits and retention
+
+- At most `CODEATROPHY_AI_WORKERS` jobs (default 2) run at once; the others
+  wait `queued`, in the order they were started.
+- At most 20 jobs may be active at once. A request that would start a 21st
+  is `409 conflict`, and nothing is queued.
+- A finished job is kept for 3 days after it finished, and only while it is
+  among the 200 newest jobs. Active jobs are never removed. A removed job is `404`; the [AI activity
+  log](#ai-activity-log) keeps its request either way, and a draft keeps what
+  its job produced.
+- When the server starts, jobs a previous process left `running` become
+  `failed` with code `interrupted` ("the server restarted before this job
+  finished; start it again"), and jobs left `queued` are queued again.
+
+### Draft requests
+
+The body of a `capture` draft's generation ([`POST /drafts`](#post-drafts)
+with `generate`, or [`POST /drafts/{id}/generate`](#post-draftsidgenerate)):
+turn rough input into a complete item draft.
 
 ```json
 {
@@ -992,7 +1136,7 @@ Turn rough input into a complete item draft.
   `422`.
 - `instruction` — optional extra guidance ("make it harder", "use 1-based
   indices").
-- `previousDraft` — optional `ItemDraft` from an earlier call; with
+- `previousDraft` — optional `ItemDraft` from an earlier generation; with
   `instruction` this asks for a revision rather than a fresh draft.
 - `styleId` — optional; which [style preset](#style-presets) to write in.
 - `instruction` — at most 2000 characters.
@@ -1001,7 +1145,7 @@ Turn rough input into a complete item draft.
   reading.
 - `providerId` — optional; the [provider](#ai) to use instead of the default.
 
-Response:
+The result, `DraftResponse`:
 
 ```json
 {
@@ -1053,9 +1197,8 @@ reasoning where the provider says so; `cacheReadTokens` and
 `cacheWriteTokens` are input tokens served from or written to the provider's
 prompt cache, counted in addition to `inputTokens`. `logId` is the entry in
 the [AI activity log](#ai-activity-log) (`null` if it could not be written).
-Every AI endpoint that generates (`/ai/draft`, `/items/{id}/ai/variant`,
-`/items/{id}/ai/testcases`, `/ai/code`) returns `usage`, and the server's own
-log gets the same figures, never the content.
+Every generation's result (draft, variant, test cases, code) carries
+`usage`, and the server's own log gets the same figures, never the content.
 
 For a problem the model also writes a reference solution
 (`problem.referenceSolution`, `null` if it gave none; for a `function`
@@ -1106,10 +1249,13 @@ review and is not stored. `tags` are the model's suggestions, normalised like
 item tags and with whitespace inside a tag replaced by `-`, so they match
 tags typed in the UI; ones that are not valid tags are left out.
 
-### `POST /items/{id}/ai/variant`
+### Variant requests
 
-Draft a new item derived from an existing one — a fresh problem to practise
-the same idea on, or a reading reworked for a different angle.
+The body of a `variant` draft's generation ([`POST /drafts`](#post-drafts)
+with `generate`, or [`POST /drafts/{id}/generate`](#post-draftsidgenerate)):
+draft a new item derived from the draft's `variantOf` item — a fresh
+problem to practise the same idea on, or a reading reworked for a different
+angle.
 
 ```json
 { "mode": "similar", "instruction": null, "previousDraft": null, "styleId": "..." }
@@ -1121,8 +1267,8 @@ default.
 `largeTestCases` (integer 0–`limits.maxLargeTestCases`, default `0`) asks
 for [large test cases](#large-test-cases), as for a draft.
 `instruction` is at most 2000 characters. `previousDraft` is an optional
-`ItemDraft` returned by an earlier call to this endpoint; with `instruction`
-it asks for a revision of that variant rather than a fresh one.
+`ItemDraft` from an earlier variant generation; with `instruction` it asks
+for a revision of that variant rather than a fresh one.
 
 | `mode` | Result |
 | --- | --- |
@@ -1135,15 +1281,17 @@ it asks for a revision of that variant rather than a fresh one.
 mode. For readings only `similar` (with an `instruction`) is meaningful; the
 other modes are `422`.
 
-Returns `{ "draft": ItemDraft, "style": ..., "check": ... }` in the same
-shape as `POST /ai/draft`, with the same reference solution and check. A
+The result is a `DraftResponse`, as for a [draft request](#draft-requests),
+with the same reference solution and check. A
 variant keeps the original's [interface](#problem-interface) unless the
 request gives an `interfaceHint` of `program` or `function` (`auto` or
 omitted keeps it; any value is `422` for a reading). Here
-`assumptions` describes how the variant differs from the original. The client
-saves it with `POST /items`, setting `variantOf` to the original's id; the
+`assumptions` describes how the variant differs from the original. Saving
+the draft creates the item with `variantOf` set to the original's id; the
 original's tags and collections are a sensible default for the new item. Test
-cases of the original are never copied, since they do not apply.
+cases of the original are never copied, since they do not apply. An original
+that has been deleted is `404` when a generation is requested, and fails a
+job that was waiting with `not_found`.
 
 ### `POST /items/{id}/ai/testcases`
 
@@ -1163,9 +1311,10 @@ Propose test cases for an existing problem.
   reference solution is the solution part only.
 - `instruction` — optional, at most 2000 characters.
 - `providerId` — optional; the [provider](#ai) to use instead of the default.
+- `origin` — optional; kept on the [job](#ai-jobs) as it is.
 - `422` for a reading.
 
-Response:
+Answers `202` with the `AiJob`. The result of the job, `TestCasesResponse`:
 
 ```json
 {
@@ -1203,7 +1352,7 @@ The inputs the problem already has are given to the model so that it adds to
 them. A proposed case whose `stdin` equals that of an existing test case or of
 an earlier proposed case (ignoring trailing whitespace) is left out, and
 `duplicatesDropped` counts those; `cases` can therefore be shorter than
-`count`, and empty when every proposal was a repeat. `usage` is as for [`POST /ai/draft`](#post-aidraft).
+`count`, and empty when every proposal was a repeat. `usage` is as for a [draft request](#draft-requests).
 
 When no engine is available, `verification.attempted` is `false`, and every
 case has `expectedStdout = predictedStdout`, `verified: false`,
@@ -1257,6 +1406,7 @@ be saved, and the request reads nothing from the library.
 - `styleId` — optional; the [style preset](#choosing-a-preset-for-a-generation)
   to write in, as for a draft.
 - `providerId` — optional; the [provider](#ai) to use instead of the default.
+- `origin` — optional; kept on the [job](#ai-jobs) as it is.
 
 The prompt carries the authoring conventions (or a
 [custom system prompt](#system-prompt) with the fixed rules) as a draft's
@@ -1264,7 +1414,7 @@ does: the stdin/stdout contract, the folded input region of a program's
 starter code, the stub, prefix and suffix of a function problem, and the
 judge's language versions.
 
-Response:
+Answers `202` with the `AiJob`. The result of the job, `CodeResponse`:
 
 ```json
 {
@@ -1284,13 +1434,13 @@ Response:
   `program` problem. A Python prefix without
   `from __future__ import annotations` gets it added, as in a draft.
 - `check` is `null` for a `program` problem. For a `function` problem it
-  proves the runners as a [draft's check](#post-aidraft) does:
+  proves the runners as a [draft's check](#draft-requests) does:
   `{ "attempted": true, "engine": "judge0", "runners": [RunnerCheck] }`, one
   entry per language in language order, each language's stub run unchanged
   in its harness on the first sample. `attempted` is `false` (with
   `engine: null` without an engine, and `runners: []`) when there is no
   judge engine or no sample. The check stops after 50 seconds.
-- `style` and `usage` are as for [`POST /ai/draft`](#post-aidraft).
+- `style` and `usage` are as for a [draft request](#draft-requests).
 
 Nothing is stored: the client puts the code into its form, and saves it with
 the item.
@@ -1381,7 +1531,7 @@ for, in the model's order:
 
 Generators the model wrote beyond the number asked for are ignored.
 
-In a draft the large cases are part of the [check](#post-aidraft): they run
+In a draft the large cases are part of the [check](#draft-requests): they run
 after the other test cases and before the runners, within the same time
 bound, and each one added counts in `check.passed` and `check.total`.
 
@@ -1395,6 +1545,197 @@ of the earlier response out of the `previousDraft` it sends, whatever their
 size, which also keeps that request within `limits.maxPreviousDraftBytes`;
 a case of more than a few kilobytes that is sent anyway is dropped before
 that limit is applied, not refused.
+
+## Drafts
+
+A **draft** is a new item in progress, kept on the server: one being captured
+(`kind: "capture"`) or a variant of an existing item (`kind: "variant"`),
+written by the AI or by hand. It holds what the generation produced and the
+client's review form with the user's edits, so the work survives leaving the
+page, a reload, another browser and a restart. Drafts never expire: a draft
+goes away only when it is [saved to the library](#post-draftsidsave) or
+deleted. Drafts are local work: they are not part of bundles and are not
+offered over MCP.
+
+A draft's AI generation is an [AI job](#ai-jobs) of kind `draft` (for a
+`capture` draft) or `variant`. When the job finishes, the server writes its
+outcome into the draft itself — the result into `generation`, or the error
+into `error` — whether or not any client is watching. A revision ("make it
+harder") is another generation of the same draft, with `previousDraft` and
+`instruction` in its request; its result replaces the previous one.
+
+`Draft`:
+
+```json
+{
+  "id": "...",
+  "kind": "capture",
+  "variantOf": null,
+  "title": "Two Sum",
+  "state": "ready",
+  "revision": 4,
+  "edited": false,
+  "request": { "text": "that problem with an array and a target...", "typeHint": "auto", "largeTestCases": 0 },
+  "job": AiJob,
+  "error": null,
+  "generation": DraftResponse,
+  "generationSeq": 1,
+  "content": { ... },
+  "basedOn": 1,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+- `kind` — `capture` or `variant`. `variantOf` is the original's id for a
+  `variant` draft (it may name an item that has since been deleted), `null`
+  for a `capture` draft.
+- `title` — a label for lists: the `title` the client last set, else the
+  title of the latest generation's draft, else the start of the request's
+  `text` (for a `capture` draft) or "Variant of …" with the original's title,
+  else "Untitled draft".
+- `state` — what the draft is waiting for, derived from the fields below in
+  this order:
+
+  | `state` | When |
+  | --- | --- |
+  | `drafting` | `job` is queued or running |
+  | `failed` | The latest generation failed: `error` is set |
+  | `ready` | A generation has not been taken into `content` yet (`generationSeq` > `basedOn`), or the content is a generation's, unedited (`generationSeq` > 0 and `edited` is `false`) |
+  | `edited` | Otherwise, when there is `content`: the user edited the draft, or wrote it by hand |
+  | `new` | Nothing yet: no content and no generation (for example the first generation was cancelled) |
+
+- `revision` — increases by one on every change to the draft, the
+  server's included (a generation starting or finishing). Updates may state
+  the revision they were based on (`expectedRevision`).
+- `request` — the body of the latest generation request, as sent, or `null`
+  if there was none. It is what [`retry`](#post-draftsidretry) sends again.
+- `job` — the latest generation's job (`AiJob`), or `null` when there was
+  none or the server no longer has it (jobs are [pruned](#limits-and-retention);
+  the draft keeps their outcome).
+- `error` — why the latest generation failed (`{ "code", "message",
+  "fields"? }`, as a job's), or `null`. Starting a generation clears it, and
+  so does an update that sets `content`.
+- `generation` — the `DraftResponse` of the latest generation that
+  succeeded, or `null`. `generationSeq` counts the generations that
+  succeeded (0 before the first).
+- `content` — the client's own document, a JSON object, stored and returned
+  as it is: the review form, with whatever the client needs to show it
+  (assumptions, the applied style, check results, …), or `null`. The server
+  never reads it. With the rest of the request it is bounded by
+  `limits.maxRequestBytes`.
+- `basedOn` — the `generationSeq` the `content` was built from (0 for content
+  written by hand). A client that finds `generationSeq` > `basedOn` builds
+  its form from `generation` (keeping what a generation does not produce,
+  such as the collections and the source, from the old content), and saves
+  it with `basedOn: generationSeq`.
+- `edited` — whether the user has changed `content` since it was built from
+  a generation; `true` for a draft written by hand.
+
+`DraftSummary` is `Draft` without `request`, `generation` and `content`.
+
+Limits: at most 500 drafts (`409 conflict` beyond).
+
+### `GET /drafts`
+
+Query: `kind`, `variantOf` (optional filters). Returns `{ "items":
+[DraftSummary] }`, most recently changed first (`updatedAt`). Not
+paginated.
+
+### `POST /drafts`
+
+```json
+{
+  "kind": "capture",
+  "variantOf": null,
+  "content": null,
+  "title": null,
+  "generate": { "text": "that problem where...", "typeHint": "auto", "styleId": "..." }
+}
+```
+
+- `kind` — required, `capture` or `variant`. `variantOf` is required for a
+  `variant` draft (an existing item, `422` otherwise) and must be absent or
+  `null` for a `capture` draft.
+- `generate` — optional: a [draft request](#draft-requests) for a `capture`
+  draft, a [variant request](#variant-requests) for a `variant` draft. It is
+  validated exactly as that request is, with the same errors and field names
+  (`text`, `styleId`, `providerId`, …), and nothing is created when it fails.
+  When valid, the draft is created in state `drafting` with its job, and the
+  answer is `202`.
+- `content`, `title` — optional, as for `PATCH`. A draft created with
+  `content` and without `generate` is written by hand: `edited` is `true`.
+
+Returns `201` (`202` with `generate`) with the `Draft`.
+
+### `GET /drafts/{id}`
+
+Returns `Draft`. While `state` is `drafting`, poll it (or its job) every
+one to two seconds.
+
+### `PATCH /drafts/{id}`
+
+```json
+{ "content": { ... }, "basedOn": 1, "edited": true, "title": "Two Sum", "expectedRevision": 4 }
+```
+
+A merge update; every field is optional.
+
+- `content` — a JSON object, or `null`; replaces the stored content and
+  clears `error`.
+- `basedOn` — an integer from 0 to `generationSeq` (`422` otherwise). Setting
+  it to `generationSeq` also marks the latest generation's job
+  [picked up](#ai-jobs).
+- `edited` — a boolean. A client sets it to `true` when the user changes the
+  form, and to `false` when it saves content just built from a generation.
+- `title` — the item's title as the form has it: a [single line](#single-line-fields)
+  of at most `limits.maxTitleChars`, or `null`/empty to fall back to the
+  server's label.
+- `expectedRevision` — optional. When it is not the draft's `revision`, the
+  update is refused with `409 conflict` and `fields.revision` set to the
+  current revision, as for [`PATCH /items/{id}`](#patch-itemsid); nothing is
+  changed. A client then reads the draft again.
+
+Returns the `Draft`. Updating a draft whose generation is running is
+allowed; the generation's result then arrives in `generation` as usual.
+
+### `POST /drafts/{id}/generate`
+
+Starts a generation of the draft. The body is a [draft
+request](#draft-requests) for a `capture` draft or a [variant
+request](#variant-requests) for a `variant` draft, validated as there; for a
+revision it carries `previousDraft` (the form as it stands, as an
+`ItemDraft`) and `instruction`. It becomes the draft's `request`, the
+draft's `error` is cleared, and the previous job, if finished, is marked
+picked up. `409 conflict` while the draft's job is active. Returns `202`
+with the `Draft` (`state: "drafting"`).
+
+### `POST /drafts/{id}/retry`
+
+Starts a generation with the draft's `request` again, as
+`POST /drafts/{id}/generate` would. `409` while the draft's job is active,
+`422` when the draft has no `request`. Returns `202` with the `Draft`.
+
+To cancel a draft's generation, cancel its job
+([`POST /ai/jobs/{id}/cancel`](#ai-jobs)); the draft keeps what it had.
+
+### `POST /drafts/{id}/save`
+
+```json
+{ "item": ItemInput, "expectedRevision": 7 }
+```
+
+Creates the item exactly as [`POST /items`](#post-items) does from `item` —
+its test cases and reference solution included — and deletes the draft, in
+one transaction: either both happen or neither does. For a `variant` draft,
+`item.variantOf` defaults to the draft's `variantOf`. A generation still
+running is cancelled. `expectedRevision` is optional and checked as for
+`PATCH`. Validation errors are those of `POST /items`, field names
+unchanged. Returns `201` with the `Item`.
+
+### `DELETE /drafts/{id}`
+
+Discards the draft, cancelling its generation if one is running. `204`.
 
 ## AI settings
 
@@ -1720,8 +2061,9 @@ up afterwards.
   the original's; for code generation, the title in the request), or the
   title of the draft that came back — or `null`. An entry outlives its item.
 - `providerName`, `kind` and `model` are as they were at the time.
-- `status` — `ok`, `failed` (with `error`) or `cancelled` (the client went
-  away).
+- `status` — `ok`, `failed` (with `error`) or `cancelled` (its
+  [job](#ai-jobs) was cancelled or dismissed, or a connection test's client
+  went away).
 - `usage` counts are `null` where the provider reported none.
 
 `AiLogDetail` is `AiLogEntry` plus:
@@ -1745,17 +2087,28 @@ contain an API key or any request header. Either is cut off at 256 KiB, and
 
 | Endpoint | Behaviour |
 | --- | --- |
-| `GET /settings/ai/log` | Query: `providerId`, `operation`, `status` (optional filters), `limit` (default 50, max 200), `before` (a cursor). Newest first. `{ "items": [AiLogEntry], "next": "<cursor>", "total": n }` |
+| `GET /settings/ai/log` | Query: `providerId`, `operation`, `status` (optional filters), `limit` (default 50, max 200), and either `offset` (default 0) or `before` (a cursor). Newest first. `{ "items": [AiLogEntry], "next": "<cursor>", "total": n }` |
 | `GET /settings/ai/log/{id}` | `AiLogDetail`. `404` for an unknown or removed entry |
 | `DELETE /settings/ai/log` | Query: `before` (optional timestamp). `204`. Removes every entry, or those created before the timestamp |
 
 The log is append-only: an entry is written once and never changed, and
-nothing is removed unless the user asks. Listing is meant for loading as the
-user scrolls. `next` is the cursor to pass as `before` for the following
-page, `null` at the end; a cursor stays valid while new entries arrive, so a
-page never repeats or skips entries. `total` counts the entries matching the
-filters. The list carries no request or response text; that is fetched per
-entry.
+nothing is removed unless the user asks. It can be listed in two ways:
+
+- **Numbered pages**, like the other lists: `offset` skips that many
+  entries (matching the filters) from the newest, as the
+  [conventions](#conventions) describe (`limit` outside 1–200 or a negative
+  `offset` is `400`). Page *n* of size `limit` starts at `offset =
+  (n − 1) × limit`; `total` gives the number of pages. A page can shift
+  when entries arrive or are removed between two requests.
+- **A cursor**, for loading as the user scrolls: `next` is the cursor to
+  pass as `before` for the following page, `null` at the end; a cursor
+  stays valid while new entries arrive, so a page never repeats or skips
+  entries.
+
+`offset` and `before` together are `400 bad_request`. Every page carries
+`next`, whichever way it was asked for. `total` counts the entries matching
+the filters. The list carries no request or response text; that is fetched
+per entry.
 
 The counts in `AiProvider.usage` are kept separately and are not reduced when
 entries are removed. Deleting a provider keeps its entries. The log holds the
@@ -1825,8 +2178,8 @@ They are independent of the AI provider and remain when it changes.
 
 ### Choosing a preset for a generation
 
-`POST /ai/draft`, `POST /items/{id}/ai/variant` and `POST /ai/code` accept a
-`styleId` field:
+[Draft requests](#draft-requests), [variant requests](#variant-requests) and
+`POST /ai/code` accept a `styleId` field:
 
 | `styleId` | Style applied |
 | --- | --- |
@@ -1834,7 +2187,7 @@ They are independent of the AI provider and remain when it changes.
 | `null` | None — built-in conventions only |
 | a preset id | That preset; unknown id is `422` |
 
-Their responses carry the preset that was actually applied:
+Their results carry the preset that was actually applied:
 `"style": { "id": "...", "name": "LeetCode style" }`, or `"style": null`.
 Presets do not apply to `POST /items/{id}/ai/testcases`.
 
@@ -1890,8 +2243,8 @@ judge's languages in the user turn.
   rejected. Violations are `422 validation_failed` and nothing is saved; the
   text is never truncated. Saving `builtIn` unchanged removes the custom
   text instead, as `DELETE` does.
-- A custom text applies to `POST /ai/draft`, `POST /items/{id}/ai/variant`,
-  `POST /ai/code` and the MCP server's authoring guide (instructions, resource and prompts),
+- A custom text applies to draft and variant generations, `POST /ai/code`
+  and the MCP server's authoring guide (instructions, resource and prompts),
   from the next request on. Test generation has rules of its own and does
   not use the conventions; their editable part is the separate
   [test case prompt](#test-case-prompt). A saved text stays as it is when a
@@ -1986,7 +2339,7 @@ Every key is always present; the values above are the defaults.
 | --- | --- | --- |
 | `hideTestCases` | boolean | When `true`, show how many test cases a problem has and how many a run used, but keep the content of non-sample cases (in the test list and in submission results) out of sight until the user asks to reveal it. Sample cases are part of the statement and stay visible |
 | `generatedTestCases` | integer 1–`limits.maxGeneratedTestCases` | How many test cases to ask for by default when generating them: the initial value of the count a client sends as `count` to `POST /items/{id}/ai/testcases` |
-| `largeTestCase` | boolean | Whether to ask for [large test cases](#large-test-cases) by default: whether a client sends a non-zero `largeTestCases` to `POST /ai/draft` and `POST /items/{id}/ai/variant`, and the initial value of that choice for `POST /items/{id}/ai/testcases` |
+| `largeTestCase` | boolean | Whether to ask for [large test cases](#large-test-cases) by default: whether a client sends a non-zero `largeTestCases` in draft and variant requests, and the initial value of that choice for `POST /items/{id}/ai/testcases` |
 | `largeTestCaseCount` | integer 1–`limits.maxLargeTestCases` | How many large test cases to ask for when they are asked for: the value a client sends as `largeTestCases` |
 | `editor.autocomplete` | boolean | Offer code completion while typing |
 | `editor.closeBrackets` | boolean | Insert the closing bracket or quote automatically |

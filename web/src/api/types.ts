@@ -631,7 +631,7 @@ export interface GenerationUsage extends TokenUsage {
   durationMs: number;
 }
 
-/** Response of `POST /ai/draft` and `POST /items/{id}/ai/variant`. */
+/** The result of a draft or variant generation, also written into its draft. */
 export interface DraftResponse {
   draft: ItemDraft;
   style: AppliedStyle | null;
@@ -664,6 +664,8 @@ export interface AiTestCasesRequest {
   largeTestCases?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
+  /** Kept on the job as it is: the screen to go back to for the result. */
+  origin?: string | null;
 }
 
 export interface ProposedTestCase {
@@ -710,6 +712,8 @@ export interface AiCodeRequest {
   /** Omitted → the default preset; `null` → built-in conventions only; an id → that preset. */
   styleId?: string | null;
   providerId?: string | null;
+  /** Kept on the job as it is: the screen to go back to for the result. */
+  origin?: string | null;
 }
 
 /** Whether each generated runner ran its stub on the first sample. */
@@ -729,6 +733,120 @@ export interface AiCodeResponse {
   check: CodeCheck | null;
   style: AppliedStyle | null;
   usage: GenerationUsage;
+}
+
+// ---- AI jobs -------------------------------------------------------------
+
+export type AiJobKind = 'draft' | 'variant' | 'testcases' | 'code';
+export type AiJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+/** Why a job failed: an error body's `error`. `interrupted`: the server restarted while it ran. */
+export interface AiJobError {
+  code: ErrorCode | 'interrupted';
+  message: string;
+  fields?: Record<string, string | number>;
+}
+
+/** One AI generation running on the server, or finished there. */
+export interface AiJob {
+  id: string;
+  kind: AiJobKind;
+  /** The problem of `testcases`, the original of `variant`, the `itemId` of a `code` request; else `null`. */
+  itemId: string | null;
+  /** The draft a `draft` or `variant` job generates for; `null` for the other kinds. */
+  draftId: string | null;
+  /** A short label for lists, fixed by the server. */
+  title: string;
+  status: AiJobStatus;
+  /** The `origin` the starting request gave, unchanged. */
+  origin: string | null;
+  /** Set for `failed` only. */
+  error: AiJobError | null;
+  /** Whether the client has collected the outcome. */
+  pickedUp: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** A job with the body it was started with and, once `succeeded`, its result. */
+export interface AiJobDetail<R = unknown> extends AiJob {
+  request: unknown;
+  result: R | null;
+}
+
+export interface AiJobListParams {
+  /** `true`: only queued and running jobs. */
+  active?: boolean;
+  kind?: AiJobKind;
+  itemId?: string;
+  draftId?: string;
+  /** `false` by default: only jobs whose outcome has not been collected. */
+  pickedUp?: boolean;
+  /** Default 50, at most 200. */
+  limit?: number;
+}
+
+// ---- Drafts ---------------------------------------------------------------
+
+export type DraftKind = 'capture' | 'variant';
+export type DraftState = 'new' | 'drafting' | 'ready' | 'edited' | 'failed';
+
+/** A new item in progress, kept on the server until it is saved or deleted. */
+export interface Draft<C = Record<string, unknown>> {
+  id: string;
+  kind: DraftKind;
+  /** The original of a `variant` draft (which may have been deleted since); `null` for `capture`. */
+  variantOf: string | null;
+  /** A label for lists, derived by the server. */
+  title: string;
+  state: DraftState;
+  /** Increases by one on every change, the server's included. */
+  revision: number;
+  /** Whether the user has changed `content` since it was built from a generation. */
+  edited: boolean;
+  /** The body of the latest generation request, as sent. */
+  request: DraftRequest | VariantRequest | null;
+  /** The latest generation's job; `null` when there was none or the server no longer has it. */
+  job: AiJob | null;
+  /** Why the latest generation failed. */
+  error: AiJobError | null;
+  /** The result of the latest generation that succeeded. */
+  generation: DraftResponse | null;
+  /** How many generations have succeeded. */
+  generationSeq: number;
+  /** The client's own document, stored as it is. */
+  content: C | null;
+  /** The `generationSeq` the content was built from (0 for content written by hand). */
+  basedOn: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DraftSummary = Omit<Draft, 'request' | 'generation' | 'content'>;
+
+export interface DraftCreate {
+  kind: DraftKind;
+  /** Required for a `variant` draft. */
+  variantOf?: string | null;
+  content?: Record<string, unknown> | null;
+  title?: string | null;
+  /** Start a generation at once: a draft request for `capture`, a variant request for `variant`. */
+  generate?: DraftRequest | VariantRequest;
+}
+
+/** A merge update: every field is optional. */
+export interface DraftPatch {
+  content?: Record<string, unknown> | null;
+  basedOn?: number;
+  edited?: boolean;
+  title?: string | null;
+  expectedRevision?: number;
+}
+
+export interface DraftSaveRequest {
+  item: ItemInput;
+  expectedRevision?: number;
 }
 
 // ---- Style presets ---------------------------------------------------------
@@ -871,11 +989,13 @@ export interface AiLogFilters {
 
 export interface AiLogParams extends AiLogFilters {
   limit?: number;
-  /** The `next` of the page before. */
+  /** How many matching entries to skip from the newest; not with `before`. */
+  offset?: number;
+  /** The `next` of the page before; not with `offset`. */
   before?: string;
 }
 
-/** A batch of the log, newest first. */
+/** A page of the log, newest first. */
 export interface AiLogPage {
   items: AiLogEntry[];
   /** The cursor of the following batch, or `null` at the end. */

@@ -27,6 +27,9 @@ import { ItemMissing } from '../item/ItemPage';
 import { WriteProblems } from '../solutions/parts';
 import { useSolutionWrite } from '../solutions/solutionWrites';
 
+/** The name a reference solution is given when it has none of its own (docs/api.md). */
+const DEFAULT_REFERENCE_NAME = 'Reference solution';
+
 export default function TestsPage() {
   const { id = '' } = useParams();
   const item = useItem(id);
@@ -715,10 +718,13 @@ function TestsManager({ item }: { item: Item }) {
             ) : (
               <div className="card verify-panel">
                 <div className="verify-panel-row">
-                  <span className="verify-panel-label">Reference solution</span>
+                  <span className="verify-panel-label">Checked against</span>
                   {reference ? (
                     <span className="verify-panel-value">
-                      <strong>{reference.name}</strong> <span className="muted">{languageLabel(reference.language, meta?.judge.languages)}</span>
+                      <strong>Reference solution</strong>
+                      {/* Its name only when it has one of its own. */}
+                      {reference.name !== DEFAULT_REFERENCE_NAME && ` · ${reference.name}`}
+                      <span className="muted"> · {languageLabel(reference.language, meta?.judge.languages)}</span>
                     </span>
                   ) : (
                     <span className="verify-panel-value muted">None chosen</span>
@@ -767,7 +773,7 @@ function TestsManager({ item }: { item: Item }) {
                   ) : other ? (
                     'A check runs another solution on every case and changes nothing.'
                   ) : (
-                    '“Verify all” runs the reference solution on every case and marks those it reproduces.'
+                    '“Verify all” runs this solution on every case and marks those whose expected output it matches.'
                   )}
                 </p>
               </div>

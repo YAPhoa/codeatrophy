@@ -1165,7 +1165,8 @@ button.chip:hover {
 .toasts {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  /* Above the jobs window when it is there (features/jobs/JobsTray.tsx). */
+  bottom: calc(16px + var(--jobs-tray-space, 0px));
   z-index: 400;
   display: flex;
   flex-direction: column;

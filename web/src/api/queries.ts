@@ -2,8 +2,8 @@
 // keep lists and detail views consistent after a mutation.
 
 import {
+  keepPreviousData,
   queryOptions,
-  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -11,7 +11,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { AiLogFilters, Item, ItemListParams, ItemType, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
+import type { AiJob, AiLogFilters, DraftSummary, Item, ItemListParams, ItemType, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -23,7 +23,7 @@ export const qk = {
   aiSettings: ['settings', 'ai'] as const,
   /** Prefix of everything cached from the AI activity log. */
   aiLog: ['settings', 'ai-log'] as const,
-  aiLogPages: (filters: AiLogFilters) => ['settings', 'ai-log', 'pages', filters] as const,
+  aiLogPage: (filters: AiLogFilters, limit: number, offset: number) => ['settings', 'ai-log', 'page', filters, limit, offset] as const,
   aiLogEntry: (id: string) => ['settings', 'ai-log', 'entry', id] as const,
   styles: ['styles'] as const,
   systemPrompt: ['settings', 'system-prompt'] as const,
@@ -40,6 +40,14 @@ export const qk = {
   preferences: ['settings', 'preferences'] as const,
   submissions: (itemId: string) => ['submissions', 'list', itemId] as const,
   submission: (id: string) => ['submissions', 'detail', id] as const,
+  /** The jobs whose outcome has not been collected: what the jobs window lists. */
+  aiJobs: ['ai-jobs', 'list'] as const,
+  /** Prefix of every cached job lookup, the list included. */
+  aiJobsAll: ['ai-jobs'] as const,
+  drafts: ['drafts', 'list'] as const,
+  draft: (id: string) => ['drafts', 'detail', id] as const,
+  /** Prefix of everything cached about drafts. */
+  draftsAll: ['drafts'] as const,
 };
 
 export function useMeta() {
@@ -236,13 +244,12 @@ export function useAiSettings() {
   return useQuery({ queryKey: qk.aiSettings, queryFn: ({ signal }) => api.settings.getAi(signal) });
 }
 
-/** The AI activity log, newest first, loaded a batch at a time as the user reaches the end. */
-export function useAiLog(filters: AiLogFilters) {
-  return useInfiniteQuery({
-    queryKey: qk.aiLogPages(filters),
-    queryFn: ({ pageParam, signal }) => api.settings.log({ ...filters, limit: PAGE_SIZE, before: pageParam ?? undefined }, signal),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.next ?? undefined,
+/** A numbered page of the AI activity log, newest first; the page before stays shown while the next loads. */
+export function useAiLog(filters: AiLogFilters, limit: number, offset: number) {
+  return useQuery({
+    queryKey: qk.aiLogPage(filters, limit, offset),
+    queryFn: ({ signal }) => api.settings.log({ ...filters, limit, offset }, signal),
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -343,4 +350,36 @@ export function useQuickUpdate() {
       void qc.invalidateQueries({ queryKey: qk.stats });
     },
   });
+}
+
+/** Whether a job is still waiting or running. */
+export const isActiveJob = (job: Pick<AiJob, 'status'>): boolean => job.status === 'queued' || job.status === 'running';
+
+/**
+ * The AI jobs whose outcome has not been collected, newest first. Polled every
+ * two seconds while one is active; otherwise every few seconds while `watching`
+ * (the jobs window is open), and else only when asked.
+ */
+export function useAiJobs(watching = false) {
+  return useQuery({
+    queryKey: qk.aiJobs,
+    queryFn: ({ signal }) => api.ai.jobs({ limit: 50 }, signal),
+    select: (data) => data.items,
+    refetchInterval: (query) => (query.state.data?.items.some(isActiveJob) ? 2000 : watching ? 5000 : false),
+  });
+}
+
+/** The drafts, most recently changed first; polled while one of them is being drafted. */
+export function useDrafts() {
+  return useQuery({
+    queryKey: qk.drafts,
+    queryFn: ({ signal }) => api.drafts.list({}, signal),
+    select: (data) => data.items,
+    refetchInterval: (query) => (query.state.data?.items.some((d: DraftSummary) => d.state === 'drafting') ? 2000 : false),
+  });
+}
+
+/** Something started or ended a generation: the jobs window and the drafts look again. */
+export function invalidateJobs(qc: QueryClient): Promise<unknown> {
+  return Promise.all([qc.invalidateQueries({ queryKey: qk.aiJobsAll }), qc.invalidateQueries({ queryKey: qk.drafts })]);
 }

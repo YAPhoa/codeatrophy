@@ -374,15 +374,16 @@ const LOG_STATUSES = ['ok', 'failed', 'cancelled'] as const;
  * anything out of the next one.
  */
 function listLog(db: MockDb, req: Req) {
-  const { limit } = pagination(req.query, LIMITS.maxPageSize);
+  const { limit, offset } = pagination(req.query, LIMITS.maxPageSize);
   const providerId = req.query.get('providerId');
   const operation = enumParam(req.query, 'operation', LOG_OPERATIONS);
   const status = enumParam(req.query, 'status', LOG_STATUSES);
   const cursor = req.query.get('before');
   if (cursor !== null && !/^\d+$/.test(cursor)) throw badRequest('before is not a cursor of this list');
+  if (cursor !== null && req.query.has('offset')) throw badRequest('offset and before cannot be used together');
   const matching = db.aiLog.filter((e) => (providerId === null || e.providerId === providerId) && (operation === undefined || e.operation === operation) && (status === undefined || e.status === status));
   const older = (cursor === null ? matching : matching.filter((e) => e.seq < Number(cursor))).reverse();
-  const batch = older.slice(0, limit);
+  const batch = older.slice(offset, offset + limit);
   const last = batch[batch.length - 1];
   return ok({ items: batch.map((e) => db.logEntryView(e)), next: last && older.length > batch.length ? String(last.seq) : null, total: matching.length });
 }

@@ -70,9 +70,9 @@ expires; open sessions are unaffected. A request body may be at most
 - Tools are annotated (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so
   clients can apply their own confirmation policy.
 - AI provider settings and credentials, their usage counts, the AI
-  activity log, the custom system prompt and the custom test case prompt
-  are not reachable through MCP tools. MCP has no AI generation of its
-  own: the connected assistant is the model.
+  activity log, AI jobs, drafts, the custom system prompt and the custom
+  test case prompt are not reachable through MCP tools. MCP has no AI
+  generation of its own: the connected assistant is the model.
 
 ## Tools
 

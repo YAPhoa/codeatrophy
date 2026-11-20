@@ -121,10 +121,22 @@ func (s *Server) routes() {
 	s.handle("GET /items/{id}/submissions", s.listSubmissions)
 	s.handle("GET /submissions/{id}", s.getSubmission)
 
-	s.handle("POST /ai/draft", s.aiDraft)
-	s.handle("POST /items/{id}/ai/variant", s.aiVariant)
 	s.handle("POST /items/{id}/ai/testcases", s.aiTestCases)
 	s.handle("POST /ai/code", s.aiCode)
+	s.handle("GET /ai/jobs", s.listAIJobs)
+	s.handle("GET /ai/jobs/{id}", s.getAIJob)
+	s.handle("POST /ai/jobs/{id}/cancel", s.cancelAIJob)
+	s.handle("POST /ai/jobs/{id}/pickup", s.pickUpAIJob)
+	s.handle("DELETE /ai/jobs/{id}", s.dismissAIJob)
+
+	s.handle("GET /drafts", s.listDrafts)
+	s.handle("POST /drafts", s.createDraft)
+	s.handle("GET /drafts/{id}", s.getDraft)
+	s.handle("PATCH /drafts/{id}", s.updateDraft)
+	s.handle("DELETE /drafts/{id}", s.deleteDraft)
+	s.handle("POST /drafts/{id}/generate", s.generateDraft)
+	s.handle("POST /drafts/{id}/retry", s.retryDraft)
+	s.handle("POST /drafts/{id}/save", s.saveDraft)
 
 	s.handle("GET /settings/ai", s.getAISettings)
 	s.handle("PUT /settings/ai", s.putAISettings)
@@ -753,55 +765,181 @@ func (s *Server) getSubmission(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (s *Server) aiDraft(w http.ResponseWriter, r *http.Request) error {
-	var in app.DraftInput
-	if err := decode(r, &in); err != nil {
-		return err
-	}
-	res, err := s.app.Draft(r.Context(), in)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, res)
-	return nil
-}
-
-func (s *Server) aiVariant(w http.ResponseWriter, r *http.Request) error {
-	var in app.VariantInput
-	if err := decode(r, &in); err != nil {
-		return err
-	}
-	res, err := s.app.Variant(r.Context(), r.PathValue("id"), in)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, res)
-	return nil
-}
-
 func (s *Server) aiTestCases(w http.ResponseWriter, r *http.Request) error {
-	var in app.GenerateTestCasesInput
-	if err := decode(r, &in); err != nil {
-		return err
-	}
-	res, err := s.app.GenerateTestCases(r.Context(), r.PathValue("id"), in)
+	raw, err := readBody(r)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, res)
+	job, err := s.app.StartAIJob(r.Context(), app.JobTestCases, r.PathValue("id"), raw)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusAccepted, job)
 	return nil
 }
 
 func (s *Server) aiCode(w http.ResponseWriter, r *http.Request) error {
-	var in app.CodeInput
-	if err := decode(r, &in); err != nil {
-		return err
-	}
-	res, err := s.app.GenerateCode(r.Context(), in)
+	raw, err := readBody(r)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, res)
+	job, err := s.app.StartAIJob(r.Context(), app.JobCode, "", raw)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusAccepted, job)
+	return nil
+}
+
+func (s *Server) listAIJobs(w http.ResponseWriter, r *http.Request) error {
+	v := r.URL.Query()
+	q := app.AIJobQuery{Kind: v.Get("kind"), ItemID: v.Get("itemId"), DraftID: v.Get("draftId")}
+	var err error
+	if q.Limit, err = queryInt(r, "limit"); err != nil {
+		return err
+	}
+	if b, err := queryBool(r, "active"); err != nil {
+		return err
+	} else if b != nil {
+		q.Active = *b
+	}
+	if b, err := queryBool(r, "pickedUp"); err != nil {
+		return err
+	} else if b != nil {
+		q.PickedUp = *b
+	}
+	l, err := s.app.ListAIJobs(r.Context(), q)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) getAIJob(w http.ResponseWriter, r *http.Request) error {
+	j, err := s.app.GetAIJob(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, j)
+	return nil
+}
+
+func (s *Server) cancelAIJob(w http.ResponseWriter, r *http.Request) error {
+	j, err := s.app.CancelAIJob(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, j)
+	return nil
+}
+
+func (s *Server) pickUpAIJob(w http.ResponseWriter, r *http.Request) error {
+	j, err := s.app.PickUpAIJob(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, j)
+	return nil
+}
+
+func (s *Server) dismissAIJob(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DismissAIJob(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listDrafts(w http.ResponseWriter, r *http.Request) error {
+	v := r.URL.Query()
+	l, err := s.app.ListDrafts(r.Context(), app.DraftQuery{Kind: v.Get("kind"), VariantOf: v.Get("variantOf")})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) createDraft(w http.ResponseWriter, r *http.Request) error {
+	var in app.NewDraftInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	d, started, err := s.app.CreateDraft(r.Context(), in)
+	if err != nil {
+		return err
+	}
+	status := http.StatusCreated
+	if started {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, d)
+	return nil
+}
+
+func (s *Server) getDraft(w http.ResponseWriter, r *http.Request) error {
+	d, err := s.app.GetDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, d)
+	return nil
+}
+
+func (s *Server) updateDraft(w http.ResponseWriter, r *http.Request) error {
+	var in app.DraftPatch
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	d, err := s.app.UpdateDraft(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, d)
+	return nil
+}
+
+func (s *Server) deleteDraft(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteDraft(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) generateDraft(w http.ResponseWriter, r *http.Request) error {
+	raw, err := readBody(r)
+	if err != nil {
+		return err
+	}
+	d, err := s.app.GenerateDraft(r.Context(), r.PathValue("id"), raw)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusAccepted, d)
+	return nil
+}
+
+func (s *Server) retryDraft(w http.ResponseWriter, r *http.Request) error {
+	d, err := s.app.RetryDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusAccepted, d)
+	return nil
+}
+
+func (s *Server) saveDraft(w http.ResponseWriter, r *http.Request) error {
+	var in app.DraftSaveInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	it, err := s.app.SaveDraft(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, it)
 	return nil
 }
 
@@ -906,6 +1044,9 @@ func (s *Server) listAILog(w http.ResponseWriter, r *http.Request) error {
 		Before: v.Get("before")}
 	var err error
 	if q.Limit, err = queryInt(r, "limit"); err != nil {
+		return err
+	}
+	if q.Offset, err = queryInt(r, "offset"); err != nil {
 		return err
 	}
 	page, err := s.app.ListAILog(r.Context(), q)

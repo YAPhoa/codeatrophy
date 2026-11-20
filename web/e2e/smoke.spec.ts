@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { choose, open, openList } from './support';
+import { choose, mockApi, open, openList } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
 // against the API mock, whose state lives in the page: every test starts from
@@ -386,7 +386,7 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await saved.getByRole('button', { name: 'Use as reference' }).click();
   await expect(saved.getByText('Reference', { exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: /^Test cases/ }).click();
-  await expect(page.getByRole('region', { name: 'Verification' })).toContainText(/Reference solution\s*Smoke test solution/);
+  await expect(page.getByRole('region', { name: 'Verification' })).toContainText(/Checked against\s*Reference solution · Smoke test solution/);
 
   // Submitted again, the same code is not offered for saving: the verdict says where it already is.
   await page.getByRole('navigation', { name: 'Problem sections' }).getByRole('link', { name: 'Solve' }).click();
@@ -440,7 +440,7 @@ test('preferences: hidden test cases and editor options follow the settings', as
 
   // By default the hidden cases are counted but not shown.
   await page.getByRole('button', { name: /^Tests/ }).click();
-  await expect(page.getByText(/\d+ test cases · \d+ shown as examples/)).toBeVisible();
+  await expect(page.getByText(/^\d+ test cases · \d+ samples? · \d+ hidden$/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reveal all' })).toBeVisible();
   // A revealed case can be hidden again: a Hide button takes the place of its "hidden" tag.
   const caseList = page.locator('.tcases');
@@ -466,7 +466,8 @@ test('preferences: hidden test cases and editor options follow the settings', as
   await expect(page.locator('.editor-host .cm-line').first()).toHaveCSS('font-size', '16px');
   // The drawer was opened by hand earlier, and that is remembered.
   await expect(page.getByRole('tab', { name: /^Tests/ })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByText(/\d+ test cases · \d+ samples, \d+ hidden/)).toBeVisible();
+  // The same line as while they were concealed.
+  await expect(page.getByText(/^\d+ test cases · \d+ samples? · \d+ hidden$/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reveal all' })).toHaveCount(0);
 });
 
@@ -1221,7 +1222,7 @@ test('model: there is no picker with only one provider ready', async ({ page }) 
   await expect(page.getByRole('combobox', { name: 'Model' })).toHaveCount(0);
 });
 
-test('AI activity: a generation is logged with its raw request, and the list loads as it is scrolled', async ({ page }) => {
+test('AI activity: a generation is logged with its raw request, and the log is shown a numbered page at a time', async ({ page }) => {
   await open(page, '/new');
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
@@ -1240,13 +1241,24 @@ test('AI activity: a generation is logged with its raw request, and the list loa
   await newest.locator('.log-row').click();
   await expect(newest.getByRole('textbox')).toHaveCount(0);
 
-  // The rest of the log arrives as its end comes into view.
+  // The rest of the log is on numbered pages, kept in the address with the filters.
   await expect(rows).toHaveCount(50);
-  await rows.last().scrollIntoViewIfNeeded();
-  await expect(rows).toHaveCount(100);
+  await expect(page.locator('.pager-range')).toHaveText('Showing 1–50 of 247');
+  const pages = page.getByRole('navigation', { name: 'Pages' });
+  await pages.getByRole('link', { name: 'Page 2' }).click();
+  await expect(page).toHaveURL(/[?&]page=2/);
+  await expect(page.locator('.pager-range')).toHaveText('Showing 51–100 of 247');
+  await expect(rows).toHaveCount(50);
+  await expect(rows.first().locator('.log-row')).toHaveAttribute('aria-expanded', 'false');
+  await pages.getByRole('link', { name: 'Page 5' }).click();
+  await expect(page.locator('.pager-range')).toHaveText('Showing 201–247 of 247');
+  await expect(rows).toHaveCount(47);
 
-  // Filters are the server's.
+  // Filters are the server's, and a new one starts again from the first page.
   await choose(page.getByRole('combobox', { name: 'Outcome' }), 'Failed');
+  await expect(page).not.toHaveURL(/page=/);
+  await expect(page).toHaveURL(/[?&]status=failed/);
+  await expect(page.locator('.pager-range')).toHaveText(/^Showing 1–\d+ of \d+$/);
   await expect(rows.first()).toContainText('failed');
   await rows.first().locator('.log-row').click();
   await expect(rows.first().getByText('No response arrived.')).toBeVisible();
@@ -1420,21 +1432,20 @@ test('large test cases: a draft kept from before cases carried their generators 
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
   // The kept draft's cases lose their generators; the generation's reports still have them.
-  await expect.poll(() => page.evaluate(() => (localStorage.getItem('codeatrophy:capture:new') ?? '').includes('"generator"'))).toBe(true);
-  await page.evaluate(() => {
-    const key = 'codeatrophy:capture:new';
-    const kept: unknown = JSON.parse(localStorage.getItem(key)!);
-    const strip = (o: unknown): void => {
-      if (Array.isArray(o)) o.forEach(strip);
-      else if (o && typeof o === 'object') {
-        const r = o as Record<string, unknown>;
-        if (r.large) delete r.generator;
-        Object.values(r).forEach(strip);
-      }
-    };
-    strip(kept);
-    localStorage.setItem(key, JSON.stringify(kept));
-  });
+  const draftId = page.url().split('/drafts/')[1]!;
+  type Kept = { content: { form: unknown } | null };
+  await expect.poll(async () => JSON.stringify((await mockApi<Kept>(page, `/drafts/${draftId}`)).content).includes('"generator"')).toBe(true);
+  const kept = (await mockApi<Kept>(page, `/drafts/${draftId}`)).content!;
+  const strip = (o: unknown): void => {
+    if (Array.isArray(o)) o.forEach(strip);
+    else if (o && typeof o === 'object') {
+      const r = o as Record<string, unknown>;
+      if (r.large) delete r.generator;
+      Object.values(r).forEach(strip);
+    }
+  };
+  strip(kept.form);
+  await mockApi(page, `/drafts/${draftId}`, { method: 'PATCH', body: { content: kept } });
   await page.reload();
   await page.getByRole('button', { name: 'Show large cases' }).click();
   await expect(page.getByRole('textbox', { name: /^Generator of case \d+, Python/ })).toHaveCount(3);

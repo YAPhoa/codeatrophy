@@ -1,0 +1,143 @@
+import { expect, test, type Page } from '@playwright/test';
+import { open } from './support';
+
+// AI generations run as jobs on the server: leaving a screen never stops
+// one, the jobs window (bottom right) follows them, and new items in
+// progress are drafts on the server, listed under Drafts. With `?mock=default`
+// a generation takes a few seconds, time enough to leave its screen first.
+
+const TWO_SUM = '11111111-1111-4111-8111-000000000001';
+const COIN_CHANGE = '11111111-1111-4111-8111-000000000008';
+
+const jobsWindow = (page: Page) => page.getByRole('region', { name: 'AI jobs' });
+const drafts = (page: Page) => page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Drafts/ });
+
+test('jobs: a capture drafts on after its page is left, shows in the jobs window and under Drafts, and is reviewed on return', async ({ page }) => {
+  await open(page, '/new', 'default');
+  await expect(drafts(page)).toHaveText('Drafts');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/);
+
+  // Elsewhere: a pill says it runs, and the sidebar counts the draft.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await expect(page.getByRole('button', { name: 'AI jobs: 1 running' })).toBeVisible();
+  await expect(drafts(page)).toHaveText('Drafts1');
+
+  // Done while the user is elsewhere: the window opens to say so.
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('Two Sum', { timeout: 10_000 });
+  await expect(row).toContainText('Draft · Ready');
+
+  await drafts(page).click();
+  const listed = page.getByRole('list', { name: 'Drafts' }).getByRole('listitem');
+  await expect(listed).toHaveCount(1);
+  await expect(listed).toContainText('Two Sum');
+  await expect(listed).toContainText('Ready to review');
+
+  await jobsWindow(page).getByRole('button', { name: 'Open' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+  // Taken in, the job leaves the window.
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^AI jobs/ })).toHaveCount(0);
+});
+
+test('jobs: a draft keeps its edits through a reload, and saving it to the library takes it off the Drafts count', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
+  await expect(drafts(page)).toHaveText('Drafts1');
+
+  await page.getByLabel('Title').fill('Two Sum, kept');
+  await page.getByLabel('Summary').fill('Kept through a reload.');
+  // Saved shortly after the change: a reload finds it on the server.
+  await page.waitForTimeout(1200);
+  await page.reload();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum, kept');
+  await expect(page.getByLabel('Summary')).toHaveValue('Kept through a reload.');
+
+  await drafts(page).click();
+  await expect(page.getByRole('list', { name: 'Drafts' }).getByRole('listitem')).toContainText(['Two Sum, kept']);
+  await expect(page.getByRole('list', { name: 'Drafts' }).getByRole('listitem')).toContainText(['Edited']);
+  await page.getByRole('link', { name: /Two Sum, kept/ }).click();
+  await page.getByRole('button', { name: 'Save to library' }).first().click();
+  await expect(page).toHaveURL(/\/items\/[^/]+\/saved$/);
+  await expect(drafts(page)).toHaveText('Drafts');
+  await drafts(page).click();
+  await expect(page.getByRole('heading', { name: 'No drafts' })).toBeVisible();
+});
+
+test('jobs: a running job is cancelled from the jobs window, and the draft keeps what it had', async ({ page }) => {
+  await open(page, '/new');
+  // The mock takes a minute over a generation asked with MOCK:SLOW.
+  await page.getByLabel('What you have').fill('two sum MOCK:SLOW');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  await drafts(page).click();
+  await expect(page.getByRole('list', { name: 'Drafts' }).getByRole('listitem')).toContainText('Drafting…');
+
+  await page.getByRole('button', { name: 'AI jobs: 1 running' }).click();
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('two sum MOCK:SLOW');
+  await expect(row).toContainText(/Draft · \d+\u00a0s/);
+  await row.getByRole('button', { name: 'Cancel' }).click();
+  await expect(row).toContainText('Draft · Cancelled');
+  await expect(page.getByRole('list', { name: 'Drafts' }).getByRole('listitem')).toContainText('Not drafted');
+
+  // Dismissed, it is gone; the draft stays, with its input.
+  await row.getByRole('button', { name: 'Dismiss two sum MOCK:SLOW' }).click();
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await page.getByRole('link', { name: /two sum MOCK:SLOW/ }).click();
+  await expect(page.getByLabel('What you have')).toHaveValue('two sum MOCK:SLOW');
+  await expect(page.getByRole('button', { name: 'Draft with AI' })).toBeVisible();
+});
+
+test('jobs: generated test cases wait for their page, and are shown there once', async ({ page }) => {
+  await open(page, `/items/${TWO_SUM}/tests/generate`, 'default');
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
+  await expect(page.getByText('Writing a solution and test cases…')).toBeVisible();
+  // Leaving does not stop it, and asks nothing.
+  await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Test cases' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('Test cases · Ready', { timeout: 10_000 });
+  await row.getByRole('button', { name: 'Open' }).click();
+  await expect(page).toHaveURL(new RegExp(`/items/${TWO_SUM}/tests/generate$`));
+  await expect(page.getByRole('heading', { name: 'Proposed cases' })).toBeVisible();
+  await expect(jobsWindow(page)).toHaveCount(0);
+
+  // Collected: coming back again starts afresh.
+  await page.getByRole('link', { name: 'Discard' }).click();
+  await page.getByRole('dialog', { name: 'Discard the proposed test cases?' }).getByRole('button', { name: 'Discard proposals' }).click();
+  await page.getByRole('link', { name: /Generate/ }).first().click();
+  await expect(page.getByRole('button', { name: 'Generate test cases', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Proposed cases' })).toHaveCount(0);
+});
+
+test('jobs: code generated after its edit page was left is offered there, not applied', async ({ page }) => {
+  await open(page, `/items/${COIN_CHANGE}/edit`, 'default');
+  const section = page.getByRole('region', { name: 'What you write' });
+  const starter = section.locator('.starter-frame .cm-content');
+  await expect(starter).toContainText('data = sys.stdin.read().split()');
+  await section.getByRole('button', { name: 'Generate code' }).click();
+  await expect(section.getByText('Writing code for 5 languages…')).toBeVisible();
+  // Nothing was edited, so leaving asks nothing.
+  await page.locator('.review-bar').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(new RegExp(`/items/${COIN_CHANGE}$`));
+
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('Code · Ready', { timeout: 10_000 });
+  await row.getByRole('button', { name: 'Open' }).click();
+  await expect(page).toHaveURL(new RegExp(`/items/${COIN_CHANGE}/edit$`));
+  await expect(section.getByText('Generated code is ready')).toBeVisible();
+  // The form is as it was until the code is applied.
+  await expect(starter).toContainText('data = sys.stdin.read().split()');
+  await section.getByRole('button', { name: 'Apply generated code' }).click();
+  await expect(section.getByRole('status').filter({ hasText: 'Wrote starter code for 5 languages.' })).toBeVisible();
+  await expect(starter).toContainText('n, amount = map(int, input().split())');
+  await expect(section.getByText('Generated code is ready')).toHaveCount(0);
+});

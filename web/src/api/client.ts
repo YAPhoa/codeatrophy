@@ -5,7 +5,10 @@
 
 import type {
   AiCodeRequest,
-  AiCodeResponse,
+  AiJob,
+  AiJobDetail,
+  AiJobError,
+  AiJobListParams,
   AiProvider,
   AiProviderInput,
   AiProviderPatch,
@@ -17,7 +20,6 @@ import type {
   AiSettings,
   AiSettingsUpdate,
   AiTestCasesRequest,
-  AiTestCasesResponse,
   AiTestRequest,
   AiTestResponse,
   BulkRequest,
@@ -25,8 +27,13 @@ import type {
   Collection,
   CollectionCreate,
   CollectionPatch,
+  Draft,
+  DraftCreate,
+  DraftKind,
+  DraftPatch,
   DraftRequest,
-  DraftResponse,
+  DraftSaveRequest,
+  DraftSummary,
   ErrorBody,
   ErrorCode,
   ExportRequest,
@@ -70,7 +77,7 @@ import type {
 export const API_BASE = '/api/v1';
 
 /** Codes produced by the client itself, in addition to the server's. */
-export type ClientErrorCode = ErrorCode | 'network' | 'aborted' | 'unknown';
+export type ClientErrorCode = ErrorCode | 'interrupted' | 'network' | 'aborted' | 'unknown';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -99,6 +106,11 @@ export class ApiError extends Error {
 
 export function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
+}
+
+/** The error a failed AI job ended with, as the request that started it would have thrown it. */
+export function jobError(error: AiJobError): ApiError {
+  return new ApiError(0, error.code, error.message, error.fields ?? {});
 }
 
 export function isAbort(err: unknown): boolean {
@@ -310,13 +322,31 @@ export const api = {
   },
 
   ai: {
-    draft: (body: DraftRequest, signal?: AbortSignal) =>
-      request<DraftResponse>('POST', '/ai/draft', { body, signal }),
-    variant: (itemId: string, body: VariantRequest, signal?: AbortSignal) =>
-      request<DraftResponse>('POST', `/items/${enc(itemId)}/ai/variant`, { body, signal }),
-    testCases: (itemId: string, body: AiTestCasesRequest, signal?: AbortSignal) =>
-      request<AiTestCasesResponse>('POST', `/items/${enc(itemId)}/ai/testcases`, { body, signal }),
-    code: (body: AiCodeRequest, signal?: AbortSignal) => request<AiCodeResponse>('POST', '/ai/code', { body, signal }),
+    /** Starts a test-case generation; the job's result is a `AiTestCasesResponse`. */
+    testCases: (itemId: string, body: AiTestCasesRequest) => request<AiJob>('POST', `/items/${enc(itemId)}/ai/testcases`, { body }),
+    /** Starts a code generation; the job's result is a `AiCodeResponse`. */
+    code: (body: AiCodeRequest) => request<AiJob>('POST', '/ai/code', { body }),
+    /** Newest first; by default only the jobs whose outcome has not been collected. */
+    jobs: (params: AiJobListParams = {}, signal?: AbortSignal) => request<List<AiJob>>('GET', '/ai/jobs', { query: { ...params }, signal }),
+    job: <R = unknown>(id: string, signal?: AbortSignal) => request<AiJobDetail<R>>('GET', `/ai/jobs/${enc(id)}`, { signal }),
+    cancel: (id: string) => request<AiJob>('POST', `/ai/jobs/${enc(id)}/cancel`),
+    /** Marks a finished job's outcome as collected. */
+    pickup: <R = unknown>(id: string) => request<AiJobDetail<R>>('POST', `/ai/jobs/${enc(id)}/pickup`),
+    /** Cancels the job if it is active, then removes it. */
+    dismiss: (id: string) => request<void>('DELETE', `/ai/jobs/${enc(id)}`),
+  },
+
+  drafts: {
+    list: (params: { kind?: DraftKind; variantOf?: string } = {}, signal?: AbortSignal) => request<List<DraftSummary>>('GET', '/drafts', { query: { ...params }, signal }),
+    create: (body: DraftCreate) => request<Draft>('POST', '/drafts', { body }),
+    get: (id: string, signal?: AbortSignal) => request<Draft>('GET', `/drafts/${enc(id)}`, { signal }),
+    update: (id: string, patch: DraftPatch, opts: { keepalive?: boolean } = {}) => request<Draft>('PATCH', `/drafts/${enc(id)}`, { body: patch, keepalive: opts.keepalive }),
+    /** Starts a generation: a draft request for a `capture` draft, a variant request for a `variant` one. */
+    generate: (id: string, body: DraftRequest | VariantRequest) => request<Draft>('POST', `/drafts/${enc(id)}/generate`, { body }),
+    retry: (id: string) => request<Draft>('POST', `/drafts/${enc(id)}/retry`),
+    /** Creates the item and deletes the draft, in one step. */
+    save: (id: string, body: DraftSaveRequest) => request<Item>('POST', `/drafts/${enc(id)}/save`, { body }),
+    remove: (id: string) => request<void>('DELETE', `/drafts/${enc(id)}`),
   },
 
   styles: {

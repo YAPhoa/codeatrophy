@@ -2,6 +2,8 @@ import { Navigate, Route, createRoutesFromElements, useLocation } from 'react-ro
 import { Shell } from './app/Shell';
 import {
   CapturePage,
+  DraftPage,
+  DraftsPage,
   EditItemPage,
   GenerateTestsPage,
   ItemPage,
@@ -27,6 +29,8 @@ export const routes = createRoutesFromElements(
     <Route index element={<LibraryPage />} />
     <Route path="collections/:collectionId" element={<LibraryPage />} />
     <Route path="new" element={<CapturePage />} />
+    <Route path="drafts" element={<DraftsPage />} />
+    <Route path="drafts/:id" element={<DraftPage />} />
     <Route path="items/:id" element={<ItemPage />} />
     <Route path="items/:id/edit" element={<EditItemPage />} />
     <Route path="items/:id/saved" element={<SavedPage />} />

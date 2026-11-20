@@ -60,6 +60,17 @@ type CodeResponse struct {
 // each runner the way the draft check does. Only languages that were asked
 // for come back. Nothing is saved; the problem need not be saved either.
 func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, error) {
+	t, err := a.prepareCode(ctx, in)
+	if err != nil {
+		return CodeResponse{}, err
+	}
+	return t.run(ctx)
+}
+
+// prepareCode validates a code request; the generation is left to the
+// task's run.
+func (a *App) prepareCode(ctx context.Context, in CodeInput) (task[CodeResponse], error) {
+	type T = task[CodeResponse]
 	fe := domain.FieldErrors{}
 	title := strings.TrimSpace(domain.NormalizeText(in.Title))
 	body := domain.NormalizeText(in.Body)
@@ -99,7 +110,7 @@ func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, err
 		}
 	}
 	if err := errValidation(fe); err != nil {
-		return CodeResponse{}, err
+		return T{}, err
 	}
 	subject := &logSubject{}
 	if title != "" {
@@ -109,9 +120,9 @@ func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, err
 		it, err := a.GetItem(ctx, in.ItemID.Val)
 		if err != nil {
 			if AsError(err).Code == CodeNotFound {
-				return CodeResponse{}, errField("itemId", "item does not exist")
+				return T{}, errField("itemId", "item does not exist")
 			}
-			return CodeResponse{}, err
+			return T{}, err
 		}
 		subject.ItemID = &it.ID
 		if subject.Title == nil {
@@ -120,44 +131,54 @@ func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, err
 	}
 	preset, err := a.resolveStyle(ctx, in.StyleID)
 	if err != nil {
-		return CodeResponse{}, err
+		return T{}, err
 	}
 	provider, err := a.activeAI(ctx, in.ProviderID)
 	if err != nil {
-		return CodeResponse{}, err
+		return T{}, err
 	}
-	conventions, err := a.Conventions(ctx)
-	if err != nil {
-		return CodeResponse{}, err
-	}
-	// Large test data never goes into a prompt.
-	samples := []map[string]any{}
-	for _, s := range in.Samples[:min(len(in.Samples), maxCodeSamples)] {
-		if isLargeData(s.Stdin, s.ExpectedStdout) {
-			samples = append(samples, map[string]any{"omitted": largeCaseInfo(s.Stdin, s.ExpectedStdout)})
-			continue
+	run := func(ctx context.Context) (CodeResponse, error) {
+		conventions, err := a.Conventions(ctx)
+		if err != nil {
+			return CodeResponse{}, err
 		}
-		samples = append(samples, map[string]any{"stdin": s.Stdin, "expectedStdout": s.ExpectedStdout})
+		// Large test data never goes into a prompt.
+		samples := []map[string]any{}
+		for _, s := range in.Samples[:min(len(in.Samples), maxCodeSamples)] {
+			if isLargeData(s.Stdin, s.ExpectedStdout) {
+				samples = append(samples, map[string]any{"omitted": largeCaseInfo(s.Stdin, s.ExpectedStdout)})
+				continue
+			}
+			samples = append(samples, map[string]any{"stdin": s.Stdin, "expectedStdout": s.ExpectedStdout})
+		}
+		problemJSON, _ := json.MarshalIndent(map[string]any{"title": title, "body": body, "interface": iface, "sampleTestCases": samples}, "", "  ")
+		function := iface == domain.InterfaceFunction
+		style, ref := styleOf(preset)
+		system, user := ai.CodePrompt{Conventions: conventions, Style: style, Problem: string(problemJSON), Function: function,
+			Languages: langs, Toolchains: a.toolchains(ctx)}.Build()
+		out := CodeResponse{StarterCode: map[string]string{}, Harness: map[string]domain.HarnessCode{}, Style: ref}
+		out.Usage, err = a.generate(ctx, "code", provider, subject, ai.GenerateRequest{
+			System:     system,
+			User:       user,
+			Schema:     ai.CodeSchema(langs, function),
+			SchemaName: "code",
+		}, func(raw json.RawMessage) error { return a.parseCode(raw, langs, function, &out) })
+		if err != nil {
+			return CodeResponse{}, err
+		}
+		if function {
+			out.Check = a.checkCode(ctx, &out, in.Samples)
+		}
+		return out, nil
 	}
-	problemJSON, _ := json.MarshalIndent(map[string]any{"title": title, "body": body, "interface": iface, "sampleTestCases": samples}, "", "  ")
-	function := iface == domain.InterfaceFunction
-	style, ref := styleOf(preset)
-	system, user := ai.CodePrompt{Conventions: conventions, Style: style, Problem: string(problemJSON), Function: function,
-		Languages: langs, Toolchains: a.toolchains(ctx)}.Build()
-	out := CodeResponse{StarterCode: map[string]string{}, Harness: map[string]domain.HarnessCode{}, Style: ref}
-	out.Usage, err = a.generate(ctx, "code", provider, subject, ai.GenerateRequest{
-		System:     system,
-		User:       user,
-		Schema:     ai.CodeSchema(langs, function),
-		SchemaName: "code",
-	}, func(raw json.RawMessage) error { return a.parseCode(raw, langs, function, &out) })
-	if err != nil {
-		return CodeResponse{}, err
+	jt := title
+	if jt == "" && subject.Title != nil {
+		jt = *subject.Title
 	}
-	if function {
-		out.Check = a.checkCode(ctx, &out, in.Samples)
+	if jt == "" {
+		jt = jobTitle(body)
 	}
-	return out, nil
+	return T{itemID: subject.ItemID, title: jt, run: run}, nil
 }
 
 // parseCode decodes the model's code into out, keeping one entry for each

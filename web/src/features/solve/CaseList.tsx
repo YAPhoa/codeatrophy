@@ -1,4 +1,3 @@
-import { Link } from 'react-router';
 import { Eye, EyeOff, FlaskConical, Settings2 } from 'lucide-react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { Item, TestCase } from '../../api/types';
@@ -58,12 +57,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
   return (
     <div className="tcases">
       <div className="tcases-head">
-        <span className="tcases-summary">{describeCases(list.length, samples, reveal.hiding)}</span>
-        {concealed > 0 && (
-          <span className="tcases-note">
-            · hidden until revealed (<Link to="/settings/preferences">change in Settings</Link>)
-          </span>
-        )}
+        <span className="tcases-summary">{describeCases(list.length, samples)}</span>
         <span className="spacer" />
         {concealed > 0 && (
           <Button size="sm" icon={<Eye size={14} />} onClick={reveal.revealAll}>

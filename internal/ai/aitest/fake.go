@@ -18,6 +18,10 @@ type Provider struct {
 	// request. When nil, Responses are returned in order.
 	Respond   func(req ai.GenerateRequest) (any, error)
 	Responses []any
+	// Hold, when set, runs at the start of each Generate, after the request
+	// is recorded; an error it returns is the request's error. It lets a
+	// test keep a request running, and see it cancelled through ctx.
+	Hold func(ctx context.Context) error
 	// ListModelsFunc answers ListModels; when nil, the list holds Model().
 	ListModelsFunc func() ([]string, error)
 	// Token counts reported with every answer.
@@ -70,6 +74,11 @@ func (p *Provider) Generate(ctx context.Context, req ai.GenerateRequest) (ai.Gen
 	p.deadlines = append(p.deadlines, deadline)
 	n := len(p.requests)
 	p.mu.Unlock()
+	if p.Hold != nil {
+		if err := p.Hold(ctx); err != nil {
+			return ai.GenerateResponse{Model: p.Model()}, err
+		}
+	}
 	var out any
 	var err error
 	switch {

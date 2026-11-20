@@ -87,6 +87,11 @@ func (t *tx) ListAILog(f store.AILogFilter) ([]store.AILogEntry, int, error) {
 	q := `SELECT ` + aiLogColumns + ` FROM ai_log WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at DESC, id DESC`
 	if f.Limit > 0 {
 		q += " LIMIT " + arg(f.Limit)
+	} else if f.Offset > 0 {
+		q += " LIMIT -1"
+	}
+	if f.Offset > 0 {
+		q += " OFFSET " + arg(f.Offset)
 	}
 	out := []store.AILogEntry{}
 	err := t.eachRow(q, args, func(rows *sql.Rows) error {

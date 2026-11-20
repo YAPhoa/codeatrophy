@@ -123,6 +123,8 @@ type AILogFilter struct {
 	// Before starts the page after this entry (keyset paging).
 	Before *AILogCursor
 	Limit  int
+	// Offset skips that many entries (after Before, if both are set).
+	Offset int
 }
 
 // AILogCursor is a position in the AI log, which is ordered newest first
@@ -130,6 +132,80 @@ type AILogFilter struct {
 type AILogCursor struct {
 	CreatedAt time.Time
 	ID        string
+}
+
+// AIJob is one AI request run in the background. Request, Result and Error
+// are JSON documents; stores compress the request and the result (see
+// CompressText). Result is set for a job that succeeded, Error for one that
+// failed.
+type AIJob struct {
+	ID        string
+	CreatedAt time.Time
+	Kind      string
+	ItemID    *string
+	// DraftID is the draft the job generates for, if any.
+	DraftID *string
+	Title   string
+	Status  string
+	// Origin is an opaque string the client gave (the screen to return to).
+	Origin     *string
+	Request    string
+	Result     *string
+	Error      *string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	PickedUpAt *time.Time
+}
+
+// AIJob statuses. Queued and running jobs are active; the others are
+// finished.
+const (
+	JobQueued    = "queued"
+	JobRunning   = "running"
+	JobSucceeded = "succeeded"
+	JobFailed    = "failed"
+	JobCancelled = "cancelled"
+)
+
+// AIJobFilter selects AI jobs; zero values select everything.
+type AIJobFilter struct {
+	// Active selects queued and running jobs only.
+	Active  bool
+	Kind    string
+	ItemID  string
+	DraftID string
+	// PickedUp, when set, selects jobs whose result was (true) or was not
+	// (false) picked up.
+	PickedUp *bool
+	Limit    int
+}
+
+// Draft is a new item in progress. Request, Generation and Content are
+// JSON documents, which stores compress (see CompressText); Error is JSON.
+type Draft struct {
+	ID        string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Kind      string
+	VariantOf *string
+	// Title is the label lists show; ClientTitle the title the client set.
+	Title         string
+	ClientTitle   *string
+	Revision      int
+	Edited        bool
+	Request       *string
+	JobID         *string
+	Error         *string
+	Generation    *string
+	GenerationSeq int
+	Content       *string
+	BasedOn       int
+}
+
+// DraftFilter selects drafts; zero values select everything.
+type DraftFilter struct {
+	Kind      string
+	VariantOf string
 }
 
 // UsageDay is the UTC day of t, in days since 1970-01-01: the unit AI usage
@@ -267,6 +343,30 @@ type Tx interface {
 	GetAILogEntry(id string) (AILogEntry, AILogBody, error)
 	// DeleteAILog removes the entries created before the time, or all.
 	DeleteAILog(before *time.Time) error
+
+	// AI jobs, newest first by (created time, id). GetAIJob reads the
+	// request and the result; ListAIJobs leaves them out (Request "",
+	// Result nil). UpdateAIJob changes everything but the id, the creation
+	// time, the kind and the request.
+	InsertAIJob(j *AIJob) error
+	GetAIJob(id string) (AIJob, error)
+	ListAIJobs(f AIJobFilter) ([]AIJob, error)
+	UpdateAIJob(j *AIJob) error
+	DeleteAIJob(id string) (bool, error)
+	// PruneAIJobs deletes finished jobs that finished before the time, and
+	// then every finished job beyond the newest keep jobs (counting active
+	// ones, which are never deleted). It returns how many it deleted.
+	PruneAIJobs(finishedBefore time.Time, keep int) (int, error)
+
+	// Drafts, most recently changed first by (updated time, id).
+	// GetDraft reads every field; ListDrafts leaves out Request, Generation
+	// and Content. UpdateDraft changes everything but the id, the creation
+	// time and the kind.
+	InsertDraft(d *Draft) error
+	GetDraft(id string) (Draft, error)
+	ListDrafts(f DraftFilter) ([]Draft, error)
+	UpdateDraft(d *Draft) error
+	DeleteDraft(id string) (bool, error)
 
 	// Settings are opaque key/value pairs.
 	GetSetting(key string) (string, bool, error)

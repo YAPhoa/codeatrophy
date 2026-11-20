@@ -86,6 +86,82 @@ func newServer(t *testing.T, opts ...func(*httpapi.Options)) *client {
 	return &client{t: t, srv: srv, ai: fake}
 }
 
+// statusOfCode maps an error code to the HTTP status a synchronous request
+// would have answered with.
+var statusOfCode = map[string]int{"upstream_error": 502, "ai_unavailable": 503, "validation_failed": 422,
+	"not_found": 404, "conflict": 409, "internal": 500, "interrupted": 500, "judge_unavailable": 503}
+
+// generate starts an AI generation the way the old synchronous endpoints
+// were called — /ai/draft and /items/{id}/ai/variant become drafts — and
+// waits for its job. A request refused up front is returned as it is; a
+// job that succeeded as 200 with its result; a failed one as its error
+// with the status the endpoint used to give.
+func (c *client) generate(path, body string) response {
+	c.t.Helper()
+	target := path
+	switch {
+	case strings.HasSuffix(path, "/ai/draft"):
+		target, body = api+"/drafts", `{"kind":"capture","generate":`+body+`}`
+	case strings.HasSuffix(path, "/ai/variant"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, api+"/items/"), "/ai/variant")
+		target, body = api+"/drafts", `{"kind":"variant","variantOf":"`+id+`","generate":`+body+`}`
+	}
+	r := c.do("POST", target, body)
+	if r.status != http.StatusAccepted {
+		return r
+	}
+	m := r.json(c.t)
+	id, _ := m["id"].(string)
+	if job, ok := m["job"].(map[string]any); ok {
+		id = job["id"].(string)
+	}
+	j := c.waitJob(id)
+	var detail struct {
+		Status string          `json:"status"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	raw := c.expect("GET", api+"/ai/jobs/"+id, "", 200).body
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		c.t.Fatal(err)
+	}
+	switch detail.Status {
+	case "succeeded":
+		return response{status: 200, body: detail.Result}
+	case "failed":
+		code := j["error"].(map[string]any)["code"].(string)
+		return response{status: statusOfCode[code], body: []byte(`{"error":` + string(detail.Error) + `}`)}
+	}
+	c.t.Fatalf("job %s ended %s", id, detail.Status)
+	return response{}
+}
+
+// expectAI is generate with an expected status.
+func (c *client) expectAI(path, body string, status int) response {
+	c.t.Helper()
+	r := c.generate(path, body)
+	if r.status != status {
+		c.t.Fatalf("POST %s: status %d, want %d: %s", path, r.status, status, r.body)
+	}
+	return r
+}
+
+// waitJob polls an AI job until it has finished.
+func (c *client) waitJob(id string) map[string]any {
+	c.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		j := c.expect("GET", api+"/ai/jobs/"+id, "", 200).json(c.t)
+		if s := j["status"]; s != "queued" && s != "running" {
+			return j
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("job %s is still %v", id, j["status"])
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 type response struct {
 	status int
 	header http.Header
@@ -377,7 +453,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		t.Errorf("meta ai while switched off: %v", m)
 	}
 	for _, js := range []string{`{"text":"x"}`, `{"text":"x","providerId":"` + id + `"}`} {
-		if e := c.expect("POST", api+"/ai/draft", js, 503).json(t)["error"].(map[string]any); e["code"] != "ai_unavailable" {
+		if e := c.expectAI(api+"/ai/draft", js, 503).json(t)["error"].(map[string]any); e["code"] != "ai_unavailable" {
 			t.Errorf("draft while switched off: %v", e)
 		}
 	}
@@ -488,7 +564,7 @@ func TestGeminiKindEndpoints(t *testing.T) {
 
 func TestStylesAndDraftEndpoints(t *testing.T) {
 	c := newServer(t)
-	c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 503)
+	c.expectAI(api+"/ai/draft", `{"text":"x"}`, 503)
 	ap := c.expect("POST", api+"/settings/ai/providers", `{"name":"A","kind":"anthropic","apiKey":"sk-1234"}`, 201).json(t)
 	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+ap["id"].(string)+`"}`, 200)
 	p := c.expect("POST", api+"/styles", `{"name":"House","instructions":"HOUSE-STYLE","isDefault":true}`, 201).json(t)
@@ -501,23 +577,23 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 		return map[string]any{"type": "reading", "title": "T", "summary": "", "body": "b", "difficulty": nil, "tags": []string{},
 			"problem": nil, "testCases": []any{}, "assumptions": []string{}}, nil
 	}
-	d := c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 200).json(t)
+	d := c.expectAI(api+"/ai/draft", `{"text":"x"}`, 200).json(t)
 	if st := d["style"].(map[string]any); st["id"] != p["id"] || st["name"] != "House" {
 		t.Errorf("style: %v", d["style"])
 	}
 	if d["draft"].(map[string]any)["problem"] != nil || len(d["draft"].(map[string]any)["testCases"].([]any)) != 0 {
 		t.Errorf("draft: %v", d["draft"])
 	}
-	d = c.expect("POST", api+"/ai/draft", `{"text":"x","styleId":null}`, 200).json(t)
+	d = c.expectAI(api+"/ai/draft", `{"text":"x","styleId":null}`, 200).json(t)
 	if v, ok := d["style"]; !ok || v != nil {
 		t.Errorf("style should be present and null: %v", d)
 	}
-	c.expect("POST", api+"/ai/draft", `{"text":"x","styleId":"nope"}`, 422)
+	c.expectAI(api+"/ai/draft", `{"text":"x","styleId":"nope"}`, 422)
 	c.expect("PATCH", api+"/styles/"+p["id"].(string), `{"isDefault":false}`, 200)
 	c.expect("DELETE", api+"/styles/"+p["id"].(string), "", 204)
 	c.expect("DELETE", api+"/styles/"+p["id"].(string), "", 404)
 	c.ai.Respond = func(ai.GenerateRequest) (any, error) { return nil, ai.Errorf(500, "provider exploded") }
-	if r := c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 502); r.errorCode(t) != "upstream_error" {
+	if r := c.expectAI(api+"/ai/draft", `{"text":"x"}`, 502); r.errorCode(t) != "upstream_error" {
 		t.Error("upstream error code")
 	}
 
@@ -526,7 +602,7 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 	if v, ok := d["check"]; !ok || v != nil {
 		t.Errorf("check of a reading: %v", d["check"])
 	}
-	c.expect("POST", api+"/ai/draft", `{"text":"x","largeTestCases":"yes"}`, 422)
+	c.expectAI(api+"/ai/draft", `{"text":"x","largeTestCases":"yes"}`, 422)
 
 	// The usage of a generation, and the AI log.
 	u := d["usage"].(map[string]any)
@@ -554,6 +630,19 @@ func TestStylesAndDraftEndpoints(t *testing.T) {
 	detail := c.expect("GET", api+"/settings/ai/log/"+u["logId"].(string), "", 200).json(t)
 	if detail["request"].(map[string]any)["schema"] != "item_draft" || detail["truncated"] != false || detail["response"] == nil {
 		t.Errorf("detail: %v", detail)
+	}
+	// Numbered pages.
+	second := c.expect("GET", api+"/settings/ai/log?limit=2&offset=2", "", 200).json(t)
+	if l := second["items"].([]any); len(l) != 1 || second["total"] != float64(3) || second["next"] != nil ||
+		l[0].(map[string]any)["id"] != next["items"].([]any)[0].(map[string]any)["id"] {
+		t.Errorf("offset page: %v", second)
+	}
+	if l := c.expect("GET", api+"/settings/ai/log?offset=1", "", 200).json(t)["items"].([]any); len(l) != 2 ||
+		l[0].(map[string]any)["id"] != items[1].(map[string]any)["id"] {
+		t.Errorf("offset 1: %v", l)
+	}
+	for _, q := range []string{"offset=-1", "offset=x", "limit=0", "limit=201", "offset=0&before=" + page["next"].(string)} {
+		c.expect("GET", api+"/settings/ai/log?"+q, "", 400)
 	}
 	c.expect("GET", api+"/settings/ai/log?before=garbage", "", 400)
 	c.expect("GET", api+"/settings/ai/log/nope", "", 404)
@@ -598,11 +687,11 @@ func TestAIRoutesTakeAProvider(t *testing.T) {
 	}
 	for _, r := range routes {
 		c.ai.Respond = func(ai.GenerateRequest) (any, error) { return r.answer, nil }
-		c.expect("POST", r.path, `{`+r.body+`}`, 200)
+		c.expectAI(r.path, `{`+r.body+`}`, 200)
 		if k := lastKey(); k != "sk-ant-def-1111" {
 			t.Errorf("%s without providerId used %q", r.path, k)
 		}
-		res := c.expect("POST", r.path, `{`+r.body+`,"providerId":"`+other["id"].(string)+`"}`, 200)
+		res := c.expectAI(r.path, `{`+r.body+`,"providerId":"`+other["id"].(string)+`"}`, 200)
 		if k := lastKey(); k != "sk-ant-other-2222" {
 			t.Errorf("%s with providerId used %q", r.path, k)
 		}
@@ -612,14 +701,14 @@ func TestAIRoutesTakeAProvider(t *testing.T) {
 			t.Errorf("%s: %s", r.path, res.body)
 		}
 		for _, n := range []string{"-1", "6", "1.5", "true"} {
-			res := c.expect("POST", r.path, `{`+r.body+`,"largeTestCases":`+n+`}`, 422)
+			res := c.expectAI(r.path, `{`+r.body+`,"largeTestCases":`+n+`}`, 422)
 			if e := res.json(t)["error"].(map[string]any); e["fields"].(map[string]any)["largeTestCases"] == nil {
 				t.Errorf("%s with largeTestCases %s: %s", r.path, n, res.body)
 			}
 		}
-		c.expect("POST", r.path, `{`+r.body+`,"largeTestCases":5}`, 200)
+		c.expectAI(r.path, `{`+r.body+`,"largeTestCases":5}`, 200)
 		for _, bad := range []string{`"nope"`, `5`, `["x"]`} {
-			res := c.expect("POST", r.path, `{`+r.body+`,"providerId":`+bad+`}`, 422)
+			res := c.expectAI(r.path, `{`+r.body+`,"providerId":`+bad+`}`, 422)
 			if e := res.json(t)["error"].(map[string]any); e["code"] != "validation_failed" || e["fields"].(map[string]any)["providerId"] == nil {
 				t.Errorf("%s with providerId %s: %s", r.path, bad, res.body)
 			}
@@ -635,9 +724,9 @@ func TestAIRoutesTakeAProvider(t *testing.T) {
 func TestCodeEndpoint(t *testing.T) {
 	c := newServer(t)
 	form := `"title":"Coin Change","body":"## Input\n\nn and amount.","languages":["python","cpp"],"samples":[{"stdin":"3 11\n1 2 5\n","expectedStdout":"3\n"}]`
-	c.expect("POST", api+"/ai/code", `{`+form+`}`, 503)
-	c.expect("POST", api+"/ai/code", `{"body":"x","languages":["cobol"]}`, 422)
-	c.expect("POST", api+"/ai/code", `{"body":"x","languages":"python"}`, 422)
+	c.expectAI(api+"/ai/code", `{`+form+`}`, 503)
+	c.expectAI(api+"/ai/code", `{"body":"x","languages":["cobol"]}`, 422)
+	c.expectAI(api+"/ai/code", `{"body":"x","languages":"python"}`, 422)
 	c.expect("GET", api+"/ai/code", "", 405)
 	def := c.expect("POST", api+"/settings/ai/providers", `{"name":"Default","kind":"anthropic","apiKey":"sk-ant-def-1111"}`, 201).json(t)
 	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+def["id"].(string)+`"}`, 200)
@@ -648,7 +737,7 @@ func TestCodeEndpoint(t *testing.T) {
 			{"language": "go", "starterCode": "package main", "prefix": "", "suffix": ""},
 		}}, nil
 	}
-	res := c.expect("POST", api+"/ai/code", `{`+form+`}`, 200)
+	res := c.expectAI(api+"/ai/code", `{`+form+`}`, 200)
 	got := res.json(t)
 	if sc := got["starterCode"].(map[string]any); len(sc) != 1 || sc["python"] != "sum" || got["check"] != nil || got["style"] != nil {
 		t.Errorf("program: %s", res.body)
@@ -660,7 +749,7 @@ func TestCodeEndpoint(t *testing.T) {
 		cs := c.ai.Configs()
 		return cs[len(cs)-1].APIKey
 	}
-	res = c.expect("POST", api+"/ai/code", `{`+form+`,"interface":"function","providerId":"`+other["id"].(string)+`"}`, 200)
+	res = c.expectAI(api+"/ai/code", `{`+form+`,"interface":"function","providerId":"`+other["id"].(string)+`"}`, 200)
 	got = res.json(t)
 	if k := lastKey(); k != "sk-ant-other-2222" {
 		t.Errorf("providerId: used %q", k)
@@ -669,13 +758,13 @@ func TestCodeEndpoint(t *testing.T) {
 	if h := got["harness"].(map[string]any); len(h) != 1 || h["python"] == nil || ch["attempted"] != true || len(ch["runners"].([]any)) != 1 {
 		t.Errorf("function: %s", res.body)
 	}
-	c.expect("POST", api+"/ai/code", `{`+form+`,"providerId":"nope"}`, 422)
+	c.expectAI(api+"/ai/code", `{`+form+`,"providerId":"nope"}`, 422)
 	entry := c.expect("GET", api+"/settings/ai/log?operation=code", "", 200).json(t)
 	if entry["total"] != float64(2) {
 		t.Errorf("log: %v", entry)
 	}
 	c.ai.Respond = func(ai.GenerateRequest) (any, error) { return map[string]any{"code": []any{}}, nil }
-	if r := c.expect("POST", api+"/ai/code", `{`+form+`}`, 502); r.errorCode(t) != "upstream_error" {
+	if r := c.expectAI(api+"/ai/code", `{`+form+`}`, 502); r.errorCode(t) != "upstream_error" {
 		t.Error("upstream error code")
 	}
 }
@@ -1120,4 +1209,100 @@ func TestCanceledRequestIsNotAnInternalError(t *testing.T) {
 			t.Errorf("%s: %d for a canceled request: %s", path, rec.Code, rec.Body)
 		}
 	}
+}
+
+// AI generations are jobs: they answer 202 at once, and their outcome is
+// read from the job or, for a draft, from the draft.
+func TestAIJobAndDraftEndpoints(t *testing.T) {
+	c := newServer(t)
+	c.expect("POST", api+"/drafts", `{"kind":"capture","generate":{"text":"x"}}`, 503)
+	ap := c.expect("POST", api+"/settings/ai/providers", `{"name":"A","kind":"anthropic","apiKey":"sk-1234"}`, 201).json(t)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+ap["id"].(string)+`"}`, 200)
+	c.ai.Respond = func(ai.GenerateRequest) (any, error) {
+		return map[string]any{"type": "reading", "title": "Generated", "summary": "", "body": "b", "difficulty": nil,
+			"tags": []string{}, "problem": nil, "testCases": []any{}, "assumptions": []string{}}, nil
+	}
+	c.expect("POST", api+"/ai/draft", `{"text":"x"}`, 404)
+	if r := c.expect("POST", api+"/drafts", `{"kind":"capture","generate":{"text":""}}`, 422); !strings.Contains(string(r.body), `"text"`) {
+		t.Errorf("generate field names: %s", r.body)
+	}
+	d := c.expect("POST", api+"/drafts", `{"kind":"capture","generate":{"text":"some notes","origin":"/drafts"}}`, 202).json(t)
+	id := d["id"].(string)
+	job := d["job"].(map[string]any)
+	if d["state"] != "drafting" || job["draftId"] != id || job["kind"] != "draft" || job["origin"] != "/drafts" {
+		t.Errorf("started: %v", d)
+	}
+	c.waitJob(job["id"].(string))
+	got := c.expect("GET", api+"/drafts/"+id, "", 200).json(t)
+	if got["state"] != "ready" || got["title"] != "Generated" || got["generationSeq"] != float64(1) ||
+		got["generation"].(map[string]any)["draft"].(map[string]any)["title"] != "Generated" {
+		t.Errorf("generated: %v", got)
+	}
+	list := c.expect("GET", api+"/drafts", "", 200).json(t)["items"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["generation"] != nil || list[0].(map[string]any)["state"] != "ready" {
+		t.Errorf("list: %v", list)
+	}
+	jobs := c.expect("GET", api+"/ai/jobs?draftId="+id, "", 200).json(t)["items"].([]any)
+	if len(jobs) != 1 || jobs[0].(map[string]any)["result"] != nil {
+		t.Errorf("jobs: %v", jobs)
+	}
+	c.expect("PATCH", api+"/drafts/"+id, `{"basedOn":1,"content":{"form":{}},"expectedRevision":2}`, 200)
+	if r := c.expect("PATCH", api+"/drafts/"+id, `{"edited":true,"expectedRevision":2}`, 409); !strings.Contains(string(r.body), `"revision":3`) {
+		t.Errorf("conflict: %s", r.body)
+	}
+	if jobs := c.expect("GET", api+"/ai/jobs", "", 200).json(t)["items"].([]any); len(jobs) != 0 {
+		t.Errorf("an adopted job is listed: %v", jobs)
+	}
+	c.expect("POST", api+"/drafts/"+id+"/generate", `{"text":"again","instruction":"shorter"}`, 202)
+	c.waitJob(c.expect("GET", api+"/drafts/"+id, "", 200).json(t)["job"].(map[string]any)["id"].(string))
+	c.expect("POST", api+"/drafts/"+id+"/retry", "", 202)
+	c.expect("POST", api+"/drafts/"+id+"/save", `{"item":{"type":"reading"}}`, 422)
+	c.waitJob(c.expect("GET", api+"/drafts/"+id, "", 200).json(t)["job"].(map[string]any)["id"].(string))
+	it := c.expect("POST", api+"/drafts/"+id+"/save", `{"item":{"type":"reading","title":"Kept"}}`, 201).json(t)
+	if it["title"] != "Kept" {
+		t.Errorf("saved: %v", it)
+	}
+	c.expect("GET", api+"/drafts/"+id, "", 404)
+	c.expect("GET", api+"/items/"+it["id"].(string), "", 200)
+
+	// A variant draft, written by hand, then discarded.
+	v := c.expect("POST", api+"/drafts", `{"kind":"variant","variantOf":"`+it["id"].(string)+`","content":{}}`, 201).json(t)
+	if v["state"] != "edited" || v["title"] != "Variant of Kept" || v["job"] != nil {
+		t.Errorf("variant: %v", v)
+	}
+	c.expect("POST", api+"/items/"+it["id"].(string)+"/ai/variant", `{"mode":"similar"}`, 404)
+	c.expect("GET", api+"/drafts?variantOf="+it["id"].(string), "", 200)
+	c.expect("GET", api+"/drafts?kind=note", "", 400)
+	c.expect("POST", api+"/drafts/"+v["id"].(string)+"/retry", "", 422)
+	c.expect("DELETE", api+"/drafts/"+v["id"].(string), "", 204)
+	c.expect("DELETE", api+"/drafts/"+v["id"].(string), "", 404)
+
+	// A job that is not a draft's, followed to the end, picked up and
+	// dismissed.
+	c.ai.Respond = func(ai.GenerateRequest) (any, error) {
+		return map[string]any{"code": []map[string]string{{"language": "python", "starterCode": "x", "prefix": "", "suffix": ""}}}, nil
+	}
+	j := c.expect("POST", api+"/ai/code", `{"body":"x","languages":["python"]}`, 202).json(t)
+	jid := j["id"].(string)
+	if j["status"] != "queued" || j["kind"] != "code" || j["draftId"] != nil {
+		t.Errorf("code job: %v", j)
+	}
+	c.waitJob(jid)
+	detail := c.expect("GET", api+"/ai/jobs/"+jid, "", 200).json(t)
+	if detail["result"].(map[string]any)["starterCode"] == nil || detail["title"] != "x" || detail["request"].(map[string]any)["body"] != "x" {
+		t.Errorf("detail: %v", detail)
+	}
+	c.expect("POST", api+"/ai/jobs/"+jid+"/cancel", "", 200)
+	if p := c.expect("POST", api+"/ai/jobs/"+jid+"/pickup", "", 200).json(t); p["pickedUp"] != true || p["status"] != "succeeded" {
+		t.Errorf("picked up: %v", p)
+	}
+	if l := c.expect("GET", api+"/ai/jobs?pickedUp=true&kind=code", "", 200).json(t)["items"].([]any); len(l) != 1 {
+		t.Errorf("picked-up jobs: %v", l)
+	}
+	for _, q := range []string{"active=maybe", "pickedUp=2", "limit=0", "kind=chat"} {
+		c.expect("GET", api+"/ai/jobs?"+q, "", 400)
+	}
+	c.expect("DELETE", api+"/ai/jobs/"+jid, "", 204)
+	c.expect("GET", api+"/ai/jobs/"+jid, "", 404)
+	c.expect("POST", api+"/ai/jobs/"+jid+"/cancel", "", 404)
 }
