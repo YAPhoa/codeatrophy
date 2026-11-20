@@ -16,16 +16,19 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
 import {
   crosshairCursor,
+  Decoration,
   drawSelection,
   dropCursor,
   EditorView,
-  highlightActiveLine,
   highlightActiveLineGutter,
   highlightSpecialChars,
   keymap,
   lineNumbers,
   placeholder as placeholderExt,
   rectangularSelection,
+  ViewPlugin,
+  type DecorationSet,
+  type ViewUpdate,
 } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 import { usePreferences } from '../api/queries';
@@ -178,6 +181,33 @@ const highlight = HighlightStyle.define([
   { tag: [t.invalid], color: 'var(--danger)' },
 ]);
 
+const activeLine = Decoration.line({ class: 'cm-activeLine' });
+
+function cursorLines(view: EditorView): DecorationSet {
+  const starts = new Set<number>();
+  for (const range of view.state.selection.ranges) {
+    if (range.empty) starts.add(view.state.doc.lineAt(range.head).from);
+  }
+  return Decoration.set([...starts].map((from) => activeLine.range(from)), true);
+}
+
+/**
+ * `highlightActiveLine`, but only for a cursor: the line's background is
+ * opaque, so on the line a selection ends on it would hide the selection.
+ */
+const highlightCursorLine = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = cursorLines(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.selectionSet) this.decorations = cursorLines(update.view);
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
+
 /**
  * The fixed part of a code editor: the `basicSetup` of the `codemirror`
  * package without bracket matching, bracket closing and completion, which
@@ -203,7 +233,7 @@ const codeSetup: Extension = [
   syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
   rectangularSelection(),
   crosshairCursor(),
-  highlightActiveLine(),
+  highlightCursorLine,
   highlightSelectionMatches(),
   regionFolding,
   keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),

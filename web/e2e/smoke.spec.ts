@@ -112,6 +112,51 @@ test('solve: the runner of a "solution only" problem sits folded around the code
   await page.keyboard.press('Enter');
   await expect(before).toHaveAttribute('aria-expanded', 'false');
   await expect(editor.getByText('import json')).toHaveCount(0);
+
+  // A drag that starts on the row selects the code from its first line.
+  const from = (await before.boundingBox())!;
+  const to = (await lines.nth(1).boundingBox())!;
+  await page.mouse.move(from.x + 200, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width - 4, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(before).toHaveAttribute('aria-expanded', 'false');
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toContain('# Definition for singly-linked list.\n# class ListNode:');
+
+  // Dragged back up, the selection ends on line 1, which shows it rather than the cursor line's background.
+  await page.mouse.down();
+  await page.mouse.move(from.x + 200, from.y + from.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(lines.first()).not.toHaveClass(/cm-activeLine/);
+  await page.keyboard.press('ArrowLeft');
+  await expect(lines.first()).toHaveClass(/cm-activeLine/);
+});
+
+test('solve: completing a library name adds its import to the solver\'s code, undone with it', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Merge k Sorted Lists' }).click();
+
+  const editor = page.locator('.editor-host');
+  const lines = editor.locator('.cm-line');
+  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
+  await editor.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('h = heapq.heappu');
+
+  // The runner imports json and sys, not heapq: the completion says it adds the import.
+  const option = page.locator('.cm-tooltip-autocomplete').getByRole('option', { name: 'heappush(heap, item)' });
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.cm-completionInfo')).toHaveText('Adds import heapq');
+  // Clicked: Enter is ignored for a moment after the list changes, which a busy machine can hit.
+  await option.click();
+  await expect(lines.first()).toHaveText('import heapq');
+  await expect(lines.last()).toHaveText('h = heapq.heappush');
+
+  // One step undoes both.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
+  await expect(lines.last()).toHaveText('h = heapq.heappu');
 });
 
 test('solve: completing a library name adds its import to the solver\'s code, undone with it', async ({ page }) => {
@@ -254,7 +299,7 @@ test('solve: the editor has the room, and a failing submission shows which case 
   // A failing hidden case shows its verdict but not its content, until it is revealed.
   await page.getByRole('button', { name: /^Case \d+: Wrong answer$/ }).first().click();
   const panel = page.getByRole('tabpanel', { name: 'Result' });
-  await expect(panel.getByText('kept out of sight')).toBeVisible();
+  await expect(panel.getByText('The input and output of this test case are hidden.')).toBeVisible();
   await expect(panel.getByText('Input', { exact: true })).toBeHidden();
   await panel.getByRole('button', { name: 'Reveal this case' }).click();
   await expect(panel.getByText('Input', { exact: true })).toBeVisible();

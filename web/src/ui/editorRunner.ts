@@ -109,8 +109,14 @@ class RunnerWidget extends WidgetType {
     return block;
   }
 
-  ignoreEvent(): boolean {
-    return true;
+  /**
+   * A press on the row goes to the editor too, so a drag that starts there
+   * selects the solver's code as one started on the line next to it would;
+   * a plain click still toggles. Within the expanded runner code the browser
+   * keeps the press, so that code can be selected and copied.
+   */
+  ignoreEvent(event: Event): boolean {
+    return !(event.type === 'mousedown' && event.target instanceof Element && event.target.closest('.cm-runner-toggle'));
   }
 }
 

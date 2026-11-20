@@ -98,7 +98,7 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
       {concealed ? (
         <div className="concealed">
           <EyeOff size={16} aria-hidden="true" />
-          <span className="grow">The input and output of this hidden test case are kept out of sight.</span>
+          <span className="grow">The input and output of this test case are hidden.</span>
           <Button size="sm" icon={<Eye size={14} />} onClick={() => result.testCaseId && reveal.reveal(result.testCaseId)}>
             Reveal this case
           </Button>
