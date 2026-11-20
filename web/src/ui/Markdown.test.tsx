@@ -72,3 +72,24 @@ describe('Markdown rendering of untrusted input', () => {
     expect(html).toContain('id="h-input"');
   });
 });
+
+// remark-math draws `$$…$$` as a display equation only when the markers sit
+// on lines of their own; a paragraph holding only a one-line `$$…$$` is
+// meant as one too.
+describe('display math', () => {
+  const displays = (html: string) => html.match(/class="katex-display"/g)?.length ?? 0;
+
+  it('draws a one-line $$…$$ standing alone as a display equation', () => {
+    expect(displays(render('Before.\n\n$$1 = \\frac{1}{E[m]}$$\n\nAfter.'))).toBe(1);
+  });
+
+  it('keeps fenced display math as it was', () => {
+    expect(displays(render('$$\n1 = \\frac{1}{E[m]}\n$$'))).toBe(1);
+  });
+
+  it('leaves $$…$$ inside a sentence inline', () => {
+    const html = render('So $$x^2$$ grows, and $y$ too.');
+    expect(displays(html)).toBe(0);
+    expect(html.match(/class="katex"/g)?.length).toBe(2);
+  });
+});

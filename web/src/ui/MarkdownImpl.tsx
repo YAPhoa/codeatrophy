@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import { ImageOff } from 'lucide-react';
-import { headingSlugs } from './markdownPlugins';
+import { displayMathAlone, headingSlugs } from './markdownPlugins';
 import { markdownUrlTransform } from './markdownUrl';
 import { MermaidDiagram } from './Mermaid';
 
@@ -15,7 +15,7 @@ import { MermaidDiagram } from './Mermaid';
 // is deliberately no `rehype-raw` here), KaTeX runs with `trust` off, and
 // react-markdown's default URL filter drops `javascript:` and similar links
 // (an image may still be a data URL of an image: `markdownUrl.ts`).
-const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath];
+const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath, displayMathAlone];
 const rehypePlugins: Options['rehypePlugins'] = [
   // KaTeX writes errorColor inline on a command it will not render; its own
   // #cc0000 is too faint on the dark theme.

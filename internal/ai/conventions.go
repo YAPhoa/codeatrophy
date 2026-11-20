@@ -47,8 +47,8 @@ a **reading** (a technical note or article).
   of the task, for simulations and design exercises with many operations, or
   when the source text is written that way. An explicit choice by the user
   settles it.
-- The body is GitHub-flavoured Markdown (math with $...$ and $$...$$) with
-  these sections, in this order:
+- The body is GitHub-flavoured Markdown with these sections, in this order
+  (inline math with $...$; a display equation between $$ lines of their own):
   1. ` + "`## Problem`" + `: the statement of the task, written so that it can be solved
      from the statement alone.
   2. ` + "`## Input`" + `: for a program, the exact input format, line by line,
