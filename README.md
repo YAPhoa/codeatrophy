@@ -7,8 +7,8 @@ in the browser against your own test cases.
 
 ![Drafting a problem with AI from a one-line note, reviewing the draft, and saving it to the library](docs/images/drafting-demo.gif)
 
-- **Problems and readings** in Markdown (with math), with tags, collections,
-  difficulty and personal progress.
+- **Problems and readings** in Markdown (with math and Mermaid diagrams), with
+  tags, collections, difficulty and personal progress.
 - **A judge built in.** Problems carry stdin/stdout test cases; "Run" and
   "Submit" execute your code in a sandbox ([Judge0](https://github.com/judge0/judge0))
   in C, C++, C#, Go, Java, JavaScript, Kotlin, Python, Ruby, Rust and TypeScript.

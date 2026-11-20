@@ -24,6 +24,7 @@
 .md pre,
 .md blockquote,
 .md .md-table-wrap,
+.md .md-mermaid,
 .md .katex-display {
   margin: 0 0 0.9em;
 }
@@ -215,6 +216,30 @@
   border-style: solid;
 }
 
+/* A ```mermaid block drawn as a diagram (ui/Mermaid.tsx). The SVG shrinks to
+   fit only so far (mermaidDraw.ts), and a wider one scrolls inside the box.
+   Its colours come from the tokens, read when it is drawn. */
+.md-mermaid {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-x: auto;
+  line-height: normal;
+}
+
+.md-mermaid-svg svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* Under the source of a diagram that could not be drawn. */
+.md .md-mermaid-note {
+  margin-top: -0.5em;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
 /* Long-form reading */
 
 .md-longform {
@@ -227,7 +252,8 @@
 .md-longform ol,
 .md-longform pre,
 .md-longform blockquote,
-.md-longform .md-table-wrap {
+.md-longform .md-table-wrap,
+.md-longform .md-mermaid {
   margin-bottom: 1.15em;
 }
 

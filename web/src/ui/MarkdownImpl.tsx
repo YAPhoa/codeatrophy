@@ -1,5 +1,5 @@
 import { useState, type ComponentPropsWithoutRef } from 'react';
-import ReactMarkdown, { type Options } from 'react-markdown';
+import ReactMarkdown, { type ExtraProps, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -7,21 +7,26 @@ import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import { ImageOff } from 'lucide-react';
 import { headingSlugs } from './markdownPlugins';
+import { markdownUrlTransform } from './markdownUrl';
+import { MermaidDiagram } from './Mermaid';
 
 // Item bodies can come from imported third-party bundles, so they are treated
 // as untrusted: raw HTML in the Markdown is never turned into elements (there
 // is deliberately no `rehype-raw` here), KaTeX runs with `trust` off, and
-// react-markdown's default URL filter drops `javascript:` and similar links.
+// react-markdown's default URL filter drops `javascript:` and similar links
+// (an image may still be a data URL of an image: `markdownUrl.ts`).
 const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath];
 const rehypePlugins: Options['rehypePlugins'] = [
   // KaTeX writes errorColor inline on a command it will not render; its own
   // #cc0000 is too faint on the dark theme.
   [rehypeKatex, { throwOnError: false, strict: 'ignore', trust: false, errorColor: 'var(--danger)' }],
-  [rehypeHighlight, { detect: false }],
+  // A diagram's source reaches MermaidDiagram as written.
+  [rehypeHighlight, { detect: false, plainText: ['mermaid'] }],
   headingSlugs,
 ];
 
 function isLocalUrl(src: string): boolean {
+  // The URL filter lets only image data URLs through (`markdownUrl.ts`).
   if (src.startsWith('data:') || src.startsWith('blob:')) return true;
   try {
     return new URL(src, window.location.href).origin === window.location.origin;
@@ -80,6 +85,22 @@ function TaskCheckbox(props: ComponentPropsWithoutRef<'input'>) {
   return <input {...props} disabled aria-label={props.checked ? 'Done' : 'Not done'} />;
 }
 
+type Element = NonNullable<ExtraProps['node']>;
+type ElementContent = Element['children'][number];
+
+function textOf(node: ElementContent): string {
+  if (node.type === 'text') return node.value;
+  return node.type === 'element' ? node.children.map(textOf).join('') : '';
+}
+
+/** The source of a ```mermaid block, or null for any other `pre`. */
+function mermaidSource(pre: Element | undefined): string | null {
+  const code = pre?.children.find((c): c is Element => c.type === 'element' && c.tagName === 'code');
+  const classes = code?.properties.className;
+  if (!code || !Array.isArray(classes) || !classes.includes('language-mermaid')) return null;
+  return textOf(code).replace(/\n$/, '');
+}
+
 const components: Options['components'] = {
   input: ({ node: _node, ...props }) => <TaskCheckbox {...props} />,
   img: ({ node: _node, ...props }) => <SafeImage {...props} />,
@@ -87,12 +108,15 @@ const components: Options['components'] = {
   table: ({ node: _node, ...props }) => <Table {...props} />,
   // Code is not prose: a page translator must leave it as written.
   code: ({ node: _node, ...props }) => <code translate="no" {...props} />,
-  pre: ({ node: _node, ...props }) => <pre translate="no" {...props} />,
+  pre: ({ node, ...props }) => {
+    const diagram = mermaidSource(node);
+    return diagram === null ? <pre translate="no" {...props} /> : <MermaidDiagram source={diagram} />;
+  },
 };
 
 export default function MarkdownImpl({ source }: { source: string }) {
   return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={markdownUrlTransform}>
       {source}
     </ReactMarkdown>
   );

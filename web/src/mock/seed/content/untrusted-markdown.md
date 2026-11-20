@@ -32,6 +32,29 @@ Ordinary formatting must keep working after sanitising: `inline code`, **bold**,
 
 Math is worth a look as well. KaTeX's `\href` and `\includegraphics` are disabled unless `trust` is switched on — leave it off: $\href{javascript:alert(1)}{x}$
 
+## Diagrams and embedded images
+
+A diagram is drawn from the text of its fence, so it is untrusted too: no click handlers, no HTML in its labels.
+
+```mermaid
+flowchart LR
+    A[Markdown body] --> B{Raw HTML?}
+    B -- yes --> C[Shown as text]
+    B -- no --> D[Rendered]
+    click A "javascript:alert(1)"
+```
+
+One that does not parse falls back to its source:
+
+```mermaid
+flowchart LR
+    A[Unclosed --> B
+```
+
+An image embedded as a `data:image` URL is part of the text, so it shows at once. An SVG shown as an image runs no script, even one that has a `<script>`:
+
+![An embedded SVG](data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='168'%20height='40'%20viewBox='0%200%20168%2040'%3E%3Crect%20width='168'%20height='40'%20rx='6'%20fill='%23076c4b'/%3E%3Ctext%20x='84'%20y='25'%20font-family='sans-serif'%20font-size='14'%20fill='white'%20text-anchor='middle'%3Eembedded%20image%3C/text%3E%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E)
+
 ## Checklist
 
 - [x] Raw HTML is escaped or stripped, not parsed.

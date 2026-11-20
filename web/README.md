@@ -6,7 +6,8 @@ is the contract between the two: change a request or response shape there,
 in the server handlers, and in `src/api/types.ts` together.
 
 Stack: Vite, React, TypeScript (strict), React Router, TanStack Query,
-CodeMirror 6, `react-markdown` with KaTeX and highlight.js. Styling is plain
+CodeMirror 6, `react-markdown` with KaTeX, highlight.js and Mermaid (loaded
+only for a page with a diagram). Styling is plain
 CSS driven by custom properties (`src/styles/tokens.css`). Everything is
 bundled; the app makes no request to any third-party origin at runtime, so it
 works offline on a LAN.
@@ -171,7 +172,8 @@ left. It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
 default writing style (`e2e/styles.spec.ts`), "Generate code" on the edit
 page of a problem (`e2e/generate-code.spec.ts`), and the system prompt and
 test case prompt, each edited only after a confirm, reset, and guarded when
-left unsaved (`e2e/system-prompt.spec.ts`). It starts its own
+left unsaved (`e2e/system-prompt.spec.ts`), and Mermaid diagrams and
+`data:image` URLs in rendered Markdown (`e2e/markdown.spec.ts`). It starts its own
 `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no backend, AI
 provider or judge, and it fails on any page error or request to a third-party
 origin. The tests in `e2e/built` check how a reload paints and that a load at
@@ -282,9 +284,12 @@ A few conventions worth knowing:
   shown. Anything new that displays test data has to honour this
   (`useReveal()` in `features/solve`).
 - **Item bodies are untrusted.** They can come from imported bundles. The
-  Markdown renderer never turns raw HTML into elements, drops unsafe URLs,
-  and does not load remote images until asked. `src/ui/Markdown.test.tsx`
-  guards this; do not add `rehype-raw`.
+  Markdown renderer never turns raw HTML into elements, drops unsafe URLs
+  (an image may be a `data:image/` URL, `src/ui/markdownUrl.ts`), and does
+  not load remote images until asked. `src/ui/Markdown.test.tsx` guards this;
+  do not add `rehype-raw`. Mermaid diagrams are drawn at its `strict` level,
+  with links and remote references stripped from the SVG
+  (`src/ui/mermaidDraw.ts`); anything that fails shows the source instead.
 - **AI work runs on the server.** Every generation is a job
   (`docs/api.md`, "AI jobs"): leaving a screen never stops one, only Cancel
   does. A new item in progress is a draft on the server, saved shortly after

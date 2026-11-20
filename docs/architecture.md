@@ -723,6 +723,14 @@ It talks to the server only through `/api/v1`. In development the Vite dev
 server proxies API calls to a running server, or serves an in-memory mock of
 the API so UI work does not require the backend.
 
+Item text is rendered as untrusted Markdown: GitHub-flavoured, with KaTeX
+math and highlighted code, but no raw HTML, no unsafe URLs and no remote image
+until the reader asks for it. Images embedded as `data:image/` URLs are shown
+as images, where an SVG cannot run script. A ```` ```mermaid ```` block is
+drawn as a diagram by Mermaid, loaded only when a page has one, at its
+`strict` security level and in the app's theme; one that does not draw shows
+its source with a short note.
+
 ## Deployment
 
 `compose.yaml` defines the server, its PostgreSQL database and the judge

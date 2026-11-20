@@ -45,6 +45,23 @@ describe('Markdown rendering of untrusted input', () => {
     expect(html).not.toContain('#cc0000');
   });
 
+  it('shows an image embedded as an image data URL, but no other data URL', () => {
+    const svg = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E";
+    const html = render(`![a](${svg}) ![b](data:text/html;base64,PHNjcmlwdD4=) [c](${svg})`);
+    expect(html).toContain(`<img src="${svg.replace(/'/g, '&#x27;')}" alt="a"`);
+    expect(html).not.toMatch(/data:text/);
+    expect(html).not.toMatch(/href="data:/);
+  });
+
+  it('hands a mermaid fence to the diagram as written, untouched by the highlighter', () => {
+    const html = render('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```\n\n```python\nx = 1\n```');
+    // Before the diagram is drawn its source holds the place, as text.
+    expect(html).toContain('<code class="language-mermaid">flowchart LR\n  A[&quot;&lt;b&gt;x&lt;/b&gt;&quot;] --&gt; B</code>');
+    expect(html).not.toMatch(/<b>/);
+    expect(html.match(/hljs/g)?.length ?? 0).toBeGreaterThan(0);
+    expect(html.slice(0, html.indexOf('</pre>'))).not.toContain('hljs');
+  });
+
   it('renders GitHub-flavoured Markdown, math and highlighted code', () => {
     const html = render('| a | b |\n| - | - |\n| 1 | 2 |\n\n- [x] done\n\n~~gone~~\n\n$1 \\le n \\le 10^5$\n\n```python\ndef f():\n    return 1\n```\n\n## Input');
     expect(html).toContain('<table>');

@@ -54,3 +54,12 @@ function subscribe(fn: () => void): () => void {
 export function useThemePreference(): ThemePreference {
   return useSyncExternalStore(subscribe, getThemePreference);
 }
+
+function appliedTheme(): 'light' | 'dark' {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+/** The theme the page is drawn in now, for parts that cannot follow the CSS tokens by themselves. */
+export function useAppliedTheme(): 'light' | 'dark' {
+  return useSyncExternalStore(subscribe, appliedTheme, () => 'light');
+}

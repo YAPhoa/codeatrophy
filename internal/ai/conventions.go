@@ -176,6 +176,10 @@ prefix, the solver's code and the suffix, each starting on a new line:
 	{text: `- The body is a well-structured Markdown article or note: a short
   introduction, sections with headings, code samples in fenced blocks with a
   language tag, and a short summary or key takeaways.
+- Optional: where a picture clearly helps (a flow, a sequence, states), a
+  small ` + "```mermaid" + ` diagram (a handful of nodes, plain labels, no styling or
+  click directives), or a small image as a ` + "`data:image/...`" + ` URL. The text
+  must make sense without it; never replace an explanation with a diagram.
 `},
 	{heading: "## All items"},
 	{text: `- Title: short and specific (at most 200 characters).

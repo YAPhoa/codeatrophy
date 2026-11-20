@@ -325,7 +325,10 @@ are left out.
   "Reference solution" if there is none; an `id` in the written value is
   ignored. Writing `null` only removes the reference mark — the solution
   itself stays saved.
-- `body` is Markdown (GitHub-flavoured, with `$...$` / `$$...$$` math).
+- `body` is Markdown (GitHub-flavoured, with `$...$` / `$$...$$` math). The UI
+  draws a ```` ```mermaid ```` fenced block as a diagram (its source when it
+  does not parse) and shows images given as `data:image/` URLs (PNG, JPEG,
+  GIF, WebP, SVG); raw HTML is never rendered.
 - `notes` is the user's private Markdown notes. `rawInput` is the original
   text an AI draft was generated from, or `null`. Neither is ever exported.
 - `problem` is `null` for readings and always an object for problems.

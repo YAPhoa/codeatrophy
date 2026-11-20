@@ -4,6 +4,17 @@ Cheat sheet for the election half of Raft (Ongaro & Ousterhout, 2014). Log repli
 
 Every server is a **follower**, a **candidate** or the **leader**. Time is divided into numbered **terms**; each term has at most one leader.
 
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Follower
+    Follower --> Candidate: timer fires
+    Candidate --> Candidate: split vote
+    Candidate --> Leader: majority
+    Candidate --> Follower: leader found
+    Leader --> Follower: higher term
+```
+
 - Follower
   - Responds to RPCs; never initiates.
   - Resets its election timer on a valid `AppendEntries` from the current leader, or when it grants a vote.
