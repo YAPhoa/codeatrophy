@@ -163,6 +163,8 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
             value={source}
             onChange={setSource}
             language={language}
+            // A "solution only" problem runs the code after its runner's prefix.
+            runsAfter={item.problem?.interface === 'function' ? item.problem.harness[language]?.prefix : null}
             ariaLabel="Solution code"
             placeholder="Paste or write a complete program that reads stdin and writes stdout…"
           />

@@ -114,6 +114,33 @@ test('solve: the runner of a "solution only" problem sits folded around the code
   await expect(editor.getByText('import json')).toHaveCount(0);
 });
 
+test('solve: completing a library name adds its import to the solver\'s code, undone with it', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Merge k Sorted Lists' }).click();
+
+  const editor = page.locator('.editor-host');
+  const lines = editor.locator('.cm-line');
+  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
+  await editor.locator('.cm-content').click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('h = heapq.heappu');
+
+  // The runner imports json and sys, not heapq: the completion says it adds the import.
+  const option = page.locator('.cm-tooltip-autocomplete').getByRole('option', { name: 'heappush(heap, item)' });
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.cm-completionInfo')).toHaveText('Adds import heapq');
+  // Clicked: Enter is ignored for a moment after the list changes, which a busy machine can hit.
+  await option.click();
+  await expect(lines.first()).toHaveText('import heapq');
+  await expect(lines.last()).toHaveText('h = heapq.heappush');
+
+  // One step undoes both.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(lines.first()).toHaveText('# Definition for singly-linked list.');
+  await expect(lines.last()).toHaveText('h = heapq.heappu');
+});
+
 test('solve: the lines that read the input open folded, and unfold in place', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Number of Islands' }).click();

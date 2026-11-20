@@ -143,7 +143,8 @@ connected over MCP would), then save.
 the flows the product stands on: capture → draft → revise → save; the coding
 workspace with a judged submission, a hidden failing case and its panes; the
 submission history, which leaves runs out; the custom input kept across a
-reload; the runner rows and folded regions of the solve editor;
+reload; the runner rows and folded regions of the solve editor; completing a
+library name with its import;
 keeping an accepted submission as a solution and making it the reference;
 preferences taking effect; large test cases, from their preferences to the
 Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
@@ -242,6 +243,13 @@ A few conventions worth knowing:
   [marked regions](../docs/api.md#folded-regions) folded; typing never folds.
   Every code editor can fold a marked region from the gutter, in any
   language.
+- **Completion knows the standard library the judge has.** Each language's
+  table in `src/ui/libraries` lists its modules' members and the names that
+  need an import, for the judge's old toolchains: nothing newer goes in.
+  Picking a name that is not imported yet adds the import in the same step,
+  unless the runner's prefix has it or an import could not follow the prefix
+  (`src/ui/editorLibrary.ts`); editors of code that runs after a prefix pass
+  it as `runsAfter`.
 - **Preferences live on the server** (`/settings/preferences`), so they follow
   the user between browsers; only the theme is local. `usePreferences()`
   returns them, with the defaults until they have loaded. Every CodeMirror

@@ -1,12 +1,14 @@
 /*
  * Language support for the code editor: loading a language's CodeMirror
- * package on demand, and the completion sources that go with it.
+ * package on demand, and the completion sources that go with it. Each
+ * language's standard-library table (./libraries) is loaded with it.
  */
 
-import { completeAnyWord, completeFromList, ifNotIn, type CompletionContext, type CompletionSource } from '@codemirror/autocomplete';
-import { type LRLanguage, StreamLanguage } from '@codemirror/language';
+import { completeAnyWord, type CompletionContext, type CompletionSource } from '@codemirror/autocomplete';
+import { type Language, type StreamParser, StreamLanguage } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
-import { EDITOR_KEYWORDS } from './editorKeywords';
+import { libraryCompletion } from './editorLibrary';
+import type { LibraryTable } from './libraries/table';
 
 /**
  * Completes words that already occur in the document. It is registered for
@@ -34,55 +36,76 @@ const completeDocumentWords: CompletionSource = (context: CompletionContext) => 
 
 export const documentWords = EditorState.languageData.of(() => [{ autocomplete: completeDocumentWords }]);
 
-/** Syntax nodes inside which keyword completion would only get in the way. */
-const NO_KEYWORDS_IN = ['LineComment', 'BlockComment', 'String', 'RawString', 'CharLiteral', 'StringLiteral', 'CharacterLiteral', 'TextBlock', 'Char'];
+/** A language with its library completion, the two loaded side by side. */
+async function withLibrary(id: string, load: Promise<[Extension, Language]>, table: Promise<{ default: LibraryTable }>): Promise<Extension> {
+  const [[support, language], { default: library }] = await Promise.all([load, table]);
+  return [support, libraryCompletion(language, id, library)];
+}
 
-/**
- * Keyword and standard-library completions for a language whose package has
- * none of its own, attached as language data so that they run next to the
- * word completion above.
- */
-function keywordCompletion(language: LRLanguage, id: string): Extension {
-  const list = EDITOR_KEYWORDS[id];
-  if (!list) return [];
-  const keywords = new Set(list.keywords);
-  const options = [
-    ...[...keywords].map((label) => ({ label, type: 'keyword' })),
-    ...[...new Set(list.library)].filter((label) => !keywords.has(label)).map((label) => ({ label, type: 'variable' })),
-  ];
-  return language.data.of({ autocomplete: ifNotIn(NO_KEYWORDS_IN, completeFromList(options)) });
+/** A legacy mode, which brings its keywords as its own completion. */
+async function legacy(id: string, mode: Promise<StreamParser<unknown>>, table: Promise<{ default: LibraryTable }>): Promise<Extension> {
+  return withLibrary(
+    id,
+    mode.then((m): [Extension, Language] => {
+      const language = StreamLanguage.define(m);
+      return [language, language];
+    }),
+    table,
+  );
 }
 
 /** Load the CodeMirror language support for a language id on demand. */
 export async function loadLanguage(id: string | null | undefined): Promise<Extension> {
   switch (id) {
     case 'python':
-      return (await import('@codemirror/lang-python')).python();
+      return withLibrary(
+        id,
+        import('@codemirror/lang-python').then((m) => [m.python(), m.pythonLanguage]),
+        import('./libraries/python'),
+      );
     case 'c':
-    case 'cpp': {
-      const { cpp, cppLanguage } = await import('@codemirror/lang-cpp');
-      return [cpp(), keywordCompletion(cppLanguage, id)];
-    }
-    case 'java': {
-      const { java, javaLanguage } = await import('@codemirror/lang-java');
-      return [java(), keywordCompletion(javaLanguage, id)];
-    }
+    case 'cpp':
+      return withLibrary(
+        id,
+        import('@codemirror/lang-cpp').then((m) => [m.cpp(), m.cppLanguage]),
+        id === 'c' ? import('./libraries/c') : import('./libraries/cpp'),
+      );
+    case 'java':
+      return withLibrary(
+        id,
+        import('@codemirror/lang-java').then((m) => [m.java(), m.javaLanguage]),
+        import('./libraries/java'),
+      );
     case 'javascript':
-      return (await import('@codemirror/lang-javascript')).javascript();
+      return withLibrary(
+        id,
+        import('@codemirror/lang-javascript').then((m) => [m.javascript(), m.javascriptLanguage]),
+        import('./libraries/javascript'),
+      );
     case 'typescript':
-      return (await import('@codemirror/lang-javascript')).javascript({ typescript: true });
+      return withLibrary(
+        id,
+        import('@codemirror/lang-javascript').then((m) => [m.javascript({ typescript: true }), m.typescriptLanguage]),
+        import('./libraries/javascript'),
+      );
     case 'go':
-      return (await import('@codemirror/lang-go')).go();
-    case 'rust': {
-      const { rust, rustLanguage } = await import('@codemirror/lang-rust');
-      return [rust(), keywordCompletion(rustLanguage, id)];
-    }
+      return withLibrary(
+        id,
+        import('@codemirror/lang-go').then((m) => [m.go(), m.goLanguage]),
+        import('./libraries/go'),
+      );
+    case 'rust':
+      return withLibrary(
+        id,
+        import('@codemirror/lang-rust').then((m) => [m.rust(), m.rustLanguage]),
+        import('./libraries/rust'),
+      );
     case 'csharp':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).csharp);
+      return legacy(id, import('@codemirror/legacy-modes/mode/clike').then((m) => m.csharp), import('./libraries/csharp'));
     case 'kotlin':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).kotlin);
+      return legacy(id, import('@codemirror/legacy-modes/mode/clike').then((m) => m.kotlin), import('./libraries/kotlin'));
     case 'ruby':
-      return StreamLanguage.define((await import('@codemirror/legacy-modes/mode/ruby')).ruby);
+      return legacy(id, import('@codemirror/legacy-modes/mode/ruby').then((m) => m.ruby), import('./libraries/ruby'));
     case 'json': {
       // The mode names keys "property", which the highlighter has to be told about.
       const [{ json }, { tags }] = await Promise.all([import('@codemirror/legacy-modes/mode/javascript'), import('@lezer/highlight')]);

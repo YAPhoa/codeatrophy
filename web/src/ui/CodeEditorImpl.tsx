@@ -31,6 +31,7 @@ import { tags as t } from '@lezer/highlight';
 import { usePreferences } from '../api/queries';
 import { cx } from './Button';
 import { documentWords, loadLanguage } from './editorLanguages';
+import { codeBefore } from './editorLibrary';
 import { FONT_SIZE_DEFAULT, lineHeightFor, resolveEditorOptions, type EditorOptions } from './editorOptions';
 import { foldRegionEffects, regionFolding, unfoldAllEffects } from './editorRegions';
 import { runnerExtension, type RunnerCode } from './editorRunner';
@@ -71,6 +72,12 @@ export interface CodeEditorProps {
    * text. For the solve editor.
    */
   runner?: RunnerCode | null;
+  /**
+   * Code that runs before this editor's text without being shown, such as
+   * the runner prefix of a stub: completion does not import again what it
+   * imports, nor add an import that could not follow it. `runner` sets it.
+   */
+  runsAfter?: string | null;
 }
 
 /** Marks a transaction that mirrors a new `value` prop, so it is not echoed back through `onChange`. */
@@ -219,6 +226,7 @@ function createCompartments() {
     indent: new Compartment(),
     metrics: new Compartment(),
     runner: new Compartment(),
+    codeBefore: new Compartment(),
     label: new Compartment(),
   };
 }
@@ -263,6 +271,7 @@ export default function CodeEditorImpl({
   autoFocus,
   foldRegions = false,
   runner,
+  runsAfter,
 }: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -296,6 +305,12 @@ export default function CodeEditorImpl({
   const appliedRunnerRef = useRef(runnerExt);
   useEffect(() => {
     runnerRef.current = runnerExt;
+  });
+
+  const before = runnerPrefix ?? runsAfter ?? null;
+  const beforeRef = useRef(before);
+  useEffect(() => {
+    beforeRef.current = before;
   });
 
   // The set of shortcut keys is fixed for the lifetime of an editor; their
@@ -339,6 +354,7 @@ export default function CodeEditorImpl({
           langC.of([]),
           roC.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
           runnerC.of(runnerRef.current),
+          compartments.codeBefore.of(codeBefore.of(beforeRef.current)),
           placeholder ? placeholderExt(placeholder) : [],
           labelC.of(labelExtension(ariaLabel)),
           EditorView.updateListener.of((update) => {
@@ -390,6 +406,10 @@ export default function CodeEditorImpl({
     appliedRunnerRef.current = runnerExt;
     view.dispatch({ effects: compartments.runner.reconfigure(runnerExt) });
   }, [compartments, runnerExt]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: compartments.codeBefore.reconfigure(codeBefore.of(before)) });
+  }, [compartments, before]);
 
   useEffect(() => {
     let cancelled = false;

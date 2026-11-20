@@ -362,6 +362,7 @@ export function ItemEditor({
                         value={form.starterCode[activeStarter] ?? ''}
                         onChange={(v) => set('starterCode', { ...form.starterCode, [activeStarter]: v })}
                         language={activeStarter}
+                        runsAfter={solutionOnly ? runner.prefix : null}
                         ariaLabel={`${solutionOnly ? 'Stub' : 'Starter code'} for ${languageName(activeStarter)}`}
                         readOnly={disabled}
                       />
