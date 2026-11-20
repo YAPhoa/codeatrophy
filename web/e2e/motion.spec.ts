@@ -123,6 +123,113 @@ test('motion: a change made on screen does animate', async ({ page }) => {
   await expect(row.locator('.fav-btn')).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('motion: a toast rises in, makes room in the stack, and plays its exit', async ({ page }) => {
+  await recordAnimations(page);
+  await open(page, '/');
+  await settled(page);
+  await recorded(page);
+  await page.locator('.item-row .item-check input').first().click();
+  await page.locator('.bulkbar').getByRole('button', { name: /favorite/i }).click();
+  const toast = page.locator('.toast');
+  await expect(toast).toBeVisible();
+  // It arrives by its entrance, and its row opens for it. A start can be reported a frame after the toast shows.
+  const arriving: string[] = [];
+  await expect.poll(async () => (arriving.push(...(await recorded(page))), arriving)).toEqual(expect.arrayContaining(['toast-in on div.toast.toast-success', 'toast-make-room on div.toast-slot']));
+
+  // Dismissed, it stays for its exit and is out of reach meanwhile.
+  await toast.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(page.locator('.toast-slot.is-leaving')).toHaveAttribute('inert', '');
+  await expect(toast).toHaveCount(0);
+  const leaving = await recorded(page);
+  expect(leaving).toContain('toast-out on div.toast.toast-success');
+  expect(leaving).toContain('toast-collapse on div.toast-slot.is-leaving');
+});
+
+/** Opens the details of Two Sum, where the "i" of the output comparison is. */
+async function openDetails(page: Page) {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Two Sum' })).toBeVisible();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
+  await expect(page.getByRole('button', { name: 'About output comparison' })).toBeVisible();
+}
+
+test('motion: a tooltip waits a moment, grows in from close by, and goes almost at once', async ({ page }) => {
+  await openDetails(page);
+  // Read within a frame of focusing the "i", well inside the wait.
+  const entrance = await page.evaluate(async () => {
+    document.querySelector<HTMLElement>('[aria-label="About output comparison"]')!.focus();
+    await new Promise(requestAnimationFrame);
+    const tip = document.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const animation = tip.getAnimations()[0] as CSSAnimation;
+    const { delay, duration } = animation.effect!.getTiming();
+    animation.pause();
+    const style = getComputedStyle(tip);
+    return { name: animation.animationName, delay, duration, opacity: style.opacity, transform: style.transform };
+  });
+  // --duration-micro of waiting, out of sight, then --duration-quick from --scale-tooltip.
+  expect(entrance).toEqual({ name: 'tooltip-in', delay: 80, duration: 150, opacity: '0', transform: 'matrix(0.98, 0, 0, 0.98, 0, 0)' });
+  // It describes the "i" from the start: only the showing waits.
+  const tip = page.getByRole('button', { name: 'About output comparison' });
+  await expect(tip).toHaveAccessibleDescription(/Values only/);
+
+  await page.evaluate(() => document.querySelector<HTMLElement>('[role="tooltip"]')!.getAnimations()[0]!.finish());
+  const exit = await page.evaluate(async () => {
+    document.querySelector<HTMLElement>('[aria-label="About output comparison"]')!.blur();
+    await new Promise(requestAnimationFrame);
+    const ghost = document.querySelector('.info-tip-text.is-closing');
+    return ghost && getComputedStyle(ghost).animationName + ' ' + getComputedStyle(ghost).animationDuration;
+  });
+  expect(exit).toBe('tooltip-out 0.05s');
+  await expect(page.locator('.info-tip-text')).toHaveCount(0);
+
+  // Passed over and left within the wait, it never shows, not even to fade.
+  const flashed = await page.evaluate(async () => {
+    const i = document.querySelector<HTMLElement>('[aria-label="About output comparison"]')!;
+    i.focus();
+    await new Promise(requestAnimationFrame);
+    i.blur();
+    await new Promise(requestAnimationFrame);
+    return document.querySelectorAll('.info-tip-text').length;
+  });
+  expect(flashed).toBe(0);
+});
+
+test('motion: a row opens and closes at the same pace', async ({ page }) => {
+  await open(page, '/');
+  await settled(page);
+  const pace = (state: string) =>
+    page.evaluate(async (state) => {
+      document.querySelector<HTMLElement>('li.item-row .item-expand button')!.click();
+      await new Promise(requestAnimationFrame);
+      const collapse = document.querySelector(`li.item-row .collapse.${state}`);
+      return collapse && getComputedStyle(collapse).animationDuration;
+    }, state);
+  // --duration-fast both ways.
+  expect(await pace('is-entering')).toBe('0.25s');
+  await expect(page.locator('li.item-row .collapse')).not.toHaveClass(/is-moving/);
+  expect(await pace('is-closing')).toBe('0.25s');
+  await expect(page.locator('li.item-row .collapse')).toHaveCount(0);
+});
+
+test('motion: a status line swaps its icon and morphs its words rather than cutting', async ({ page }) => {
+  await recordAnimations(page);
+  await open(page, '/settings/preferences');
+  await settled(page);
+  await recorded(page);
+  await page.getByRole('checkbox', { name: 'Generate large test cases by default' }).click();
+  const status = page.locator('.prefs-status').getByRole('status');
+  await expect(status).toHaveText('Saved');
+  // From nothing to "Saving…", then to "Saved": each change swaps the icon and morphs the words.
+  await expect.poll(async () => (await page.locator('.prefs-status .morph-swap, .prefs-status .icon-swap-out').count()) === 0).toBe(true);
+  const played = await recorded(page);
+  expect(played).toContain('icon-swap-in on span.icon-swap-icon.is-in');
+  expect(played).toContain('script on span.morph-swap');
+  // What is drawn is for sight; the live region holds the words alone.
+  await expect(page.locator('.prefs-status .status-swap')).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('motion: an invalid field shakes after a failed save, and can shake again', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();

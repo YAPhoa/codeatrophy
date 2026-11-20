@@ -115,7 +115,7 @@ export function ImportSection() {
 
       {result ? (
         <div className="stack">
-          <Callout tone="ok" role="status" title="Import complete">
+          <Callout tone="ok" role="status" title="Import complete" className="reveal">
             <ul className="import-result">
               <li>{plural(result.created, 'item')} added</li>
               {result.updated > 0 && <li>{plural(result.updated, 'item')} updated to the bundle’s version</li>}

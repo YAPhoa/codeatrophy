@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { qk } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { errorLine } from '../../lib/errors';
+import { StatusSwap } from '../../ui/Animated';
 import { Segmented } from '../../ui/Field';
 import { Markdown } from '../../ui/Markdown';
 import { Spinner } from '../../ui/misc';
@@ -72,6 +73,9 @@ export function Notes({ item }: { item: Item }) {
     };
   }, []);
 
+  // How the last save went. Notes left empty say nothing once saved.
+  const status = state === 'saving' ? 'Saving…' : state === 'dirty' ? 'Unsaved' : text === '' ? '' : 'Saved';
+
   return (
     <div className="notes">
       <div className="row notes-bar">
@@ -80,19 +84,15 @@ export function Notes({ item }: { item: Item }) {
           Private notes
         </span>
         <span className="spacer" />
-        <span className="notes-state" role="status">
-          {state === 'saving' && (
-            <>
-              <Spinner size={12} /> Saving…
-            </>
+        <span className="notes-state">
+          {/* An error may be long, so it wraps as plain text; the states that swap fit on one line. */}
+          {state === 'error' ? (
+            <span className="field-error" role="status">
+              Not saved: {error}
+            </span>
+          ) : (
+            <StatusSwap icon={state === 'saving' ? <Spinner size={12} /> : status === 'Saved' && <Check size={12} />} text={status} />
           )}
-          {state === 'saved' && text !== '' && (
-            <>
-              <Check size={12} aria-hidden="true" /> Saved
-            </>
-          )}
-          {state === 'dirty' && 'Unsaved'}
-          {state === 'error' && <span className="field-error">Not saved: {error}</span>}
         </span>
         <Segmented
           size="sm"

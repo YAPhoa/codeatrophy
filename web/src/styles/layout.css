@@ -755,8 +755,8 @@ button.nav-twisty:hover {
     transform: translateX(-102%);
     /* Closing is quicker than opening; visibility waits for the slide out to finish. */
     transition:
-      transform var(--duration-fast) var(--ease-out),
-      visibility 0s linear var(--duration-fast);
+      transform var(--duration-medium) var(--ease-out),
+      visibility 0s linear var(--duration-medium);
     box-shadow: var(--shadow-dialog);
     visibility: hidden;
     overscroll-behavior: contain;
@@ -766,7 +766,7 @@ button.nav-twisty:hover {
     transform: none;
     visibility: visible;
     transition:
-      transform var(--duration-medium) var(--ease-out),
+      transform var(--duration-slow) var(--ease-out),
       visibility 0s;
   }
 
@@ -786,15 +786,15 @@ button.nav-twisty:hover {
     opacity: 0;
     visibility: hidden;
     transition:
-      opacity var(--duration-fast) var(--ease-out),
-      visibility 0s linear var(--duration-fast);
+      opacity var(--duration-medium) var(--ease-out),
+      visibility 0s linear var(--duration-medium);
   }
 
   .drawer-scrim.is-open {
     opacity: 1;
     visibility: visible;
     transition:
-      opacity var(--duration-medium) var(--ease-out),
+      opacity var(--duration-slow) var(--ease-out),
       visibility 0s;
   }
 

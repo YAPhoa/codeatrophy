@@ -222,6 +222,31 @@
   margin-top: var(--space-1);
 }
 
+/* A tooltip holds back a moment before it shows, so one passed over on the
+   way to something else never flashes. It is in the page and describes its
+   control from the start; only the showing waits. It then grows in from
+   closer than a popover, and goes almost at once (InfoTip times the exit). */
+.popover.info-tip-text {
+  animation: tooltip-in var(--duration-quick) var(--ease-out) var(--duration-micro) backwards;
+}
+
+.popover.info-tip-text.is-closing {
+  animation: tooltip-out var(--duration-instant) var(--ease-out) forwards;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-tooltip));
+  }
+}
+
+@keyframes tooltip-out {
+  to {
+    opacity: 0;
+  }
+}
+
 .field-hint {
   max-width: 60ch;
   font-size: var(--text-sm);
@@ -776,7 +801,7 @@ button.chip:hover {
 @keyframes popover-out {
   to {
     opacity: 0;
-    transform: scale(0.99);
+    transform: scale(var(--scale-popover-out));
   }
 }
 
@@ -1119,6 +1144,14 @@ button.chip:hover {
   flex: none;
 }
 
+/* The note's words and mark change together (TextSwap), laid out as the note is. */
+.dialog-note > .text-swap {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+}
+
 .dialog-note.is-ok {
   color: var(--ok);
 }
@@ -1140,33 +1173,44 @@ button.chip:hover {
   pointer-events: none;
 }
 
-/* A toast sits in a one-row grid so that, as it leaves, the row closes to
-   nothing and the toasts above slide down instead of jumping. The space
-   between toasts is padding, which closes along with it. */
+/* A toast sits in a one-row grid. The row opens as the toast arrives and
+   closes once it has left, so the rest of the stack eases out of the way
+   instead of jumping. The space between toasts is padding, which opens and
+   closes along with it. */
 .toast-slot {
   display: grid;
   grid-template-rows: 1fr;
+  animation: toast-make-room var(--duration-medium) var(--ease-out);
 }
 
 .toast-slot + .toast-slot {
   padding-top: var(--space-2);
 }
 
+/* Held to the bottom of its row at its own height: while the row opens the
+   toast is already where it will rest, and only its own entrance moves it. */
 .toast-slot > .toast {
   min-height: 0;
+  align-self: end;
 }
 
+/* Leaving is quicker than arriving. The toast goes first, and only then does
+   its row close, so it is never squeezed mid-exit; Toast.tsx removes it once
+   both have played. While its row closes the toast is already invisible and
+   inert, so it may overflow the shrinking row. */
 .toast-slot.is-leaving {
-  animation: toast-collapse var(--duration-fast) var(--ease-out) var(--duration-fade-out) forwards;
+  animation: toast-collapse var(--duration-fast) var(--ease-out) var(--duration-fast) forwards;
 }
 
-/* Leaving is slower than arriving: the toast fades out at a steady pace (an
-   eased curve holds it, then drops it at the end, which reads as a pop), and
-   only then does its row close, so it is never clipped mid-fade. Toast.tsx removes it
-   once both have played. While its row closes the toast is already invisible
-   and inert, so it may overflow the shrinking row. */
 .toast-slot.is-leaving > .toast {
-  animation: toast-out var(--duration-fade-out) linear forwards;
+  animation: toast-out var(--duration-fast) var(--ease-out) forwards;
+}
+
+@keyframes toast-make-room {
+  from {
+    grid-template-rows: 0fr;
+    padding-top: 0;
+  }
 }
 
 @keyframes toast-collapse {
@@ -1176,9 +1220,22 @@ button.chip:hover {
   }
 }
 
+/* Rises into place from just below, sharpening and growing a touch as it
+   fades in, and sinks back the same way. The movement is what lets the fade
+   ride --ease-out without reading as a pop. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--distance-toast)) scale(var(--scale-toast));
+    filter: blur(var(--blur-small));
+  }
+}
+
 @keyframes toast-out {
   to {
     opacity: 0;
+    transform: translateY(var(--distance-toast)) scale(var(--scale-toast));
+    filter: blur(var(--blur-small));
   }
 }
 
@@ -1193,7 +1250,7 @@ button.chip:hover {
   box-shadow: var(--shadow-pop);
   pointer-events: auto;
   line-height: 1.4;
-  animation: toast-in var(--duration-fast) var(--ease-in-out);
+  animation: toast-in var(--duration-medium) var(--ease-out);
 }
 
 /* Frosted glass: the page shows through, blurred, under a lit top edge. Where
@@ -1203,14 +1260,6 @@ button.chip:hover {
     background: color-mix(in srgb, var(--surface) 60%, transparent);
     backdrop-filter: blur(var(--blur-glass)) saturate(180%);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%), var(--shadow-pop);
-  }
-}
-
-/* A plain fade: quick in, slow out (above). Not on --ease-out: with it the
-   toast is half there within a few frames and reads as a pop. */
-@keyframes toast-in {
-  from {
-    opacity: 0;
   }
 }
 
@@ -1850,7 +1899,7 @@ button.chip:hover {
 }
 
 .collapse.is-closing {
-  animation: collapse-close var(--duration-quick) var(--ease-out) forwards;
+  animation: collapse-close var(--duration-fast) var(--ease-out) forwards;
   pointer-events: none;
 }
 
@@ -1890,7 +1939,7 @@ button.chip:hover {
 @keyframes collapse-fade-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(calc(var(--distance-micro) * -1));
   }
 }
 
@@ -1911,8 +1960,15 @@ details[open] > :not(summary) {
 @keyframes reveal-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(calc(var(--distance-micro) * -1));
   }
+}
+
+/* The answer to something just done (an import, a connection test) settles
+   in as it arrives. Only for what mounts with its answer, never for what a
+   page may open on. */
+.reveal {
+  animation: reveal-in var(--duration-fast) var(--ease-out);
 }
 
 /* ---- Changes in place ---- */
@@ -1986,6 +2042,26 @@ details[open] > :not(summary) {
 .morph-swap > span {
   grid-area: 1 / 1;
   white-space: pre;
+}
+
+/* A status changing in place (StatusSwap): its icon and words, spaced as
+   the line it sits in spaces its own parts. */
+.status-swap {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+}
+
+/* Words too long to morph (TextSwap): the new ones blur in, in place. */
+.text-swap.is-in {
+  animation: text-swap-in var(--duration-fast) var(--ease-out);
+}
+
+@keyframes text-swap-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--blur-small));
+  }
 }
 
 /* A copy button: both labels are laid out in one cell, out of sight, so the

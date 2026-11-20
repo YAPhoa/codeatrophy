@@ -4,6 +4,7 @@ import { useLimits, usePreferences, useUpdatePreferences } from '../../api/queri
 import type { EditorPreferences, Preferences, PreferencesUpdate } from '../../api/types';
 import { setThemePreference, useThemePreference } from '../../lib/theme';
 import { setReadingSize, useReadingSize } from '../../lib/readingSize';
+import { StatusSwap } from '../../ui/Animated';
 import { Checkbox, NumberStepper, Segmented } from '../../ui/Field';
 import { ErrorCallout, Spinner } from '../../ui/misc';
 import { FONT_SIZE_MAX, FONT_SIZE_MIN, lineHeightFor, TAB_SIZES, type TabSize } from '../../ui/editorOptions';
@@ -61,18 +62,11 @@ function useAutosave() {
 
 /** "Saving…", then "Saved": how a setting that saves itself says so. */
 export function SaveStatus({ state }: { state: SaveState }) {
+  const saving = state.status === 'saving';
+  const saved = state.status === 'saved';
   return (
-    <span className="prefs-status" role="status">
-      {state.status === 'saving' && (
-        <>
-          <Spinner size={12} /> Saving…
-        </>
-      )}
-      {state.status === 'saved' && (
-        <>
-          <Check size={14} aria-hidden="true" /> Saved
-        </>
-      )}
+    <span className="prefs-status">
+      <StatusSwap icon={saving ? <Spinner size={12} /> : saved && <Check size={14} />} text={saving ? 'Saving…' : saved ? 'Saved' : ''} />
     </span>
   );
 }

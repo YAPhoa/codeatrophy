@@ -75,7 +75,7 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('tab', { name: /^Notes/ }).click();
   await page.getByLabel('Private notes (Markdown)').pressSequentially(' x');
-  const state = page.locator('.notes-state');
+  const state = page.locator('.notes-state').getByRole('status');
   await expect(state).toHaveText('Unsaved');
   // Well inside the autosave delay, and without leaving the field.
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
@@ -269,8 +269,11 @@ test('drawer: on a narrow screen it takes focus, keeps it, and closes on Escape'
   await opener.click();
   await expect(page.getByRole('button', { name: 'Close navigation' })).toBeFocused();
   await expect(page.locator('main')).toHaveAttribute('inert', '');
+  // A panel: it opens in --duration-slow and closes in --duration-medium.
+  await expect(page.locator('.sidebar')).toHaveCSS('transition-duration', '0.4s, 0s');
   await page.keyboard.press('Escape');
   await expect(page.locator('.sidebar')).not.toHaveClass(/is-open/);
+  await expect(page.locator('.sidebar')).toHaveCSS('transition-duration', '0.35s, 0s');
   await expect(page.locator('main')).not.toHaveAttribute('inert', '');
   await expect(opener).toBeFocused();
 });

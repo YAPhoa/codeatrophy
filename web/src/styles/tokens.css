@@ -60,9 +60,18 @@
   /* Motion. Things that open take --duration-fast and close in --duration-quick;
      lib/motion.ts reads --duration-quick to know how long a closing overlay
      stays mounted, and --duration-fast with --ease-out for the sliding tab
-     and segmented indicators. Panels open in --duration-slow; a success check
-     draws in --duration-very-slow; a toast fades out over --duration-fade-out.
-     Under reduced motion base.css cuts every duration to nil. */
+     and segmented indicators. Rows that open in place (ui/Collapse.tsx) take
+     --duration-fast both ways. A tooltip waits --duration-micro before it
+     shows, so one passed over on the way elsewhere never flashes; it then
+     shows in --duration-quick from --scale-tooltip and goes in
+     --duration-instant. Panels (the navigation drawer of a narrow screen) open
+     in --duration-slow and close in --duration-medium; a success check draws
+     in --duration-very-slow. A toast rises in over --duration-medium and
+     leaves in --duration-fast. Things that arrive together settle in one
+     after another, --stagger apart. lib/motion.ts reads these with their
+     unit, since a build may write 250ms as .25s. Under reduced motion
+     base.css cuts every duration and delay to nil. */
+  --duration-instant: 50ms;
   --duration-micro: 80ms;
   --duration-hover: 120ms;
   --duration-quick: 150ms;
@@ -70,16 +79,22 @@
   --duration-medium: 350ms;
   --duration-slow: 400ms;
   --duration-very-slow: 500ms;
-  --duration-fade-out: 1000ms;
+  --stagger: 40ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: ease-in-out;
   /* A small overshoot: a check settling, a star popping. */
   --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
   --scale-modal: 0.96;
   --scale-popover: 0.97;
+  /* A closing popover shrinks barely as it fades: the fade is what is seen. */
+  --scale-popover-out: 0.99;
+  --scale-tooltip: 0.98;
+  --scale-toast: 0.97;
   --distance-micro: 4px;
   --distance-small: 6px;
   --distance-base: 8px;
+  /* How far below its place a toast starts, and sinks back to as it leaves. */
+  --distance-toast: 16px;
   --blur-small: 2px;
   --blur-large: 8px;
   /* Frosted glass: what shows through a toast. */

@@ -25,7 +25,19 @@ export function token(name: string): string {
  */
 export function exitDuration(name = '--duration-quick'): number {
   if (prefersReducedMotion()) return 0;
-  const ms = parseFloat(token(name));
+  return parseDuration(token(name));
+}
+
+/**
+ * A CSS time as milliseconds. The unit has to be read, not assumed: the
+ * production build's minifier rewrites `250ms` as `.25s` wherever that is
+ * shorter, custom properties included, so the same token reads `250ms` from
+ * the dev server and `.25s` from a build.
+ */
+export function parseDuration(value: string): number {
+  const match = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(ms|s)\s*$/i.exec(value);
+  if (!match) return 0;
+  const ms = parseFloat(match[1]!) * (match[2]!.toLowerCase() === 's' ? 1000 : 1);
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
 
@@ -115,18 +127,24 @@ export function usePresence(open: boolean, exitToken = '--duration-quick'): { mo
  * when React removes it, however that happens: its `open` turning false or a
  * parent unmounting it. The moment it is removed, a copy takes its place,
  * marked `is-closing`, inert and hidden from assistive technology, and is
- * dropped once the exit has played (`--duration-quick`). The stylesheet
- * gives `.is-closing` the exit. Under reduced motion it simply goes.
+ * dropped once the exit has played (`--duration-quick` unless another
+ * duration token is named). The stylesheet gives `.is-closing` the exit.
+ * Under reduced motion it simply goes, and so does anything not yet drawn (a
+ * tooltip still waiting to show); one caught partway into its entrance
+ * leaves from as far as it got.
  *
  * Pass it as `ref` directly, or call it from a ref callback of your own and
  * return what it returns.
  */
-export function exitOnRemove(node: HTMLElement | null): (() => void) | undefined {
+export function exitOnRemove(node: HTMLElement | null, exitToken = '--duration-quick'): (() => void) | undefined {
   if (!node) return undefined;
   return () => {
-    const ms = exitDuration();
+    const ms = exitDuration(exitToken);
     const parent = node.parentNode;
     if (ms === 0 || !parent) return;
+    // Read while it is still in the page: the copy starts its exit afresh, at full strength.
+    const shown = parseFloat(getComputedStyle(node).opacity);
+    if (shown === 0) return;
     const next = node.nextSibling;
     const ghost = node.cloneNode(true) as HTMLElement;
     // What a copy does not carry over: typed values and scroll positions.
@@ -145,6 +163,7 @@ export function exitOnRemove(node: HTMLElement | null): (() => void) | undefined
       copy.removeAttribute('id');
     });
     ghost.classList.add('is-closing');
+    if (shown < 1) ghost.style.opacity = String(shown);
     ghost.setAttribute('inert', '');
     ghost.setAttribute('aria-hidden', 'true');
     // Wait for the commit to finish: in development StrictMode detaches and

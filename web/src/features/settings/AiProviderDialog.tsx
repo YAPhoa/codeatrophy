@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, KeyRound, PlugZap, Server } from 'lucide-react';
 import { api, isAbort, isApiError } from '../../api/client';
@@ -7,6 +7,7 @@ import type { AiEffort, AiProvider, AiProviderKind, AiSettings, AiTestResponse }
 import { errorLine, sentence } from '../../lib/errors';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatMs, plural, relativeTime } from '../../lib/format';
+import { TextSwap } from '../../ui/Animated';
 import { Button, cx } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Checkbox, Field, SelectField, TextField } from '../../ui/Field';
@@ -367,7 +368,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const breaksDefault = provider?.isDefault === true && provider.ready && outlook.missing.length > 0;
 
   // The footer's word on saving: the next step of the flow, or what saving leads to.
-  const note: { text: ReactNode; tone?: 'is-ok' | 'is-warn' } | null =
+  const note: { text: string; tone?: 'is-ok' | 'is-warn' } | null =
     !adding && !dirty
       ? { text: 'No unsaved changes.' }
       : (adding || testNeeded) && modelInUse === null
@@ -375,18 +376,11 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
         : testNeeded
           ? { text: adding ? 'Test the connection to add it.' : 'Test the connection to save it.' }
           : breaksDefault
-            ? { text: <>This is the default provider. Saving it without {listNeeds(outlook.missing)} turns AI features off.</>, tone: 'is-warn' }
+            ? { text: `This is the default provider. Saving it without ${listNeeds(outlook.missing)} turns AI features off.`, tone: 'is-warn' }
             : !adding && outlook.missing.length > 0
-              ? { text: <>Can be saved now; it still needs {listNeeds(outlook.missing)}.</> }
+              ? { text: `Can be saved now; it still needs ${listNeeds(outlook.missing)}.` }
               : passed
-                ? {
-                    text: (
-                      <>
-                        <CheckCircle2 size={14} aria-hidden="true" /> {adding ? 'Tested. Ready to add.' : 'Tested. Save to keep it.'}
-                      </>
-                    ),
-                    tone: 'is-ok',
-                  }
+                ? { text: adding ? 'Tested. Ready to add.' : 'Tested. Save to keep it.', tone: 'is-ok' }
                 : null;
 
   return (
@@ -400,7 +394,11 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
       footer={
         <>
           <span className={cx('dialog-note', note?.tone)} role="status">
-            {note?.text}
+            {/* A note may wrap, so it changes whole, its check mark with it. */}
+            <TextSwap swapKey={note?.text ?? ''}>
+              {note?.tone === 'is-ok' && <CheckCircle2 size={14} aria-hidden="true" />}
+              {note?.text}
+            </TextSwap>
           </span>
           <Button onClick={onClose} disabled={saving}>
             Cancel
@@ -598,7 +596,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           </Button>
         </div>
         {test?.ok && (
-          <Callout tone="ok" role="status" title="The connection works">
+          <Callout tone="ok" role="status" title="The connection works" className="reveal">
             {test.model !== null ? (
               <>
                 <code translate="no">{test.model}</code> answered{test.latencyMs != null ? ` in ${formatMs(test.latencyMs)}` : ''}.
@@ -609,7 +607,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
           </Callout>
         )}
         {test && !test.ok && (
-          <Callout tone="danger" role="alert" title="Connection failed">
+          <Callout tone="danger" role="alert" title="Connection failed" className="reveal">
             {test.error ? sentence(test.error) : 'The provider did not accept the request.'}
           </Callout>
         )}

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { exitDuration, token } from '../lib/motion';
+import { exitDuration, token, useChangeCount } from '../lib/motion';
 import { cx } from './Button';
 
 // Small pieces that animate a change in place. Each plays only when what it
@@ -104,6 +104,43 @@ export function MorphText({ text }: { text: string }) {
         <span>{text.slice(start, text.length - end)}</span>
       </span>
       {text.slice(text.length - end)}
+    </span>
+  );
+}
+
+/**
+ * A short status beside a control ("Saving…", then "Saved") that changes in
+ * place: its icon swaps and its words morph instead of cutting from one to
+ * the next. What shows is drawn for sight only; the same words sit out of
+ * sight in a live region of their own, so each state is announced once and
+ * whole, never the halves of a morph. An empty `text` shows nothing.
+ */
+export function StatusSwap({ icon, text }: { icon?: ReactNode; text: string }) {
+  return (
+    <>
+      <span className="status-swap" aria-hidden="true">
+        <IconSwap swapKey={text}>{icon}</IconSwap>
+        <MorphText text={text} />
+      </span>
+      <span className="sr-only" role="status">
+        {text}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Words that change in place where they may wrap, which MorphText cannot
+ * (it holds to one line): the new words blur in where the old ones were
+ * (ui.css, `.text-swap`). Plays when `swapKey` changes after it has mounted.
+ * The words are the page's own, so a live region around them reads only the
+ * new state.
+ */
+export function TextSwap({ swapKey, className, children }: { swapKey: string | number | boolean; className?: string; children: ReactNode }) {
+  const n = useChangeCount(swapKey);
+  return (
+    <span key={n} className={cx('text-swap', n > 0 && 'is-in', className)}>
+      {children}
     </span>
   );
 }

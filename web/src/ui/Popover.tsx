@@ -31,23 +31,28 @@ interface PopoverProps {
   children: ReactNode;
   /** Keep focus where it is (for comboboxes whose input stays focused). */
   noAutoFocus?: boolean;
+  /** The duration token its exit lasts, when it closes quicker than a popover does (a tooltip). */
+  exitToken?: string;
 }
 
 /**
  * A floating panel positioned under (or, when there is no room, above) its
  * anchor, or the other way round with `side="above"`. Closes on Escape, on a click outside, and when focus leaves it.
  */
-export function Popover({ anchorRef, open, onClose, align = 'start', side = 'below', matchWidth, className, role, label, id, children, noAutoFocus }: PopoverProps) {
+export function Popover({ anchorRef, open, onClose, align = 'start', side = 'below', matchWidth, className, role, label, id, children, noAutoFocus, exitToken }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; minWidth?: number; maxHeight: number; origin: string } | null>(null);
-  const attach = useCallback((node: HTMLDivElement | null) => {
-    ref.current = node;
-    const exit = exitOnRemove(node);
-    return () => {
-      ref.current = null;
-      exit?.();
-    };
-  }, []);
+  const attach = useCallback(
+    (node: HTMLDivElement | null) => {
+      ref.current = node;
+      const exit = exitOnRemove(node, exitToken);
+      return () => {
+        ref.current = null;
+        exit?.();
+      };
+    },
+    [exitToken],
+  );
 
   const place = useCallback(() => {
     const anchor = anchorRef.current;

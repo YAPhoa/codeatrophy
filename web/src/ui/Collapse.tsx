@@ -28,7 +28,8 @@ function FadeOpen({ open, children }: { open: boolean; children: ReactNode }) {
 }
 
 function GrowOpen({ open, children }: { open: boolean; children: ReactNode }) {
-  const { mounted, closing } = usePresence(open);
+  // It closes at the pace it opens, --duration-fast both ways (ui.css, `.collapse`).
+  const { mounted, closing } = usePresence(open, '--duration-fast');
   // Whether it has been closed since it mounted: only then does opening play.
   const [toggled, setToggled] = useState(!open);
   if (!open && !toggled) setToggled(true);

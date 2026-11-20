@@ -196,7 +196,7 @@ export function ExportSection() {
 
         {error != null && <ErrorCallout error={error} title="The export failed" onRetry={() => void run()} />}
         {done && (
-          <Callout tone="ok" role="status" title="Bundle downloaded">
+          <Callout tone="ok" role="status" title="Bundle downloaded" className="reveal">
             <PackageCheck size={14} aria-hidden="true" /> {done.filename} · {formatBytes(done.size)}
           </Callout>
         )}

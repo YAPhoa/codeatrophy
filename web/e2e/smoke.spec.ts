@@ -391,13 +391,13 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   const preference = page.getByRole('checkbox', { name: 'Generate large test cases by default' });
   await expect(preference).not.toBeChecked();
   await preference.check();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
   // How many is a preference of its own.
   const count = page.getByLabel('Large test cases to generate');
   await expect(count).toHaveValue('3');
   await page.getByRole('button', { name: 'Fewer large test cases' }).click();
   await expect(count).toHaveValue('2');
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
 
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
@@ -1323,7 +1323,7 @@ test('item bar: the favorite button says what it does, and the menu keeps only e
 test('large test cases: a draft kept from before cases carried their generators still shows them', async ({ page }) => {
   await open(page, '/settings/preferences');
   await page.getByRole('checkbox', { name: 'Generate large test cases by default' }).check();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
   await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
   await page.getByRole('button', { name: 'Draft with AI' }).click();

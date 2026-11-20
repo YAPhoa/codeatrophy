@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { IconSwap, MorphText, NumberChange, sharedEnds } from './Animated';
+import { IconSwap, MorphText, NumberChange, sharedEnds, StatusSwap, TextSwap } from './Animated';
 
 describe('sharedEnds', () => {
   it('finds the letters two labels share at the start and the end', () => {
@@ -32,5 +32,13 @@ describe('changes in place, on a first render', () => {
   it('draws plain text and plain digits', () => {
     expect(renderToStaticMarkup(<MorphText text="Copy" />)).toBe('<span class="morph">Copy</span>');
     expect(renderToStaticMarkup(<NumberChange value={42} />)).toBe('42');
+    expect(renderToStaticMarkup(<TextSwap swapKey="saved">Saved</TextSwap>)).toBe('<span class="text-swap">Saved</span>');
+  });
+
+  it('gives a status its words once, for assistive technology, apart from what is drawn', () => {
+    const html = renderToStaticMarkup(<StatusSwap icon={<svg />} text="Saved" />);
+    expect(html).toContain('<span class="status-swap" aria-hidden="true">');
+    expect(html).toContain('<span class="sr-only" role="status">Saved</span>');
+    expect(html).not.toContain('is-in');
   });
 });

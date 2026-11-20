@@ -8,6 +8,7 @@ import { summariseVerify } from '../../lib/checks';
 import { errorLine } from '../../lib/errors';
 import { plural } from '../../lib/format';
 import { languageName } from '../../lib/languages';
+import { IconSwap, TextSwap } from '../../ui/Animated';
 import { Button } from '../../ui/Button';
 import { Spinner } from '../../ui/misc';
 
@@ -68,13 +69,6 @@ export function TestOutcome({ item, test, className }: { item: Item; test: Solut
   const { state } = test;
   if (state.status === 'idle') return null;
   const cls = `check-line${className ? ` ${className}` : ''}`;
-  if (state.status === 'running') {
-    return (
-      <p className={`${cls} tone-neutral`} role="status">
-        <Spinner size={12} /> Running on {plural(item.testCaseCount, 'test case')}…
-      </p>
-    );
-  }
   if (state.status === 'failed') {
     return (
       <p className={`${cls} tone-danger`} role="alert">
@@ -82,16 +76,24 @@ export function TestOutcome({ item, test, className }: { item: Item; test: Solut
       </p>
     );
   }
-  const summary = summariseVerify(state.results, cases, hiding, item.problem?.timeLimitMs);
-  const passed = summary.total > 0 && summary.passed === summary.total;
+  // Running and its outcome are one line, which changes in place from the one to the other.
+  const summary = state.status === 'done' ? summariseVerify(state.results, cases, hiding, item.problem?.timeLimitMs) : null;
+  const passed = summary !== null && summary.total > 0 && summary.passed === summary.total;
+  const shows = summary === null ? 'running' : passed ? 'passes' : 'fails';
   return (
-    <p className={`${cls} tone-${passed ? 'ok' : 'danger'}`} role="status">
-      {passed ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
-      <span>
-        Passes {summary.passed} of {plural(summary.total, 'test case')}
-        {summary.failure ? `. ${summary.failure}` : ''}
-        {summary.slowest && <span className="check-aside"> · slowest {summary.slowest}</span>}
-      </span>
+    <p className={`${cls} tone-${summary === null ? 'neutral' : passed ? 'ok' : 'danger'}`} role="status">
+      <IconSwap swapKey={shows}>{summary === null ? <Spinner size={12} /> : passed ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}</IconSwap>
+      <TextSwap swapKey={shows}>
+        {summary === null ? (
+          <>Running on {plural(item.testCaseCount, 'test case')}…</>
+        ) : (
+          <>
+            Passes {summary.passed} of {plural(summary.total, 'test case')}
+            {summary.failure ? `. ${summary.failure}` : ''}
+            {summary.slowest && <span className="check-aside"> · slowest {summary.slowest}</span>}
+          </>
+        )}
+      </TextSwap>
     </p>
   );
 }
