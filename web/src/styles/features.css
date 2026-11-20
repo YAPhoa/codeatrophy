@@ -3279,22 +3279,26 @@ button.case-chip:hover {
   scroll-behavior: smooth;
 }
 
-/* The text column is 720px at most: about 85 characters a line at 17px. It
-   gives way first when the pane is too narrow for it and the outline. */
+/* The text column is capped by the "Text width" preference: 720px by
+   default, about 85 characters a line at 17px (the numbers and what they
+   give are in lib/textWidth.ts; ReaderView sets --reader-column and
+   --reader-outline). Full is 100%, which grows the track into all the free
+   space. The column gives way when the pane is narrower than its cap. The
+   outline docks beside it (has-outline) only while the column keeps nearly
+   its whole cap; otherwise it folds into a button in the bar and the column
+   gets the room. ReaderView measures the pane for that. */
 .reader-layout {
+  --reader-column: 720px;
+  --reader-outline: 220px;
   display: grid;
-  grid-template-columns: minmax(0, 720px) 220px;
+  grid-template-columns: minmax(0, var(--reader-column));
   justify-content: center;
   gap: var(--space-12);
   padding: var(--space-10) var(--space-8) 96px;
 }
 
-.reader.has-notes .reader-layout {
-  grid-template-columns: minmax(0, 720px);
-}
-
-.reader.has-notes .reader-outline {
-  display: none;
+.reader-layout.has-outline {
+  grid-template-columns: minmax(0, var(--reader-column)) var(--reader-outline);
 }
 
 /* Back as the notes close: the outline fades in while the text column eases
@@ -3398,6 +3402,14 @@ button.case-chip:hover {
   border-left-color: var(--border);
 }
 
+/* The outline folded into the bar's button. */
+.reader-outline-pop .reader-outline {
+  position: relative;
+  top: auto;
+  max-height: none;
+  overflow: visible;
+}
+
 /* The heading an outline link jumps to lights up briefly, which shows where it
    went even when the page cannot scroll any further. */
 .reader-layout :target {
@@ -3468,12 +3480,7 @@ button.case-chip:hover {
 
 @media (max-width: 1100px) {
   .reader-layout {
-    grid-template-columns: minmax(0, 720px);
     padding: 28px var(--space-5) 72px;
-  }
-
-  .reader-outline {
-    display: none;
   }
 }
 

@@ -1,14 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
-import { ArrowLeft, ExternalLink, MoreHorizontal, NotebookPen, X } from 'lucide-react';
+import { ArrowLeft, ExternalLink, MoreHorizontal, MoveHorizontal, NotebookPen, TableOfContents, X } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
-import { slideFrom, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
+import { exitDuration, slideFrom, token, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
+import { columnCap, OUTLINE_PX, outlineDocks, setTextWidth, TEXT_WIDTHS, useTextWidth, type TextWidth } from '../../lib/textWidth';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
-import { MenuButton } from '../../ui/Popover';
+import { MenuButton, Popover } from '../../ui/Popover';
 import { Callout } from '../../ui/misc';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl, TagChips } from '../item/controls';
@@ -80,8 +81,14 @@ function useOutline(containerRef: React.RefObject<HTMLElement | null>, source: s
     scroller.addEventListener('scroll', schedule, { passive: true });
     for (const t of hand) scroller.addEventListener(t, byHand, { passive: true });
     window.addEventListener('resize', schedule);
+    // The text reflows when its column changes width (the text width
+    // preference, the notes) or a diagram or image comes in, which moves the
+    // headings without a scroll.
+    const ro = typeof ResizeObserver !== 'undefined' && containerRef.current ? new ResizeObserver(schedule) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
     return () => {
       cancelAnimationFrame(frame);
+      ro?.disconnect();
       scroller.removeEventListener('scroll', schedule);
       for (const t of hand) scroller.removeEventListener(t, byHand);
       window.removeEventListener('resize', schedule);
@@ -120,6 +127,63 @@ export function ReaderView({ item }: { item: Item }) {
     if (from && articleRef.current) slideFrom(articleRef.current, from);
   }, [notesOpen]);
 
+  const textWidth = useTextWidth();
+  const layoutRef = useRef<HTMLDivElement>(null);
+  // Where the text column and the outline were before the width changed. The
+  // text reflows at once; the two ease sideways from their old places, as the
+  // column does for the notes (only across: the scroll keeps the reader's
+  // place, so the column's top may move by that and must not slide).
+  const widthWas = useRef<Map<Element, DOMRect> | null>(null);
+  const chooseWidth = (width: TextWidth) => {
+    if (width === textWidth) return;
+    const children = Array.from(layoutRef.current?.children ?? []);
+    widthWas.current = new Map(children.map((el) => [el, el.getBoundingClientRect()]));
+    setTextWidth(width);
+  };
+  useLayoutEffect(() => {
+    const was = widthWas.current;
+    widthWas.current = null;
+    if (!was) return;
+    for (const [el, from] of was) {
+      if (!(el instanceof HTMLElement) || !el.isConnected) continue;
+      const to = el.getBoundingClientRect();
+      slideFrom(el, new DOMRect(from.left, to.top, from.width, from.height));
+    }
+    // An outline the new width leaves room for fades in beside the text.
+    const ms = exitDuration('--duration-slow');
+    for (const el of Array.from(layoutRef.current?.children ?? [])) {
+      if (!was.has(el) && el instanceof HTMLElement && ms > 0) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: token('--ease-in-out') || 'ease-in-out' });
+    }
+  }, [textWidth]);
+  const widthLabel = TEXT_WIDTHS.find((w) => w.value === textWidth)?.label ?? '';
+
+  // The room the pane leaves for the text and a docked outline: measured, so
+  // the sidebar and the notes count, not the window.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    const layout = layoutRef.current;
+    if (!scroller || !layout) return;
+    const measure = () => {
+      const style = getComputedStyle(layout);
+      const px = (v: string) => parseFloat(v) || 0;
+      setRoom(scroller.clientWidth - px(style.paddingLeft) - px(style.paddingRight) - px(style.columnGap));
+    };
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(scroller);
+    return () => ro?.disconnect();
+  }, []);
+  // Whether the outline fits beside nearly the whole chosen column, remembered with
+  // the width it was decided for: the margin against flicker applies only
+  // while the room changes, never to a new choice of width.
+  const [fit, setFit] = useState<{ width: TextWidth; fits: boolean } | null>(null);
+  const fits = room !== null && outlineDocks(textWidth, room, fit === null || fit.width !== textWidth || fit.fits);
+  if (room !== null && (fit?.width !== textWidth || fit.fits !== fits)) setFit({ width: textWidth, fits });
+  const hasOutline = headings.length > 2;
+  const docked = hasOutline && fits && !notesOpen;
+
   return (
     <div className={cx('reader', notesOpen && 'has-notes', notesToggled && !notesOpen && 'notes-closed')}>
       <header className="reader-bar">
@@ -139,6 +203,16 @@ export function ReaderView({ item }: { item: Item }) {
             onCreate={() => collectionActions.create(null, (c) => actions.toggleCollection(c.id, true))}
           />
         </span>
+        {hasOutline && !docked && <OutlineButton headings={headings} active={active} onChoose={choose} />}
+        <MenuButton
+          size="sm"
+          variant="ghost"
+          label={`Text width: ${widthLabel}`}
+          menuLabel="Text width"
+          align="end"
+          icon={<MoveHorizontal size={16} />}
+          items={[{ heading: 'Text width' }, ...TEXT_WIDTHS.map((w) => ({ label: w.label, selected: w.value === textWidth, onSelect: () => chooseWidth(w.value) }))]}
+        />
         <Button size="sm" icon={<NotebookPen size={14} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
           Notes
         </Button>
@@ -146,8 +220,8 @@ export function ReaderView({ item }: { item: Item }) {
       </header>
 
       <div className="reader-body">
-        <div className="reader-scroll" role="region" aria-label="Reading" tabIndex={0}>
-          <div className="reader-layout">
+        <div className="reader-scroll" role="region" aria-label="Reading" tabIndex={0} ref={scrollRef}>
+          <div className={cx('reader-layout', docked && 'has-outline')} ref={layoutRef} style={{ '--reader-column': columnCap(textWidth), '--reader-outline': `${OUTLINE_PX}px` } as CSSProperties}>
             <article className="reader-article" ref={articleRef}>
               <header className="reader-head">
                 <h1>{item.title}</h1>
@@ -175,7 +249,7 @@ export function ReaderView({ item }: { item: Item }) {
               <Related item={item} />
             </article>
 
-            {headings.length > 2 && <Outline headings={headings} active={active} onChoose={choose} />}
+            {docked && <Outline headings={headings} active={active} onChoose={choose} />}
           </div>
         </div>
 
@@ -201,7 +275,13 @@ export function ReaderView({ item }: { item: Item }) {
 const OUTLINE_ACTIVE = 'a.is-active';
 const OUTLINE_MARKER = { pseudo: '::before', axis: 'y' } as const;
 
-function Outline({ headings, active, onChoose }: { headings: Heading[]; active: string | null; onChoose: (id: string) => void }) {
+interface OutlineProps {
+  headings: Heading[];
+  active: string | null;
+  onChoose: (id: string) => void;
+}
+
+function Outline({ headings, active, onChoose }: OutlineProps) {
   const ref = useSlidingIndicator<HTMLElement>(OUTLINE_ACTIVE, OUTLINE_MARKER);
   const minTop = Math.min(...headings.map((h) => h.level), 3);
   return (
@@ -210,13 +290,49 @@ function Outline({ headings, active, onChoose }: { headings: Heading[]; active: 
       <ul>
         {headings.map((h) => (
           <li key={h.id} style={{ paddingLeft: (h.level - minTop) * 12 }}>
-            <a href={`#${h.id}`} onClick={() => onChoose(h.id)} className={cx(active === h.id && 'is-active')} aria-current={active === h.id ? 'location' : undefined}>
+            <a
+              href={`#${h.id}`}
+              onClick={() => onChoose(h.id)}
+              className={cx(active === h.id && 'is-active')}
+              aria-current={active === h.id ? 'location' : undefined}
+              data-autofocus={active === h.id || undefined}
+            >
               {h.text}
             </a>
           </li>
         ))}
       </ul>
     </nav>
+  );
+}
+
+/** The outline folded into the bar, for when the pane has no room for it beside the chosen text width. */
+function OutlineButton({ headings, active, onChoose }: OutlineProps) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <IconButton
+        ref={anchorRef}
+        size="sm"
+        label="On this page"
+        icon={<TableOfContents size={16} />}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      />
+      <Popover anchorRef={anchorRef} open={open} onClose={close} align="end" role="dialog" label="On this page" className="popover-panel reader-outline-pop">
+        <Outline
+          headings={headings}
+          active={active}
+          onChoose={(id) => {
+            onChoose(id);
+            close();
+          }}
+        />
+      </Popover>
+    </>
   );
 }
 

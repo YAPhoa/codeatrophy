@@ -173,7 +173,10 @@ default writing style (`e2e/styles.spec.ts`), "Generate code" on the edit
 page of a problem (`e2e/generate-code.spec.ts`), and the system prompt and
 test case prompt, each edited only after a confirm, reset, and guarded when
 left unsaved (`e2e/system-prompt.spec.ts`), and Mermaid diagrams and
-`data:image` URLs in rendered Markdown (`e2e/markdown.spec.ts`). It starts its own
+`data:image` URLs in rendered Markdown (`e2e/markdown.spec.ts`), and the
+reader's text width, from its bar and from Settings, with the outline folding
+into the bar when the pane has no room for it beside the chosen width
+(`e2e/text-width.spec.ts`). It starts its own
 `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no backend, AI
 provider or judge, and it fails on any page error or request to a third-party
 origin. The tests in `e2e/built` check how a reload paints and that a load at
@@ -273,7 +276,9 @@ A few conventions worth knowing:
   (`src/ui/editorLibrary.ts`); editors of code that runs after a prefix pass
   it as `runsAfter`.
 - **Preferences live on the server** (`/settings/preferences`), so they follow
-  the user between browsers; only the theme is local. `usePreferences()`
+  the user between browsers; only the theme, the reading text size and the
+  reader's text width (`src/lib/textWidth.ts`, also switched from the reader's
+  bar) are local. `usePreferences()`
   returns them, with the defaults until they have loaded. Every CodeMirror
   editor goes through `src/ui/CodeEditor.tsx`, which applies the editor
   preferences itself — callers pass nothing.

@@ -4,6 +4,7 @@ import { useLimits, usePreferences, useUpdatePreferences } from '../../api/queri
 import type { EditorPreferences, Preferences, PreferencesUpdate } from '../../api/types';
 import { setThemePreference, useThemePreference } from '../../lib/theme';
 import { setReadingSize, useReadingSize } from '../../lib/readingSize';
+import { setTextWidth, TEXT_WIDTHS, useTextWidth } from '../../lib/textWidth';
 import { StatusSwap } from '../../ui/Animated';
 import { Checkbox, NumberStepper, Segmented } from '../../ui/Field';
 import { ErrorCallout, Spinner } from '../../ui/misc';
@@ -123,6 +124,7 @@ export function PreferencesSection() {
   const setEditor = (change: Partial<EditorPreferences>) => save({ editor: change });
   const theme = useThemePreference();
   const readingSize = useReadingSize();
+  const textWidth = useTextWidth();
   const limits = useLimits();
   const maxGenerated = limits?.maxGeneratedTestCases ?? 30;
   const maxLarge = limits?.maxLargeTestCases ?? 5;
@@ -136,7 +138,7 @@ export function PreferencesSection() {
         <SaveStatus state={state} />
       </div>
       <p className="settings-lead">
-        All changes are applied immediately and stored on the server, except for Appearance, which is stored in the browser.
+        All changes are applied immediately and stored on the server, except for Appearance and Reading, which are stored in the browser.
       </p>
       {state.status === 'error' && <ErrorCallout error={state.error} title="Could not save the change. The previous setting is restored." />}
 
@@ -174,6 +176,19 @@ export function PreferencesSection() {
               { value: 'large', label: 'Large' },
             ]}
           />
+        </div>
+      </div>
+
+      <div className="card card-pad prefs-group" role="group" aria-labelledby="preferences-reading-title">
+        <h2 id="preferences-reading-title" className="prefs-group-title">
+          Reading
+        </h2>
+        <div className="prefs-row">
+          <div className="prefs-row-text">
+            <div className="prefs-row-label">Text width</div>
+            <div className="field-hint">The width of a reading's text column.</div>
+          </div>
+          <Segmented label="Text width" value={textWidth} onChange={setTextWidth} options={TEXT_WIDTHS} />
         </div>
       </div>
 
