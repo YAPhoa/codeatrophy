@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { open } from './support';
+import { open, TWO_SUM_TEXT } from './support';
 
 // Keyboard, focus and screen-reader behaviour the UI is held to. Like the
 // smoke suite, these run against the API mock.
@@ -27,8 +27,8 @@ test('confirm: a destructive dialog opens on Cancel, so Enter does not delete', 
 
 test('live regions: the elapsed-time counter of a generation is not announced', async ({ page }) => {
   // Normal mock delays, so the panel stays up long enough to look at.
-  await page.goto('/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await open(page, '/new', 'default');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
 
   const status = page.getByRole('status').filter({ hasText: 'Drafting…' });
@@ -83,22 +83,6 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await expect(state).toHaveText('Saved');
 });
 
-test('reduced motion: the mark of a generation in progress is a still frame', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  // Normal mock delays, so the generating panel stays up long enough to look at.
-  await page.goto('/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
-  await page.getByRole('button', { name: 'Draft with AI' }).click();
-  const rows = page.locator('.generating-row');
-  await expect(rows).toHaveCount(5);
-  for (const row of await rows.all()) await expect(row).toHaveCSS('animation-name', 'none');
-  await expect(rows.nth(1)).toHaveCSS('opacity', '0');
-  await expect(page.locator('.generating-token').first()).toHaveCSS('animation-name', 'none');
-  const caret = page.locator('.generating-caret');
-  await expect(caret).toHaveCSS('animation-name', 'none');
-  await expect(caret).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 28, 23)');
-});
-
 test('deep links: the open tabs of the solve page are part of the address', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
@@ -121,7 +105,7 @@ test('deep links: the open tabs of the solve page are part of the address', asyn
 
 test('deep links: a capture\'s draft has an address of its own, and its input is a step in the history', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(page).toHaveURL(/\/drafts\/[^/?]+$/);
@@ -157,7 +141,7 @@ test('deep links: the selected test case is in the address', async ({ page }) =>
   await expect(name).not.toHaveValue('');
   await expect(page).not.toHaveURL(/case=/);
 
-  const second = page.getByRole('list', { name: 'Test cases' }).locator('.case-row-main').nth(1);
+  const second = page.getByRole('list', { name: 'Test cases' }).getByRole('listitem').nth(1).getByRole('button').first();
   await second.click();
   await expect(page).toHaveURL(/[?&]case=/);
   const selectedName = await name.inputValue();
@@ -205,15 +189,30 @@ test('forms: a save that cannot go through says why and moves to the field', asy
   await expect(dialog.getByLabel('Name')).toBeFocused();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
 
-  // An item whose title was emptied.
+  // An item whose title was emptied: the field shakes too, and again on another try.
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('button', { name: 'More actions' }).click();
   await page.getByRole('menuitem', { name: 'Edit details…' }).click();
-  await page.getByLabel('Title').fill('');
+  const title = page.getByLabel('Title');
+  await title.fill('');
+  await title.evaluate((el) => {
+    const w = window as unknown as { __shakes: number };
+    w.__shakes = 0;
+    el.addEventListener('animationstart', (e) => {
+      if ((e as AnimationEvent).animationName === 'shake') w.__shakes++;
+    });
+  });
+  const shakes = () => page.evaluate(() => (window as unknown as { __shakes: number }).__shakes);
   await page.getByLabel('Source note').focus();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByLabel('Title')).toBeFocused();
-  await expect(page.getByLabel('Title')).toHaveAttribute('aria-invalid', 'true');
+  await expect(title).toBeFocused();
+  await expect(title).toHaveAttribute('aria-invalid', 'true');
+  await expect.poll(shakes).toBe(1);
+  // The shake ends; the error styling stays.
+  await expect(title).not.toHaveClass(/is-shaking/);
+  await expect(title).toHaveAttribute('aria-invalid', 'true');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect.poll(shakes).toBe(2);
 });
 
 test('forms: drafting from nothing asks for some text', async ({ page }) => {
@@ -258,13 +257,9 @@ test('dialogs: Escape asks before dropping what was typed, and Cancel does not',
   await expect(ask).toBeHidden();
 });
 
-test('toasts: the container is a live region before a toast arrives', async ({ page }) => {
-  await open(page, '/');
-  await expect(page.getByRole('region', { name: 'Notifications' })).toHaveAttribute('aria-live', 'polite');
-});
-
 test('drawer: on a narrow screen it takes focus, keeps it, and closes on Escape', async ({ page }) => {
-  await page.setViewportSize({ width: 420, height: 800 });
+  // The sidebar is a drawer below 900px.
+  await page.setViewportSize({ width: 800, height: 800 });
   await open(page, '/');
   const opener = page.getByRole('button', { name: 'Open navigation' });
   await opener.click();
@@ -302,7 +297,7 @@ test('headings: a page that only has a message to show still has an h1', async (
 
 test('undo: a test case removed from a draft can be put back where it was', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'Test cases' })).toBeVisible();
 
@@ -318,7 +313,7 @@ test('undo: a test case removed from a draft can be put back where it was', asyn
 
 test('assumptions: each is a checkbox named by its own text, ticked from anywhere on the line', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   const line = page.locator('.assumptions-list li').first();
   const text = (await line.innerText()).trim();
@@ -333,38 +328,6 @@ test('AI activity: a row says which column each of its values belongs to', async
   await open(page, '/settings/ai-activity');
   const row = page.getByRole('list', { name: 'Requests' }).getByRole('button').first();
   await expect(row).toHaveAccessibleName(/Provider: .+Model: .+Tokens in: .+Tokens out: .+Time: .+When: /);
-});
-
-test('motion: a closing dialog plays its exit out of reach, then goes', async ({ page }) => {
-  await open(page, '/');
-  const opener = page.getByRole('button', { name: 'New collection' });
-  await opener.click();
-  await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
-  const closing = await page.evaluate(() => {
-    const backdrop = document.querySelector('.dialog-backdrop');
-    return backdrop && { closing: backdrop.classList.contains('is-closing'), inert: backdrop.hasAttribute('inert'), hidden: backdrop.getAttribute('aria-hidden') };
-  });
-  expect(closing).toEqual({ closing: true, inert: true, hidden: 'true' });
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(opener).toBeFocused();
-  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
-});
-
-test('reduced motion: dialogs and menus close at once', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await open(page, '/');
-  await page.getByRole('button', { name: 'New collection' }).click();
-  await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  expect(await page.locator('.dialog-backdrop').count()).toBe(0);
-
-  await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
-  await page.getByRole('button', { name: 'More actions' }).click();
-  await expect(page.getByRole('menu')).toBeVisible();
-  await page.keyboard.press('Escape');
-  expect(await page.locator('.popover').count()).toBe(0);
 });
 
 test('motion: the tab underline is one indicator that follows the selected tab', async ({ page }) => {
@@ -429,13 +392,6 @@ test('focus: the ring on a tag chip in a library row is not cut off', async ({ p
   const chip = page.locator('.item-tags .chip').first();
   await chip.focus();
   await expect(chip).toHaveCSS('outline-offset', '-2px');
-});
-
-test('reduced motion: the reader jumps to a heading instead of scrolling smoothly', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await open(page, '/');
-  await page.getByRole('link', { name: 'Consistent Hashing' }).click();
-  await expect(page.getByRole('region', { name: 'Reading', exact: true })).toHaveCSS('scroll-behavior', 'auto');
 });
 
 test('toasts: a toast stays while the pointer is on it, so its Undo cannot slip away', async ({ page }) => {

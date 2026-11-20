@@ -7,7 +7,8 @@ const PORT = Number(process.env.E2E_PORT ?? 5174);
 // production build: they run against one made with the mock and served by
 // `vite preview`, kept out of the working tree like the other artefacts.
 const BUILT_PORT = Number(process.env.E2E_BUILT_PORT ?? 5175);
-const BUILT_DIR = 'node_modules/.tmp/e2e-built';
+// Per port, so concurrent runs on other ports do not empty each other's build.
+const BUILT_DIR = `node_modules/.tmp/e2e-built-${BUILT_PORT}`;
 const browser = { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } };
 
 export default defineConfig({

@@ -11,6 +11,7 @@ import (
 	"codeatrophy/internal/domain"
 )
 
+// The field rules are domain.ValidateStylePreset's, tested there.
 func TestStylePresetCRUDAndLimits(t *testing.T) {
 	e := newEnv(t)
 	create := func(js string) (domain.StylePreset, error) {
@@ -27,18 +28,6 @@ func TestStylePresetCRUDAndLimits(t *testing.T) {
 	must(create(`{"name":"Ärger","instructions":"x"}`))
 	_, err = create(`{"name":"ärger","instructions":"x"}`)
 	wantCode(t, err, app.CodeValidation)
-	for _, js := range []string{
-		`{"instructions":"x"}`,
-		`{"name":"x"}`,
-		`{"name":"x","instructions":"` + strings.Repeat("é", domain.MaxStyleInstructionsChars+1) + `"}`,
-		`{"name":"` + strings.Repeat("名", domain.MaxStyleNameChars+1) + `","instructions":"x"}`,
-		`{"name":"x","instructions":"bell\u0007"}`,
-		`{"name":"x","instructions":"   "}`,
-	} {
-		_, err := create(js)
-		wantCode(t, err, app.CodeValidation)
-	}
-	must(create(`{"name":"` + strings.Repeat("名", domain.MaxStyleNameChars) + `","instructions":"` + strings.Repeat("é", domain.MaxStyleInstructionsChars) + `"}`))
 
 	// Single default: setting it on one clears the others.
 	b = must(e.app.UpdateStylePreset(e.ctx, b.ID, decodeInto[domain.StylePresetInput](t, `{"isDefault":true}`)))

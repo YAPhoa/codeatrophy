@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -75,6 +77,68 @@ func TestDBStatusOfABehindDatabase(t *testing.T) {
 	printStatus(&out, st, true)
 	if !strings.Contains(out.String(), "applied at the next start, or by codeatrophy db migrate") {
 		t.Errorf("with automatic migration:\n%s", out.String())
+	}
+}
+
+// A database migrated by a newer server is refused, and its status says so.
+func TestDBMigrateRefusesANewerSchema(t *testing.T) {
+	ctx := context.Background()
+	quiet := slog.New(slog.DiscardHandler)
+	tg := dbopen.Target{SQLitePath: filepath.Join(t.TempDir(), "x.db")}
+	var out bytes.Buffer
+	if err := runMigrate(ctx, &out, tg, quiet); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", tg.SQLitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (999, 'future', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	out.Reset()
+	err = runMigrate(ctx, &out, tg, quiet)
+	if !errors.Is(err, store.ErrNewerSchema) || !strings.Contains(out.String(), "schema version 999") ||
+		strings.Contains(out.String(), "Applied") {
+		t.Errorf("newer schema: %v\n%s", err, out.String())
+	}
+	st, err := dbopen.Inspect(ctx, tg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	printStatus(&out, st, false)
+	if !strings.Contains(words(out.String()), "Schema version: 999 (newer than this server: upgrade the server)") {
+		t.Errorf("status of a newer database:\n%s", out.String())
+	}
+}
+
+func TestDBStatusBranches(t *testing.T) {
+	var out bytes.Buffer
+	printStatus(&out, store.Status{Backend: "SQLite", Location: "/data/new.db", Latest: 6,
+		Pending: []string{"0001_init.sql"}}, true)
+	for _, want := range []string{"Backend: SQLite", "Database: /data/new.db",
+		"does not exist yet; it is created at the next start, or by codeatrophy db migrate",
+		"Schema version: none (no schema yet)", "Pending migrations: 0001_init.sql (applied at the next start"} {
+		if !strings.Contains(words(out.String()), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "Rows:") {
+		t.Errorf("rows without counts:\n%s", out.String())
+	}
+	out.Reset()
+	printStatus(&out, store.Status{Backend: "PostgreSQL", Location: "postgres://db/x", Exists: true, Version: 6, Latest: 6,
+		Counts: []store.TableCount{{Table: "items", Rows: 3}, {Table: "test_cases", Rows: 12}}}, false)
+	got := words(out.String())
+	for _, want := range []string{"Schema version: 6", "Pending migrations: none", "Rows: items 3 test_cases 12"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(got, "does not exist") {
+		t.Errorf("an existing database:\n%s", out.String())
 	}
 }
 

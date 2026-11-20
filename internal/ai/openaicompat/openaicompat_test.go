@@ -3,13 +3,17 @@ package openaicompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/aitest"
 )
 
 func TestGenerateWithJSONSchema(t *testing.T) {
@@ -212,34 +216,39 @@ func TestListModels(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{404, `not found`, "does not list"},
-		{401, `{"error":{"message":"bad key ` + key + `"}}`, "rejected the API key"},
-		{500, `{"error":{"message":"` + key + `"}}`, "HTTP 500"},
+		{405, ``, "does not list"},
 		{200, `<html>hello</html>`, "not in the expected format"},
 		{200, `{"models":[]}`, "not in the expected format"},
-		{200, `{"data":[{"id":"` + strings.Repeat("x", ai.MaxModelListBytes) + `"}]}`, "too large"},
 	} {
 		status, body = c.status, c.body
 		_, err := lister.ListModels(context.Background())
-		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), key) {
+		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%d %.40s: %v", c.status, c.body, err)
 		}
 	}
-	// Ids beyond the entry bound are not collected.
-	status = 200
-	var sb strings.Builder
-	sb.WriteString(`{"data":[`)
-	for i := range ai.MaxModelListEntries + 10 {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		fmt.Fprintf(&sb, `{"id":"m%d"}`, i)
-	}
-	sb.WriteString(`]}`)
-	body = sb.String()
-	if ids, err := lister.ListModels(context.Background()); err != nil || len(ids) != ai.MaxModelListEntries {
-		t.Errorf("bounded: %d ids, %v", len(ids), err)
-	}
+}
+
+// The failures every lister reports the same way.
+func TestListModelsFailures(t *testing.T) {
+	aitest.CheckModelLister(t, aitest.ModelListService{
+		Path: "/v1/models",
+		Page: func(ids []string) string {
+			models := make([]string, len(ids))
+			for i, id := range ids {
+				models[i] = `{"id":"` + id + `","object":"model"}`
+			}
+			return `{"object":"list","data":[` + strings.Join(models, ",") + `]}`
+		},
+		Key: "sk-proj-listsecret",
+		New: func(t *testing.T, base string) ai.ModelLister {
+			p, err := New(ai.Config{BaseURL: base + "/v1", APIKey: "sk-proj-listsecret"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return p.(ai.ModelLister)
+		},
+		Unreachable: "could not reach the AI provider: ",
+	})
 }
 
 // prompt_tokens includes the cached part, which is reported apart; the
@@ -261,5 +270,94 @@ func TestGenerateReportsTheTokenBreakdown(t *testing.T) {
 	resp, err = p.Generate(context.Background(), ai.GenerateRequest{System: "S", User: "U", Schema: ai.PingSchema()})
 	if err != nil || resp.InputTokens != nil || resp.OutputTokens != nil || resp.ReasoningTokens != nil || resp.CacheReadTokens != nil {
 		t.Errorf("no usage: %+v %v", resp, err)
+	}
+}
+
+// failingTransport fails every request with an error that names the key, as
+// a proxy might.
+type failingTransport struct{ key string }
+
+func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("proxy refused " + f.key)
+}
+
+// A request that gets no response says why, without the key, and one that
+// runs out of time says so.
+func TestGenerateWithoutAResponse(t *testing.T) {
+	const key = "sk-proj-transportsecret"
+	gen := func(cfg ai.Config) error {
+		t.Helper()
+		p, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+		var pe *ai.Error
+		if !errors.As(err, &pe) || pe.Status != 0 {
+			t.Fatalf("got %T %v, want an *ai.Error without a status", err, err)
+		}
+		return err
+	}
+
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	if err := gen(ai.Config{Model: "m", BaseURL: closed.URL, APIKey: key}); !strings.HasPrefix(err.Error(), "could not reach the AI provider: ") ||
+		!strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("unreachable: %v", err)
+	}
+
+	err := gen(ai.Config{Model: "m", BaseURL: "http://provider.invalid", APIKey: key,
+		HTTPClient: &http.Client{Transport: failingTransport{key}}})
+	if err.Error() != "could not reach the AI provider: proxy refused [redacted]" {
+		t.Errorf("transport error: %v", err)
+	}
+
+	done := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
+	}))
+	defer slow.Close()
+	defer close(done)
+	start := time.Now()
+	if err := gen(ai.Config{Model: "m", BaseURL: slow.URL, APIKey: key, Timeout: 200 * time.Millisecond}); err.Error() != "the AI provider did not respond in time" {
+		t.Errorf("timeout: %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("Generate took %s with a 200ms timeout", d.Round(time.Millisecond))
+	}
+}
+
+// A 404 points at the base URL and the model, and is not retried in JSON
+// mode; a success whose body is not JSON is reported as such.
+func TestNotFoundAndABodyThatIsNotJSON(t *testing.T) {
+	var calls atomic.Int32
+	status, body := 0, ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{Model: "gpt-x", BaseURL: srv.URL})
+	for _, c := range []struct {
+		status     int
+		body, want string
+		wantStatus int
+	}{
+		{404, `{"error":{"message":"The model gpt-x does not exist."}}`,
+			`the provider returned 404 (check the base URL and model "gpt-x"): The model gpt-x does not exist.`, 404},
+		{404, `404 page not found`, `the provider returned 404 (check the base URL and model "gpt-x")`, 404},
+		{200, `<html>a proxy's sign-in page</html>`, "the provider's response is not valid JSON", 0},
+	} {
+		status, body = c.status, c.body
+		calls.Store(0)
+		_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+		var pe *ai.Error
+		if !errors.As(err, &pe) || err.Error() != c.want || pe.Status != c.wantStatus || calls.Load() != 1 {
+			t.Errorf("%d %.30s: %v (status %v) after %d calls", c.status, c.body, err, pe, calls.Load())
+		}
 	}
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, buildQuery, isAbort, request, setTransport } from './client';
+import type { ErrorCode } from './types';
+import { ApiError, KNOWN_CODES, api, buildQuery, isAbort, jobError, request, setTransport } from './client';
 
 type Call = { url: string; init: RequestInit };
 
@@ -47,8 +48,14 @@ describe('request', () => {
     const calls = stub(() => json({ id: '1' }));
     await api.items.update('1', { notes: 'n' }, { keepalive: true });
     await api.items.update('1', { notes: 'n' });
-    expect(calls[0]?.init.keepalive).toBe(true);
-    expect(calls[1]?.init.keepalive).toBeUndefined();
+    await api.drafts.update('d1', { content: {} }, { keepalive: true });
+    await api.drafts.update('d1', { content: {} });
+    expect(calls.map((c) => `${c.init.method} ${c.url} ${c.init.keepalive}`)).toEqual([
+      'PATCH /api/v1/items/1 true',
+      'PATCH /api/v1/items/1 undefined',
+      'PATCH /api/v1/drafts/d1 true',
+      'PATCH /api/v1/drafts/d1 undefined',
+    ]);
   });
 
   it('sends JSON under /api/v1 and parses the response', async () => {
@@ -103,11 +110,26 @@ describe('request', () => {
     expect(err.currentRevision).toBeNull();
   });
 
-  it('keeps the two 503 codes apart', async () => {
-    stub(() => json({ error: { code: 'ai_unavailable', message: 'no provider' } }, 503));
-    expect((await failure(api.drafts.create({ kind: 'capture', generate: { text: 'x' } }))).code).toBe('ai_unavailable');
-    stub(() => json({ error: { code: 'judge_unavailable', message: 'no engine' } }, 503));
-    expect((await failure(api.testCases.verify('x', false))).code).toBe('judge_unavailable');
+  it('passes every error code of the contract through with its status, the two 503s apart', async () => {
+    // The statuses of docs/api.md, Errors.
+    const statusOf: Record<ErrorCode, number> = {
+      bad_request: 400,
+      forbidden: 403,
+      not_found: 404,
+      conflict: 409,
+      too_large: 413,
+      validation_failed: 422,
+      upstream_error: 502,
+      ai_unavailable: 503,
+      judge_unavailable: 503,
+      internal: 500,
+    };
+    expect([...KNOWN_CODES].sort()).toEqual(Object.keys(statusOf).sort());
+    for (const [code, status] of Object.entries(statusOf)) {
+      stub(() => json({ error: { code, message: `the server says ${code}` } }, status));
+      const err = await failure(api.collections.create({ name: 'x' }));
+      expect({ status: err.status, code: err.code, message: err.message }, code).toEqual({ status, code, message: `the server says ${code}` });
+    }
   });
 
   it('reports a gateway error page as an unreachable server', async () => {
@@ -120,6 +142,28 @@ describe('request', () => {
   it('reports an unrecognised error body as unknown', async () => {
     stub(() => json({ message: 'nope' }, 418));
     expect((await failure(api.meta())).code).toBe('unknown');
+    stub(() => json({ error: { code: 'teapot', message: 'short and stout' } }, 418));
+    expect((await failure(api.meta())).code).toBe('unknown');
+  });
+
+  it('reports a success that is not JSON as unknown, or as aborted when the request was cancelled', async () => {
+    stub(() => new Response('<html>Welcome to nginx</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    const err = await failure(api.meta());
+    expect(err).toMatchObject({ status: 200, code: 'unknown' });
+
+    // Cancelled while the body was being read, which cuts it short.
+    const controller = new AbortController();
+    stub(() => {
+      const body = new ReadableStream({
+        pull: (stream) => {
+          controller.abort();
+          stream.enqueue(new TextEncoder().encode('{"ver'));
+          stream.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    expect((await failure(api.meta(controller.signal))).code).toBe('aborted');
   });
 
   it('reports a transport failure as a network error', async () => {
@@ -163,6 +207,19 @@ describe('request', () => {
     expect(await res.blob.text()).toBe('PK');
   });
 
+  it('reads the file name in every form the server writes it, and none when there is none', async () => {
+    const filename = async (disposition: string | null) => {
+      stub(() => new Response('PK', { status: 200, headers: disposition === null ? {} : { 'Content-Disposition': disposition } }));
+      return (await api.bundle.export({ scope: 'all', includeSolutions: true, includeHiddenTests: true })).filename;
+    };
+    // Go's mime.FormatMediaType leaves a plain name unquoted, and encodes any other as RFC 5987 does.
+    expect(await filename('attachment; filename=dp.codeatrophy.zip')).toBe('dp.codeatrophy.zip');
+    expect(await filename("attachment; filename*=utf-8''caf%C3%A9%20notes.codeatrophy.zip")).toBe('café notes.codeatrophy.zip');
+    expect(await filename("attachment; filename*=UTF-8''%E6%97%A5%E6%9C%AC.zip")).toBe('日本.zip');
+    expect(await filename('attachment')).toBeNull();
+    expect(await filename(null)).toBeNull();
+  });
+
   it('turns an error response to an export into an ApiError', async () => {
     stub(() => json({ error: { code: 'not_found', message: 'collection not found' } }, 404));
     const err = await failure(api.bundle.export({ scope: 'collection', collectionId: 'gone', includeSolutions: true, includeHiddenTests: true }));
@@ -195,9 +252,22 @@ describe('request', () => {
     const calls = stub(() => json({ id: 'j1' }));
     await api.ai.cancel('j1');
     await api.ai.pickup('j1');
-    stub(() => new Response(null, { status: 204 }));
-    await api.ai.dismiss('j1');
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(['POST /api/v1/ai/jobs/j1/cancel', 'POST /api/v1/ai/jobs/j1/pickup']);
+    const dismissed = stub(() => new Response(null, { status: 204 }));
+    await expect(api.ai.dismiss('j1')).resolves.toBeUndefined();
+    expect([...calls, ...dismissed].map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      'POST /api/v1/ai/jobs/j1/cancel',
+      'POST /api/v1/ai/jobs/j1/pickup',
+      'DELETE /api/v1/ai/jobs/j1',
+    ]);
+  });
+
+  it('turns the error a job failed with into the ApiError its request would have thrown', () => {
+    const err = jobError({ code: 'validation_failed', message: 'count: must be between 1 and 30', fields: { count: 'must be between 1 and 30' } });
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0, code: 'validation_failed', message: 'count: must be between 1 and 30', fields: { count: 'must be between 1 and 30' } });
+    // A job the server stopped by restarting has a code of its own, and no fields.
+    expect(jobError({ code: 'interrupted', message: 'the server restarted' })).toMatchObject({ code: 'interrupted', fields: {} });
+    expect(jobError({ code: 'conflict', message: 'changed', fields: { revision: 4 } }).currentRevision).toBe(4);
   });
 
   it('updates a draft with the revision it was based on, and reads a refusal as a revision conflict', async () => {
@@ -228,13 +298,6 @@ describe('request', () => {
     expect(JSON.parse(calls[0]?.init.body as string).expectedRevision).toBe(3);
     expect(err.isRevisionConflict).toBe(true);
     expect(err.currentRevision).toBe(4);
-  });
-
-  it('recognises a refused cross-origin change', async () => {
-    stub(() => json({ error: { code: 'forbidden', message: 'cross-origin requests are not allowed' } }, 403));
-    const err = await failure(api.collections.create({ name: 'x' }));
-    expect(err.status).toBe(403);
-    expect(err.code).toBe('forbidden');
   });
 
   it('exposes the low-level request for endpoints without a wrapper', async () => {

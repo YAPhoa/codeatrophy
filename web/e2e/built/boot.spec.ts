@@ -62,7 +62,7 @@ async function boxesNow(page: Page) {
   }, STEADY);
 }
 
-test('built: a reload paints the shell, the sidebar counts and the rows in one frame, in their fonts', async ({ page }) => {
+test('built: a reload paints the shell, the sidebar counts and the rows in one frame, in their fonts; at normal speed an item opens with no loading state', async ({ page }) => {
   await recordFirstFrame(page);
   await recordLoading(page);
   await open(page, '/');
@@ -78,6 +78,14 @@ test('built: a reload paints the shell, the sidebar counts and the rows in one f
   expect(counts).toBeGreaterThan(5);
   // No text changed font afterwards, and nothing showed as loading.
   expect(await page.evaluate(() => (window as unknown as { __fontsAfter: string[] }).__fontsAfter)).toEqual([]);
+  expect((await loadingRecord(page)).indicators).toEqual([]);
+
+  await open(page, '/', 'default');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await expect(page.locator('.workspace-body')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /solution code/i })).toBeVisible();
+  // A quiet moment, for a late indicator to show.
+  await page.waitForTimeout(500);
   expect((await loadingRecord(page)).indicators).toEqual([]);
 });
 

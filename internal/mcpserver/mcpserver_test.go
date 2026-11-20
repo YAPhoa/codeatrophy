@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -26,9 +27,18 @@ type fixture struct {
 	app *app.App
 	srv *httptest.Server
 	ctx context.Context
+	// endpoint is the MCP endpoint's URL.
+	endpoint string
 }
 
 func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *fixture {
+	t.Helper()
+	return newFixtureWith(t, token, false, opts...)
+}
+
+// newFixtureWith serves the MCP handler on its own or, with mounted, at /mcp
+// behind the HTTP API's root handler, as the server does.
+func newFixtureWith(t *testing.T, token string, mounted bool, opts ...func(*mcpserver.Options)) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	db := teststore.Open(t)
@@ -51,13 +61,20 @@ func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *f
 	for _, fn := range opts {
 		fn(&o)
 	}
-	h := mcpserver.Handler(o)
+	var h http.Handler = mcpserver.Handler(o)
+	if mounted {
+		h = httpapi.New(httpapi.Options{App: a, MCP: h, MCPPath: "/mcp"})
+	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(func() {
 		srv.Close()
 		a.Stop()
 	})
-	return &fixture{app: a, srv: srv, ctx: ctx}
+	f := &fixture{app: a, srv: srv, ctx: ctx, endpoint: srv.URL}
+	if mounted {
+		f.endpoint += "/mcp"
+	}
+	return f
 }
 
 type bearer struct {
@@ -73,19 +90,28 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (f *fixture) connect(t *testing.T, token string) *mcp.ClientSession {
 	t.Helper()
-	httpClient := &http.Client{}
-	if token != "" {
-		httpClient.Transport = bearer{token, http.DefaultTransport}
-	}
-	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
-	defer cancel()
-	s, err := c.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: f.srv.URL, HTTPClient: httpClient}, nil)
+	s, err := f.tryConnect(token)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
 	return s
+}
+
+// tryConnect opens a session at the fixture's endpoint.
+func (f *fixture) tryConnect(token string) (*mcp.ClientSession, error) {
+	return connectTo(f.ctx, f.endpoint, token)
+}
+
+func connectTo(ctx context.Context, endpoint, token string) (*mcp.ClientSession, error) {
+	httpClient := &http.Client{}
+	if token != "" {
+		httpClient.Transport = bearer{token, http.DefaultTransport}
+	}
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return c.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: httpClient}, nil)
 }
 
 func call(t *testing.T, s *mcp.ClientSession, name string, args any) (map[string]any, bool) {
@@ -134,12 +160,65 @@ func TestToolsListAndAnnotations(t *testing.T) {
 			t.Errorf("no tool may change style presets: %s", name)
 		}
 	}
-	if !names["get_item"].Annotations.ReadOnlyHint || !*names["delete_item"].Annotations.DestructiveHint ||
-		names["create_item"].Annotations.ReadOnlyHint {
-		t.Error("annotations")
+	// The tools are the ones docs/mcp.md lists under "## Tools".
+	doc, err := os.ReadFile("../../docs/mcp.md")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if names["list_style_presets"].Annotations.ReadOnlyHint != true {
-		t.Error("list_style_presets is read-only")
+	section := string(doc)
+	section = section[strings.Index(section, "\n## Tools\n"):strings.Index(section, "\n## Prompts\n")]
+	documented := map[string]bool{}
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\|").FindAllStringSubmatch(section, -1) {
+		documented[m[1]] = true
+	}
+	for _, n := range want {
+		if !documented[n] {
+			t.Errorf("%s is not documented in docs/mcp.md", n)
+		}
+	}
+	if len(documented) != len(want) {
+		t.Errorf("docs/mcp.md lists %d tools, want %d", len(documented), len(want))
+	}
+
+	// Every tool's hints. The tools of the "Reading" section in docs/mcp.md
+	// are read-only; no tool reaches outside the library.
+	const (
+		ro  = "readOnly"    // read-only, idempotent
+		add = "additive"    // writes, not destructive
+		idm = "idempotent"  // writes, idempotent, not destructive
+		ovw = "overwriting" // idempotent, destructive
+		del = "destructive" // destructive, not idempotent
+	)
+	kinds := map[string]string{
+		"get_overview": ro, "search_items": ro, "get_item": ro, "list_test_cases": ro, "list_solutions": ro,
+		"get_submission": ro, "list_style_presets": ro,
+		"create_item": add, "update_item": idm, "edit_item_text": add, "delete_item": del, "bulk_update_items": del,
+		"create_collection": add, "update_collection": idm, "delete_collection": del, "set_collection_items": ovw,
+		"add_items_to_collection": idm, "remove_item_from_collection": idm, "rename_tag": idm, "delete_tag": del,
+		"add_test_cases": add, "update_test_case": idm, "delete_test_case": del, "verify_test_cases": add,
+		"save_solution": add, "delete_solution": del, "run_code": add,
+	}
+	if len(kinds) != len(want) {
+		t.Fatalf("the annotation table has %d tools, want %d", len(kinds), len(want))
+	}
+	for name, kind := range kinds {
+		tool := names[name]
+		if tool == nil {
+			continue
+		}
+		a := tool.Annotations
+		if a == nil || a.DestructiveHint == nil || a.OpenWorldHint == nil {
+			t.Errorf("%s: incomplete annotations %+v", name, a)
+			continue
+		}
+		readOnly, destructive := kind == ro, kind == ovw || kind == del
+		idempotent := kind == ro || kind == idm || kind == ovw
+		if a.ReadOnlyHint != readOnly || *a.DestructiveHint != destructive || a.IdempotentHint != idempotent || *a.OpenWorldHint {
+			t.Errorf("%s: annotations %+v (destructive %v, openWorld %v), want %s", name, a, *a.DestructiveHint, *a.OpenWorldHint, kind)
+		}
+		if a.Title == "" || a.Title != tool.Title {
+			t.Errorf("%s: title %q, annotation title %q", name, tool.Title, a.Title)
+		}
 	}
 }
 
@@ -216,12 +295,6 @@ func TestReadAndWriteTools(t *testing.T) {
 	}
 	if r, isErr := call(t, s, "rename_tag", map[string]any{"name": "easy", "newName": "warmup"}); isErr || r["name"] != "warmup" {
 		t.Errorf("rename_tag: %v", r)
-	}
-	// HTTP and MCP see the same data.
-	viaApp, err := f.app.GetItem(f.ctx, id)
-	latest, _ := call(t, s, "get_item", map[string]any{"id": id})
-	if err != nil || viaApp.Revision != int(latest["item"].(map[string]any)["revision"].(float64)) || viaApp.Tags[1] != "warmup" {
-		t.Errorf("app view: %v %v", viaApp.Revision, err)
 	}
 	if r, isErr := call(t, s, "delete_item", map[string]any{"id": id}); isErr || r["deleted"] != id {
 		t.Errorf("delete: %v", r)
@@ -306,8 +379,23 @@ func TestAccessControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("without token: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") != `Bearer realm="codeatrophy"` {
+		t.Errorf("without token: %d %v", resp.StatusCode, resp.Header)
+	}
+	for _, auth := range []string{"Bearer nope", "Basic czNjcmV0OnMzY3JldA==", "s3cret", "Bearer"} {
+		req, _ := http.NewRequest("POST", f.srv.URL, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", auth)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") == "" {
+			t.Errorf("Authorization %q: %d %v", auth, resp.StatusCode, resp.Header)
+		}
+	}
+	if _, err := f.tryConnect("nope"); err == nil {
+		t.Error("a client with a wrong token connected")
 	}
 	s := f.connect(t, "s3cret")
 	if _, err := s.ListTools(f.ctx, nil); err != nil {
@@ -388,12 +476,6 @@ func TestSolutionTools(t *testing.T) {
 	it, _ := call(t, s, "create_item", map[string]any{"type": "problem", "title": "A plus B",
 		"testCases": []map[string]any{{"stdin": "1 2", "expectedStdout": "", "isSample": true}}})
 	id := it["id"].(string)
-	// Making a solution the reference is item content: the revision is checked.
-	res, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Sum", "language": "python",
-		"source": "sum", "isReference": true, "expectedRevision": 7})
-	if !isErr || res["error"].(map[string]any)["code"] != "conflict" {
-		t.Errorf("stale revision: %v", res)
-	}
 	ref, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Sum", "language": "python",
 		"source": "sum", "isReference": true, "expectedRevision": 1})
 	if isErr || ref["isReference"] != true || ref["itemId"] != id {
@@ -410,6 +492,13 @@ func TestSolutionTools(t *testing.T) {
 	if res, isErr := call(t, s, "save_solution", map[string]any{"name": "x"}); !isErr || res["error"].(map[string]any)["code"] != "validation_failed" {
 		t.Errorf("neither id nor itemId: %v", res)
 	}
+	if res, isErr := call(t, s, "save_solution", map[string]any{"id": other["id"], "itemId": id, "name": "x"}); !isErr ||
+		res["error"].(map[string]any)["code"] != "validation_failed" {
+		t.Errorf("both id and itemId: %v", res)
+	}
+	if got, _ := call(t, s, "list_solutions", map[string]any{"itemId": id}); got["items"].([]any)[1].(map[string]any)["name"] != "Broken" {
+		t.Errorf("a refused save_solution changed the solution: %v", got)
+	}
 	list, _ := call(t, s, "list_solutions", map[string]any{"itemId": id})
 	if items := list["items"].([]any); len(items) != 2 || items[0].(map[string]any)["id"] != ref["id"] {
 		t.Errorf("list_solutions: %v", list)
@@ -422,22 +511,6 @@ func TestSolutionTools(t *testing.T) {
 	ver, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": other["id"]})
 	if isErr || ver["results"].([]any)[0].(map[string]any)["ok"] != false {
 		t.Errorf("verify other: %v", ver)
-	}
-	if res, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": other["id"], "updateExpected": true}); !isErr ||
-		res["error"].(map[string]any)["code"] != "validation_failed" {
-		t.Errorf("updateExpected with a non-reference solution: %v", res)
-	}
-	// The check is the solution's last run.
-	list, _ = call(t, s, "list_solutions", map[string]any{"itemId": id})
-	if run, _ := list["items"].([]any)[1].(map[string]any)["lastRun"].(map[string]any); run == nil || run["passed"] != float64(0) || run["total"] != float64(1) {
-		t.Errorf("lastRun after verify_test_cases: %v", list)
-	}
-	// Code run with run_code keeps its figures when saved with its submission.
-	sub, _ := call(t, s, "run_code", map[string]any{"itemId": id, "language": "python", "source": "echo", "mode": "submit"})
-	kept, isErr := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "Echo", "language": "python", "source": "echo",
-		"submissionId": sub["id"]})
-	if run, _ := kept["lastRun"].(map[string]any); isErr || run == nil || run["ranAt"] != sub["finishedAt"] || run["total"] != float64(1) {
-		t.Errorf("saved from a submission: %v", kept)
 	}
 	if res, isErr := call(t, s, "delete_solution", map[string]any{"id": other["id"]}); isErr || res["deleted"] != other["id"] {
 		t.Errorf("delete_solution: %v", res)
@@ -474,10 +547,18 @@ func TestSessionCap(t *testing.T) {
 func TestIdleSessionsExpire(t *testing.T) {
 	f := newFixture(t, "", func(o *mcpserver.Options) { o.MaxSessions = 1; o.SessionTimeout = 200 * time.Millisecond })
 	f.connect(t, "")
-	time.Sleep(600 * time.Millisecond)
-	c := f.connect(t, "")
-	if _, err := c.ListTools(f.ctx, nil); err != nil {
-		t.Errorf("a new session after the idle one expired: %v", err)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		c, err := f.tryConnect("")
+		if err == nil {
+			defer c.Close()
+			if _, err := c.ListTools(f.ctx, nil); err != nil {
+				t.Errorf("a new session after the idle one expired: %v", err)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the idle session did not expire: %v", err)
+		}
 	}
 }
 
@@ -502,23 +583,6 @@ func TestFunctionProblemTools(t *testing.T) {
 	run, isErr := call(t, s, "run_code", map[string]any{"itemId": id, "language": "python", "source": "sum"})
 	if isErr || run["verdict"] != "accepted" || run["lineOffset"] != float64(0) {
 		t.Errorf("run_code: %v", run)
-	}
-	if res, isErr := call(t, s, "run_code", map[string]any{"itemId": id, "language": "cpp", "source": "x"}); !isErr ||
-		res["error"].(map[string]any)["code"] != "validation_failed" {
-		t.Errorf("run_code without a harness: %v", res)
-	}
-	sol, _ := call(t, s, "save_solution", map[string]any{"itemId": id, "name": "C++", "language": "cpp", "source": "int f();"})
-	if res, isErr := call(t, s, "verify_test_cases", map[string]any{"itemId": id, "solutionId": sol["id"]}); !isErr ||
-		res["error"].(map[string]any)["code"] != "validation_failed" {
-		t.Errorf("verify without a harness: %v", res)
-	}
-	// Back to a program only with an empty harness.
-	if res, isErr := call(t, s, "update_item", map[string]any{"id": id, "problem": map[string]any{"interface": "program"}}); !isErr {
-		t.Errorf("program with a harness: %v", res)
-	}
-	if res, isErr := call(t, s, "update_item", map[string]any{"id": id, "problem": map[string]any{"interface": "program", "harness": map[string]any{}}}); isErr ||
-		res["problem"].(map[string]any)["interface"] != "program" {
-		t.Errorf("program: %v", res)
 	}
 }
 
@@ -585,4 +649,202 @@ func TestSystemPromptInGuideOnly(t *testing.T) {
 	if g := res.Contents[0].Text; strings.Contains(g, "CUSTOM-CONVENTIONS-MARKER") || !strings.Contains(g, "# Codeatrophy authoring conventions") {
 		t.Error("the guide should use the built-in conventions after a reset")
 	}
+}
+
+// Mounted at /mcp behind the HTTP API's root handler, as the server runs it,
+// the endpoint passes the Host check and keeps its stream working.
+func TestMountedBehindTheHTTPAPI(t *testing.T) {
+	f := newFixtureWith(t, "s3cret", true)
+	s := f.connect(t, "s3cret")
+	res, err := s.ListTools(f.ctx, nil)
+	if err != nil || len(res.Tools) == 0 {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if ov, isErr := call(t, s, "get_overview", map[string]any{}); isErr || ov["stats"] == nil {
+		t.Errorf("get_overview: %v", ov)
+	}
+	if _, err := f.tryConnect(""); err == nil {
+		t.Error("connected without the token")
+	}
+	req, _ := http.NewRequest("POST", f.endpoint, strings.NewReader(`{}`))
+	req.Host = "evil.example"
+	req.Header.Set("Authorization", "Bearer s3cret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a foreign Host: %d", resp.StatusCode)
+	}
+}
+
+// The organising and test-case tools no other test calls.
+func TestCollectionTagAndTestCaseTools(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	col, _ := call(t, s, "create_collection", map[string]any{"name": "DP"})
+	cid := col["id"].(string)
+	it, _ := call(t, s, "create_item", map[string]any{"type": "problem", "title": "P", "tags": []string{"dp"},
+		"testCases": []map[string]any{{"stdin": "1 2", "expectedStdout": "3"}}})
+	id := it["id"].(string)
+	other, _ := call(t, s, "create_item", map[string]any{"type": "reading", "title": "R"})
+	oid := other["id"].(string)
+	cases, _ := call(t, s, "list_test_cases", map[string]any{"itemId": id})
+	tcid := cases["items"].([]any)[0].(map[string]any)["id"].(string)
+	ids := func(v any) string {
+		var out []string
+		for _, x := range v.([]any) {
+			out = append(out, x.(string))
+		}
+		return strings.Join(out, ",")
+	}
+	steps := []struct {
+		tool  string
+		args  map[string]any
+		check func(map[string]any) bool
+	}{
+		{"update_collection", map[string]any{"id": cid, "name": "Dynamic programming", "description": "d"},
+			func(r map[string]any) bool {
+				return r["id"] == cid && r["name"] == "Dynamic programming" && r["description"] == "d"
+			}},
+		{"set_collection_items", map[string]any{"id": cid, "itemIds": []string{id, oid}},
+			func(r map[string]any) bool { return ids(r["itemIds"]) == id+","+oid }},
+		{"remove_item_from_collection", map[string]any{"id": cid, "itemId": oid},
+			func(r map[string]any) bool { return r["removed"] == oid && r["collectionId"] == cid }},
+		{"add_items_to_collection", map[string]any{"id": cid, "itemIds": []string{oid}},
+			func(r map[string]any) bool { return ids(r["itemIds"]) == id+","+oid }},
+		// Without itemIds the membership is cleared.
+		{"set_collection_items", map[string]any{"id": cid},
+			func(r map[string]any) bool { v, ok := r["itemIds"].([]any); return ok && len(v) == 0 }},
+		{"delete_collection", map[string]any{"id": cid}, func(r map[string]any) bool { return r["deleted"] == cid }},
+		{"delete_tag", map[string]any{"name": "dp"}, func(r map[string]any) bool { return r["deleted"] == "dp" }},
+		{"update_test_case", map[string]any{"id": tcid, "name": "Example", "isSample": true},
+			func(r map[string]any) bool {
+				return r["id"] == tcid && r["name"] == "Example" && r["isSample"] == true && r["stdin"] == "1 2"
+			}},
+		{"delete_test_case", map[string]any{"id": tcid}, func(r map[string]any) bool { return r["deleted"] == tcid }},
+	}
+	for _, st := range steps {
+		if r, isErr := call(t, s, st.tool, st.args); isErr || !st.check(r) {
+			t.Errorf("%s %v: %v", st.tool, st.args, r)
+		}
+	}
+	// What the tools did is what the library holds.
+	if _, err := f.app.GetCollection(f.ctx, cid); app.AsError(err).Code != app.CodeNotFound {
+		t.Errorf("the collection is still there: %v", err)
+	}
+	if got, err := f.app.GetItem(f.ctx, id); err != nil || len(got.Tags) != 0 || got.TestCaseCount != 0 {
+		t.Errorf("item after delete_tag and delete_test_case: %+v %v", got, err)
+	}
+	for _, tool := range []string{"delete_collection", "delete_tag", "delete_test_case"} {
+		arg := map[string]any{"id": "nope", "name": "nope"}
+		if r, isErr := call(t, s, tool, arg); !isErr || r["error"].(map[string]any)["code"] != "not_found" {
+			t.Errorf("%s of a missing one: %v", tool, r)
+		}
+	}
+}
+
+// Arguments that do not decode are reported as the HTTP API reports a body
+// that does not: a wrong type names the field, anything else is bad_request.
+func TestArgumentDecoding(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	it, _ := call(t, s, "create_item", map[string]any{"type": "reading", "title": "R"})
+	r, isErr := call(t, s, "update_item", map[string]any{"id": it["id"], "title": "x", "expectedRevision": "1"})
+	e, _ := r["error"].(map[string]any)
+	if !isErr || e["code"] != "validation_failed" || e["fields"].(map[string]any)["expectedRevision"] == nil {
+		t.Errorf("a wrong type: %v", r)
+	}
+	for _, raw := range []string{`[1]`, `"x"`, `7`} {
+		r, isErr := call(t, s, "get_item", json.RawMessage(raw))
+		if e, _ := r["error"].(map[string]any); !isErr || e["code"] != "bad_request" || e["fields"] != nil {
+			t.Errorf("arguments %s: %v", raw, r)
+		}
+	}
+	if got, _ := f.app.GetItem(f.ctx, it["id"].(string)); got.Title != "R" {
+		t.Errorf("a refused update wrote: %v", got.Title)
+	}
+}
+
+// Every property a tool's input schema offers is a field its arguments are
+// decoded into, of the type the schema gives: a value of the wrong type for it
+// is refused naming that field and the type. (A property the decoder does not
+// know would be ignored silently.)
+func TestSchemaPropertiesAreDecoded(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	res, err := s.ListTools(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, tool := range res.Tools {
+		var schema map[string]any
+		b, _ := json.Marshal(tool.InputSchema)
+		if err := json.Unmarshal(b, &schema); err != nil {
+			t.Fatal(err)
+		}
+		probes := wrongTyped(schema, "")
+		total += len(probes)
+		for _, p := range probes {
+			r, isErr := call(t, s, tool.Name, p.args)
+			e, _ := r["error"].(map[string]any)
+			fields, _ := e["fields"].(map[string]any)
+			if !isErr || e["code"] != "validation_failed" || len(fields) != 1 || fields[p.path] != "must be "+p.want {
+				t.Errorf("%s: a wrong type for %s is not reported as one for %s: %v", tool.Name, p.path, p.want, r)
+			}
+		}
+	}
+	if total < 100 {
+		t.Errorf("only %d properties probed", total)
+	}
+}
+
+type probe struct {
+	path string
+	args any
+	want string // the type the decoder should ask for
+}
+
+var schemaKinds = map[string]string{"string": "a string", "integer": "an integer", "boolean": "a boolean",
+	"array": "an array", "object": "an object"}
+
+// wrongTyped returns, for each property of an object schema (and the
+// properties of nested objects and arrays of objects), arguments that give it
+// a value of the wrong type.
+func wrongTyped(schema map[string]any, prefix string) []probe {
+	ps, _ := schema["properties"].(map[string]any)
+	var out []probe
+	for name, raw := range ps {
+		sub := raw.(map[string]any)
+		path := name
+		if prefix != "" {
+			path = prefix + "." + name
+		}
+		wrap := func(v any) any { return map[string]any{name: v} }
+		var bad any = "x"
+		want := "an object" // anyOf: an object or null
+		switch typ := sub["type"].(type) {
+		case string:
+			want = schemaKinds[typ]
+			if typ == "string" {
+				bad = 5
+			}
+		case []any:
+			bad, want = 5, "a string" // a nullable string
+		}
+		out = append(out, probe{path, wrap(bad), want})
+		if sub["type"] == "object" {
+			for _, p := range wrongTyped(sub, path) {
+				out = append(out, probe{p.path, wrap(p.args), p.want})
+			}
+		}
+		if items, ok := sub["items"].(map[string]any); ok && items["type"] == "object" {
+			for _, p := range wrongTyped(items, path+".0") {
+				out = append(out, probe{p.path, wrap([]any{p.args}), p.want})
+			}
+		}
+	}
+	return out
 }

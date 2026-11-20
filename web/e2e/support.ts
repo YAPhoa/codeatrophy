@@ -28,7 +28,7 @@ export interface LoadingRecord {
 
 /**
  * Record, frame by frame, when the app is shown, when loading indicators
- * (`.loading-delay`) are mounted and when they show, and which entrance
+ * (`.loading-delay`) are inserted and when they show, and which entrance
  * fades start. Read it with `loadingRecord`.
  */
 export async function recordLoading(page: Page): Promise<void> {
@@ -37,12 +37,22 @@ export async function recordLoading(page: Page): Promise<void> {
     const record = { revealedAt: null as number | null, indicators: [] as { what: string; where: string; mountedAt: number; shownAt: number }[], entrances: [] as { what: string; at: number }[] };
     (window as unknown as { __loading: typeof record }).__loading = record;
     const describe = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${typeof el.className === 'string' ? el.className.trim().replace(/\s+/g, '.') : ''}`;
-    new MutationObserver((changes) => {
+    // Marked as it is inserted, not when an observer hears of it at the end of a
+    // long task: the indicator's 400ms are timed from no earlier than this.
+    const mark = (node: Node) => {
+      if (!(node instanceof Element)) return;
       const now = performance.now();
-      for (const change of changes)
-        for (const node of change.addedNodes)
-          if (node instanceof Element) for (const el of [node, ...node.querySelectorAll('.loading-delay')] as Marked[]) if (el.matches('.loading-delay')) el.__mountedAt ??= now;
-    }).observe(document, { childList: true, subtree: true });
+      for (const el of [node, ...node.querySelectorAll('.loading-delay')] as Marked[]) if (el.matches('.loading-delay')) el.__mountedAt ??= now;
+    };
+    const { appendChild, insertBefore } = Node.prototype;
+    Node.prototype.appendChild = function <T extends Node>(this: Node, node: T): T {
+      mark(node);
+      return appendChild.call(this, node) as T;
+    };
+    Node.prototype.insertBefore = function <T extends Node>(this: Node, node: T, child: Node | null): T {
+      mark(node);
+      return insertBefore.call(this, node, child) as T;
+    };
     document.addEventListener(
       'transitionstart',
       (e) => {
@@ -115,14 +125,39 @@ export async function choose(select: Locator, option: string | RegExp): Promise<
   await list.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
 }
 
+/** Rough text the mock drafts as Two Sum. */
+export const TWO_SUM_TEXT = 'two sum — array of ints and a target, return the two indices that add up to it. O(n)?';
+
+/** The library row of the item titled `title`. */
+export const row = (page: Page, title: string): Locator => page.locator('li.item-row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
+
+/** Replace the code in the solving editor. */
+export async function writeCode(page: Page, source: string): Promise<void> {
+  await page.getByRole('textbox', { name: /solution code/i }).click();
+  await page.keyboard.press('ControlOrMeta+A');
+  // Inserted as one piece of text, so that bracket closing and completion do not reshape it.
+  await page.keyboard.insertText(source);
+}
+
 /** Call the mock's API from the page, as a script would, and read the JSON answer (`null` for none). */
 export async function mockApi<T = unknown>(page: Page, path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  // The mock is installed as the app starts.
+  await page.waitForFunction(() => '__codeatrophyMock' in window);
   return page.evaluate(
     async ({ path, init }) => {
       const mock = (window as unknown as { __codeatrophyMock: { fetch: (p: string, i?: RequestInit) => Promise<Response> } }).__codeatrophyMock;
       const res = await mock.fetch(`/api/v1${path}`, init ? { method: init.method, body: init.body === undefined ? undefined : JSON.stringify(init.body) } : undefined);
+      if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path}: ${res.status} ${await res.text()}`);
       return res.status === 204 ? null : res.json();
     },
     { path, init },
   ) as Promise<T>;
+}
+
+/** The seeded item titled `title`, as the mock's API lists it. */
+export async function mockItem(page: Page, title: string): Promise<{ id: string; title: string; tags: string[]; revision: number }> {
+  const { items } = await mockApi<{ items: { id: string; title: string; tags: string[]; revision: number }[] }>(page, `/items?limit=200&q=${encodeURIComponent(title)}`);
+  const item = items.find((i) => i.title === title);
+  if (!item) throw new Error(`no item titled ${title}`);
+  return item;
 }

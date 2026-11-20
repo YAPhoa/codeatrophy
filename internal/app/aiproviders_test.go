@@ -583,36 +583,6 @@ func TestAIConnectionTest(t *testing.T) {
 	}
 }
 
-// A connection test against another origin uses only a key from the same
-// request, for saved and environment providers alike.
-func TestConnectionTestDoesNotSendStoredKeysElsewhere(t *testing.T) {
-	e := newEnv(t, withAIEnv(app.AIEnv{AnthropicAPIKey: "sk-ant-env-4444"}))
-	p := e.addProvider(t, `{"name":"Saved","kind":"anthropic","apiKey":"sk-ant-saved-5555"}`)
-	for _, id := range []string{p.ID, "env-anthropic"} {
-		n, lists := len(e.ai.Configs()), e.ai.ListCalls()
-		res := e.testProvider(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example"}`)
-		if res.OK || res.Models != nil || len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
-			t.Errorf("%s: a request was made to the override without a key: %+v", id, res)
-		}
-		must(e.app.TestAIProvider(e.ctx, decodeInto[app.AITestInput](t,
-			`{"providerId":"`+id+`","baseUrl":"https://attacker.example","apiKey":"sk-own-6666"}`)))
-		for _, cfg := range e.ai.Configs()[n:] {
-			if cfg.APIKey != "sk-own-6666" {
-				t.Errorf("%s: a stored key was sent to the override: %q", id, cfg.APIKey)
-			}
-		}
-	}
-	// The same origin as the stored key still uses it.
-	e.testProvider(t, `{"providerId":"`+p.ID+`","baseUrl":"https://api.anthropic.com/"}`)
-	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-saved-5555" {
-		t.Errorf("same-origin override: %q", cfg.APIKey)
-	}
-	e.testProvider(t, `{"providerId":"env-anthropic"}`)
-	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-env-4444" {
-		t.Errorf("environment provider: %q", cfg.APIKey)
-	}
-}
-
 // A model listing names its provider as a connection test does and returns
 // the same list, but makes no generation request: nothing is counted or
 // logged, and nothing is saved.
@@ -698,32 +668,52 @@ func TestAIModelListing(t *testing.T) {
 	wantField(t, err, "providerId")
 }
 
-// A model listing against another origin uses only a key from the same
-// request, for saved and environment providers alike.
-func TestModelListingDoesNotSendStoredKeysElsewhere(t *testing.T) {
-	e := newEnv(t, withAIEnv(app.AIEnv{AnthropicAPIKey: "sk-ant-env-4444"}))
-	p := e.addProvider(t, `{"name":"Saved","kind":"anthropic","apiKey":"sk-ant-saved-5555"}`)
-	for _, id := range []string{p.ID, "env-anthropic"} {
-		n, lists := len(e.ai.Configs()), e.ai.ListCalls()
-		res := e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example"}`)
-		if res.Models != nil || res.Error == nil || len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
-			t.Errorf("%s: a request was made to the override without a key: %+v", id, res)
-		}
-		e.listModels(t, `{"providerId":"`+id+`","baseUrl":"https://attacker.example","apiKey":"sk-own-6666"}`)
-		for _, cfg := range e.ai.Configs()[n:] {
-			if cfg.APIKey != "sk-own-6666" || cfg.BaseURL != "https://attacker.example" {
-				t.Errorf("%s: a stored key was sent to the override: %q", id, cfg.APIKey)
+// A connection test or a model listing against another origin uses only a
+// key from the same request, for saved and environment providers alike.
+func TestStoredKeysAreNotSentElsewhere(t *testing.T) {
+	for _, call := range []struct {
+		name string
+		// do makes the call and reports whether it reached a provider.
+		do func(t *testing.T, e *env, js string) bool
+	}{
+		{"connection test", func(t *testing.T, e *env, js string) bool {
+			r := e.testProvider(t, js)
+			return r.OK || r.Models != nil
+		}},
+		{"model listing", func(t *testing.T, e *env, js string) bool {
+			r := e.listModels(t, js)
+			return r.Models != nil || r.Error == nil
+		}},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			e := newEnv(t, withAIEnv(app.AIEnv{AnthropicAPIKey: "sk-ant-env-4444"}))
+			p := e.addProvider(t, `{"name":"Saved","kind":"anthropic","apiKey":"sk-ant-saved-5555"}`)
+			for _, id := range []string{p.ID, "env-anthropic"} {
+				n, lists := len(e.ai.Configs()), e.ai.ListCalls()
+				if call.do(t, e, `{"providerId":"`+id+`","baseUrl":"https://attacker.example"}`) ||
+					len(e.ai.Configs()) != n || e.ai.ListCalls() != lists {
+					t.Errorf("%s: a request was made to the override without a key", id)
+				}
+				call.do(t, e, `{"providerId":"`+id+`","baseUrl":"https://attacker.example","apiKey":"sk-own-6666"}`)
+				if len(e.ai.Configs()) == n {
+					t.Errorf("%s: no request with the request's own key", id)
+				}
+				for _, cfg := range e.ai.Configs()[n:] {
+					if cfg.APIKey != "sk-own-6666" || cfg.BaseURL != "https://attacker.example" {
+						t.Errorf("%s: a stored key was sent to the override: %q %q", id, cfg.APIKey, cfg.BaseURL)
+					}
+				}
 			}
-		}
-	}
-	// The same origin as the stored key still uses it.
-	e.listModels(t, `{"providerId":"`+p.ID+`","baseUrl":"https://api.anthropic.com/"}`)
-	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-saved-5555" {
-		t.Errorf("same-origin override: %q", cfg.APIKey)
-	}
-	e.listModels(t, `{"providerId":"env-anthropic"}`)
-	if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-env-4444" {
-		t.Errorf("environment provider: %q", cfg.APIKey)
+			// The same origin as the stored key still uses it.
+			call.do(t, e, `{"providerId":"`+p.ID+`","baseUrl":"https://api.anthropic.com/"}`)
+			if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-saved-5555" {
+				t.Errorf("same-origin override: %q", cfg.APIKey)
+			}
+			call.do(t, e, `{"providerId":"env-anthropic"}`)
+			if cfg := e.lastConfig(); cfg.APIKey != "sk-ant-env-4444" {
+				t.Errorf("environment provider: %q", cfg.APIKey)
+			}
+		})
 	}
 }
 
@@ -928,10 +918,7 @@ func TestRequestsCanNameAProvider(t *testing.T) {
 			r, err := e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"mode":"similar"`+extra+`}`))
 			return r.Usage, err
 		default:
-			e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-				return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-					"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14"}}}, nil
-			}
+			e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("7 7", "14"), nil }
 			r, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1`+extra+`}`))
 			return r.Usage, err
 		}
@@ -1351,7 +1338,7 @@ func TestAIProviderEffort(t *testing.T) {
 
 	// Its requests carry it, and the log records it.
 	e.setDefault(t, p.ID)
-	res := must(newDraft(t, e, `{"text":"two sum"}`, draftJSON()))
+	res := must(draftWith(t, e, `{"text":"two sum"}`, draftJSON()))
 	if r := e.ai.Last(); r.Effort != "medium" || r.Light {
 		t.Errorf("draft request: effort %q, light %v", r.Effort, r.Light)
 	}
@@ -1403,7 +1390,7 @@ func TestAIProviderEffort(t *testing.T) {
 	if got := must(e.patchProvider(t, p.ID, `{"effort":null}`)); got.Effort != nil {
 		t.Errorf("after clearing: %+v", got)
 	}
-	res = must(newDraft(t, e, `{"text":"x"}`, draftJSON()))
+	res = must(draftWith(t, e, `{"text":"x"}`, draftJSON()))
 	if r := e.ai.Last(); r.Effort != "" {
 		t.Errorf("draft with the default: effort %q", r.Effort)
 	}

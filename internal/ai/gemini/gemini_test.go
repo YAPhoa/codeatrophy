@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/aitest"
 )
 
 const key = "AIza-test-verysecret"
@@ -115,6 +116,27 @@ func TestListModelsPagesWithTheKeyInAHeader(t *testing.T) {
 	}
 }
 
+// The failures every lister reports the same way.
+func TestListModelsFailures(t *testing.T) {
+	aitest.CheckModelLister(t, aitest.ModelListService{
+		Path: "/v1beta/models",
+		Page: func(ids []string) string {
+			models := make([]string, len(ids))
+			for i, id := range ids {
+				models[i] = `{"name":"models/` + id + `","supportedGenerationMethods":["generateContent"]}`
+			}
+			return `{"models":[` + strings.Join(models, ",") + `]}`
+		},
+		Key:         key,
+		New:         func(t *testing.T, base string) ai.ModelLister { return lister(t, base+"/v1beta") },
+		Unreachable: "could not reach the Gemini API: ",
+		Cancelled:   "the request was cancelled",
+	})
+}
+
+// Google answers an invalid key with 400 and the reason API_KEY_INVALID, and
+// a key without access with 403; an answer that is not an object of models
+// is not a model list.
 func TestListModelsErrors(t *testing.T) {
 	m := &models{pages: map[string]string{}}
 	srv := httptest.NewServer(m)
@@ -127,26 +149,26 @@ func TestListModelsErrors(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{401, `{"error":{"message":"bad key ` + key + `"}}`, "rejected the API key"},
 		{403, `{"error":{"message":"` + key + ` is not allowed"}}`, "rejected the API key"},
 		{400, invalidKey, "rejected the API key"},
 		{400, `{"error":{"message":"` + key + `"}}`, "HTTP 400"},
-		{404, `not found`, "does not list its models"},
 		{405, ``, "does not list its models"},
-		{500, `{"error":{"message":"` + key + `"}}`, "HTTP 500"},
 		{200, `<html>` + key + `</html>`, "not in the expected format"},
 		{200, `[]`, "not in the expected format"},
 		{200, `null`, "not in the expected format"},
 		{200, `{"models":"` + key + `"}`, "not in the expected format"},
-		{200, `{"models":[{"name":"models/` + strings.Repeat("x", ai.MaxModelListBytes) + `"}]}`, "too large"},
 	} {
 		m.status, m.pages[""] = c.status, c.body
 		_, err := l.ListModels(context.Background())
 		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), key) {
 			t.Errorf("%d %.40s: %v", c.status, c.body, err)
 		}
+		want := c.status
+		if want == 200 {
+			want = 0
+		}
 		var pe *ai.Error
-		if c.status != 200 && (!errors.As(err, &pe) || pe.Status != c.status) {
+		if !errors.As(err, &pe) || pe.Status != want {
 			t.Errorf("%d: status %v", c.status, err)
 		}
 	}
@@ -157,22 +179,9 @@ func TestListModelsErrors(t *testing.T) {
 	if _, err := l.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Errorf("two halves: %v", err)
 	}
-
-	// An unreachable service is reported without the key.
-	srv.Close()
-	if _, err := l.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "could not reach") ||
-		strings.Contains(err.Error(), key) {
-		t.Errorf("unreachable: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := l.ListModels(ctx); err == nil || strings.Contains(err.Error(), key) {
-		t.Errorf("cancelled: %v", err)
-	}
 }
 
-// Ids beyond the entry bound are not collected, and no further page is
-// asked for.
+// Once the entry bound is reached no further page is asked for.
 func TestListModelsEntryBound(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`{"models":[`)

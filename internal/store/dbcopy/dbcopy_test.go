@@ -75,6 +75,119 @@ func TestCopyRoundTrip(t *testing.T) {
 	}
 }
 
+// populateMany adds more rows than one page of the PostgreSQL export (200)
+// or one multi-row insert (200), and more items than one batch of the
+// search index rebuild (100): items with mixed-case ids and two tags each,
+// and submissions whose results span pages of their composite key.
+func populateMany(t *testing.T, db store.Store) {
+	t.Helper()
+	storetest.Write(t, db, func(tx store.Tx) error {
+		for i := range 260 {
+			it := storetest.Item(fmt.Sprintf("%c%03d", "bBaA"[i%4], i), fmt.Sprintf("Bulk item %03d", i), domain.TypeProblem,
+				"bulk", fmt.Sprint("group-", i%7))
+			it.Body = fmt.Sprintf("needle%03d", i)
+			if err := tx.InsertItem(&it); err != nil {
+				return err
+			}
+		}
+		for s := range 3 {
+			sub := domain.Submission{ID: fmt.Sprint("bulk-sub", s), ItemID: "b000", Mode: domain.ModeSubmit, Language: "python",
+				Source: "x", Status: domain.SubmissionCompleted, CreatedAt: time.Date(2026, 3, 1, 10, 0, s, 0, time.UTC)}
+			if err := tx.InsertSubmission(&sub); err != nil {
+				return err
+			}
+			for j := range 160 {
+				if err := tx.AddSubmissionResult(sub.ID, j, domain.SubmissionResult{Name: fmt.Sprint("case ", j),
+					Verdict: domain.VerdictAccepted, Stdin: fmt.Sprint(j), Stdout: fmt.Sprint(s, j)}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// Tables larger than a page, a batch and an index rebuild step copy
+// completely, in order, both ways.
+func TestCopyOfManyRows(t *testing.T) {
+	for _, via := range backends {
+		t.Run("SQLite to "+via.name+" and back", func(t *testing.T) {
+			ctx := context.Background()
+			src := teststore.OpenSQLite(t)
+			storetest.Populate(t, src)
+			populateMany(t, src)
+			want := storetest.Dump(t, src)
+			if len(want["items"]) < 250 || len(want["item_tags"]) < 450 || len(want["submission_results"]) < 450 {
+				t.Fatalf("too few rows: %d items, %d tags, %d results", len(want["items"]), len(want["item_tags"]),
+					len(want["submission_results"]))
+			}
+			mid := via.open(t)
+			if _, err := dbcopy.Copy(ctx, src, mid, dbcopy.Options{}); err != nil {
+				t.Fatal(err)
+			}
+			storetest.SameDump(t, "after the first copy", want, storetest.Dump(t, mid))
+			back := teststore.OpenSQLite(t)
+			if _, err := dbcopy.Copy(ctx, mid, back, dbcopy.Options{}); err != nil {
+				t.Fatal(err)
+			}
+			storetest.SameDump(t, "after the copy back", want, storetest.Dump(t, back))
+			// Every item is in the rebuilt search index, the last ones too.
+			for _, db := range []store.Store{mid, back} {
+				for _, q := range []string{"needle000", "needle150", "needle259"} {
+					got := storetest.Read(t, db, func(tx store.Tx) (int, error) {
+						_, n, err := tx.ListItems(store.ItemFilter{Query: q})
+						return n, err
+					})
+					if got != 1 {
+						t.Errorf("%s: %d items found for %q", via.name, got, q)
+					}
+				}
+			}
+		})
+	}
+}
+
+// versionBulk reports a schema version other than its database's.
+type versionBulk struct {
+	store.Bulk
+	version int
+}
+
+func (v versionBulk) SchemaVersion(context.Context) (int, error) { return v.version, nil }
+
+func (v versionBulk) Export(ctx context.Context, fn func(store.Dump) error) error {
+	return errors.New("exported despite the version mismatch")
+}
+
+func (v versionBulk) Import(ctx context.Context, fn func(store.Load) error) error {
+	return errors.New("imported despite the version mismatch")
+}
+
+// Databases at different schema versions are not copied either way, and
+// the destination is left as it was.
+func TestCopyRefusesDifferentSchemaVersions(t *testing.T) {
+	ctx := context.Background()
+	src := teststore.OpenSQLite(t)
+	storetest.Populate(t, src)
+	dst := teststore.OpenSQLite(t)
+	before := storetest.Dump(t, dst)
+	older := store.SchemaVersion - 1
+	for name, pair := range map[string][2]store.Bulk{
+		"older source":      {versionBulk{src, older}, dst},
+		"older destination": {src, versionBulk{dst, older}},
+	} {
+		_, err := dbcopy.Copy(ctx, pair[0], pair[1], dbcopy.Options{Replace: true})
+		want := fmt.Sprintf("the source is at schema version %d and the destination at %d", store.SchemaVersion, older)
+		if name == "older source" {
+			want = fmt.Sprintf("the source is at schema version %d and the destination at %d", older, store.SchemaVersion)
+		}
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "so that both are migrated") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	storetest.SameDump(t, "after the refused copies", before, storetest.Dump(t, dst))
+}
+
 // sameViews compares what the application sees through the store.
 func sameViews(t *testing.T, want, got store.Store) {
 	t.Helper()

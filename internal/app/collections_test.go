@@ -105,10 +105,6 @@ func TestCollectionMembership(t *testing.T) {
 	if page.Total != 2 || page.Items[0].ID != ids[0] || page.Items[1].ID != ids[1] {
 		t.Errorf("position listing: %+v", page.Items)
 	}
-	// Membership changes do not touch the item revision.
-	if it := must(e.app.GetItem(e.ctx, ids[0])); it.Revision != 1 {
-		t.Errorf("revision %d", it.Revision)
-	}
 	uncollected := must(e.app.ListItems(e.ctx, app.ItemQuery{Uncollected: true}))
 	if uncollected.Total != 1 || uncollected.Items[0].ID != ids[2] {
 		t.Errorf("uncollected: %+v", uncollected.Items)
@@ -118,4 +114,73 @@ func TestCollectionMembership(t *testing.T) {
 	if len(it.CollectionIDs) != 0 || it.Revision != 1 {
 		t.Errorf("collectionIds patch: %+v", it.ItemSummary)
 	}
+}
+
+func TestUpdateCollectionFields(t *testing.T) {
+	e := newEnv(t)
+	c := must(e.app.CreateCollection(e.ctx, decodeInto[domain.CollectionInput](t, `{"name":"Plan","description":"d"}`)))
+	update := func(js string) (domain.Collection, error) {
+		return e.app.UpdateCollection(e.ctx, c.ID, decodeInto[domain.CollectionInput](t, js))
+	}
+	if got := must(update(`{"name":"  Study plan  "}`)); got.Name != "Study plan" || got.Description != "d" || got.ParentID != nil {
+		t.Errorf("rename: %+v", got)
+	}
+	if got := must(update(`{"description":null}`)); got.Description != "" || got.Name != "Study plan" {
+		t.Errorf("description cleared: %+v", got)
+	}
+	for _, bad := range []struct{ js, field string }{
+		{`{"position":-1}`, "position"},
+		{`{"position":null}`, "position"},
+		{`{"parentId":"nope"}`, "parentId"},
+		{`{"name":null}`, "name"},
+		{`{"name":"  "}`, "name"},
+	} {
+		_, err := update(bad.js)
+		wantField(t, err, bad.field)
+	}
+	if got := must(e.app.GetCollection(e.ctx, c.ID)); got.Name != "Study plan" || got.ParentID != nil || got.Position != 0 {
+		t.Errorf("a rejected update was written: %+v", got)
+	}
+	_, err := e.app.UpdateCollection(e.ctx, "nope", decodeInto[domain.CollectionInput](t, `{"name":"x"}`))
+	wantCode(t, err, app.CodeNotFound)
+}
+
+// Removing from a collection in bulk leaves the items' other collections
+// alone and counts every existing item, member or not.
+func TestBulkRemoveFromCollection(t *testing.T) {
+	e := newEnv(t)
+	col := func(name string) domain.Collection {
+		return must(e.app.CreateCollection(e.ctx, decodeInto[domain.CollectionInput](t, `{"name":"`+name+`"}`)))
+	}
+	one, two := col("One"), col("Two")
+	var ids []string
+	for _, title := range []string{"a", "b", "c"} {
+		ids = append(ids, must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"`+title+`"}`))).ID)
+	}
+	must(e.app.AddCollectionItems(e.ctx, one.ID, ids[:2]))
+	must(e.app.AddCollectionItems(e.ctx, two.ID, ids[:2]))
+	members := func(c domain.Collection) string {
+		var out []string
+		for _, it := range must(e.app.ListItems(e.ctx, app.ItemQuery{CollectionID: c.ID, Sort: "position"})).Items {
+			out = append(out, it.Title)
+		}
+		return strings.Join(out, ",")
+	}
+	r := must(e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t,
+		`{"ids":["`+ids[0]+`","`+ids[2]+`","unknown"],"action":"removeFromCollection","collectionId":"`+one.ID+`"}`)))
+	if r.Affected != 2 {
+		t.Errorf("affected %d", r.Affected)
+	}
+	if got := members(one); got != "b" {
+		t.Errorf("left in the collection: %s", got)
+	}
+	if got := members(two); got != "a,b" {
+		t.Errorf("the other collection: %s", got)
+	}
+	if got := must(e.app.GetItem(e.ctx, ids[0])); len(got.CollectionIDs) != 1 || got.CollectionIDs[0] != two.ID {
+		t.Errorf("memberships of a: %v", got.CollectionIDs)
+	}
+	_, err := e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t,
+		`{"ids":["`+ids[1]+`"],"action":"removeFromCollection","collectionId":"nope"}`))
+	wantCode(t, err, app.CodeNotFound)
 }

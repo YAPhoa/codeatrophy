@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, open } from './support';
 
 // The default style is chosen from a radio group of cards on the Writing
 // styles page and saved at once; editing and deleting a style happen in its
@@ -8,12 +8,7 @@ import { open } from './support';
 const group = (page: Page) => page.getByRole('radiogroup', { name: 'Default style' });
 
 /** The default the mock server holds, read past the page's cache: a preset's name, or null. */
-const storedDefault = (page: Page) =>
-  page.evaluate(async () => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (path: string) => Promise<Response> } }).__codeatrophyMock;
-    const { items } = (await (await mock.fetch('/api/v1/styles')).json()) as { items: { name: string; isDefault: boolean }[] };
-    return items.find((s) => s.isDefault)?.name ?? null;
-  });
+const storedDefault = async (page: Page) => (await mockApi<{ items: { name: string; isDefault: boolean }[] }>(page, '/styles')).items.find((s) => s.isDefault)?.name ?? null;
 
 test('styles: picking a radio makes it the default, and Built-in clears it', async ({ page }) => {
   await open(page, '/settings/styles');

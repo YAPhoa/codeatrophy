@@ -1,0 +1,33 @@
+{
+  "format": "codeatrophy.bundle",
+  "formatVersion": 1,
+  "name": "Hand-written v1",
+  "description": "Written by hand from docs/bundle-format.md.",
+  "author": "tests",
+  "createdAt": "2026-01-31T12:00:00Z",
+  "generator": { "name": "hand", "version": "1.0" },
+  "includes": { "solutions": true, "hiddenTests": true },
+  "comment": "A field readers do not recognise; it is ignored.",
+  "items": [
+    { "id": "0193b2f0-1111-7000-8000-000000000001", "path": "items/two-sum", "type": "problem", "title": "Two Sum", "contentHash": "sha256:716b292d0ce477ac811e275d7642678ba8b1f4093efd22df72884ee3f10f5975" },
+    { "id": "0193b2f4-1111-7000-8000-000000000002", "path": "items/cap-notes", "type": "reading", "title": "CAP theorem notes", "contentHash": "sha256:63a2a07ae67bd8df0baba22d130d7d8b57f1ec87796a207e8230c568c4815625" }
+  ],
+  "collections": [
+    {
+      "id": "0193b2f1-1111-7000-8000-000000000001",
+      "name": "Dynamic Programming",
+      "description": "Bottom-up first.",
+      "parentId": null,
+      "position": 0,
+      "itemIds": ["0193b2f0-1111-7000-8000-000000000001"]
+    },
+    {
+      "id": "0193b2f1-1111-7000-8000-000000000002",
+      "name": "Warm-up",
+      "description": "",
+      "parentId": "0193b2f1-1111-7000-8000-000000000001",
+      "position": 1,
+      "itemIds": ["0193b2f4-1111-7000-8000-000000000002", "0193b2f0-1111-7000-8000-000000000001"]
+    }
+  ]
+}

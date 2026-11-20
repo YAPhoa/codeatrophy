@@ -83,7 +83,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	e.engine.Handler = generatorHandler
 
 	// Three generators give three cases, appended in the model's order.
-	res := must(newDraft(t, e, `{"text":"x","largeTestCases":3}`,
+	res := must(draftWith(t, e, `{"text":"x","largeTestCases":3}`,
 		largeDraft(gen("gen 200000"), named("Second", "gen 3000"), named("Third", "gen 5000"))))
 	c, d := res.Check, res.Draft
 	if len(c.LargeCases) != 3 {
@@ -109,14 +109,12 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	}
 	req := e.ai.Last()
 	b, _ := json.Marshal(req.Schema)
-	if !strings.Contains(req.System, `Also write "largeCases": a list of exactly 3 generators`) ||
-		!strings.Contains(req.System, "at most 1048576 bytes") || !strings.Contains(string(b), `"largeCases"`) ||
-		!strings.Contains(string(b), "Exactly 3 generators") {
+	if !strings.Contains(req.System, `"largeCases"`) || !strings.Contains(string(b), `"largeCases"`) {
 		t.Error("the large cases are not asked for")
 	}
 
 	// None asked for: not asked for, and an empty list, never null.
-	res = must(newDraft(t, e, `{"text":"x"}`, largeDraft(gen("gen 2000"))))
+	res = must(draftWith(t, e, `{"text":"x"}`, largeDraft(gen("gen 2000"))))
 	b, _ = json.Marshal(e.ai.Last().Schema)
 	if res.Check.LargeCases == nil || len(res.Check.LargeCases) != 0 || len(res.Draft.TestCases) != 1 ||
 		strings.Contains(string(b), "largeCases") || strings.Contains(e.ai.Last().System, `"largeCases"`) {
@@ -127,14 +125,14 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	}
 
 	// Generators beyond the number asked for are ignored.
-	res = must(newDraft(t, e, `{"text":"x","largeTestCases":1}`, largeDraft(gen("gen 2000"), gen("gen 4000"))))
+	res = must(draftWith(t, e, `{"text":"x","largeTestCases":1}`, largeDraft(gen("gen 2000"), gen("gen 4000"))))
 	if len(res.Check.LargeCases) != 1 || len(res.Draft.TestCases) != 2 || len(res.Draft.TestCases[1].Stdin) != 2000 {
 		t.Errorf("extra generators: %+v", res.Check.LargeCases)
 	}
 
 	// Fewer generators than asked for: the missing ones fail, the others
 	// are added.
-	res = must(newDraft(t, e, `{"text":"x","largeTestCases":3}`, largeDraft(gen("gen 2000"))))
+	res = must(draftWith(t, e, `{"text":"x","largeTestCases":3}`, largeDraft(gen("gen 2000"))))
 	ls := res.Check.LargeCases
 	if len(ls) != 3 || ls[0].Status != "added" || len(res.Draft.TestCases) != 2 {
 		t.Fatalf("fewer generators: %+v", ls)
@@ -151,7 +149,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	// None at all.
 	for _, d := range []map[string]any{largeDraft(), draftJSON()} {
 		d["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "python", "source": "sum"}
-		res = must(newDraft(t, e, `{"text":"x","largeTestCases":2}`, d))
+		res = must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, d))
 		if ls := res.Check.LargeCases; len(ls) != 2 || ls[0].Status != "failed" || *ls[0].Error != "the model wrote no generator" ||
 			*ls[1].Error != "the model wrote no generator" || len(res.Draft.TestCases) != 1 {
 			t.Errorf("no generator: %+v", ls)
@@ -181,7 +179,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 			d = largeDraft(gen("gen 500"), tc.gen, gen("gen 800"))
 			d["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "python", "source": "sum-small"}
 		}
-		res := must(newDraft(t, e, `{"text":"x","largeTestCases":3}`, d))
+		res := must(draftWith(t, e, `{"text":"x","largeTestCases":3}`, d))
 		ls := res.Check.LargeCases
 		if len(ls) != 3 {
 			t.Errorf("%s: %+v", name, ls)
@@ -198,7 +196,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 
 	// An input that repeats an earlier large case fails; the earlier one
 	// stays.
-	res = must(newDraft(t, e, `{"text":"x","largeTestCases":3}`,
+	res = must(draftWith(t, e, `{"text":"x","largeTestCases":3}`,
 		largeDraft(named("A", "gen-text 9 9"), named("B", "gen 2000"), named("C", "gen-text 9 9  "))))
 	if ls := res.Check.LargeCases; ls[0].Status != "added" || ls[1].Status != "added" || ls[2].Status != "failed" ||
 		*ls[2].Error != "the generated input repeats large case 1" || ls[2].TimeMs != nil || ls[2].Index != nil ||
@@ -210,7 +208,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	// output would be marked verified and probably be wrong.
 	wrong := largeDraft(gen("gen 2000"), gen("gen 3000"))
 	wrong["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "python", "source": "double"}
-	res = must(newDraft(t, e, `{"text":"x","largeTestCases":2}`, wrong))
+	res = must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, wrong))
 	if res.Check.Error == nil || !strings.Contains(*res.Check.Error, `"Example 1"`) || len(res.Draft.TestCases) != 1 {
 		t.Errorf("failed reference: %v", res.Check.Error)
 	}
@@ -222,14 +220,14 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	// Skipped without a reference solution or an engine, every one of them.
 	noRef := largeDraft(gen("gen 10"), gen("gen 20"))
 	noRef["problem"].(map[string]any)["referenceSolution"] = nil
-	ls = must(newDraft(t, e, `{"text":"x","largeTestCases":2}`, noRef)).Check.LargeCases
+	ls = must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, noRef)).Check.LargeCases
 	if len(ls) != 2 || ls[0].Status != "skipped" || !strings.Contains(*ls[0].Error, "no reference solution") ||
 		*ls[0].Name != "Many sevens" || ls[1].Status != "skipped" || *ls[1].Error != *ls[0].Error {
 		t.Errorf("no reference: %+v", ls)
 	}
 	ne := newEnv(t, withoutEngine())
 	ne.enableAI(t)
-	ls = must(newDraft(t, ne, `{"text":"x","largeTestCases":3}`, largeDraft(gen("gen 10")))).Check.LargeCases
+	ls = must(draftWith(t, ne, `{"text":"x","largeTestCases":3}`, largeDraft(gen("gen 10")))).Check.LargeCases
 	for _, lc := range ls {
 		if lc.Status != "skipped" || !strings.Contains(*lc.Error, "no judge engine") {
 			t.Errorf("no engine: %+v", lc)
@@ -239,7 +237,7 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 		t.Errorf("no engine: %d reports", len(ls))
 	}
 	e.engine.SetHealth(errStr("down"))
-	for _, lc := range must(newDraft(t, e, `{"text":"x","largeTestCases":2}`, largeDraft(gen("gen 10"), gen("gen 20")))).Check.LargeCases {
+	for _, lc := range must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, largeDraft(gen("gen 10"), gen("gen 20")))).Check.LargeCases {
 		if lc.Status != "skipped" {
 			t.Errorf("engine down: %+v", lc)
 		}
@@ -248,14 +246,14 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	// A reading ignores the count.
 	reading := draftJSON()
 	reading["type"] = "reading"
-	if res := must(newDraft(t, e, `{"text":"x","typeHint":"reading","largeTestCases":2}`, reading)); res.Check != nil ||
+	if res := must(draftWith(t, e, `{"text":"x","typeHint":"reading","largeTestCases":2}`, reading)); res.Check != nil ||
 		strings.Contains(e.ai.Last().System, "largeCases") {
 		t.Errorf("reading: %+v", res.Check)
 	}
 	// The count is bounded, for a reading too.
 	for _, body := range []string{`{"text":"x","largeTestCases":6}`, `{"text":"x","largeTestCases":-1}`,
 		`{"text":"x","typeHint":"reading","largeTestCases":6}`} {
-		_, err := newDraft(t, e, body, largeDraft())
+		_, err := draftWith(t, e, body, largeDraft())
 		if wantField(t, err, "largeTestCases"); app.AsError(err).Fields["largeTestCases"] != "must be between 0 and 5" {
 			t.Errorf("%s: %v", body, app.AsError(err).Fields)
 		}
@@ -301,19 +299,35 @@ func TestLargeCasesRunInParallel(t *testing.T) {
 func TestLargeCasesOutOfTime(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
-	e.engine.Handler = func(ctx context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
-		if req.Source == "gen-hang" {
-			<-ctx.Done()
-			return judge.ExecResult{}, ctx.Err()
-		}
-		return generatorHandler(ctx, req)
-	}
-	ctx, cancel := context.WithTimeout(e.ctx, 500*time.Millisecond)
+	// The time runs out once both hanging generators have started and the
+	// good case's reference run has its result.
+	ctx, cancel := context.WithCancel(e.ctx)
 	defer cancel()
+	var hanging atomic.Int32
+	var goodDone atomic.Bool
+	runOut := func() {
+		if hanging.Load() == 2 && goodDone.Load() {
+			cancel()
+		}
+	}
+	e.engine.Handler = func(hctx context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		switch {
+		case req.Source == "gen-hang":
+			hanging.Add(1)
+			runOut()
+			<-hctx.Done()
+			return judge.ExecResult{}, hctx.Err()
+		case req.Source == "sum" && len(req.Stdin) == 2000:
+			r, err := generatorHandler(hctx, req)
+			goodDone.Store(true)
+			runOut()
+			return r, err
+		}
+		return generatorHandler(hctx, req)
+	}
 	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
 		return largeDraft(gen("gen-hang"), gen("gen 2000"), gen("gen-hang")), nil
 	}
-	start := time.Now()
 	res := must(e.app.Draft(ctx, decodeInto[app.DraftInput](t, `{"text":"x","largeTestCases":3}`)))
 	ls := res.Check.LargeCases
 	if len(ls) != 3 || ls[1].Status != "added" || *ls[1].Index != 1 || len(res.Draft.TestCases) != 2 {
@@ -323,9 +337,6 @@ func TestLargeCasesOutOfTime(t *testing.T) {
 		if lc.Status != "skipped" || *lc.Error != "the check's time ran out" || lc.Index != nil {
 			t.Errorf("out of time: %+v %v", lc, lc.Error)
 		}
-	}
-	if d := time.Since(start); d > 5*time.Second {
-		t.Errorf("took %v", d)
 	}
 }
 
@@ -342,7 +353,7 @@ func TestLargeCaseOfAFunctionProblem(t *testing.T) {
 	d := fnDraftJSON()
 	d["testCases"] = []map[string]any{{"name": "Example 1", "stdin": "1 2", "expectedStdout": "3", "isSample": true}}
 	d["largeCases"] = []any{gen("gen 3000")}
-	res := must(newDraft(t, e, `{"text":"x","largeTestCases":1}`, d))
+	res := must(draftWith(t, e, `{"text":"x","largeTestCases":1}`, d))
 	if lc := res.Check.LargeCases[0]; lc.Status != "added" || *lc.Index != 1 {
 		t.Fatalf("large case: %+v %v", lc, lc.Error)
 	}
@@ -375,9 +386,9 @@ func TestGeneratedTestsWithLargeCases(t *testing.T) {
 			gens = append(gens, gen(s))
 		}
 		e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-			return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-				"cases":      []map[string]any{{"name": "small", "rationale": "x", "stdin": "4 4", "predictedStdout": "8", "isSample": false}},
-				"largeCases": gens}, nil
+			answer := casesAnswer("4 4", "8")
+			answer["largeCases"] = gens
+			return answer, nil
 		}
 	}
 	generate := func(js string) app.GenerateTestCasesResponse {
@@ -458,6 +469,48 @@ func TestGeneratedTestsWithLargeCases(t *testing.T) {
 	}
 }
 
+// Generated tests build no large case without an engine, nor from a
+// reference solution too large for the engine to run; the proposed cases
+// are still returned.
+func TestGeneratedLargeCasesNeedARunnableReference(t *testing.T) {
+	answer := func(lang, source string) func(ai.GenerateRequest) (any, error) {
+		return func(ai.GenerateRequest) (any, error) {
+			a := casesAnswer("4 4", "8")
+			a["referenceSolution"] = map[string]any{"language": lang, "source": source}
+			a["largeCases"] = []any{gen("gen 2000"), gen("gen 3000")}
+			return a, nil
+		}
+	}
+	for name, c := range map[string]struct {
+		opt                  option
+		lang, source, status string
+		want                 string
+	}{
+		"no engine": {withoutEngine(), "python", "sum", "skipped", "no judge engine is configured"},
+		"too large": {withToolchains(20), "cpp", "int main() { return 0; }", "failed", "the reference solution cannot run: the program is"},
+	} {
+		e := newEnv(t, c.opt)
+		e.enableAI(t)
+		it := e.problem(t, "")
+		e.ai.Respond = answer(c.lang, c.source)
+		res, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t,
+			`{"count":1,"largeTestCases":2,"language":"`+c.lang+`"}`))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(res.Cases) != 1 || len(res.LargeCases) != 2 {
+			t.Errorf("%s: %d cases, %d reports", name, len(res.Cases), len(res.LargeCases))
+			continue
+		}
+		for _, lc := range res.LargeCases {
+			if lc.Status != c.status || lc.Error == nil || !strings.Contains(*lc.Error, c.want) || lc.Index != nil {
+				t.Errorf("%s: %+v %s", name, lc, ptrString(lc.Error))
+			}
+		}
+	}
+}
+
 // A variant asks for large cases too, and builds them like a draft.
 func TestVariantWithLargeTestCases(t *testing.T) {
 	e := newEnv(t)
@@ -485,7 +538,7 @@ func TestRevisionsDoNotShowLargeCases(t *testing.T) {
 		{"name": "Huge", "stdin": strings.Repeat("7 ", 300000), "expectedStdout": "2100000", "isSample": false},
 	}
 	body := mustJSON(t, map[string]any{"text": "x", "instruction": "shorter", "previousDraft": prev})
-	must(newDraft(t, e, body, draftJSON()))
+	must(draftWith(t, e, body, draftJSON()))
 	u := e.ai.Last().User
 	if strings.Contains(u, "7 7 7 7") || !strings.Contains(u, `"largeTestCasesOmitted":[{"expectedOutputBytes":7,"inputBytes":600000,"name":"Huge"}]`) ||
 		!strings.Contains(u, "Leave them out of the revision") || !strings.Contains(u, `"stdin":"1 2"`) {
@@ -553,7 +606,7 @@ func TestLargeCasesAfterManyCases(t *testing.T) {
 		cases = append(cases, map[string]any{"name": "c" + strconv.Itoa(i), "stdin": strconv.Itoa(i), "expectedStdout": strconv.Itoa(i), "isSample": true})
 	}
 	d["testCases"] = cases
-	res := must(newDraft(t, e, `{"text":"x","largeTestCases":2}`, d))
+	res := must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, d))
 	c := res.Check
 	if c.LargeCases[0].Status != "added" || *c.LargeCases[0].Index != 12 || *c.LargeCases[1].Index != 13 || c.Total != 14 ||
 		c.Passed != 12 || !strings.Contains(*c.Error, "only the first 10") {

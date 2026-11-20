@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, open } from './support';
 
 // "Generate code" on the edit page of a problem: the AI writes the code of
 // the languages the tabs list, from the form as it stands, into the form.
@@ -15,13 +15,10 @@ const starter = (page: Page) => codeSection(page).locator('.starter-frame .cm-co
 
 /** The problem as the mock server holds it, read past the page's cache. */
 const stored = (page: Page, id: string) =>
-  page.evaluate(async (id) => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (path: string) => Promise<Response> } }).__codeatrophyMock;
-    return (await (await mock.fetch(`/api/v1/items/${id}`)).json()) as {
-      title: string;
-      problem: { interface: string; starterCode: Record<string, string>; harness: Record<string, { prefix: string; suffix: string }> };
-    };
-  }, id);
+  mockApi<{
+    title: string;
+    problem: { interface: string; starterCode: Record<string, string>; harness: Record<string, { prefix: string; suffix: string }> };
+  }>(page, `/items/${id}`);
 
 test('generate code: a full program\'s starters read its input, and Cancel discards them', async ({ page }) => {
   await open(page, `/items/${COIN_CHANGE}/edit`);

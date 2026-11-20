@@ -43,13 +43,6 @@ test('paging: the bar shows the range and links to each page, and the page is in
   await expect(pager(page).locator('.pager-range')).toHaveText('Showing 1–50 of 132');
 });
 
-test('paging: a long list shows its first, last and nearby pages, with gaps between', async ({ page }) => {
-  await withExtraItems(page, 400);
-  await open(page, '/?page=5');
-  await expect(pages(page).locator('.pager-btn, .pager-gap')).toHaveText(['', '1', '…', '4', '5', '6', '…', '9', '']);
-  await expect(pager(page).locator('.pager-range')).toHaveText('Showing 201–250 of 425');
-});
-
 test('paging: the page size is kept in this browser, and changing it starts from the first page', async ({ page }) => {
   await withExtraItems(page, 107);
   await open(page, '/?page=2');
@@ -108,10 +101,12 @@ test('paging: a list that fits on one page still says what it shows', async ({ p
   await expect(pages(page).getByRole('button', { name: 'Next page' })).toBeDisabled();
 });
 
-test('paging: on a narrow screen the bar takes two lines, within the list', async ({ page }) => {
+test('paging: a long list links its first, last and nearby pages, and on a narrow screen the bar takes two lines, within the list', async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 900 });
   await withExtraItems(page, 400);
   await open(page, '/?page=5');
+  // Which pages are linked is lib/paging.ts's (unit-tested); here, that the gaps show.
+  await expect(pages(page).locator('.pager-btn, .pager-gap')).toHaveText(['', '1', '…', '4', '5', '6', '…', '9', '']);
   const box = await page.locator('.item-list-foot').evaluate((foot) => {
     const f = foot.getBoundingClientRect();
     const parts = [...foot.querySelectorAll('.pager-info, .pager-pages')].map((el) => el.getBoundingClientRect());

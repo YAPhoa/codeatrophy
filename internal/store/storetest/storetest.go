@@ -37,6 +37,7 @@ func Run(t *testing.T, open Opener) {
 		{"SearchRules", testSearchRules},
 		{"TitleOrder", testTitleOrder},
 		{"CollectionsMembershipAndComputedFields", testCollectionsMembershipAndComputedFields},
+		{"ManyIDs", testManyIDs},
 		{"Collections", testCollections},
 		{"TestCases", testTestCases},
 		{"TagsStatsSettings", testTagsStatsSettings},
@@ -536,6 +537,81 @@ func testCollectionsMembershipAndComputedFields(t *testing.T, db store.Store) {
 	}
 	if order := Read(t, db, func(tx store.Tx) ([]string, error) { return tx.CollectionItemIDs("c1") }); strings.Join(order, ",") != "b" {
 		t.Errorf("membership not deleted with the item: %v", order)
+	}
+}
+
+// Lookups by more ids than one statement takes (SQLite splits them into
+// groups of 500) find every item and fill every item's computed fields.
+func testManyIDs(t *testing.T, db store.Store) {
+	const n = 501
+	var all []string
+	Write(t, db, func(tx store.Tx) error {
+		if err := tx.InsertCollection(&domain.Collection{ID: "c", Name: "All", CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		for i := range n {
+			it := Item(fmt.Sprintf("i%03d", i), fmt.Sprintf("Item %03d", i), domain.TypeProblem, "bulk")
+			if err := tx.InsertItem(&it); err != nil {
+				return err
+			}
+			all = append(all, it.ID)
+		}
+		// The first and the last item by title have a variant, a test case,
+		// a solution and a verdict.
+		for _, id := range []string{"i000", fmt.Sprintf("i%03d", n-1)} {
+			v := Item(id+"v", "Item "+id[1:]+" variant", domain.TypeProblem, "bulk")
+			v.VariantOf = &id
+			if err := tx.InsertItem(&v); err != nil {
+				return err
+			}
+			all = append(all, v.ID)
+			if err := tx.InsertTestCase(&domain.TestCase{ID: id + "t", ItemID: id, Origin: domain.OriginManual,
+				CreatedAt: now, UpdatedAt: now}); err != nil {
+				return err
+			}
+			if err := tx.InsertSolution(&domain.ItemSolution{ID: id + "s", ItemID: id, Name: "S", Language: "python",
+				Source: "x", CreatedAt: now, UpdatedAt: now}); err != nil {
+				return err
+			}
+			acc := domain.VerdictAccepted
+			if err := tx.InsertSubmission(&domain.Submission{ID: id + "sub", ItemID: id, Mode: domain.ModeSubmit,
+				Language: "python", Source: "x", Status: domain.SubmissionCompleted, Verdict: &acc, CreatedAt: now}); err != nil {
+				return err
+			}
+		}
+		return tx.AddCollectionItems("c", all)
+	})
+	existing := Read(t, db, func(tx store.Tx) (map[string]bool, error) {
+		return tx.ExistingItemIDs(append(slices.Clone(all), "missing1", "missing2"))
+	})
+	if len(existing) != len(all) || !existing["i000"] || !existing["i500v"] || existing["missing2"] {
+		t.Errorf("ExistingItemIDs found %d of %d", len(existing), len(all))
+	}
+	byIDs := Read(t, db, func(tx store.Tx) (int, error) {
+		_, total, err := tx.ListItems(store.ItemFilter{IDs: append(slices.Clone(all[:n]), "missing")})
+		return total, err
+	})
+	if byIDs != n {
+		t.Errorf("listing %d ids found %d items", n, byIDs)
+	}
+	list := Read(t, db, func(tx store.Tx) ([]domain.ItemSummary, error) {
+		l, _, err := tx.ListItems(store.ItemFilter{Sort: store.SortTitle})
+		return l, err
+	})
+	if len(list) != len(all) || list[len(list)-2].ID != "i500" {
+		t.Fatalf("%d items listed, want %d", len(list), len(all))
+	}
+	for _, s := range list {
+		extras := s.ID == "i000" || s.ID == "i500"
+		want := 0
+		if extras {
+			want = 1
+		}
+		if strings.Join(s.Tags, ",") != "bulk" || strings.Join(s.CollectionIDs, ",") != "c" || s.VariantCount != want ||
+			s.TestCaseCount != want || s.SolutionCount != want || (s.LastVerdict != nil) != extras {
+			t.Errorf("%s: tags %v, collections %v, %d variants, %d cases, %d solutions, verdict %v", s.ID, s.Tags,
+				s.CollectionIDs, s.VariantCount, s.TestCaseCount, s.SolutionCount, s.LastVerdict)
+		}
 	}
 }
 

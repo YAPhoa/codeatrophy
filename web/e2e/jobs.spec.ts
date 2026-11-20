@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, open, TWO_SUM_TEXT } from './support';
 
 // AI generations run as jobs on the server: leaving a screen never stops
 // one, the jobs window (bottom right) follows them, and new items in
@@ -15,7 +15,7 @@ const drafts = (page: Page) => page.getByRole('complementary', { name: 'Navigati
 test('jobs: a capture drafts on after its page is left, shows in the jobs window and under Drafts, and is reviewed on return', async ({ page }) => {
   await open(page, '/new', 'default');
   await expect(drafts(page)).toHaveText('Drafts');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByText('Drafting…')).toBeVisible();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/);
@@ -46,7 +46,7 @@ test('jobs: a capture drafts on after its page is left, shows in the jobs window
 
 test('jobs: a draft keeps its edits through a reload, and saving it to the library takes it off the Drafts count', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(drafts(page)).toHaveText('Drafts1');
@@ -54,7 +54,8 @@ test('jobs: a draft keeps its edits through a reload, and saving it to the libra
   await page.getByLabel('Title').fill('Two Sum, kept');
   await page.getByLabel('Summary').fill('Kept through a reload.');
   // Saved shortly after the change: a reload finds it on the server.
-  await page.waitForTimeout(1200);
+  const id = page.url().split('/drafts/')[1]!;
+  await expect.poll(async () => JSON.stringify(await mockApi(page, `/drafts/${id}`))).toContain('Kept through a reload.');
   await page.reload();
   await expect(page.getByLabel('Title')).toHaveValue('Two Sum, kept');
   await expect(page.getByLabel('Summary')).toHaveValue('Kept through a reload.');
@@ -140,4 +141,129 @@ test('jobs: code generated after its edit page was left is offered there, not ap
   await expect(section.getByRole('status').filter({ hasText: 'Wrote starter code for 5 languages.' })).toBeVisible();
   await expect(starter).toContainText('n, amount = map(int, input().split())');
   await expect(section.getByText('Generated code is ready')).toHaveCount(0);
+});
+
+test('jobs: a draft that fails while its page is left is listed as failed, and its page says so and offers to try again', async ({ page }) => {
+  await open(page, '/new', 'default');
+  // The mock ends a generation asked with MOCK:FAIL as an error of the provider.
+  await page.getByLabel('What you have').fill('two sum MOCK:FAIL');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  await page.getByRole('link', { name: /^All items/ }).click();
+
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('Draft · Failed', { timeout: 10_000 });
+  await row.getByRole('button', { name: 'Open' }).click();
+  const failed = page.getByRole('alert').filter({ hasText: 'Drafting failed' });
+  await expect(failed).toContainText('The AI provider returned an error');
+  await expect(jobsWindow(page)).toHaveCount(0);
+
+  // Trying again asks again, from the same input.
+  await expect(page.getByLabel('What you have')).toHaveValue('two sum MOCK:FAIL');
+  await failed.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+});
+
+test('jobs: a revision that fails says so, keeps the draft, and is asked again', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  await page.getByLabel('What to change').fill('make it harder MOCK:FAIL');
+  await page.getByRole('button', { name: 'Revise draft' }).click();
+  const failed = page.getByRole('alert').filter({ hasText: 'The revision failed' });
+  await expect(failed).toContainText('The AI provider returned an error');
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+
+  await failed.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('Revising the draft…')).toBeVisible();
+  await expect(failed).toBeVisible();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+});
+
+test('jobs: a server restart ends a running job as interrupted', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum MOCK:SLOW');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+
+  await page.evaluate(() => (window as unknown as { __codeatrophyMock: { restart: () => void } }).__codeatrophyMock.restart());
+  const failed = page.getByRole('alert').filter({ hasText: 'Drafting failed' });
+  await expect(failed).toContainText('It stopped before this finished. Start it again.');
+  await expect(page.getByText('Drafting…')).toHaveCount(0);
+});
+
+test('jobs: test cases whose generation failed while their page was left show the error there', async ({ page }) => {
+  await open(page, `/items/${TWO_SUM}/tests/generate`, 'default');
+  await page.getByLabel('Anything to focus on? (optional)').fill('MOCK:FAIL');
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
+  await expect(page.getByText('Writing a solution and test cases…')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Test cases' }).click();
+
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText('Test cases · Failed', { timeout: 10_000 });
+  await row.getByRole('button', { name: 'Open' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Generation failed' })).toContainText('The AI provider returned an error');
+  await expect(page.getByRole('heading', { name: 'Proposed cases' })).toHaveCount(0);
+  await expect(jobsWindow(page)).toHaveCount(0);
+});
+
+test('drafts: a draft changed elsewhere is reloaded on the next edit, and says so', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+  const id = page.url().split('/drafts/')[1]!;
+  await expect.poll(async () => (await mockApi<{ state: string }>(page, `/drafts/${id}`)).state).toBe('ready');
+
+  // Another tab renames it.
+  type Kept = { revision: number; content: { form: { title: string } } };
+  const kept = await mockApi<Kept>(page, `/drafts/${id}`);
+  await mockApi(page, `/drafts/${id}`, { method: 'PATCH', body: { content: { ...kept.content, form: { ...kept.content.form, title: 'Two Sum, from the other tab' } }, title: 'Two Sum, from the other tab', expectedRevision: kept.revision } });
+
+  // An edit here is refused, and the draft is read again.
+  await page.getByLabel('Summary').fill('Edited here.');
+  await expect(page.getByText('This draft changed elsewhere, so it was reloaded.')).toBeVisible();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum, from the other tab');
+});
+
+test('drafts: an edit the server cannot take is not saved yet, and says why', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+  const id = page.url().split('/drafts/')[1]!;
+  await expect.poll(async () => (await mockApi<{ state: string }>(page, `/drafts/${id}`)).state).toBe('ready');
+
+  await mockApi(page, `/drafts/${id}`, { method: 'DELETE' });
+  await page.getByLabel('Summary').fill('Edited here.');
+  await expect(page.getByRole('status').filter({ hasText: /^Not saved yet: / })).toBeVisible();
+});
+
+test('drafts: a variant is drafted from the Variants tab and listed as one; discarded, its address says it is gone', async ({ page }) => {
+  await open(page, `/items/${TWO_SUM}?tab=variants`);
+  await page.getByRole('tabpanel').getByRole('link', { name: /^Harder/ }).click();
+  await page.getByRole('button', { name: 'Draft another problem' }).click();
+  await expect(page.getByLabel('Title')).not.toHaveValue('');
+  const address = new URL(page.url()).pathname;
+
+  await drafts(page).click();
+  const listed = page.getByRole('list', { name: 'Drafts' }).getByRole('listitem');
+  await expect(listed).toHaveCount(1);
+  await expect(listed.locator('.draft-kind')).toHaveText('Variant');
+  await expect(listed).toContainText('Ready to review');
+
+  await listed.getByRole('button', { name: /^Discard / }).click();
+  await page.getByRole('dialog', { name: 'Discard this draft?' }).getByRole('button', { name: 'Discard draft' }).click();
+  await expect(page.getByRole('heading', { name: 'No drafts' })).toBeVisible();
+  await expect(drafts(page)).toHaveText('Drafts');
+
+  // A link to it, from the history or a bookmark.
+  await page.evaluate((to) => {
+    window.history.pushState(null, '', to);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, address);
+  await expect(page.getByRole('heading', { name: 'This draft is gone' })).toBeVisible();
 });

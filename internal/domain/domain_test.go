@@ -230,3 +230,45 @@ func TestSingleLineFieldsRejectUnicodeSeparators(t *testing.T) {
 		}
 	}
 }
+
+// Null clears the nullable fields and is an error for the others; compare
+// is set through the input like the other problem fields.
+func TestApplyItemInputNullsAndCompare(t *testing.T) {
+	apply := func(js string) (Item, FieldErrors) {
+		t.Helper()
+		u, n := "https://a.test", "note"
+		it := Item{ItemSummary: ItemSummary{Type: TypeProblem, Title: "T", Status: StatusDone, Favorite: true, Tags: []string{"dp"}},
+			Source: Source{URL: &u, Note: &n}, Problem: DefaultProblemSpec()}
+		var in ItemInput
+		if err := DecodeJSON([]byte(js), &in); err != nil {
+			t.Fatal(err)
+		}
+		return it, ApplyItemInput(&it, in)
+	}
+	it, fe := apply(`{"problem":{"compare":"exact"}}`)
+	if len(fe) != 0 || it.Problem.Compare != CompareExact || it.Problem.TimeLimitMs != DefaultTimeLimitMs {
+		t.Errorf("compare: %v %+v", fe, it.Problem)
+	}
+	it, fe = apply(`{"source":null}`)
+	if len(fe) != 0 || it.Source.URL != nil || it.Source.Note != nil {
+		t.Errorf("source null: %v %+v", fe, it.Source)
+	}
+	for _, c := range []struct{ js, field string }{
+		{`{"tags":null}`, "tags"},
+		{`{"status":null}`, "status"},
+		{`{"favorite":null}`, "favorite"},
+		{`{"problem":null}`, "problem"},
+		{`{"problem":{"timeLimitMs":null}}`, "problem.timeLimitMs"},
+		{`{"problem":{"memoryLimitKb":null}}`, "problem.memoryLimitKb"},
+		{`{"problem":{"compare":null}}`, "problem.compare"},
+	} {
+		it, fe := apply(c.js)
+		if _, ok := fe[c.field]; !ok || len(fe) != 1 {
+			t.Errorf("%s: %v", c.js, fe)
+		}
+		if it.Status != StatusDone || !it.Favorite || len(it.Tags) != 1 || it.Problem == nil ||
+			it.Problem.TimeLimitMs != DefaultTimeLimitMs || it.Problem.Compare != CompareTokens {
+			t.Errorf("%s: a null was applied: %+v %+v", c.js, it.ItemSummary, it.Problem)
+		}
+	}
+}

@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "name": "", "input": "1.in", "output": "1.out", "sample": true, "origin": "manual", "verified": false },
+    { "name": "hidden", "input": "2.in", "output": "2.out", "sample": false, "origin": "import", "verified": true }
+  ]
+}

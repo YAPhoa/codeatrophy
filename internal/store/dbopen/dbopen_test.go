@@ -20,6 +20,7 @@ import (
 	"codeatrophy/internal/store/dbopen"
 	"codeatrophy/internal/store/postgres/pgtest"
 	"codeatrophy/internal/store/sqlite"
+	"codeatrophy/internal/store/sqlite/sqlitetest"
 	"codeatrophy/internal/store/storetest"
 )
 
@@ -135,8 +136,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	path, _ := sqliteLibrary(t, t.TempDir())
 	// Back to version 7: without a tags table, with an ai_providers that
 	// knew two kinds and no effort levels, and with solutions that have no
-	// last run, AI jobs nor drafts. Migrations 8 and 9 rebuild ai_providers and item_tags, so
-	// their triggers and indexes are not needed here.
+	// last run, AI jobs nor drafts.
 	lite, err := sqlite.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -150,31 +150,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`CREATE TABLE item_tags_old (item_id TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
-			tag TEXT NOT NULL, PRIMARY KEY (item_id, tag)) WITHOUT ROWID;
-		INSERT INTO item_tags_old SELECT item_id, tag FROM item_tags;
-		DROP TABLE item_tags;
-		ALTER TABLE item_tags_old RENAME TO item_tags;
-		DROP TABLE tags;
-		CREATE TABLE ai_providers_old (
-			seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
-			kind TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')), model TEXT NOT NULL DEFAULT '',
-			base_url TEXT NOT NULL DEFAULT '', api_key TEXT NOT NULL DEFAULT '', api_key_origin TEXT NOT NULL DEFAULT '',
-			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-		INSERT INTO ai_providers_old SELECT seq, id, name, name_key, kind, model, base_url, api_key, api_key_origin,
-			created_at, updated_at FROM ai_providers;
-		DROP TABLE ai_providers;
-		ALTER TABLE ai_providers_old RENAME TO ai_providers;
-		ALTER TABLE solutions DROP COLUMN last_run_at;
-		ALTER TABLE solutions DROP COLUMN last_run_passed;
-		ALTER TABLE solutions DROP COLUMN last_run_total;
-		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
-		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;
-		DROP TABLE ai_jobs;
-		DROP TABLE drafts;
-		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
-		t.Fatal(err)
-	}
+	sqlitetest.UndoMigrationsFrom(t, raw, 8)
 	raw.Close()
 	if st, err := sqlite.Inspect(context.Background(), path); err != nil || st.Version != 7 {
 		t.Fatalf("the SQLite database is at %+v %v", st, err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/domain"
+	"codeatrophy/internal/jobqueue"
 	"codeatrophy/internal/store"
 	"codeatrophy/internal/store/teststore"
 )
@@ -72,10 +74,7 @@ func TestAIJobRunsInTheBackground(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
 	p := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
-	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-		return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14"}}}, nil
-	}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("7 7", "14"), nil }
 	ctx, cancel := context.WithCancel(e.ctx)
 	job := must(e.app.StartAIJob(ctx, app.JobTestCases, p.ID, json.RawMessage(`{"count":1,"origin":"/items/`+p.ID+`/tests/generate"}`)))
 	cancel() // the client goes away at once
@@ -199,21 +198,16 @@ func TestAIJobWorkerLimitAndActiveCap(t *testing.T) {
 	_, err := e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody))
 	wantCode(t, err, app.CodeConflict)
 	close(release)
-	var last time.Time
 	for _, id := range ids {
-		j := e.waitJob(t, id)
-		if j.Status != store.JobSucceeded {
+		if j := e.waitJob(t, id); j.Status != store.JobSucceeded {
 			t.Fatalf("job %s: %+v", id, j.AIJob)
 		}
-		if j.StartedAt.Before(last) {
-			t.Errorf("job %s started out of order", id)
-		}
-		last = *j.StartedAt
 	}
 }
 
 // Cancelling a running job aborts its provider request, which the AI log
-// records as cancelled; a queued one never runs; a finished one stays.
+// records as cancelled; a queued one never runs; a finished one stays. A
+// job that is active cannot be picked up.
 func TestAIJobCancel(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
@@ -224,6 +218,10 @@ func TestAIJobCancel(t *testing.T) {
 	b := must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
 	waitFor(t, "two running jobs", func() bool { return running.Load() == 2 })
 	c := must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
+	for _, id := range []string{a.ID, c.ID} {
+		_, err := e.app.PickUpAIJob(e.ctx, id)
+		wantCode(t, err, app.CodeConflict)
+	}
 	if got := must(e.app.CancelAIJob(e.ctx, c.ID)); got.Status != store.JobCancelled || got.FinishedAt == nil {
 		t.Errorf("cancelled while queued: %+v", got)
 	}
@@ -252,27 +250,16 @@ func TestAIJobCancel(t *testing.T) {
 	wantCode(t, err, app.CodeNotFound)
 	e.ai.Hold = nil
 	d := must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
-	if j := must(e.app.CancelAIJob(e.ctx, d.ID)); j.Status == store.JobCancelled {
-		// Cancelled before it finished, which is allowed; nothing more to see.
-		return
-	}
 	done := e.waitJob(t, d.ID)
-	if got := must(e.app.CancelAIJob(e.ctx, d.ID)); got.Status != done.Status {
+	if done.Status != store.JobSucceeded {
+		t.Fatalf("finished: %+v", done.AIJob)
+	}
+	if got := must(e.app.CancelAIJob(e.ctx, d.ID)); got.Status != done.Status || !got.FinishedAt.Equal(*done.FinishedAt) {
 		t.Errorf("cancelling a finished job changed it: %+v", got)
 	}
-}
-
-// A job that is active cannot be picked up.
-func TestAIJobPickUpWhileActive(t *testing.T) {
-	e := newEnv(t)
-	e.enableAI(t)
-	e.ai.Respond = codeAnswer
-	release, running := e.hold()
-	defer close(release)
-	j := must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
-	waitFor(t, "the job to run", func() bool { return running.Load() == 1 })
-	_, err := e.app.PickUpAIJob(e.ctx, j.ID)
-	wantCode(t, err, app.CodeConflict)
+	if got := must(e.app.GetAIJob(e.ctx, d.ID)); got.Status != store.JobSucceeded || string(got.Result) != string(done.Result) {
+		t.Errorf("stored after cancelling: %+v", got.AIJob)
+	}
 }
 
 // On start, jobs left running by a previous process fail as interrupted,
@@ -306,7 +293,8 @@ func TestAIJobsAfterARestart(t *testing.T) {
 		!strings.Contains(j.Error.Message, "restarted") || j.FinishedAt == nil {
 		t.Errorf("interrupted job: %+v", j.AIJob)
 	}
-	// The queued job ran (with AI off it fails; what matters is that it ran).
+	// The queued job ran. It may start before AI is enabled above and fail,
+	// so only that it started is checked.
 	if j := e.waitJob(t, "queued"); j.StartedAt == nil {
 		t.Errorf("queued job: %+v", j.AIJob)
 	}
@@ -349,7 +337,8 @@ func TestAIJobsAreCapped(t *testing.T) {
 }
 
 // Stopping the server ends running jobs without finishing them, so the
-// next start reports them as interrupted.
+// next start reports them as interrupted, and a draft's generation fails
+// the draft.
 func TestAIJobStopLeavesRunningJobs(t *testing.T) {
 	db := teststore.Open(t)
 	e := newEnv(t, func(o *app.Options) { o.Store = db })
@@ -357,7 +346,8 @@ func TestAIJobStopLeavesRunningJobs(t *testing.T) {
 	e.ai.Respond = codeAnswer
 	_, running := e.hold()
 	j := must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
-	waitFor(t, "the job to run", func() bool { return running.Load() == 1 })
+	d, _ := e.newDraft(t, `{"kind":"capture","generate":{"text":"two sum"}}`)
+	waitFor(t, "both jobs to run", func() bool { return running.Load() == 2 })
 	e.app.Stop()
 	var got store.AIJob
 	if err := db.Read(context.Background(), func(tx store.Tx) (err error) { got, err = tx.GetAIJob(j.ID); return err }); err != nil {
@@ -371,8 +361,55 @@ func TestAIJobStopLeavesRunningJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer next.Stop()
-	if d := must(next.GetAIJob(context.Background(), j.ID)); d.Status != store.JobFailed || d.Error.Code != app.CodeInterrupted {
-		t.Errorf("after the restart: %+v", d.AIJob)
+	if got := must(next.GetAIJob(context.Background(), j.ID)); got.Status != store.JobFailed || got.Error.Code != app.CodeInterrupted {
+		t.Errorf("after the restart: %+v", got.AIJob)
+	}
+	if got := must(next.GetDraft(context.Background(), d.ID)); got.State != app.DraftFailed || got.Error == nil ||
+		got.Error.Code != app.CodeInterrupted || got.Job == nil || got.Job.Status != store.JobFailed {
+		t.Errorf("the draft after the restart: %+v", got.DraftSummary)
+	}
+}
+
+// recordingQueue is an AI queue that runs nothing and records what is
+// pushed to it.
+type recordingQueue struct {
+	mu     sync.Mutex
+	pushed []string
+}
+
+func (q *recordingQueue) Start(context.Context, jobqueue.Run) {}
+func (q *recordingQueue) Cancel(string)                       {}
+func (q *recordingQueue) Stop()                               {}
+func (q *recordingQueue) Push(id string) {
+	q.mu.Lock()
+	q.pushed = append(q.pushed, id)
+	q.mu.Unlock()
+}
+
+// On start, the queued jobs are queued again oldest first.
+func TestQueuedAIJobsArePushedOldestFirst(t *testing.T) {
+	db := teststore.Open(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := db.Write(context.Background(), func(tx store.Tx) error {
+		for _, j := range []struct {
+			id  string
+			age time.Duration
+		}{{"newest", 0}, {"oldest", 2 * time.Hour}, {"middle", time.Hour}} {
+			if err := tx.InsertAIJob(&store.AIJob{ID: j.id, CreatedAt: now.Add(-j.age), Kind: app.JobCode,
+				Status: store.JobQueued, Request: codeBody}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	q := &recordingQueue{}
+	newEnv(t, func(o *app.Options) { o.Store, o.AIQueue = db, q })
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if got := strings.Join(q.pushed, ","); got != "oldest,middle,newest" {
+		t.Errorf("pushed %s", got)
 	}
 }
 

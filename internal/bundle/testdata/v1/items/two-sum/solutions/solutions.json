@@ -1,0 +1,6 @@
+{
+  "solutions": [
+    { "name": "Hash map, one pass", "language": "python", "file": "hash-map.txt", "notes": "O(n) time, O(n) space.", "reference": true },
+    { "name": "Brute force", "language": "cpp", "file": "02-brute-force.cpp", "notes": "", "reference": false }
+  ]
+}

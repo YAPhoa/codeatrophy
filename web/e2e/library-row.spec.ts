@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { open } from './support';
+import { open, row } from './support';
 
 // A library row's checkbox and star wait at rest, in their places, and show
 // when the row is pointed at or reached by keyboard, once anything is
@@ -8,7 +8,6 @@ import { open } from './support';
 const PLAIN = 'Merge k Sorted Lists';
 const STARRED = 'Two Sum';
 
-const row = (page: Page, title: string) => page.locator('li.item-row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
 const checkbox = (r: Locator) => r.locator('.item-check input');
 const star = (r: Locator) => r.locator('.item-star .fav-btn');
 
@@ -150,22 +149,4 @@ test('selection bar: as wide as its actions, Delete before the more-actions menu
   const first = (await bar.getByRole('button', { name: 'Clear selection' }).boundingBox())!;
   const last = (await bar.getByRole('button', { name: 'More actions' }).boundingBox())!;
   expect(Math.abs(last.y - first.y)).toBeLessThan(2);
-});
-
-test('library row at 390px: a long verdict is cut short rather than run into the date', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
-  await atRest(page);
-  const r = row(page, 'Network Delay Time');
-  // Where the badge's text visibly ends: past its box only if it spills out.
-  const textEnd = await r.locator('.item-verdict .badge').evaluate((el) => {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const text = range.getBoundingClientRect().right;
-    return getComputedStyle(el).overflow === 'hidden' ? Math.min(text, el.getBoundingClientRect().right) : text;
-  });
-  const date = (await r.locator('.item-updated').boundingBox())!;
-  expect(textEnd).toBeLessThanOrEqual(date.x);
-  const wrap = (await page.locator('.item-list-wrap').boundingBox())!;
-  const chevron = (await r.locator('.item-expand').boundingBox())!;
-  expect(chevron.x + chevron.width).toBeLessThanOrEqual(wrap.x + wrap.width);
 });

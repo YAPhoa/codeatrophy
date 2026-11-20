@@ -64,6 +64,22 @@ func TestSystemPromptSetValidateReset(t *testing.T) {
 	}
 }
 
+// systemPrompts runs a draft, a variant of the problem itemID and a test
+// generation for it, and returns the system prompt each one sent.
+func (e *env) systemPrompts(t *testing.T, itemID string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`)))
+	out["draft"] = e.ai.Last().System
+	must(e.app.Variant(e.ctx, itemID, decodeInto[app.VariantInput](t, `{"mode":"similar"}`)))
+	out["variant"] = e.ai.Last().System
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("7 7", "14"), nil }
+	must(e.app.GenerateTestCases(e.ctx, itemID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1}`)))
+	out["testcases"] = e.ai.Last().System
+	return out
+}
+
 // The custom system prompt replaces the editable conventions in drafts and
 // variants; the fixed rules and the style preset still apply, and test
 // generation, which has rules of its own, is unaffected.
@@ -72,21 +88,7 @@ func TestSystemPromptReachesGenerations(t *testing.T) {
 	e.enableAI(t)
 	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
 	must(e.app.CreateStylePreset(e.ctx, decodeInto[domain.StylePresetInput](t, `{"name":"Mark","instructions":"STYLE-MARKER","isDefault":true}`)))
-	systems := func() map[string]string {
-		out := map[string]string{}
-		e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
-		must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`)))
-		out["draft"] = e.ai.Last().System
-		must(e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"mode":"similar"}`)))
-		out["variant"] = e.ai.Last().System
-		e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-			return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-				"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14"}}}, nil
-		}
-		must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1}`)))
-		out["testcases"] = e.ai.Last().System
-		return out
-	}
+	systems := func() map[string]string { return e.systemPrompts(t, it.ID) }
 	before := systems()
 	for _, op := range []string{"draft", "variant"} {
 		if !strings.Contains(before[op], ai.AuthoringConventions) || !strings.Contains(before[op], "STYLE-MARKER") {

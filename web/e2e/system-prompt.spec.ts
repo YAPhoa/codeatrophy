@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, open } from './support';
 
 // The prompt cards on the Writing styles page, the system prompt and the
 // test case prompt: each editable text is read-only until an "are you sure"
@@ -20,7 +20,7 @@ interface Kind {
 const SYSTEM: Kind = {
   card: 'System prompt',
   section: 'Authoring conventions',
-  path: '/api/v1/settings/ai/system-prompt',
+  path: '/settings/ai/system-prompt',
   confirm: 'Edit the system prompt?',
   confirmBody: 'Editing the system prompt changes every draft.',
   builtIn: '# Codeatrophy authoring conventions',
@@ -31,7 +31,7 @@ const SYSTEM: Kind = {
 const TESTS: Kind = {
   card: 'Test case prompt',
   section: 'Test guidance',
-  path: '/api/v1/settings/ai/testcase-prompt',
+  path: '/settings/ai/testcase-prompt',
   confirm: 'Edit the test case prompt?',
   confirmBody: 'Editing this prompt changes every generated test set. A bad edit can make tests worse.',
   builtIn: '- For a program problem, write a correct, efficient reference solution',
@@ -42,11 +42,7 @@ const TESTS: Kind = {
 const card = (page: Page, k: Kind) => page.getByRole('group', { name: k.card });
 
 /** What the mock server holds, read past the page's cache. */
-const stored = (page: Page, k: Kind) =>
-  page.evaluate(async (path) => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (path: string) => Promise<Response> } }).__codeatrophyMock;
-    return (await (await mock.fetch(path)).json()) as { custom: string | null; isCustom: boolean };
-  }, k.path);
+const stored = (page: Page, k: Kind) => mockApi<{ custom: string | null; isCustom: boolean }>(page, k.path);
 
 async function startEditing(page: Page, k: Kind) {
   await card(page, k).getByRole('button', { name: 'Edit' }).click();
@@ -132,26 +128,7 @@ test('system prompt: the Edit button sits in the Authoring conventions heading r
   }
 });
 
-test('system prompt: leaving with unsaved changes asks first', async ({ page }) => {
-  await open(page, '/settings/styles');
-  const editor = await startEditing(page, SYSTEM);
-  await editor.fill('Unsaved.');
-
-  const nav = page.getByRole('navigation', { name: 'Settings' });
-  await nav.getByRole('link', { name: 'Preferences' }).click();
-  const leave = page.getByRole('dialog', { name: 'Leave without saving?' });
-  await expect(leave).toContainText('Your changes to the system prompt have not been saved.');
-  await leave.getByRole('button', { name: 'Stay' }).click();
-  await expect(page).toHaveURL(/\/settings\/styles(\?|$)/);
-  await expect(editor).toHaveValue('Unsaved.');
-
-  await nav.getByRole('link', { name: 'Preferences' }).click();
-  await leave.getByRole('button', { name: 'Discard and leave' }).click();
-  await expect(page).toHaveURL(/\/settings\/preferences$/);
-  expect(await stored(page, SYSTEM)).toMatchObject({ isCustom: false });
-});
-
-test('test case prompt: leaving with unsaved changes asks first, for either card', async ({ page }) => {
+test('prompts: leaving with unsaved changes asks first, naming the cards changed', async ({ page }) => {
   await open(page, '/settings/styles');
   const editor = await startEditing(page, TESTS);
   await editor.fill('Unsaved tests.');
@@ -168,7 +145,15 @@ test('test case prompt: leaving with unsaved changes asks first, for either card
   await other.fill('Unsaved conventions.');
   await nav.getByRole('link', { name: 'Preferences' }).click();
   await expect(leave).toContainText('Your changes to the system prompt and the test case prompt have not been saved.');
+  await leave.getByRole('button', { name: 'Stay' }).click();
+
+  // With the test case prompt's edit given up, only the system prompt is named.
+  await card(page, TESTS).getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('dialog', { name: 'Discard your changes?' }).getByRole('button', { name: 'Discard' }).click();
+  await nav.getByRole('link', { name: 'Preferences' }).click();
+  await expect(leave).toContainText('Your changes to the system prompt have not been saved.');
   await leave.getByRole('button', { name: 'Discard and leave' }).click();
   await expect(page).toHaveURL(/\/settings\/preferences$/);
+  expect(await stored(page, SYSTEM)).toMatchObject({ isCustom: false });
   expect(await stored(page, TESTS)).toMatchObject({ isCustom: false });
 });

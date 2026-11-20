@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "name": "Example 1", "input": "01.in", "output": "01.out", "sample": true, "origin": "manual", "verified": true },
+    { "name": "Large", "input": "big.in", "output": "big.out", "sample": false, "origin": "ai", "verified": false }
+  ]
+}

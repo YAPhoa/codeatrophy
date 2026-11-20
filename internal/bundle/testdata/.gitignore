@@ -1,0 +1,2 @@
+# Test case outputs are fixtures here, not coverage profiles.
+!*.out

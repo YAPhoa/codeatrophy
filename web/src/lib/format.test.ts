@@ -1,6 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { describeCases, describeChanges, describeRun, describeUsage, formatDuration, formatRunTime, formatTokens, isFailedVerdict, withUnit } from './format';
+import { describeCases, describeChanges, describeRun, describeUsage, formatBytes, formatDuration, formatMemoryKb, formatMs, formatRunTime, formatTokens, isFailedVerdict, plural, readingMinutes, relativeTime, withUnit } from './format';
 import type { Verdict } from '../api/types';
+
+describe('format', () => {
+  const now = Date.parse('2026-06-15T12:00:00Z');
+
+  it('formats relative times', () => {
+    expect(relativeTime('2026-06-15T11:59:40Z', now)).toBe('just now');
+    expect(relativeTime('2026-06-15T09:00:00Z', now)).toMatch(/3 hr/);
+    expect(relativeTime('2026-06-14T12:00:00Z', now)).toBe('yesterday');
+    expect(relativeTime('2026-04-15T12:00:00Z', now)).toMatch(/2 mo/);
+    expect(relativeTime('2024-01-01T00:00:00Z', now)).toMatch(/2024/);
+    expect(relativeTime('not a date', now)).toBe('');
+  });
+
+  it('formats sizes and durations', () => {
+    expect(formatBytes(512)).toBe('512\u00a0B');
+    expect(formatBytes(52428800)).toBe('50\u00a0MB');
+    expect(formatMemoryKb(262144)).toBe('256\u00a0MB');
+    expect(formatMemoryKb(9120)).toBe('8.9\u00a0MB');
+    expect(formatMs(48)).toBe('48\u00a0ms');
+    expect(formatMs(2000)).toBe('2\u00a0s');
+  });
+
+  it('pluralises', () => {
+    expect(plural(1, 'case')).toBe('1 case');
+    expect(plural(0, 'case')).toBe('0 cases');
+    expect(plural(2, 'min', 'min')).toBe('2 min');
+  });
+
+  it('estimates reading time with a floor of one minute', () => {
+    expect(readingMinutes('')).toBe(1);
+    expect(readingMinutes(Array.from({ length: 660 }, () => 'word').join(' '))).toBe(3);
+  });
+});
 
 describe('formatRunTime', () => {
   it('shows the measured time of a run that finished', () => {
@@ -54,7 +87,10 @@ describe('describeRun', () => {
 });
 
 describe('describeChanges', () => {
-  it('names saved solutions', () => {
+  it('describes what differs in an imported item, in the words of its type', () => {
+    expect(describeChanges(['title'], 'reading')).toBe('title');
+    expect(describeChanges(['body', 'testCases'], 'problem')).toBe('statement and test cases');
+    expect(describeChanges(['title', 'body', 'limits', 'somethingNew'], 'reading')).toBe('title, text, time and memory limits and somethingNew');
     expect(describeChanges(['starterCode', 'solutions', 'testCases'], 'problem')).toBe('starter code, solutions and test cases');
   });
 });
@@ -103,10 +139,10 @@ describe('describeUsage', () => {
   });
 });
 
-
 describe('withUnit', () => {
-  it('groups digits and keeps the unit on the same line', () => {
-    expect(withUnit(10000, 'ms')).toBe(`${(10000).toLocaleString()}\u00a0ms`);
+  it('rounds a number to a whole one and keeps the unit on the same line', () => {
+    expect(withUnit(512, 'ms')).toBe('512\u00a0ms');
+    expect(withUnit(2.6, 's')).toBe('3\u00a0s');
     expect(withUnit('1.5', 'MB')).toBe('1.5\u00a0MB');
   });
 });

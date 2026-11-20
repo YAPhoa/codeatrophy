@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
 	"codeatrophy/internal/store/postgres/pgtest"
 	"codeatrophy/internal/store/storetest"
@@ -245,180 +243,36 @@ func undoMigrationsFrom(t *testing.T, db *DB, from int) {
 	}
 }
 
-// Migration 8 allows the gemini kind: a database at version 7 keeps every
-// provider, its usage and log rows and every other row, and the kind is
-// still checked. The library is written at the current version and taken
-// back, since the store writes the current schema.
-func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
-	ctx := context.Background()
-	url := pgtest.URL(t)
-	db := open(t, url, nil)
-	storetest.Populate(t, db)
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-	insert := func(db *DB, p store.AIProvider) error {
-		return db.Write(ctx, func(tx store.Tx) error { return tx.InsertAIProvider(&p) })
-	}
-	if err := insert(db, store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
-		BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now}); err != nil {
+// pgObjects lists a table's indexes, triggers and constraints, with the
+// constraints' definitions.
+func pgObjects(t *testing.T, db *DB, table string) string {
+	t.Helper()
+	var s string
+	if err := db.pool.QueryRow(`SELECT COALESCE(string_agg(o, ', ' ORDER BY o), '') FROM (
+			SELECT 'index ' || indexname AS o FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1
+			UNION ALL SELECT 'trigger ' || tgname FROM pg_trigger WHERE tgrelid = to_regclass($1) AND NOT tgisinternal
+			UNION ALL SELECT 'constraint ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
+				WHERE conrelid = to_regclass($1)) objects`, table).Scan(&s); err != nil {
 		t.Fatal(err)
 	}
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
-		t.Fatalf("the fixture has no providers or usage: %v", want)
-	}
-	undoMigrationsFrom(t, db, 8)
-	gemini := store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now}
-	if err := insert(db, gemini); err == nil {
-		t.Fatal("version 7 accepted the gemini kind")
-	}
-	db.Close()
-
-	db = open(t, url, nil)
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	storetest.SameDump(t, "after migration 8", want, storetest.Dump(t, db))
-	if err := insert(db, gemini); err != nil {
-		t.Fatalf("a gemini provider: %v", err)
-	}
-	if err := insert(db, store.AIProvider{ID: "m", Name: "Mistral", Kind: "mistral", CreatedAt: now, UpdatedAt: now}); err == nil {
-		t.Error("an unknown kind was accepted")
-	}
-	if _, err := db.pool.Exec(`UPDATE ai_providers SET kind = 'anthropic' WHERE id = 'g'`); err == nil {
-		t.Error("the kind was changed")
-	}
+	return s
 }
 
-// Migration 9 makes tags records of their own: every tag an item carries
-// becomes one, every other row is kept, and item_tags refers to tags.
-func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
-	ctx := context.Background()
-	url := pgtest.URL(t)
-	db := open(t, url, nil)
-	storetest.Populate(t, db)
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	if len(want["tags"]) < 3 || len(want["item_tags"]) <= len(want["tags"]) {
-		t.Fatalf("the fixture has too few tags: %v %v", want["tags"], want["item_tags"])
-	}
-	undoMigrationsFrom(t, db, 9)
-	var exists bool
-	if err := db.pool.QueryRow(`SELECT to_regclass('tags') IS NOT NULL`).Scan(&exists); err != nil || exists {
-		t.Fatalf("version 8 has a tags table: %v %v", exists, err)
-	}
-	db.Close()
-
-	db = open(t, url, nil)
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	storetest.SameDump(t, "after migration 9", want, storetest.Dump(t, db))
-	if _, err := db.pool.Exec(`INSERT INTO item_tags (item_id, tag) VALUES ('origin', 'unregistered')`); err == nil {
-		t.Error("an item carries a tag that is not registered")
-	}
-	if _, err := db.pool.Exec(`DELETE FROM tags WHERE name = 'array'`); err == nil {
-		t.Error("a tag an item carries was deleted")
-	}
-	if _, err := db.pool.Exec(`DELETE FROM items WHERE id = 's7'`); err != nil {
-		t.Errorf("deleting an item with tags: %v", err)
-	}
-}
-
-// Migration 10 gives AI providers an effort level: Anthropic providers get
-// high, which the server sent them until then, the other kinds none, and
-// every other row is kept.
-func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
-	ctx := context.Background()
-	url := pgtest.URL(t)
-	db := open(t, url, nil)
-	storetest.Populate(t, db)
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-	if err := db.Write(ctx, func(tx store.Tx) error {
-		for _, p := range []store.AIProvider{
-			{ID: "a", Name: "Second key", Kind: "anthropic"},
-			{ID: "o", Name: "Local", Kind: "openai_compatible", Effort: "low"},
-			{ID: "g", Name: "Gemini", Kind: "gemini", Effort: "medium"},
-		} {
-			p.CreatedAt, p.UpdatedAt = now, now
-			if err := tx.InsertAIProvider(&p); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	undoMigrationsFrom(t, db, 10)
-	db.Close()
-
-	db = open(t, url, nil)
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	got := storetest.Dump(t, db)
-	delete(want, "ai_providers")
-	delete(got, "ai_providers")
-	storetest.SameDump(t, "after migration 10", want, got)
-	efforts := map[string]string{}
-	var list []store.AIProvider
-	if err := db.Read(ctx, func(tx store.Tx) (err error) { list, err = tx.ListAIProviders(); return err }); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range list {
-		efforts[p.Kind+" "+p.Name] = p.Effort
-	}
-	if fmt.Sprint(efforts) != "map[anthropic Second key:high anthropic Work:high gemini Gemini: openai_compatible Local:]" {
-		t.Errorf("efforts after migrating: %v", efforts)
-	}
-	if _, err := db.pool.Exec(`UPDATE ai_providers SET effort = 'max' WHERE id = 'a'`); err == nil {
-		t.Error("an unknown effort was accepted")
-	}
-}
-
-// Migration 11 gives saved solutions a last run: every existing solution
-// starts without one, every other row is kept, and the figures are checked.
-func TestLastRunMigrationStartsEverySolutionWithoutARun(t *testing.T) {
-	ctx := context.Background()
-	url := pgtest.URL(t)
-	db := open(t, url, nil)
-	storetest.Populate(t, db)
-	want := storetest.Dump(t, db)
-	undoMigrationsFrom(t, db, 11)
-	db.Close()
-
-	db = open(t, url, nil)
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	got := storetest.Dump(t, db)
-	// Undoing migration 12 dropped the AI jobs and the drafts.
-	for _, table := range []string{"solutions", "ai_jobs", "drafts"} {
-		delete(want, table)
-		delete(got, table)
-	}
-	storetest.SameDump(t, "after migration 11", want, got)
-	var sols []domain.ItemSolution
-	if err := db.Read(ctx, func(tx store.Tx) (err error) { sols, err = tx.ListSolutions("origin"); return err }); err != nil {
-		t.Fatal(err)
-	}
-	if len(sols) != 2 || sols[0].LastRun != nil || sols[1].LastRun != nil || sols[0].Notes != storetest.ArbitraryText {
-		t.Errorf("solutions after migrating: %+v", sols)
-	}
-	for what, set := range map[string]string{
-		"a run without its time":       `last_run_passed = 1, last_run_total = 2`,
-		"a time without a run":         `last_run_time_ms = 5`,
-		"more passed than ran":         `last_run_passed = 3, last_run_total = 2, last_run_at = 1`,
-		"a run without its case count": `last_run_passed = 1, last_run_at = 1`,
-		"a negative memory":            `last_run_passed = 1, last_run_total = 2, last_run_memory_kb = -1, last_run_at = 1`,
-	} {
-		if _, err := db.pool.Exec(`UPDATE solutions SET ` + set + ` WHERE id = 'sol0'`); err == nil {
-			t.Errorf("%s was accepted", what)
-		}
-	}
-	if _, err := db.pool.Exec(`UPDATE solutions SET last_run_passed = 2, last_run_total = 2, last_run_at = 1 WHERE id = 'sol0'`); err != nil {
-		t.Errorf("a run without figures: %v", err)
-	}
+// Each migration run again keeps the library, and leaves each table's
+// indexes, triggers and constraints as a new database has them.
+func TestMigrationsKeepData(t *testing.T) {
+	storetest.RunMigrations(t, storetest.MigrationHarness{
+		New: func(t *testing.T) string { return pgtest.URL(t) },
+		Open: func(t *testing.T, url string) storetest.MigrationDB {
+			return open(t, url, nil)
+		},
+		UndoFrom: func(t *testing.T, db storetest.MigrationDB, from int) { undoMigrationsFrom(t, db.(*DB), from) },
+		Exec: func(db storetest.MigrationDB, q string) error {
+			_, err := db.(*DB).pool.Exec(q)
+			return err
+		},
+		Objects: func(t *testing.T, db storetest.MigrationDB, table string) string {
+			return pgObjects(t, db.(*DB), table)
+		},
+	})
 }

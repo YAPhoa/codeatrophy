@@ -1,14 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { removeLocalStorage, withFakeLocalStorage } from '../../test/fakeStorage';
 import { MAX_ENDPOINTS, endpointKey, rememberModels, rememberedModels } from './modelCache';
-
-function fakeStorage(): Storage {
-  const data = new Map<string, string>();
-  return {
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => void data.set(k, v),
-    removeItem: (k: string) => void data.delete(k),
-  } as unknown as Storage;
-}
 
 const OPENAI = 'https://api.openai.com/v1';
 
@@ -36,12 +28,7 @@ describe('endpointKey', () => {
 });
 
 describe('remembered models', () => {
-  beforeEach(() => {
-    Object.defineProperty(globalThis, 'localStorage', { value: fakeStorage(), configurable: true });
-  });
-  afterEach(() => {
-    Reflect.deleteProperty(globalThis, 'localStorage');
-  });
+  withFakeLocalStorage();
 
   it('are found again under the same endpoint, with when they were loaded', () => {
     rememberModels('openai_compatible', OPENAI, ['gpt-4.1', 'gpt-4.1-mini'], Date.parse('2026-01-02T03:04:05Z'));
@@ -73,7 +60,7 @@ describe('remembered models', () => {
   });
 
   it('do nothing without storage', () => {
-    Reflect.deleteProperty(globalThis, 'localStorage');
+    removeLocalStorage();
     rememberModels('openai_compatible', OPENAI, ['a']);
     expect(rememberedModels('openai_compatible', OPENAI)).toBeNull();
   });

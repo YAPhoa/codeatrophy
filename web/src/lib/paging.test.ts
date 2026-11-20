@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { withFakeLocalStorage } from '../test/fakeStorage';
 import { getPageSize, pageList, parsePage, setPageSize, withPage } from './paging';
 
 describe('pageList', () => {
@@ -37,12 +38,7 @@ describe('the page in the URL', () => {
 });
 
 describe('page size', () => {
-  beforeEach(() => {
-    const data = new Map<string, string>();
-    const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) };
-    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
-  });
-  afterEach(() => Reflect.deleteProperty(globalThis, 'localStorage'));
+  withFakeLocalStorage();
 
   it('defaults to 50, and is kept when it is one of the sizes offered', () => {
     expect(getPageSize()).toBe(50);

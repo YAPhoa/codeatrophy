@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, mockItem, open, row } from './support';
 
 // A library row's line shows the title, as many tags as fit and the facts in
 // columns, named in the list's head; it opens, from its chevron or a click
@@ -16,9 +16,6 @@ const LONGEST_TAGS = ['hash-map', 'sliding-window', 'string'];
 /** Given more tags than any line has room for (openWithTags). */
 const COIN = 'Coin Change';
 const MANY_TAGS = ['bottom-up', 'classic', 'coins', 'dynamic-programming', 'greedy-fails', 'interview', 'memoization', 'minimum', 'top-down', 'unbounded-knapsack'];
-
-/** The library row of the item titled `title`. */
-const row = (page: Page, title: string) => page.locator('li.item-row').filter({ has: page.getByRole('link', { name: title, exact: true }) });
 
 /** The details a row's chevron controls. */
 async function detailsOf(page: Page, title: string) {
@@ -42,21 +39,8 @@ const lineOf = (r: Locator) =>
 /** Open the library with `title` tagged `tags`, set through the mock before the list first loads. */
 async function openWithTags(page: Page, title: string, tags: string[]) {
   await open(page, '/tags');
-  await page.waitForFunction(() => '__codeatrophyMock' in window);
-  await page.evaluate(
-    async ([title, tags]) => {
-      type Mock = { db: { items: Map<string, { id: string; title: string; revision: number }> }; fetch: (path: string, init?: RequestInit) => Promise<Response> };
-      const mock = (window as unknown as { __codeatrophyMock: Mock }).__codeatrophyMock;
-      const item = [...mock.db.items.values()].find((i) => i.title === title)!;
-      const res = await mock.fetch(`/api/v1/items/${item.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tags, expectedRevision: item.revision }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-    },
-    [title, tags] as const,
-  );
+  const item = await mockItem(page, title);
+  await mockApi(page, `/items/${item.id}`, { method: 'PATCH', body: { tags, expectedRevision: item.revision } });
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^All items/ }).click();
   await expect(row(page, title)).toBeVisible();
 }
@@ -92,6 +76,9 @@ test('library details: the chevron opens a row on its summary, every tag and the
   const details = await detailsOf(page, LONGEST);
   await expect(details).toBeVisible();
   await expect(details.locator('.item-details-summary')).toHaveText(LONGEST_SUMMARY);
+  // The summary is only in the details, and each tag shows once: the line leaves them to the details.
+  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(1);
+  await expect(r.locator('.item-tags')).toHaveCount(0);
   // The chevron sits on the open row's own fill, and shades it on hover.
   await page.mouse.move(0, 0);
   await expect(hide).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
@@ -113,6 +100,8 @@ test('library details: the chevron opens a row on its summary, every tag and the
   await hide.click();
   await expect(details).toHaveCount(0);
   await expect(r.getByRole('button', { name: 'Show details' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(r.locator('.item-tags .chip-tag')).toHaveText(LONGEST_TAGS);
+  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(0);
   await expect.poll(async () => (await below.boundingBox())!.y).toBe(belowTop);
 });
 
@@ -164,7 +153,7 @@ for (const width of [1440, 600]) {
       expect(await lineOf(r)).toEqual(before);
       await expect(await detailsOf(page, title)).toBeVisible();
       await expect(r.locator('.item-tags')).toHaveCount(0);
-      await page.waitForTimeout(400);
+      await r.evaluate((li) => Promise.all(li.getAnimations({ subtree: true }).map((a) => a.finished)));
       expect(await lineOf(r)).toEqual(before);
 
       await r.getByRole('button', { name: 'Hide details' }).click();
@@ -175,23 +164,6 @@ for (const width of [1440, 600]) {
     }
   });
 }
-
-test('library details: an open row shows each tag once, and closing puts them back on the line', async ({ page }) => {
-  await open(page, '/');
-  const r = row(page, LONGEST);
-  await r.getByRole('button', { name: 'Show details' }).click();
-  const details = await detailsOf(page, LONGEST);
-  await expect(details).toBeVisible();
-  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(1);
-  for (const tag of LONGEST_TAGS) await expect(r.locator('.chip-tag', { hasText: new RegExp(`^${tag}$`) })).toHaveCount(1);
-  await expect(r.locator('.item-tags')).toHaveCount(0);
-
-  await r.getByRole('button', { name: 'Hide details' }).click();
-  await expect(details).toHaveCount(0);
-  await expect(r.locator('.item-tags .chip-tag')).toHaveText(LONGEST_TAGS);
-  // The summary is only in the details: the line is the title and its tags.
-  await expect(r.getByText(LONGEST_SUMMARY, { exact: true })).toHaveCount(0);
-});
 
 test('library tags: the line shows as many tags as fit, then "+N", at any width', async ({ page }) => {
   await openWithTags(page, COIN, MANY_TAGS);
@@ -318,7 +290,7 @@ test('library details: a click on the facts closes the row and selects nothing, 
   await expect(details).toHaveCount(0);
   await expect(r.getByRole('checkbox')).not.toBeChecked();
   await expect(page.getByRole('toolbar', { name: 'Actions for selected items' })).toHaveCount(0);
-  await expect(page).toHaveURL(/\/\?mock=fast$/);
+  await expect(page).not.toHaveURL(/\/items\/|tag=/);
 
   await r.getByRole('button', { name: 'Show details' }).click();
   // The summary is not a tab stop of its own: the title is the row's link to the item.
@@ -341,7 +313,7 @@ test('library details: they stay under the title, clear of the facts\' columns, 
     await r.getByRole('button', { name: 'Show details' }).click();
     const details = await detailsOf(page, COIN);
     await expect(details).toBeVisible();
-    await page.waitForTimeout(400);
+    await r.evaluate((li) => Promise.all(li.getAnimations({ subtree: true }).map((a) => a.finished)));
     const box = await r.evaluate((li) => {
       const right = (sel: string) => Math.max(...[...li.querySelectorAll(sel)].map((el) => el.getBoundingClientRect().right));
       const tops = [...li.querySelectorAll('.item-details .chip-tag')].map((el) => el.getBoundingClientRect().top);
@@ -470,6 +442,9 @@ test('library head: the columns are named over them, the title\'s too, but not o
   const names = head.locator('.item-sort, .item-col-head');
   await expect(names).toHaveText(['Title', 'Difficulty', 'Verdict', 'Updated']);
   const columns = ['.item-title', '.item-kind', '.item-verdict', '.item-updated'];
+  // Measured on the real rows, in their own font.
+  await expect(page.locator('.item-row').first().getByRole('checkbox')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     // Where each column's name starts, and on every row, where each fact's content starts and ends, and where the next column starts.

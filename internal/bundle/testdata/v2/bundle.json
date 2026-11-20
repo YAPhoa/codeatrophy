@@ -1,0 +1,13 @@
+{
+  "format": "codeatrophy.bundle",
+  "formatVersion": 2,
+  "name": "Hand-written v2",
+  "description": "",
+  "author": "",
+  "createdAt": "2026-02-01T08:30:00Z",
+  "generator": { "name": "hand", "version": "2.0" },
+  "items": [
+    { "id": "0193b2f0-2222-7000-8000-000000000001", "path": "items/add", "type": "problem", "title": "Add two numbers", "contentHash": "sha256:603edc49d6bac5e0683d718f3af6d82ebd1562489c7dbd28db4742546871ccac" }
+  ],
+  "collections": []
+}

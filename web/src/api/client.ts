@@ -161,7 +161,7 @@ interface RequestOptions {
   as?: 'json' | 'blob';
 }
 
-const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
+export const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'bad_request',
   'forbidden',
   'not_found',

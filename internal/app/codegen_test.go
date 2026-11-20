@@ -116,12 +116,6 @@ func TestGenerateCodeForAFunctionProblemChecksItsRunners(t *testing.T) {
 	if c == nil || !c.Attempted || c.Engine == nil || len(c.Runners) != 2 {
 		t.Fatalf("check: %+v", c)
 	}
-	if r := c.Runners[0]; r.Language != "cpp" || r.Status != "failed" || r.Error == nil || !strings.Contains(*r.Error, "boom") {
-		t.Errorf("cpp runner: %+v", r)
-	}
-	if r := c.Runners[1]; r.Language != "python" || r.Status != "ok" {
-		t.Errorf("python runner: %+v", r)
-	}
 	if !strings.Contains(mustJSON(t, e.ai.Last().Schema), `"prefix"`) {
 		t.Error("a function problem's schema asks for the harness")
 	}

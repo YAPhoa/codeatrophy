@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { withFakeLocalStorage } from '../test/fakeStorage';
 import type { Tag } from '../api/types';
 import { DEFAULT_TAG_ORDER, getHideEmptyTags, nextTagOrder, setHideEmptyTags, sortTags, tagDirectionText, type TagOrder } from './tagList';
 
@@ -40,12 +41,7 @@ describe('sorting tags', () => {
 });
 
 describe('hiding empty tags', () => {
-  beforeEach(() => {
-    const data = new Map<string, string>();
-    const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) };
-    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
-  });
-  afterEach(() => Reflect.deleteProperty(globalThis, 'localStorage'));
+  withFakeLocalStorage();
 
   it('is on unless turned off in this browser', () => {
     expect(getHideEmptyTags()).toBe(true);

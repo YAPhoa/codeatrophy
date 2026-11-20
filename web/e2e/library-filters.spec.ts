@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockApi, open } from './support';
 
 // The Type (in a collection), Status, Difficulty and Tags menus of the filter
 // bar: a header that counts what is picked and clears it, then rows with the
@@ -15,11 +15,7 @@ async function openMenu(page: Page, name: string) {
 }
 
 /** The total of `GET /items` with these parameters, asked of the mock past the page's cache. */
-const total = (page: Page, query: string) =>
-  page.evaluate(async (query) => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (path: string) => Promise<Response> } }).__codeatrophyMock;
-    return ((await (await mock.fetch(`/api/v1/items?limit=1&${query}`)).json()) as { total: number }).total;
-  }, query);
+const total = async (page: Page, query: string) => (await mockApi<{ total: number }>(page, `/items?limit=1&${query}`)).total;
 
 /** Each row's name and count, as the menu shows them. */
 const counts = (page: Page, name: string) =>
@@ -100,7 +96,9 @@ test('filters: Clear empties the menu\'s values, and the header keeps its height
   const clear = status.getByRole('button', { name: 'Clear' });
   await expect(head).toHaveText(/0 selected/);
   await expect(clear).toBeHidden();
-  // Measured once the menu has grown in.
+  // Measured once the counts are in and the menu has grown in.
+  await expect(status.locator('.facet-count .skel')).toHaveCount(0);
+  await page.evaluate(() => document.fonts.ready);
   await status.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
   const height = (await head.boundingBox())!.height;
   const firstRowTop = (await status.locator('.facet-row').first().boundingBox())!.y;

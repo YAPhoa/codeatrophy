@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { open, TWO_SUM_TEXT, writeCode } from './support';
 
 // Motion plays on a change made on screen, never on arriving at data that
 // was already so; under reduced motion every change lands at once.
@@ -112,12 +112,16 @@ test('motion: a screen fades in when it opens, not when its view changes', async
 });
 
 test('motion: a change made on screen does animate', async ({ page }) => {
+  await recordAnimations(page);
   await open(page, '/');
   await settled(page);
+  await recorded(page);
   const row = page.locator('.item-row').filter({ has: page.getByRole('link', { name: 'Two Sum', exact: true }) });
   await row.locator('.fav-btn').click();
   await expect(row.locator('.fav-btn')).toHaveAttribute('aria-pressed', 'false');
-  await expect(row.locator('.fav-btn .icon-swap-icon')).toHaveClass(/is-in/);
+  // The star swaps its icon. A start can be reported a frame after the click.
+  const played: string[] = [];
+  await expect.poll(async () => (played.push(...(await recorded(page))), played)).toEqual(expect.arrayContaining(['fade-in on span.icon-swap-icon.is-in', 'fade-out on span.icon-swap-out']));
   // Controls stay usable while it plays.
   await row.locator('.fav-btn').click();
   await expect(row.locator('.fav-btn')).toHaveAttribute('aria-pressed', 'true');
@@ -230,21 +234,21 @@ test('motion: a status line swaps its icon and morphs its words rather than cutt
   await expect(page.locator('.prefs-status .status-swap')).toHaveAttribute('aria-hidden', 'true');
 });
 
-test('motion: an invalid field shakes after a failed save, and can shake again', async ({ page }) => {
+test('motion: a closing dialog plays its exit out of reach, then goes', async ({ page }) => {
   await open(page, '/');
-  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Two Sum' })).toBeVisible();
-  await page.getByRole('button', { name: 'More actions' }).click();
-  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
-  const title = page.getByLabel('Title');
-  await title.fill('');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(title).toBeFocused();
-  await expect(title).toHaveClass(/is-shaking/);
-  await expect(title).toHaveAttribute('aria-invalid', 'true');
-  // The shake ends; the error styling stays.
-  await expect(title).not.toHaveClass(/is-shaking/);
-  await expect(title).toHaveAttribute('aria-invalid', 'true');
+  const opener = page.getByRole('button', { name: 'New collection' });
+  await opener.click();
+  await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
+  const closing = await page.evaluate(() => {
+    const backdrop = document.querySelector('.dialog-backdrop');
+    return backdrop && { closing: backdrop.classList.contains('is-closing'), inert: backdrop.hasAttribute('inert'), hidden: backdrop.getAttribute('aria-hidden') };
+  });
+  expect(closing).toEqual({ closing: true, inert: true, hidden: 'true' });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
 });
 
 test.describe('reduced motion', () => {
@@ -259,7 +263,7 @@ test.describe('reduced motion', () => {
     await expect(toast).toBeVisible();
     expect(await toast.evaluate((el) => [getComputedStyle(el).opacity, getComputedStyle(el).transform, getComputedStyle(el).filter])).toEqual(['1', 'none', 'none']);
 
-    await page.goto('/settings/mcp');
+    await open(page, '/settings/mcp');
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     const copy = page.locator('.copy-btn').first();
     await copy.click();
@@ -271,7 +275,8 @@ test.describe('reduced motion', () => {
     await open(page, '/?type=reading');
     await page.getByRole('link', { name: 'Untrusted Markdown: What a Renderer Must Not Do' }).click();
     const notesButton = page.getByRole('button', { name: 'Notes', exact: true });
-    if ((await notesButton.getAttribute('aria-pressed')) === 'true') await notesButton.click();
+    // The seed's reading has no notes, so the panel starts closed.
+    await expect(notesButton).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('.reader-notes')).toHaveCount(0);
 
     await notesButton.click();
@@ -287,9 +292,7 @@ test.describe('reduced motion', () => {
   test('an accepted verdict is shown at once', async ({ page }) => {
     await open(page, '/');
     await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
-    await page.getByRole('textbox', { name: /solution code/i }).click();
-    await page.keyboard.press('ControlOrMeta+A');
-    await page.keyboard.insertText('import sys\n\nprint(len(sys.stdin.readline()))\n');
+    await writeCode(page, 'import sys\n\nprint(len(sys.stdin.readline()))\n');
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     const head = page.locator('.result-head.is-fresh');
     await expect(head).toContainText('Accepted');
@@ -300,5 +303,40 @@ test.describe('reduced motion', () => {
       '0px',
     ]);
     expect(await head.locator('.result-verdict').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+  });
+
+  test('the mark of a generation in progress is a still frame', async ({ page }) => {
+    // Normal mock delays, so the generating panel stays up long enough to look at.
+    await open(page, '/new', 'default');
+    await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+    await page.getByRole('button', { name: 'Draft with AI' }).click();
+    const rows = page.locator('.generating-row');
+    await expect(rows).toHaveCount(5);
+    for (const row of await rows.all()) await expect(row).toHaveCSS('animation-name', 'none');
+    await expect(rows.nth(1)).toHaveCSS('opacity', '0');
+    await expect(page.locator('.generating-token').first()).toHaveCSS('animation-name', 'none');
+    const caret = page.locator('.generating-caret');
+    await expect(caret).toHaveCSS('animation-name', 'none');
+    await expect(caret).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 28, 23)');
+  });
+
+  test('dialogs and menus close at once', async ({ page }) => {
+    await open(page, '/');
+    await page.getByRole('button', { name: 'New collection' }).click();
+    await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    expect(await page.locator('.dialog-backdrop').count()).toBe(0);
+
+    await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    expect(await page.locator('.popover').count()).toBe(0);
+  });
+
+  test('the reader jumps to a heading instead of scrolling smoothly', async ({ page }) => {
+    await open(page, '/');
+    await page.getByRole('link', { name: 'Consistent Hashing' }).click();
+    await expect(page.getByRole('region', { name: 'Reading', exact: true })).toHaveCSS('scroll-behavior', 'auto');
   });
 });

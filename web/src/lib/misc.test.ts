@@ -1,36 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ApiError } from '../api/client';
+import { describe, expect, it } from 'vitest';
+import { ApiError, KNOWN_CODES } from '../api/client';
+import type { ErrorCode } from '../api/types';
+import { withFakeLocalStorage } from '../test/fakeStorage';
 import type { StylePreset } from '../api/types';
 import { headingSlugs, slugify } from '../ui/markdownPlugins';
 import { MAX_STORED_INPUT_BYTES, clearCode, initialCode, loadCode, loadCustomInput, pickLanguage, rememberLanguage, saveCode, saveCustomInput } from './codeStore';
 import { describeError, errorLine, sentence } from './errors';
-import { describeChanges, formatBytes, formatMemoryKb, formatMs, plural, readingMinutes, relativeTime } from './format';
 import { languageLabel, sortLanguages } from './languages';
 import { mcpConnection, mcpUrl } from './mcp';
 import { resolveStyleChoice } from './styleChoice';
 
-/** A minimal in-memory Storage for the node test environment. */
-function fakeStorage(): Storage {
-  const data = new Map<string, string>();
-  return {
-    get length() {
-      return data.size;
-    },
-    clear: () => data.clear(),
-    getItem: (k) => data.get(k) ?? null,
-    key: (i) => [...data.keys()][i] ?? null,
-    removeItem: (k) => void data.delete(k),
-    setItem: (k, v) => void data.set(k, String(v)),
-  };
-}
-
 describe('codeStore', () => {
-  beforeEach(() => {
-    (globalThis as { localStorage?: Storage }).localStorage = fakeStorage();
-  });
-  afterEach(() => {
-    delete (globalThis as { localStorage?: Storage }).localStorage;
-  });
+  withFakeLocalStorage();
 
   it('keeps code per item and language', () => {
     saveCode('i1', 'python', 'print(1)');
@@ -81,19 +62,13 @@ describe('codeStore', () => {
     saveCustomInput('i2', '');
     expect(globalThis.localStorage.length).toBe(0);
   });
-
-  it('does not throw when storage is unavailable', () => {
-    delete (globalThis as { localStorage?: Storage }).localStorage;
-    expect(() => saveCode('i', 'python', 'x')).not.toThrow();
-    expect(loadCode('i', 'python')).toBeNull();
-  });
 });
 
 describe('describeError', () => {
   it('has a presentation for every code in the contract', () => {
-    const codes = ['bad_request', 'forbidden', 'not_found', 'conflict', 'too_large', 'validation_failed', 'upstream_error', 'ai_unavailable', 'judge_unavailable', 'internal'] as const;
-    for (const code of codes) {
-      const view = describeError(new ApiError(400, code, 'server message'));
+    expect(KNOWN_CODES.size).toBeGreaterThan(0);
+    for (const code of KNOWN_CODES) {
+      const view = describeError(new ApiError(400, code as ErrorCode, 'server message'));
       expect(view.title.length, code).toBeGreaterThan(0);
       expect(view.message.length, code).toBeGreaterThan(0);
     }
@@ -163,39 +138,6 @@ describe('describeError', () => {
   });
 });
 
-describe('format', () => {
-  const now = Date.parse('2026-06-15T12:00:00Z');
-
-  it('formats relative times', () => {
-    expect(relativeTime('2026-06-15T11:59:40Z', now)).toBe('just now');
-    expect(relativeTime('2026-06-15T09:00:00Z', now)).toMatch(/3 hr/);
-    expect(relativeTime('2026-06-14T12:00:00Z', now)).toBe('yesterday');
-    expect(relativeTime('2026-04-15T12:00:00Z', now)).toMatch(/2 mo/);
-    expect(relativeTime('2024-01-01T00:00:00Z', now)).toMatch(/2024/);
-    expect(relativeTime('not a date', now)).toBe('');
-  });
-
-  it('formats sizes and durations', () => {
-    expect(formatBytes(512)).toBe('512\u00a0B');
-    expect(formatBytes(52428800)).toBe('50\u00a0MB');
-    expect(formatMemoryKb(262144)).toBe('256\u00a0MB');
-    expect(formatMemoryKb(9120)).toBe('8.9\u00a0MB');
-    expect(formatMs(48)).toBe('48\u00a0ms');
-    expect(formatMs(2000)).toBe('2\u00a0s');
-  });
-
-  it('pluralises', () => {
-    expect(plural(1, 'case')).toBe('1 case');
-    expect(plural(0, 'case')).toBe('0 cases');
-    expect(plural(2, 'min', 'min')).toBe('2 min');
-  });
-
-  it('estimates reading time with a floor of one minute', () => {
-    expect(readingMinutes('')).toBe(1);
-    expect(readingMinutes(Array.from({ length: 660 }, () => 'word').join(' '))).toBe(3);
-  });
-});
-
 describe('mcpConnection', () => {
   it('builds the endpoint and commands', () => {
     const c = mcpConnection(mcpUrl({ path: '/mcp', url: null }, 'http://localhost:8080/'), false);
@@ -204,7 +146,7 @@ describe('mcpConnection', () => {
     expect(c.stdioCommand).toBe('npx mcp-remote http://localhost:8080/mcp');
   });
 
-  it('adds a bearer header placeholder when a token is required, never a real token', () => {
+  it('adds a bearer header with a placeholder for the token when one is required', () => {
     const c = mcpConnection(mcpUrl({ path: 'mcp' }, 'https://lib.example'), true);
     expect(c.url).toBe('https://lib.example/mcp');
     expect(c.claudeCommand).toContain('--header "Authorization: Bearer <your-token>"');
@@ -254,12 +196,6 @@ describe('languages and slugs', () => {
     expect(languageLabel('go', judge)).toBe('Go (1.13.5)');
     expect(languageLabel('python', judge)).toBe('Python');
     expect(languageLabel('rust')).toBe('Rust');
-  });
-
-  it('describes what differs in an imported item', () => {
-    expect(describeChanges(['title'], 'reading')).toBe('title');
-    expect(describeChanges(['body', 'testCases'], 'problem')).toBe('statement and test cases');
-    expect(describeChanges(['title', 'body', 'limits', 'somethingNew'], 'reading')).toBe('title, text, time and memory limits and somethingNew');
   });
 
   it('slugifies headings', () => {

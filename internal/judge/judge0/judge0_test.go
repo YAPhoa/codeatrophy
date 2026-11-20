@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"codeatrophy/internal/domain"
+	"codeatrophy/internal/grader"
 	"codeatrophy/internal/judge"
 )
 
@@ -29,6 +32,18 @@ type fakeJudge0 struct {
 	polls  map[string]int
 	bodies map[string]map[string]any
 	n      int
+	// languages and config, when set, replace the /languages and
+	// /config_info answers.
+	languages []map[string]any
+	config    map[string]any
+	// batchCreate and batchPoll, when set, may answer a batch request
+	// themselves (returning true); call counts that endpoint's requests
+	// from 1.
+	batchCreate  func(w http.ResponseWriter, call int, subs []map[string]any) bool
+	batchPoll    func(w http.ResponseWriter, call int, tokens []string) bool
+	batchCreates int
+	batchPolls   int
+	singles      int
 }
 
 func b64s(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -52,6 +67,8 @@ func (f *fakeJudge0) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/about":
 		writeJSON(map[string]any{"version": "1.13.1"})
+	case r.URL.Path == "/languages" && f.languages != nil:
+		writeJSON(f.languages)
 	case r.URL.Path == "/languages":
 		writeJSON([]map[string]any{
 			{"id": 52, "name": "C++ (GCC 7.4.0)"}, {"id": 54, "name": "C++ (GCC 9.2.0)"},
@@ -68,26 +85,46 @@ func (f *fakeJudge0) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(map[string]any{"run_cmd": "/usr/local/python-3.8.1/bin/python3 script.py"})
 	case r.URL.Path == "/languages/78":
 		writeJSON(map[string]any{"compile_cmd": "/usr/local/kotlin-1.3.70/bin/kotlinc %s Main.kt", "run_cmd": "/usr/local/kotlin-1.3.70/bin/kotlin MainKt"})
+	case r.URL.Path == "/config_info" && f.config != nil:
+		writeJSON(f.config)
 	case r.URL.Path == "/config_info":
 		writeJSON(map[string]any{"max_memory_limit": 8388608, "max_wall_time_limit": 60, "max_cpu_time_limit": 30,
 			"max_submission_batch_size": 2, "enable_batched_submissions": true})
 	case r.URL.Path == "/submissions" && r.Method == http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		f.singles++
+		f.mu.Unlock()
 		writeJSON(map[string]any{"token": f.add(body)})
 	case r.URL.Path == "/submissions/batch" && r.Method == http.MethodPost:
 		var body struct {
 			Submissions []map[string]any `json:"submissions"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		f.batchCreates++
+		call := f.batchCreates
+		f.mu.Unlock()
+		if f.batchCreate != nil && f.batchCreate(w, call, body.Submissions) {
+			return
+		}
 		var out []map[string]any
 		for _, s := range body.Submissions {
 			out = append(out, map[string]any{"token": f.add(s)})
 		}
 		writeJSON(out)
 	case r.URL.Path == "/submissions/batch" && r.Method == http.MethodGet:
+		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
+		f.mu.Lock()
+		f.batchPolls++
+		call := f.batchPolls
+		f.mu.Unlock()
+		if f.batchPoll != nil && f.batchPoll(w, call, tokens) {
+			return
+		}
 		var subs []map[string]any
-		for _, tok := range strings.Split(r.URL.Query().Get("tokens"), ",") {
+		for _, tok := range tokens {
 			subs = append(subs, f.poll(tok))
 		}
 		writeJSON(map[string]any{"submissions": subs})
@@ -430,5 +467,201 @@ func TestShellCrashReportIsStrippedOnlyWhenUnambiguous(t *testing.T) {
 	res = run("python", "Fatal Python error: Segmentation fault\nrun: line 1:     3 Segmentation fault      (core dumped) /usr/local/python-3.8.1/bin/python3 script.py\n", 139)
 	if res.Stderr != "Fatal Python error: Segmentation fault\n" {
 		t.Errorf("python: %q", res.Stderr)
+	}
+}
+
+// runBatch runs ExecuteBatch over n Python requests and returns what onDone
+// reported per index, failing the test unless onDone was called exactly once
+// for every index.
+func runBatch(t *testing.T, e *Engine, n int) ([]judge.ExecResult, []error) {
+	t.Helper()
+	reqs := make([]judge.ExecRequest, n)
+	for i := range reqs {
+		reqs[i] = judge.ExecRequest{Language: "python", Source: "x", Stdin: fmt.Sprint(i), TimeLimitMs: 1000, MemoryLimitKb: 65536}
+	}
+	calls := make([]int, n)
+	res := make([]judge.ExecResult, n)
+	errs := make([]error, n)
+	err := e.ExecuteBatch(context.Background(), reqs, nil, func(i int, r judge.ExecResult, err error) {
+		calls[i]++
+		res[i], errs[i] = r, err
+	})
+	if err != nil {
+		t.Fatalf("ExecuteBatch: %v", err)
+	}
+	for i, c := range calls {
+		if c != 1 {
+			t.Errorf("index %d: onDone called %d times", i, c)
+		}
+	}
+	return res, errs
+}
+
+func httpError(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write([]byte(`{"error":"boom"}`))
+}
+
+// A failed chunk reports its error for every request it had not reported
+// yet; the chunks after it are not started and report judge.ErrNotRun.
+func TestBatchFailuresReportEveryIndexOnce(t *testing.T) {
+	writeJSON := func(w http.ResponseWriter, v any) { json.NewEncoder(w).Encode(v) }
+	done := func(tok string) map[string]any {
+		return map[string]any{"token": tok, "status": map[string]any{"id": 3}, "stdout": b64s("ok\n")}
+	}
+	const notRun = "not run"
+	cases := []struct {
+		name    string
+		create  func(w http.ResponseWriter, call int, subs []map[string]any) bool
+		poll    func(w http.ResponseWriter, call int, tokens []string) bool
+		want    []string // per index: "" for a result, notRun, or part of the error
+		creates int
+	}{
+		{name: "create fails",
+			create:  func(w http.ResponseWriter, _ int, _ []map[string]any) bool { httpError(w); return true },
+			want:    []string{"HTTP 500", "HTTP 500", notRun, notRun, notRun},
+			creates: 1},
+		{name: "second chunk fails",
+			create: func(w http.ResponseWriter, call int, _ []map[string]any) bool {
+				if call != 2 {
+					return false
+				}
+				httpError(w)
+				return true
+			},
+			want:    []string{"", "", "HTTP 500", "HTTP 500", notRun},
+			creates: 2},
+		{name: "too few tokens",
+			create: func(w http.ResponseWriter, _ int, _ []map[string]any) bool {
+				writeJSON(w, []map[string]any{{"token": "only"}})
+				return true
+			},
+			want:    []string{"returned 1 tokens for 2 submissions", "returned 1 tokens for 2 submissions", notRun, notRun, notRun},
+			creates: 1},
+		{name: "one submission rejected",
+			create: func(w http.ResponseWriter, _ int, _ []map[string]any) bool {
+				writeJSON(w, []map[string]any{{"token": "accepted"}, {"language_id": []string{"language with id 0 doesn't exist"}}})
+				return true
+			},
+			want:    []string{"rejected", "rejected: {\"language_id\"", notRun, notRun, notRun},
+			creates: 1},
+		{name: "poll fails",
+			poll:    func(w http.ResponseWriter, _ int, _ []string) bool { httpError(w); return true },
+			want:    []string{"HTTP 500", "HTTP 500", notRun, notRun, notRun},
+			creates: 1},
+		{name: "poll fails after one finished",
+			poll: func(w http.ResponseWriter, call int, tokens []string) bool {
+				if call == 1 {
+					writeJSON(w, map[string]any{"submissions": []map[string]any{done(tokens[0]),
+						{"token": tokens[1], "status": map[string]any{"id": 2}}}})
+					return true
+				}
+				httpError(w)
+				return true
+			},
+			want:    []string{"", "HTTP 500", notRun, notRun, notRun},
+			creates: 1},
+		{name: "status count mismatch",
+			poll: func(w http.ResponseWriter, _ int, tokens []string) bool {
+				writeJSON(w, map[string]any{"submissions": []map[string]any{done(tokens[0])}})
+				return true
+			},
+			want:    []string{"unexpected number of submissions", "unexpected number of submissions", notRun, notRun, notRun},
+			creates: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, srv := newFake(t) // batches of 2
+			f.batchCreate, f.batchPoll = c.create, c.poll
+			e := newEngine(t, srv.URL, Config{})
+			res, errs := runBatch(t, e, len(c.want))
+			for i, want := range c.want {
+				switch {
+				case want == "":
+					if errs[i] != nil || res[i].Stdout != "ok\n" {
+						t.Errorf("index %d: %+v, %v; want its result", i, res[i], errs[i])
+					}
+				case want == notRun:
+					if !errors.Is(errs[i], judge.ErrNotRun) {
+						t.Errorf("index %d: %v, want ErrNotRun", i, errs[i])
+					}
+				case errs[i] == nil || errors.Is(errs[i], judge.ErrNotRun) || !strings.Contains(errs[i].Error(), want):
+					t.Errorf("index %d: %v, want an error containing %q", i, errs[i], want)
+				}
+			}
+			if f.batchCreates != c.creates || f.singles != 0 {
+				t.Errorf("%d batches and %d single submissions created, want %d batches", f.batchCreates, f.singles, c.creates)
+			}
+		})
+	}
+}
+
+// When the server disables batching (or allows batches of one), ExecuteBatch
+// refuses without reporting anything, and the grader falls back to single
+// submissions.
+func TestBatchingDisabledFallsBackToSingleSubmissions(t *testing.T) {
+	for name, conf := range map[string]map[string]any{
+		"disabled":      {"max_submission_batch_size": 20, "enable_batched_submissions": false},
+		"batch of one":  {"max_submission_batch_size": 1, "enable_batched_submissions": true},
+		"size not sent": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, srv := newFake(t)
+			f.config = conf
+			e := newEngine(t, srv.URL, Config{})
+			reqs := []judge.ExecRequest{{Language: "python", Source: "x"}, {Language: "python", Source: "x"}}
+			calls := 0
+			if err := e.ExecuteBatch(context.Background(), reqs, nil, func(int, judge.ExecResult, error) { calls++ }); err == nil || calls != 0 {
+				t.Errorf("ExecuteBatch: %v with %d onDone calls; want an error and none", err, calls)
+			}
+			exp := "ok\n"
+			cs := []grader.Case{{Name: "a", Expected: &exp}, {Name: "b", Expected: &exp}, {Name: "c", Expected: &exp}}
+			out := grader.New(e, 2).Grade(context.Background(), grader.Program{Language: "python", Source: "x", TimeLimitMs: 1000, MemoryLimitKb: 65536},
+				domain.CompareTokens, cs, nil)
+			if out.Verdict != domain.VerdictAccepted || out.Passed != 3 {
+				t.Errorf("verdict %s, passed %d/3", out.Verdict, out.Passed)
+			}
+			if f.batchCreates != 0 || f.singles != 3 {
+				t.Errorf("%d batches, %d single submissions; want 0 and 3", f.batchCreates, f.singles)
+			}
+		})
+	}
+}
+
+// Without a multi-file program language, Java and Kotlin run with the
+// server's own commands and get at least the address space those need; any
+// memory limit is capped at the server's max_memory_limit.
+func TestMemoryFloorAndCap(t *testing.T) {
+	f, srv := newFake(t)
+	f.languages = []map[string]any{{"id": 62, "name": "Java (OpenJDK 13.0.1)"}, {"id": 78, "name": "Kotlin (1.3.70)"},
+		{"id": 71, "name": "Python (3.8.1)"}}
+	f.config = map[string]any{"max_memory_limit": 4000000, "max_wall_time_limit": 60, "max_cpu_time_limit": 30,
+		"max_submission_batch_size": 2, "enable_batched_submissions": true}
+	e := newEngine(t, srv.URL, Config{})
+	f2, srv2 := newFake(t)
+	f2.languages = f.languages
+	e2 := newEngine(t, srv2.URL, Config{}) // max_memory_limit 8388608
+	for _, c := range []struct {
+		lang    string
+		limitKb int
+		fake    *fakeJudge0
+		e       *Engine
+		want    int
+	}{
+		{"java", 65536, f2, e2, 6291456},            // floor
+		{"kotlin", 65536, f2, e2, 3145728},          // floor
+		{"java", 6291456, f2, e2, 6291456 + 524288}, // above the floor: limit + allowance
+		{"java", 65536, f, e, 4000000},              // floor, capped
+		{"kotlin", 65536, f, e, 3145728},            // floor under the cap
+		{"python", 8388608, f2, e2, 8388608},        // limit + allowance, capped
+		{"python", 65536, f, e, 65536 + 65536},      // no floor for other languages
+	} {
+		if _, err := c.e.Execute(context.Background(), judge.ExecRequest{Language: c.lang, Source: "x", TimeLimitMs: 1000, MemoryLimitKb: c.limitKb}); err != nil {
+			t.Fatal(err)
+		}
+		body := c.fake.last()
+		if body["memory_limit"] != float64(c.want) || body["additional_files"] != nil || body["source_code"] != b64s("x") {
+			t.Errorf("%s with %d KB: memory_limit %v (want %d), request %v", c.lang, c.limitKb, body["memory_limit"], c.want, body)
+		}
 	}
 }

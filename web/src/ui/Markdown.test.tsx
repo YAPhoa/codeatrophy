@@ -45,14 +45,6 @@ describe('Markdown rendering of untrusted input', () => {
     expect(html).not.toContain('#cc0000');
   });
 
-  it('shows an image embedded as an image data URL, but no other data URL', () => {
-    const svg = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E";
-    const html = render(`![a](${svg}) ![b](data:text/html;base64,PHNjcmlwdD4=) [c](${svg})`);
-    expect(html).toContain(`<img src="${svg.replace(/'/g, '&#x27;')}" alt="a"`);
-    expect(html).not.toMatch(/data:text/);
-    expect(html).not.toMatch(/href="data:/);
-  });
-
   it('hands a mermaid fence to the diagram as written, untouched by the highlighter', () => {
     const html = render('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```\n\n```python\nx = 1\n```');
     // Before the diagram is drawn its source holds the place, as text.

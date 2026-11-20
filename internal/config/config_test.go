@@ -141,3 +141,40 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("a bad CODEATROPHY_DB_AUTO_MIGRATE: %v", err)
 	}
 }
+
+func TestDataDirAndLogFormat(t *testing.T) {
+	c, err := LoadFrom(env(map[string]string{"CODEATROPHY_DATA_DIR": "/srv/codeatrophy", "CODEATROPHY_LOG_FORMAT": "JSON"}))
+	if err != nil || c.DataDir != "/srv/codeatrophy" || c.DBPath != "/srv/codeatrophy/codeatrophy.db" || c.LogFormat != "json" {
+		t.Errorf("data dir and log format: %q %q %q %v", c.DataDir, c.DBPath, c.LogFormat, err)
+	}
+	c, err = LoadFrom(env(map[string]string{"CODEATROPHY_DATA_DIR": "/srv/codeatrophy", "CODEATROPHY_DB_PATH": "/db/x.db"}))
+	if err != nil || c.DBPath != "/db/x.db" {
+		t.Errorf("CODEATROPHY_DB_PATH wins: %q %v", c.DBPath, err)
+	}
+	if c, _ := LoadFrom(env(nil)); c.LogFormat != "text" {
+		t.Errorf("default log format: %q", c.LogFormat)
+	}
+	_, err = LoadFrom(env(map[string]string{"CODEATROPHY_LOG_FORMAT": "xml"}))
+	if err == nil || !strings.Contains(err.Error(), "CODEATROPHY_LOG_FORMAT") {
+		t.Errorf("a bad log format: %v", err)
+	}
+}
+
+func TestJudgeWorkersAndMCPToken(t *testing.T) {
+	c, err := LoadFrom(env(map[string]string{"CODEATROPHY_JUDGE_WORKERS": "3", "CODEATROPHY_JUDGE_CONCURRENCY": "8",
+		"CODEATROPHY_MCP_TOKEN": "s3cret", "CODEATROPHY_MCP_ENABLED": "false"}))
+	if err != nil || c.Judge.Workers != 3 || c.Judge.Concurrency != 8 || c.MCP.Token != "s3cret" || c.MCP.Enabled {
+		t.Errorf("parsed: %+v %+v %v", c.Judge, c.MCP, err)
+	}
+	if d, _ := LoadFrom(env(nil)); d.Judge.Workers != 2 || d.Judge.Concurrency != 4 || d.MCP.Token != "" {
+		t.Errorf("defaults: %+v %+v", d.Judge, d.MCP)
+	}
+	for _, k := range []string{"CODEATROPHY_JUDGE_WORKERS", "CODEATROPHY_JUDGE_CONCURRENCY"} {
+		for _, v := range []string{"0", "-1"} {
+			_, err := LoadFrom(env(map[string]string{k: v}))
+			if err == nil || !strings.Contains(err.Error(), "must be at least 1") {
+				t.Errorf("%s=%s: %v", k, v, err)
+			}
+		}
+	}
+}

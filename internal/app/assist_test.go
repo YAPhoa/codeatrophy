@@ -41,6 +41,13 @@ func draftJSON() map[string]any {
 	}
 }
 
+// casesAnswer is a model's answer to a test-case request: the reference
+// solution "sum" and one case.
+func casesAnswer(stdin, predicted string) map[string]any {
+	return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
+		"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": stdin, "predictedStdout": predicted}}}
+}
+
 func TestDraftNormalizesModelOutput(t *testing.T) {
 	e := newEnv(t)
 	_, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"two sum"}`))
@@ -74,13 +81,13 @@ func TestDraftNormalizesModelOutput(t *testing.T) {
 	reading["type"] = "reading"
 	e.ai.Responses = []any{reading}
 	e.ai.Respond = nil
-	res = must(newDraft(t, e, `{"text":"notes","typeHint":"reading"}`, reading))
+	res = must(draftWith(t, e, `{"text":"notes","typeHint":"reading"}`, reading))
 	if res.Draft.Problem != nil || len(res.Draft.TestCases) != 0 {
 		t.Errorf("reading draft: %+v", res.Draft)
 	}
 }
 
-func newDraft(t *testing.T, e *env, js string, out any) (app.DraftResponse, error) {
+func draftWith(t *testing.T, e *env, js string, out any) (app.DraftResponse, error) {
 	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return out, nil }
 	return e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, js))
 }
@@ -92,7 +99,7 @@ func TestDraftTagsAreHyphenated(t *testing.T) {
 	e.enableAI(t)
 	d := draftJSON()
 	d["tags"] = []string{"Shortest  Path", "graph\ttheory ", " dp ", "two pointers", "shortest-path", "a/b", "   "}
-	res := must(newDraft(t, e, `{"text":"x"}`, d))
+	res := must(draftWith(t, e, `{"text":"x"}`, d))
 	if got := strings.Join(res.Draft.Tags, ","); got != "dp,graph-theory,shortest-path,two-pointers" {
 		t.Errorf("draft tags: %s", got)
 	}
@@ -117,12 +124,16 @@ func TestDraftValidationAndUpstreamErrors(t *testing.T) {
 		wantCode(t, err, app.CodeValidation)
 	}
 	// Instruction at the limit is fine.
-	_, err := newDraft(t, e, `{"text":"x","instruction":"`+strings.Repeat("i", domain.MaxGenerationInstructionChars)+`"}`, draftJSON())
+	_, err := draftWith(t, e, `{"text":"x","instruction":"`+strings.Repeat("i", domain.MaxGenerationInstructionChars)+`"}`, draftJSON())
 	if err != nil {
 		t.Errorf("instruction at the limit: %v", err)
 	}
-	_, err = newDraft(t, e, `{"text":"x"}`, map[string]any{"title": ""})
-	wantCode(t, err, app.CodeUpstream)
+	untitled := draftJSON()
+	untitled["title"] = " \n "
+	_, err = draftWith(t, e, `{"text":"x"}`, untitled)
+	if ae := wantCode(t, err, app.CodeUpstream); !strings.Contains(ae.Message, "without a title") {
+		t.Errorf("untitled draft: %s", ae.Message)
+	}
 	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
 		return nil, ai.Errorf(401, "the Anthropic API rejected the API key sk-ant-test-1234")
 	}
@@ -132,7 +143,7 @@ func TestDraftValidationAndUpstreamErrors(t *testing.T) {
 		t.Errorf("the API key leaked into the error: %s", ae.Message)
 	}
 	// A revision passes the previous draft and the instruction as data.
-	_, err = newDraft(t, e, `{"text":"x","instruction":"make it harder","previousDraft":{"title":"Old"}}`, draftJSON())
+	_, err = draftWith(t, e, `{"text":"x","instruction":"make it harder","previousDraft":{"title":"Old"}}`, draftJSON())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,10 +220,7 @@ func TestStylePresetResolution(t *testing.T) {
 	wantCode(t, err, app.CodeValidation)
 
 	// Test-case generation never uses presets.
-	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-		return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases": []map[string]any{{"name": "a", "rationale": "r", "stdin": "1 1", "predictedStdout": "2", "isSample": false}}}, nil
-	}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("1 1", "2"), nil }
 	must(e.app.GenerateTestCases(e.ctx, orig.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1}`)))
 	if sys := e.ai.Last().System; strings.Contains(sys, "STYLE-") || strings.Contains(sys, "<style_preset") {
 		t.Error("presets must not reach the test-case prompt")
@@ -320,49 +328,13 @@ func TestVariantRevisionUsesPreviousDraft(t *testing.T) {
 	wantCode(t, err, app.CodeValidation)
 }
 
-func TestAIRequestHonoursCancellation(t *testing.T) {
-	slow := &ctxProvider{started: make(chan struct{})}
-	e := newEnv(t, func(o *app.Options) {
-		o.Providers[ai.ProviderAnthropic] = func(ai.Config) (ai.Provider, error) { return slow, nil }
-	})
-	e.enableAI(t)
-	ctx, cancel := context.WithCancel(e.ctx)
-	go func() {
-		<-slow.started
-		cancel() // the client went away
-	}()
-	_, err := e.app.Draft(ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`))
-	if err == nil || !slow.sawCancel {
-		t.Errorf("cancellation not propagated: %v", err)
-	}
-}
-
-type ctxProvider struct {
-	started   chan struct{}
-	sawCancel bool
-}
-
-func (p *ctxProvider) Name() string  { return "ctx" }
-func (p *ctxProvider) Model() string { return "m" }
-func (p *ctxProvider) Generate(ctx context.Context, _ ai.GenerateRequest) (ai.GenerateResponse, error) {
-	close(p.started)
-	<-ctx.Done()
-	p.sawCancel = true
-	return ai.GenerateResponse{}, ctx.Err()
-}
-
 // The output schema only allows the requested language, and a model that
 // answers in another one is an upstream error.
 func TestGenerateTestCasesLanguageMismatch(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
 	it := e.problem(t, "")
-	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-		return map[string]any{
-			"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases":             []map[string]any{{"name": "a", "rationale": "r", "stdin": "1 1", "predictedStdout": "2", "isSample": true}},
-		}, nil
-	}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("1 1", "2"), nil }
 	_, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"language":"cpp"}`))
 	wantCode(t, err, app.CodeUpstream)
 	b, _ := json.Marshal(e.ai.Last().Schema)
@@ -386,5 +358,69 @@ func TestDraftCountsNormalizedText(t *testing.T) {
 	}
 	if u := e.ai.Last().User; strings.Contains(u, "\r") {
 		t.Error("the model sees normalized text")
+	}
+}
+
+// A model's answer that cannot be used fails the generation; a reference
+// solution the engine cannot run leaves every case unverified, with the
+// reason.
+func TestGenerateTestCasesFailures(t *testing.T) {
+	e := newEnv(t, withToolchains(20)) // cpp programs of at most 20 bytes
+	e.enableAI(t)
+	it := e.problem(t, "")
+	generate := func(js string, answer map[string]any) (app.GenerateTestCasesResponse, error) {
+		e.ai.Respond = func(ai.GenerateRequest) (any, error) { return answer, nil }
+		return e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, js))
+	}
+	big := strings.Repeat("1 ", domain.MaxTestCaseBytes)
+	withCases := func(cases ...map[string]any) map[string]any {
+		a := casesAnswer("", "")
+		a["cases"] = cases
+		return a
+	}
+	unusable := casesAnswer("7 7", "14")
+	unusable["referenceSolution"] = map[string]any{"language": "python", "source": "  "}
+	for name, c := range map[string]struct {
+		answer map[string]any
+		want   string
+	}{
+		"not the schema":       {map[string]any{"referenceSolution": "sum", "cases": []any{}}, "do not match the schema"},
+		"unusable reference":   {unusable, "unusable reference solution"},
+		"no cases":             {withCases(), "no usable test cases"},
+		"only oversized cases": {withCases(map[string]any{"name": "n", "stdin": big, "predictedStdout": "0"}), "no usable test cases"},
+	} {
+		_, err := generate(`{}`, c.answer)
+		if ae := wantCode(t, err, app.CodeUpstream); !strings.Contains(ae.Message, c.want) {
+			t.Errorf("%s: %s", name, ae.Message)
+		}
+	}
+	res := must(generate(`{}`, withCases(map[string]any{"name": "big", "stdin": big, "predictedStdout": "0"},
+		map[string]any{"name": "small", "stdin": "7 7", "predictedStdout": "14"})))
+	if len(res.Cases) != 1 || res.Cases[0].Name != "small" || !res.Cases[0].Verified {
+		t.Errorf("an oversized case among others: %+v", res.Cases)
+	}
+
+	for name, c := range map[string]struct {
+		lang, source, want string
+	}{
+		"language not offered": {"java", "class Main {}", `language "java" is not offered by the judge engine`},
+		"program too large":    {"cpp", "int main() { return 0; }", "the reference solution cannot run: the program is 24 bytes"},
+		"does not compile":     {"cpp", "compile_error", "the reference solution does not compile: main.cpp:1: error"},
+	} {
+		answer := casesAnswer("7 7", "14")
+		answer["referenceSolution"] = map[string]any{"language": c.lang, "source": c.source}
+		res, err := generate(`{"language":"`+c.lang+`"}`, answer)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		v := res.Verification
+		if !v.Attempted || v.Error == nil || !strings.Contains(*v.Error, c.want) {
+			t.Errorf("%s: verification %+v %s", name, v, ptrString(v.Error))
+		}
+		if cs := res.Cases; len(cs) != 1 || cs[0].Verified || cs[0].Error == nil || *cs[0].Error != *v.Error ||
+			cs[0].ExpectedStdout != "14" || cs[0].PredictionMatched != nil {
+			t.Errorf("%s: cases %+v", name, cs)
+		}
 	}
 }

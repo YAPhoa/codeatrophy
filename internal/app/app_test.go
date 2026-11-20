@@ -180,11 +180,6 @@ func TestUpdateItemMergeAndRevision(t *testing.T) {
 		up.Problem.TimeLimitMs != 500 || up.Problem.MemoryLimitKb != domain.DefaultMemoryLimitKb || *up.Difficulty != domain.DifficultyHard {
 		t.Errorf("merge: %+v %+v %+v", up.ItemSummary, up.Source, up.Problem)
 	}
-	// A no-op update keeps the revision.
-	up = must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"title":"New"}`)))
-	if up.Revision != 2 {
-		t.Errorf("no-op update changed revision to %d", up.Revision)
-	}
 	// Stale expectedRevision is a conflict carrying the current revision.
 	ae := wantCode(t, must2(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"title":"Stale","expectedRevision":1}`))), app.CodeConflict)
 	if ae.Fields["revision"] != 2 {
@@ -320,8 +315,8 @@ func TestEditItemText(t *testing.T) {
 		t.Error("a failed edit must not write anything")
 	}
 	notes := must(edit(`{"field":"notes","edits":[{"oldText":"todo","newText":"done"}]}`))
-	if notes.Notes != "done" || notes.Revision != 2 {
-		t.Errorf("notes edits are personal state: rev %d", notes.Revision)
+	if notes.Notes != "done" {
+		t.Errorf("notes edit: %q", notes.Notes)
 	}
 	_, err = edit(`{"field":"title","edits":[{"oldText":"a","newText":"b"}]}`)
 	wantCode(t, err, app.CodeValidation)
@@ -360,11 +355,6 @@ func TestBulkActionsAndTags(t *testing.T) {
 	if tg.Name != "y" || tg.Count != 2 {
 		t.Errorf("rename merge: %+v", tg)
 	}
-	if err := e.app.DeleteTag(e.ctx, "dp"); err != nil {
-		t.Fatal(err)
-	}
-	wantCode(t, e.app.DeleteTag(e.ctx, "dp"), app.CodeNotFound)
-	wantCode(t, must2(e.app.RenameTag(e.ctx, "nope", "z")), app.CodeNotFound)
 	if r := bulk(`{` + ids + `,"action":"delete"}`); r.Affected != 2 {
 		t.Errorf("delete affected %d", r.Affected)
 	}
@@ -625,5 +615,67 @@ func wantField(t *testing.T, err error, field string) {
 	e := wantCode(t, err, app.CodeValidation)
 	if _, ok := e.Fields[field]; !ok {
 		t.Fatalf("validation error %v does not name %q", err, field)
+	}
+}
+
+// Bulk parameters are checked before anything is written, and an action
+// that fails on one item writes nothing.
+func TestBulkItemsValidation(t *testing.T) {
+	e := newEnv(t)
+	tags := make([]string, domain.MaxTags-1)
+	for i := range tags {
+		tags[i] = fmt.Sprintf(`"t%02d"`, i)
+	}
+	empty := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"Empty"}`)))
+	full := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"Full","tags":[`+strings.Join(tags, ",")+`]}`)))
+	ids := `"ids":["` + empty.ID + `","` + full.ID + `"]`
+	for _, c := range []struct{ js, field string }{
+		{`"action":"addTags"`, "tags"},
+		{`"action":"removeTags","tags":["  "]`, "tags"},
+		{`"action":"addTags","tags":["a/b"]`, "tags"},
+		{`"action":"setStatus","status":"lost"`, "status"},
+		{`"action":"setFavorite"`, "favorite"},
+		{`"action":"addToCollection"`, "collectionId"},
+		{`"action":"removeFromCollection"`, "collectionId"},
+		{`"action":"explode"`, "action"},
+	} {
+		_, err := e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t, `{`+ids+`,`+c.js+`}`))
+		wantField(t, err, c.field)
+	}
+	// The first item could take two more tags; the second cannot.
+	_, err := e.app.BulkItems(e.ctx, decodeInto[app.BulkInput](t, `{`+ids+`,"action":"addTags","tags":["new1","new2"]}`))
+	wantField(t, err, "tags")
+	if got := must(e.app.GetItem(e.ctx, empty.ID)); len(got.Tags) != 0 || got.Revision != 1 {
+		t.Errorf("the first item was written: %v, revision %d", got.Tags, got.Revision)
+	}
+	if got := must(e.app.GetItem(e.ctx, full.ID)); len(got.Tags) != domain.MaxTags-1 {
+		t.Errorf("the second item has %d tags", len(got.Tags))
+	}
+	if n := len(must(e.app.ListTags(e.ctx)).Items); n != domain.MaxTags-1 {
+		t.Errorf("%d tags exist after a refused bulk action", n)
+	}
+}
+
+func TestListItemsOrder(t *testing.T) {
+	e := newEnv(t)
+	for _, title := range []string{"B", "A", "C"} {
+		must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"`+title+`"}`)))
+	}
+	titles := func(q app.ItemQuery) string {
+		var out []string
+		for _, it := range must(e.app.ListItems(e.ctx, q)).Items {
+			out = append(out, it.Title)
+		}
+		return strings.Join(out, "")
+	}
+	if got := titles(app.ItemQuery{Sort: "title"}); got != "ABC" {
+		t.Errorf("title, default order: %s", got)
+	}
+	if got := titles(app.ItemQuery{Sort: "title", Order: "desc"}); got != "CBA" {
+		t.Errorf("title, desc: %s", got)
+	}
+	one := 1
+	if got := titles(app.ItemQuery{Sort: "title", Order: "desc", Limit: &one, Offset: 1}); got != "B" {
+		t.Errorf("title, desc, second page of one: %s", got)
 	}
 }

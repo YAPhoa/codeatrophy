@@ -14,6 +14,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/sqlite/sqlitetest"
 	"codeatrophy/internal/store/storetest"
 )
 
@@ -57,61 +58,6 @@ func clearStylePresets(t *testing.T, db *DB) {
 	}
 }
 
-// downMigrations undo a migration, so that tests can run the latest one
-// again on a database that already holds data. A new migration that cannot
-// simply run twice adds its reverse here.
-var downMigrations = map[int]string{
-	6: `ALTER TABLE items DROP COLUMN problem_interface;
-		ALTER TABLE items DROP COLUMN harness;
-		ALTER TABLE submissions DROP COLUMN line_offset;
-		ALTER TABLE submissions DROP COLUMN harness;`,
-	7: `DROP TABLE ai_usage; DROP TABLE ai_log_bodies; DROP TABLE ai_log_texts; DROP TABLE ai_log;`,
-	// The ai_providers table of 0004, which knew two kinds.
-	8: `CREATE TABLE ai_providers_old (
-			seq            INTEGER PRIMARY KEY,
-			id             TEXT    NOT NULL UNIQUE,
-			name           TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
-			name_key       TEXT    NOT NULL UNIQUE,
-			kind           TEXT    NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
-			model          TEXT    NOT NULL DEFAULT '',
-			base_url       TEXT    NOT NULL DEFAULT '',
-			api_key        TEXT    NOT NULL DEFAULT '',
-			api_key_origin TEXT    NOT NULL DEFAULT '',
-			created_at     INTEGER NOT NULL,
-			updated_at     INTEGER NOT NULL);
-		INSERT INTO ai_providers_old SELECT * FROM ai_providers;
-		DROP TABLE ai_providers;
-		ALTER TABLE ai_providers_old RENAME TO ai_providers;
-		CREATE TRIGGER ai_providers_kind_immutable BEFORE UPDATE OF kind ON ai_providers
-		WHEN NEW.kind != OLD.kind BEGIN SELECT RAISE(ABORT, 'the kind of an AI provider cannot be changed'); END;
-		CREATE TRIGGER ai_providers_name_single_line_insert BEFORE INSERT ON ai_providers
-		WHEN instr(NEW.name, char(10)) > 0 OR instr(NEW.name, char(9)) > 0 OR instr(NEW.name, char(13)) > 0
-		BEGIN SELECT RAISE(ABORT, 'AI provider name must be a single line'); END;
-		CREATE TRIGGER ai_providers_name_single_line_update BEFORE UPDATE OF name ON ai_providers
-		WHEN instr(NEW.name, char(10)) > 0 OR instr(NEW.name, char(9)) > 0 OR instr(NEW.name, char(13)) > 0
-		BEGIN SELECT RAISE(ABORT, 'AI provider name must be a single line'); END;
-		CREATE TRIGGER ai_providers_max_count BEFORE INSERT ON ai_providers
-		WHEN (SELECT COUNT(*) FROM ai_providers) >= 20
-		BEGIN SELECT RAISE(ABORT, 'too many AI providers'); END;`,
-	// The item_tags table of 0001, which referred to no tags table.
-	9: `CREATE TABLE item_tags_old (
-			item_id TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
-			tag     TEXT NOT NULL,
-			PRIMARY KEY (item_id, tag)) WITHOUT ROWID;
-		INSERT INTO item_tags_old SELECT item_id, tag FROM item_tags;
-		DROP TABLE item_tags;
-		ALTER TABLE item_tags_old RENAME TO item_tags;
-		CREATE INDEX item_tags_tag ON item_tags (tag);
-		DROP TABLE tags;`,
-	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
-	11: `ALTER TABLE solutions DROP COLUMN last_run_at;
-		ALTER TABLE solutions DROP COLUMN last_run_passed;
-		ALTER TABLE solutions DROP COLUMN last_run_total;
-		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
-		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;`,
-	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
-}
-
 // undoLatestMigration takes the database back to the version before the
 // latest migration.
 func undoLatestMigration(t *testing.T, db *DB) { undoMigrationsFrom(t, db, store.SchemaVersion) }
@@ -119,16 +65,7 @@ func undoLatestMigration(t *testing.T, db *DB) { undoMigrationsFrom(t, db, store
 // undoMigrationsFrom takes the database back to the version before from.
 func undoMigrationsFrom(t *testing.T, db *DB, from int) {
 	t.Helper()
-	for v := store.SchemaVersion; v >= from; v-- {
-		if down, ok := downMigrations[v]; ok {
-			if _, err := db.writer.Exec(down); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if _, err := db.writer.Exec(`DELETE FROM schema_migrations WHERE version >= ?`, from); err != nil {
-		t.Fatal(err)
-	}
+	sqlitetest.UndoMigrationsFrom(t, db.writer, from)
 }
 
 // The built-in presets are seeded once, and only into an empty table.
@@ -374,218 +311,26 @@ func sqliteObjects(t *testing.T, db *DB, table string) string {
 	return names
 }
 
-// Migration 8 rebuilds ai_providers to allow the gemini kind: a database at
-// version 7 keeps every provider, its usage and log rows and every other
-// row, and the table's rules still hold. The library is written at the
-// current version and taken back, since the store writes the current schema.
-func TestGeminiKindMigrationKeepsEverything(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "v7.db")
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.Populate(t, db)
-	write(t, db, func(tx store.Tx) error {
-		return tx.InsertAIProvider(&store.AIProvider{ID: "o", Name: "Local", Kind: "openai_compatible", Model: "llama3",
-			BaseURL: "http://localhost:11434/v1", CreatedAt: now, UpdatedAt: now})
-	})
-	wantTriggers := sqliteObjects(t, db, "ai_providers")
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	if len(want["ai_providers"]) != 2 || len(want["ai_usage"]) == 0 || len(want["ai_log"]) == 0 {
-		t.Fatalf("the fixture has no providers or usage: %v", want)
-	}
-	undoMigrationsFrom(t, db, 8)
-	gemini := &store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now}
-	insert := func(db *DB, p *store.AIProvider) error {
-		return db.Write(ctx, func(tx store.Tx) error { return tx.InsertAIProvider(p) })
-	}
-	if err := insert(db, gemini); err == nil {
-		t.Fatal("version 7 accepted the gemini kind")
-	}
-	db.Close()
-
-	db, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	storetest.SameDump(t, "after migration 8", want, storetest.Dump(t, db))
-	if got := sqliteObjects(t, db, "ai_providers"); got != wantTriggers {
-		t.Errorf("triggers and indexes: %s, want %s", got, wantTriggers)
-	}
-	if err := insert(db, gemini); err != nil {
-		t.Fatalf("a gemini provider: %v", err)
-	}
-	if got := read(t, db, func(tx store.Tx) (store.AIProvider, error) { return tx.GetAIProvider("g") }); got.Kind != "gemini" {
-		t.Errorf("stored as %+v", got)
-	}
-	// New rows follow the copied ones, and the table's rules still hold.
-	var seqs string
-	if err := db.writer.QueryRow(`SELECT group_concat(id, ',') FROM (SELECT id FROM ai_providers ORDER BY seq)`).
-		Scan(&seqs); err != nil || !strings.HasSuffix(seqs, ",o,g") {
-		t.Errorf("insertion order: %s %v", seqs, err)
-	}
-	for what, q := range map[string]string{
-		"an unknown kind":   `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'X', 'x', 'mistral', 0, 0)`,
-		"a duplicate name":  `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'Local', 'local', 'gemini', 0, 0)`,
-		"a multi-line name": `INSERT INTO ai_providers (id, name, name_key, kind, created_at, updated_at) VALUES ('x', 'a` + "\n" + `b', 'a b', 'gemini', 0, 0)`,
-		"a changed kind":    `UPDATE ai_providers SET kind = 'anthropic' WHERE id = 'g'`,
-	} {
-		if _, err := db.writer.Exec(q); err == nil {
-			t.Errorf("%s was accepted", what)
-		}
-	}
-}
-
-// Migration 9 makes tags records of their own: every tag an item carries
-// becomes one, every other row is kept, and item_tags refers to tags.
-func TestTagsMigrationRegistersCarriedTags(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "v8.db")
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.Populate(t, db)
-	wantIndexes := sqliteObjects(t, db, "item_tags")
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	if len(want["tags"]) < 3 || len(want["item_tags"]) <= len(want["tags"]) {
-		t.Fatalf("the fixture has too few tags: %v %v", want["tags"], want["item_tags"])
-	}
-	undoMigrationsFrom(t, db, 9)
-	var n int
-	if err := db.writer.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'tags'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("version 8 has a tags table: %d %v", n, err)
-	}
-	db.Close()
-
-	db, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	storetest.SameDump(t, "after migration 9", want, storetest.Dump(t, db))
-	if got := sqliteObjects(t, db, "item_tags"); got != wantIndexes {
-		t.Errorf("indexes: %s, want %s", got, wantIndexes)
-	}
-	if _, err := db.writer.Exec(`INSERT INTO item_tags (item_id, tag) VALUES ('origin', 'unregistered')`); err == nil {
-		t.Error("an item carries a tag that is not registered")
-	}
-	if _, err := db.writer.Exec(`DELETE FROM tags WHERE name = 'array'`); err == nil {
-		t.Error("a tag an item carries was deleted")
-	}
-	if _, err := db.writer.Exec(`DELETE FROM items WHERE id = 's7'`); err != nil {
-		t.Errorf("deleting an item with tags: %v", err)
-	}
-}
-
-// Migration 10 gives AI providers an effort level: Anthropic providers get
-// high, which the server sent them until then, the other kinds none, and
-// every other row is kept.
-func TestEffortMigrationKeepsAnthropicAtHigh(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "v9.db")
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.Populate(t, db)
-	write(t, db, func(tx store.Tx) error {
-		for _, p := range []store.AIProvider{
-			{ID: "a", Name: "Second key", Kind: "anthropic"},
-			{ID: "o", Name: "Local", Kind: "openai_compatible", Effort: "low"},
-			{ID: "g", Name: "Gemini", Kind: "gemini", Effort: "medium"},
-		} {
-			p.CreatedAt, p.UpdatedAt = now, now
-			if err := tx.InsertAIProvider(&p); err != nil {
-				return err
+// Each migration run again keeps the library, and SQLite keeps the
+// triggers and indexes of the tables it rebuilds.
+func TestMigrationsKeepData(t *testing.T) {
+	storetest.RunMigrations(t, storetest.MigrationHarness{
+		New: func(t *testing.T) string { return filepath.Join(t.TempDir(), "codeatrophy.db") },
+		Open: func(t *testing.T, path string) storetest.MigrationDB {
+			db, err := Open(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		return nil
+			t.Cleanup(func() { db.Close() })
+			return db
+		},
+		UndoFrom: func(t *testing.T, db storetest.MigrationDB, from int) { undoMigrationsFrom(t, db.(*DB), from) },
+		Exec: func(db storetest.MigrationDB, q string) error {
+			_, err := db.(*DB).writer.Exec(q)
+			return err
+		},
+		Objects: func(t *testing.T, db storetest.MigrationDB, table string) string {
+			return sqliteObjects(t, db.(*DB), table)
+		},
 	})
-	storetest.ClearNewerData(t, db) // older schemas lack some of it
-	want := storetest.Dump(t, db)
-	undoMigrationsFrom(t, db, 10)
-	db.Close()
-
-	db, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	got := storetest.Dump(t, db)
-	delete(want, "ai_providers")
-	delete(got, "ai_providers")
-	storetest.SameDump(t, "after migration 10", want, got)
-	efforts := map[string]string{}
-	for _, p := range read(t, db, func(tx store.Tx) ([]store.AIProvider, error) { return tx.ListAIProviders() }) {
-		efforts[p.Kind+" "+p.Name] = p.Effort
-	}
-	if fmt.Sprint(efforts) != "map[anthropic Second key:high anthropic Work:high gemini Gemini: openai_compatible Local:]" {
-		t.Errorf("efforts after migrating: %v", efforts)
-	}
-	if _, err := db.writer.Exec(`UPDATE ai_providers SET effort = 'max' WHERE id = 'a'`); err == nil {
-		t.Error("an unknown effort was accepted")
-	}
-}
-
-// Migration 11 gives saved solutions a last run: every existing solution
-// starts without one, every other row is kept, and the figures are checked.
-func TestLastRunMigrationStartsEverySolutionWithoutARun(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "v10.db")
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.Populate(t, db)
-	want := storetest.Dump(t, db)
-	undoMigrationsFrom(t, db, 11)
-	db.Close()
-
-	db, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
-		t.Fatalf("version %d after migrating", v)
-	}
-	got := storetest.Dump(t, db)
-	// Undoing migration 12 dropped the AI jobs and the drafts.
-	for _, table := range []string{"solutions", "ai_jobs", "drafts"} {
-		delete(want, table)
-		delete(got, table)
-	}
-	storetest.SameDump(t, "after migration 11", want, got)
-	sols := read(t, db, func(tx store.Tx) ([]domain.ItemSolution, error) { return tx.ListSolutions("origin") })
-	if len(sols) != 2 || sols[0].LastRun != nil || sols[1].LastRun != nil || sols[0].Notes != storetest.ArbitraryText {
-		t.Errorf("solutions after migrating: %+v", sols)
-	}
-	for what, set := range map[string]string{
-		"a run without its time":       `last_run_passed = 1, last_run_total = 2`,
-		"a time without a run":         `last_run_time_ms = 5`,
-		"more passed than ran":         `last_run_passed = 3, last_run_total = 2, last_run_at = 1`,
-		"a run without its case count": `last_run_passed = 1, last_run_at = 1`,
-		"a negative memory":            `last_run_passed = 1, last_run_total = 2, last_run_memory_kb = -1, last_run_at = 1`,
-	} {
-		if _, err := db.writer.Exec(`UPDATE solutions SET ` + set + ` WHERE id = 'sol0'`); err == nil {
-			t.Errorf("%s was accepted", what)
-		}
-	}
-	if _, err := db.writer.Exec(`UPDATE solutions SET last_run_passed = 2, last_run_total = 2, last_run_at = 1 WHERE id = 'sol0'`); err != nil {
-		t.Errorf("a run without figures: %v", err)
-	}
 }

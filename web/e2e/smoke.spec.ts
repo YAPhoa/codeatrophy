@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { choose, mockApi, open, openList } from './support';
+import { choose, mockApi, open, openList, TWO_SUM_TEXT, writeCode } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
 // against the API mock, whose state lives in the page: every test starts from
@@ -9,7 +9,7 @@ import { choose, mockApi, open, openList } from './support';
 test('capture: rough text becomes a reviewed, saved problem', async ({ page }) => {
   await open(page, '/new');
 
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
 
   // Review: the draft is complete, says what was assumed, and nothing is saved yet.
@@ -22,7 +22,7 @@ test('capture: rough text becomes a reviewed, saved problem', async ({ page }) =
   await page.getByRole('button', { name: 'Ask for a revision' }).click();
   await page.getByLabel('What to change').fill('use 1-based indices');
   await page.getByRole('button', { name: 'Revise draft' }).click();
-  await expect(page.getByText('Revising the draft…')).toBeHidden();
+  await expect(page.getByRole('region', { name: /assum|filled in/i })).toContainText('Switched the statement to 1-based indices.');
 
   await page.getByLabel('Title').fill('Two Sum (smoke test)');
   await page.getByRole('button', { name: 'Save to library' }).first().click();
@@ -40,7 +40,7 @@ test('capture: rough text becomes a reviewed, saved problem', async ({ page }) =
 test('solution only: the runner and the AI\'s solution stay out of sight from capture to solving', async ({ page }) => {
   await open(page, '/new');
 
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('radiogroup', { name: 'What you write' }).getByText('Solution only').click();
   await page.getByRole('button', { name: 'Draft with AI' }).click();
 
@@ -77,13 +77,8 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
   await expect(languages).toContainText(['Go', 'Python']);
   await page.keyboard.press('Escape');
 
-  // The runner is one click away, folded around the solver's code.
-  const editor = page.locator('.editor-host');
-  const after = editor.getByRole('button', { name: /^Runner · \d+ lines?, after your code$/ });
-  await expect(after).toHaveAttribute('aria-expanded', 'false');
-  await after.click();
-  await expect(after).toHaveAttribute('aria-expanded', 'true');
-  await expect(editor.getByText('sys.stdin')).toBeVisible();
+  // The runner is folded after the solver's code.
+  await expect(page.locator('.editor-host').getByRole('button', { name: /^Runner · \d+ lines?, after your code$/ })).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('solve: the runner of a "solution only" problem sits folded around the code, outside it', async ({ page }) => {
@@ -197,12 +192,8 @@ test('test cases to generate: the preference is where the generate page starts',
   await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
   await expect(page.getByText(/\d+ of 11 selected/)).toBeVisible();
   await expect(page.locator('.proposal-head .usage-line')).toContainText('claude-opus-5-5');
-  // The proposed solution is hidden as well, with what running it found.
-  await expect(page.getByRole('button', { name: 'Show solution' })).toBeVisible();
-  await expect(page.locator('.solution-found')).toContainText(/inputs/);
 });
 
-/** Replace the code in the solving editor. */
 test('new item: starts as the type being browsed, and takes the tags the draft suggests', async ({ page }) => {
   await open(page, '/');
   const nav = page.getByRole('complementary', { name: 'Navigation' });
@@ -226,7 +217,11 @@ test('new item: starts as the type being browsed, and takes the tags the draft s
   await expect(kind.getByRole('radio', { name: 'Auto-detect' })).toBeChecked();
 
   // The tags the draft suggests are on the form, and on the saved item.
-  await page.getByLabel('What you have').fill('shortest path in a weighted graph, the one with the heap');
+  // Typed once the page has settled on its input, which the navigation may still be filling in.
+  const text = page.getByLabel('What you have');
+  await expect(text).toHaveValue('');
+  await text.fill('shortest path in a weighted graph, the one with the heap');
+  await expect(text).toHaveValue('shortest path in a weighted graph, the one with the heap');
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Remove tag graph' })).toBeVisible();
@@ -238,13 +233,6 @@ test('new item: starts as the type being browsed, and takes the tags the draft s
   await expect(saved.getByRole('link', { name: /graph$/ })).toBeVisible();
   await expect(saved.getByRole('link', { name: /heap$/ })).toBeVisible();
 });
-
-async function writeCode(page: Page, source: string): Promise<void> {
-  await page.getByRole('textbox', { name: /solution code/i }).click();
-  await page.keyboard.press('ControlOrMeta+A');
-  // Inserted as one piece of text, so that bracket closing and completion do not reshape it.
-  await page.keyboard.insertText(source);
-}
 
 test('solve: the editor has the room, and a failing submission shows which case and why', async ({ page }) => {
   await open(page, '/');
@@ -352,7 +340,7 @@ test('solutions: an accepted submission is kept, and can become the reference', 
   await writeCode(page, 'import sys\n\nprint(len(sys.stdin.readline()))\n');
   // The editor's code has not been judged, so there are no figures to show.
   const dialog = page.getByRole('dialog', { name: 'Save as a solution' });
-  await page.locator('.editor-save').click();
+  await page.getByRole('button', { name: 'Save as solution' }).click();
   await expect(dialog.locator('.save-solution-code')).toHaveText(/^Python \([\d.]+\) · not judged yet$/);
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
@@ -491,7 +479,7 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
 
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
@@ -669,7 +657,7 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(page).toHaveURL(/\/tests$/);
   await page.getByRole('button', { name: 'Show test cases' }).first().click();
   await expect(page.getByRole('button', { name: 'Hide test cases' })).toBeVisible();
-  await page.locator('.case-row').last().locator('.case-row-main').click();
+  await page.getByRole('list', { name: 'Test cases' }).getByRole('listitem').last().getByRole('button').first().click();
   const editor = page.getByRole('group', { name: 'Selected test case' });
   await expect(editor.getByRole('group', { name: 'Input (stdin)' })).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
   await expect(editor.getByRole('button', { name: 'Download' })).toBeVisible();
@@ -694,7 +682,7 @@ test('large test cases: asked for on the generate form, then kept and managed on
 
 test('verify all: a draft is checked again as edited, and a saved problem from the top of its test cases', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('radiogroup', { name: 'What you write' }).getByText('Full program').click();
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByText('Passes 2 of 2 test cases')).toBeVisible();
@@ -799,7 +787,7 @@ test('preferences: the reading text size scales rendered Markdown and is kept in
   // Kept across a reload, and Default puts the sizes back.
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-reading-size', 'large');
-  await page.goto('/settings/preferences');
+  await open(page, '/settings/preferences');
   await page.getByRole('group', { name: 'Appearance' }).getByText('Default', { exact: true }).click();
   await expect(page.locator('html')).not.toHaveAttribute('data-reading-size');
 });
@@ -986,16 +974,15 @@ test('AI providers: a new one gets a model from the loaded list, is added once t
   await expect(page.getByRole('option', { name: 'gpt-4.1-mini' })).toBeVisible();
 });
 
-test('AI providers: a Google Gemini one is added from its listed models, on Google\'s own server', async ({ page }) => {
+test('AI providers: a Google Gemini one has no base URL, and lists only its text models', async ({ page }) => {
   await open(page, '/settings/ai');
-  const section = page.getByRole('region', { name: 'AI providers' });
-  await section.getByRole('button', { name: 'Add provider' }).click();
+  await page.getByRole('region', { name: 'AI providers' }).getByRole('button', { name: 'Add provider' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add provider' });
-  const note = dialog.locator('.dialog-note');
   await dialog.getByRole('radio', { name: /Google Gemini/ }).check();
   await expect(dialog.getByLabel('Name')).toHaveValue('Google Gemini');
   // It has a server of its own, so no base URL is asked for; nor is there a default model.
   await expect(dialog.getByText('Connects to generativelanguage.googleapis.com.')).toBeVisible();
+  await expect(dialog.getByLabel('Base URL')).toHaveCount(0);
   const model = dialog.getByRole('combobox', { name: 'Model' });
   await expect(model).toHaveAttribute('placeholder', 'e.g. gemini-3.5-flash…');
 
@@ -1005,17 +992,7 @@ test('AI providers: a Google Gemini one is added from its listed models, on Goog
   await expect(model).toBeFocused();
   await expect(page.getByRole('option', { name: /embedding|^models\// })).toHaveCount(0);
   await page.getByRole('option', { name: 'gemini-3.5-flash', exact: true }).click();
-  await expect(note).toHaveText('Test the connection to add it.');
-  await dialog.getByRole('button', { name: 'Test connection' }).click();
-  await expect(dialog.getByText('The connection works')).toBeVisible();
-  await expect(note).toHaveText('Tested. Ready to add.');
-  await dialog.getByRole('button', { name: 'Add provider' }).click();
-  await expect(dialog).toBeHidden();
-
-  const row = section.getByRole('listitem').filter({ hasText: 'Google Gemini' });
-  await expect(row).toContainText('gemini-3.5-flash');
-  await expect(row).toContainText('key ending in Gm1n');
-  await expect(row.getByText('ready', { exact: true })).toBeVisible();
+  await expect(model).toHaveValue('gemini-3.5-flash');
 });
 
 test('AI providers: editing one offers its models without a test, and asks for a test only for a new server or key', async ({ page }) => {
@@ -1144,11 +1121,7 @@ test('AI providers: the request timeout is saved when committed, and a value out
   const section = page.getByRole('region', { name: 'AI providers' });
   const timeout = section.getByLabel('Request timeout');
   // What the server holds. A reload would reset the mock, so it is asked directly.
-  const saved = () =>
-    page.evaluate(async () => {
-      const mock = (window as unknown as { __codeatrophyMock: { fetch: (url: string) => Promise<Response> } }).__codeatrophyMock;
-      return ((await (await mock.fetch('/api/v1/settings/ai')).json()) as { timeoutSeconds: number }).timeoutSeconds;
-    });
+  const saved = async () => (await mockApi<{ timeoutSeconds: number }>(page, '/settings/ai')).timeoutSeconds;
 
   await expect(timeout).toHaveValue('300');
   await expect(timeout).toHaveAccessibleDescription('seconds');
@@ -1182,7 +1155,7 @@ test('model: a draft, its revision and generated test cases use the provider cho
   await expect(model).toHaveText('Personal key · claude-opus-5-5 (default)');
   await choose(model, 'Local Ollama · qwen2.5-coder:14b');
 
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it.');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(page.locator('.usage-line')).toContainText('qwen2.5-coder:14b');
@@ -1214,7 +1187,7 @@ test('model: a draft, its revision and generated test cases use the provider cho
 
 test('model: there is no picker with only one provider ready', async ({ page }) => {
   // The environment's provider is the only one.
-  await open(page, '/settings/ai?mock=ai-env,fast');
+  await open(page, '/settings/ai', 'ai-env,fast');
   await expect(page.getByRole('region', { name: 'AI providers' }).getByRole('listitem')).toHaveCount(1);
   await page.getByRole('link', { name: 'New item' }).click();
   await expect(page.getByRole('button', { name: 'Draft with AI' })).toBeVisible();
@@ -1224,7 +1197,7 @@ test('model: there is no picker with only one provider ready', async ({ page }) 
 
 test('AI activity: a generation is logged with its raw request, and the log is shown a numbered page at a time', async ({ page }) => {
   await open(page, '/new');
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
@@ -1327,27 +1300,9 @@ test('organise: selected items are filed into a new collection', async ({ page }
   await expect(page.getByRole('link', { name: 'Edit Distance' })).toBeVisible();
 });
 
-test('library: the filter box names the view, a row shows only a failed verdict and a cut title in full on hover, and the sidebar counts every view', async ({ page }) => {
+test('library: a cut title shows in full on hover, and Favorites is counted in the sidebar', async ({ page }) => {
   await open(page, '/');
-  const nav = page.getByRole('complementary', { name: 'Navigation' });
-  const filter = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
-  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
-  await expect(filter).toHaveAccessibleName('Filter items');
-
-  // A verdict only when the last one failed. The status icon's tooltip gives any last one.
   const rows = page.locator('.item-row');
-  const lru = rows.filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) });
-  await expect(lru.locator('.item-verdict')).toHaveText('Compile error');
-  await expect(lru.locator('.item-status button')).toHaveAttribute('title', 'To do · Last verdict: Compile error');
-  await expect(page.locator('.item-verdict', { hasText: /Accepted|Executed/ })).toHaveCount(0);
-  // A reading's type icon says what it is; its difficulty shows like a problem's, when it has one.
-  const reading = rows.filter({ has: page.getByRole('link', { name: 'How B-Trees Work', exact: true }) });
-  await expect(reading.getByLabel('Reading', { exact: true })).toBeVisible();
-  await expect(reading.locator('.item-kind')).toHaveText('');
-  const rated = rows.filter({ has: page.getByRole('link', { name: 'Raft: Leader Election Cheat Sheet', exact: true }) });
-  await expect(rated.locator('.item-kind .badge-difficulty')).toHaveText('Medium');
-  await expect(rows.locator('.item-kind, .item-verdict').filter({ hasText: 'Reading' })).toHaveCount(0);
-  await expect(rows.locator('.badge').filter({ hasText: /^Reading$/ })).toHaveCount(0);
 
   // A title cut off by the row shows in full on hover; one that fits gets no tooltip.
   await page.setViewportSize({ width: 1000, height: 900 });
@@ -1357,26 +1312,15 @@ test('library: the filter box names the view, a row shows only a failed verdict 
   const fits = rows.locator('.item-title', { hasText: 'LRU Cache' });
   await fits.hover();
   await expect(fits).not.toHaveAttribute('title', /./);
-  await page.setViewportSize({ width: 1440, height: 900 });
 
-  // Favorites is counted like the other views, and follows changes. Uncollected is not in the sidebar for now.
-  const count = (name: string) => nav.getByRole('link', { name: new RegExp(`^${name}`) }).locator('.nav-count');
-  await expect(count('Favorites')).toHaveText('5');
-  await lru.getByRole('button', { name: /favorite/i }).click();
-  await expect(count('Favorites')).toHaveText('6');
-
-  await nav.getByRole('link', { name: /^Problems/ }).click();
-  await expect(filter).toHaveAttribute('placeholder', 'Filter problems…');
-  await expect(filter).toHaveAccessibleName('Filter problems');
-  await nav.getByRole('link', { name: /^Readings/ }).click();
-  await expect(filter).toHaveAttribute('placeholder', 'Filter readings…');
-  await nav.getByRole('link', { name: /^Favorites/ }).click();
-  await expect(rows).toHaveCount(6);
-  await expect(filter).toHaveAttribute('placeholder', 'Filter items…');
-  await expect(nav.getByRole('link', { name: /^Uncollected/ })).toHaveCount(0);
+  // Favorites is counted like the other views, and follows changes.
+  const favorites = page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Favorites/ }).locator('.nav-count');
+  await expect(favorites).toHaveText('5');
+  await rows.filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) }).getByRole('button', { name: /favorite/i }).click();
+  await expect(favorites).toHaveText('6');
 });
 
-test('settings: Import and Export are pages of Settings, and their old addresses lead there', async ({ page }) => {
+test('settings: Import and Export are not in the sidebar; a collection\'s menu leads to Export, and so does its old address', async ({ page }) => {
   await open(page, '/');
   const sidebar = page.getByRole('complementary', { name: 'Navigation' });
   await expect(sidebar.getByRole('link', { name: 'Import', exact: true })).toHaveCount(0);
@@ -1386,24 +1330,14 @@ test('settings: Import and Export are pages of Settings, and their old addresses
   await page.getByRole('menuitem', { name: 'Export…' }).click();
   await expect(page).toHaveURL(/\/settings\/export\?collection=/);
   const collection = new URL(page.url()).searchParams.get('collection')!;
-  const nav = page.getByRole('navigation', { name: 'Settings' });
-  await expect(nav.getByRole('link', { name: 'Export' })).toHaveAttribute('aria-current', 'page');
-  await expect(page).toHaveTitle(/^Export · Settings/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Export a bundle');
   await expect(page.getByLabel('Collection', { exact: true })).toHaveAttribute('value', collection);
-
-  await nav.getByRole('link', { name: 'Import' }).click();
-  await expect(page).toHaveURL(/\/settings\/import$/);
-  await expect(nav.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import a bundle');
 
   // A bookmark of the old page arrives, with what it asked to export.
   await open(page, `/export?collection=${collection}&solutions=0`);
   await expect(page).toHaveURL(new RegExp(`/settings/export\\?collection=${collection}&solutions=0`));
   await expect(page.getByLabel('Collection', { exact: true })).toHaveAttribute('value', collection);
   await expect(page.getByRole('checkbox', { name: 'Saved solutions' })).not.toBeChecked();
-  await open(page, '/import');
-  await expect(page).toHaveURL(/\/settings\/import\?mock=fast$/);
 });
 
 test('item bar: the favorite button says what it does, and the menu keeps only edit, export and delete', async ({ page }) => {
@@ -1427,7 +1361,7 @@ test('large test cases: a draft kept from before cases carried their generators 
   await page.getByRole('checkbox', { name: 'Generate large test cases by default' }).check();
   await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
-  await page.getByLabel('What you have').fill('two sum — array of ints and a target, return the two indices that add up to it. O(n)?');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
 
@@ -1449,4 +1383,87 @@ test('large test cases: a draft kept from before cases carried their generators 
   await page.reload();
   await page.getByRole('button', { name: 'Show large cases' }).click();
   await expect(page.getByRole('textbox', { name: /^Generator of case \d+, Python/ })).toHaveCount(3);
+});
+
+test('bundles: an item exported, then deleted, comes back from its bundle', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Export this item…' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download bundle' }).click();
+  const bundle = await download;
+  expect(bundle.suggestedFilename()).toMatch(/\.codeatrophy\.zip$/);
+  await expect(page.getByRole('status').filter({ hasText: 'Bundle downloaded' })).toContainText(bundle.suggestedFilename());
+
+  // Deleted, after the confirmation.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('dialog', { name: 'Delete “Two Sum”?' }).getByRole('button', { name: 'Delete problem' }).click();
+  await expect(page.getByText('Deleted “Two Sum”')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Two Sum', exact: true })).toHaveCount(0);
+
+  // The preview shows it as new, and the import adds it back.
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Import' }).click();
+  await page.locator('#bundle-file').setInputFiles(await bundle.path());
+  await expect(page.getByRole('region', { name: 'Bundle' }).locator('.import-counts')).toContainText(/New\s*1\s*will be added/);
+  await expect(page.getByRole('region', { name: 'Items in the bundle' }).getByRole('row', { name: /Two Sum/ })).toContainText('Added');
+  await page.getByRole('button', { name: 'Import bundle' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Import complete' })).toContainText('1 item added');
+  await page.getByRole('link', { name: 'See the library' }).click();
+  await expect(page.getByRole('link', { name: 'Two Sum', exact: true })).toBeVisible();
+});
+
+test('edit: a save after a change elsewhere shows what changed there, and merging keeps both', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
+  await page.getByLabel('Summary').fill('Edited here.');
+
+  // An assistant connected over MCP edits the title and the statement meanwhile.
+  const id = page.url().split('/items/')[1]!.split('/')[0]!;
+  await page.evaluate((id) => (window as unknown as { __codeatrophyMock: { externalEdit: (id: string) => void } }).__codeatrophyMock.externalEdit(id), id);
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const conflict = page.getByRole('dialog', { name: 'This item changed elsewhere' });
+  await expect(conflict.getByRole('heading', { name: 'Changed elsewhere (2)' })).toBeVisible();
+  await expect(conflict).toContainText('Two Sum (edited elsewhere)');
+  await expect(conflict.getByRole('heading', { name: /^Changed by both/ })).toHaveCount(0);
+
+  await conflict.getByRole('button', { name: 'Merge and save' }).click();
+  await expect(page).toHaveURL(new RegExp(`/items/${id}$`));
+  await expect(page.getByRole('heading', { name: 'Two Sum (edited elsewhere)' })).toBeVisible();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details…' }).click();
+  await expect(page.getByLabel('Summary')).toHaveValue('Edited here.');
+});
+
+test('new item: without AI, an item is written by hand and saved', async ({ page }) => {
+  await open(page, '/new', 'fast,no-ai');
+  await expect(page.getByRole('button', { name: 'Draft with AI' })).toHaveCount(0);
+  await page.getByRole('radiogroup', { name: 'Kind of item' }).getByText('Reading').click();
+  await page.getByLabel('What you have').fill('A B-tree keeps its nodes half full.');
+  await page.getByRole('button', { name: 'Continue to the editor' }).click();
+  await page.getByLabel('Title').fill('B-trees, by hand');
+  await page.getByRole('button', { name: 'Save to library' }).first().click();
+  await expect(page).toHaveURL(/\/items\/[^/]+$/);
+  await expect(page.getByRole('heading', { name: 'B-trees, by hand' })).toBeVisible();
+});
+
+test('forbidden: a server that does not answer at this address says so instead of starting', async ({ page }) => {
+  await open(page, '/', 'forbidden');
+  await expect(page.getByText('The server does not answer at this address')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Two Sum', exact: true })).toHaveCount(0);
+});
+
+test('forbidden: a change the server refuses is undone, and a toast says why', async ({ page }) => {
+  await open(page, '/', 'fast,forbidden-writes');
+  const star = page.locator('.item-row').filter({ has: page.getByRole('link', { name: 'LRU Cache', exact: true }) }).getByRole('button', { name: /favorite/i });
+  await expect(star).toHaveAttribute('aria-pressed', 'false');
+  await star.click();
+  await expect(page.getByRole('region', { name: 'Notifications' })).toContainText('The server refused this change');
+  await expect(star).toHaveAttribute('aria-pressed', 'false');
 });

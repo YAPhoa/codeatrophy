@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Item, ItemDraft, LargeCaseReport, Limits } from '../api/types';
+import type { Item, ItemDraft, LargeCaseReport } from '../api/types';
+import { LIMITS as limits } from '../mock/db';
 import {
   addFormLanguage,
   changedFields,
@@ -305,51 +306,6 @@ describe('mergeForms', () => {
     expect(changedFields(base, { ...base, title: ' Two Sum ', tags: ['HASH-MAP', 'array'], collectionIds: ['c2', 'c1'] })).toEqual([]);
   });
 });
-
-const limits: Limits = {
-  maxImportBytes: 52428800,
-  maxImportUncompressedBytes: 209715200,
-  maxImportEntries: 1000000,
-  maxImportCollections: 10000,
-  maxRequestBytes: 33554432,
-  maxPageSize: 200,
-  maxSourceBytes: 65536,
-  maxTitleChars: 200,
-  maxSummaryChars: 5000,
-  maxTextBytes: 1048576,
-  maxSourceUrlChars: 2048,
-  maxSourceNoteChars: 2000,
-  maxTags: 30,
-  maxTagChars: 40,
-  maxCollectionNameChars: 200,
-  maxCollectionDescriptionChars: 5000,
-  timeLimitMs: { min: 100, max: 30000 },
-  memoryLimitKb: { min: 16384, max: 2097152 },
-  maxTestCasesPerItem: 1000,
-  maxTestDataBytes: 8388608,
-  maxTestCaseNameChars: 200,
-  maxDraftTextChars: 50000,
-  maxInstructionChars: 2000,
-  maxPreviousDraftBytes: 2097152,
-  maxGeneratedTestCases: 30,
-  maxLargeInputBytes: 1048576,
-  maxLargeTestCases: 5,
-  maxStylePresets: 20,
-  maxStyleNameChars: 60,
-  maxStyleInstructionsChars: 2000,
-  maxSystemPromptChars: 20000,
-  maxModelIdChars: 200,
-  maxApiKeyChars: 1000,
-  maxAiProviders: 20,
-  maxAiProviderNameChars: 60,
-  minAiTimeoutSeconds: 10,
-  maxAiTimeoutSeconds: 300,
-  maxBundleNameChars: 200,
-  maxBundleDescriptionChars: 5000,
-  maxSolutionsPerItem: 50,
-  maxSolutionNameChars: 100,
-  maxSolutionNotesChars: 5000,
-};
 
 describe('validateForm', () => {
   const ok = { ...emptyForm(), title: 'ok' };

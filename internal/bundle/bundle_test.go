@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -273,7 +274,9 @@ func TestRejectsInvalidBundles(t *testing.T) {
 		"no manifest":   zipOf(t, map[string]string{"readme.md": "x"}),
 		"bad json":      zipOf(t, map[string]string{"bundle.json": "{"}),
 		"wrong format":  zipOf(t, map[string]string{"bundle.json": `{"format":"other","formatVersion":1}`}),
-		"newer version": zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":3}`}),
+		"newer version": zipOf(t, map[string]string{"bundle.json": fmt.Sprintf(`{"format":"codeatrophy.bundle","formatVersion":%d}`, FormatVersion+1)}),
+		"version 0":     zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":0}`}),
+		"version -1":    zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle","formatVersion":-1}`}),
 		"no version":    zipOf(t, map[string]string{"bundle.json": `{"format":"codeatrophy.bundle"}`}),
 	}
 	for name, data := range cases {
@@ -383,20 +386,32 @@ func TestSlug(t *testing.T) {
 // includes in bundle.json says what was exported; without it, a reader
 // infers it from the files.
 func TestIncludesDecideWhatWasExported(t *testing.T) {
-	b := sampleBundle()
-	b.Meta.Includes = &Includes{Solutions: false, HiddenTests: false}
-	it := &b.Items[0]
-	it.SolutionsIncluded, it.Solutions, it.HiddenTestsIncluded = false, nil, false
-	it.TestCases = it.TestCases[:1]
-	got, _, err := Read(write(t, b), lim)
+	// Content that includes says was left out is ignored, with a warning,
+	// and the hash covers only what is kept.
+	data := rewriteJSON(t, write(t, sampleBundle()), "bundle.json", func(m map[string]any) {
+		m["includes"] = map[string]any{"solutions": false, "hiddenTests": false}
+	})
+	got, warnings, err := Read(data, lim)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := got.Items[0]; p.HasSolutions() || p.HasHiddenTests() {
-		t.Errorf("declared partial export: %+v", p)
+	p := got.Items[0]
+	if p.HasSolutions() || p.Solutions != nil || p.HasHiddenTests() || len(p.TestCases) != 1 || p.TestCases[0].Name != "Example 1" {
+		t.Errorf("left-out content kept: %+v", p)
+	}
+	for _, w := range []string{"two-sum-0193b2f0: solutions in a bundle exported without them; ignored",
+		"two-sum-0193b2f0: hidden test cases in a bundle exported without them; ignored"} {
+		if !containsWarning(warnings, w) {
+			t.Errorf("missing warning %q in %v", w, warnings)
+		}
+	}
+	kept := sampleBundle().Items[0]
+	kept.SolutionsIncluded, kept.Solutions, kept.HiddenTestsIncluded, kept.TestCases = false, nil, false, kept.TestCases[:1]
+	if ContentHash(&p) != ContentHash(&kept) {
+		t.Error("the hash still covers the ignored content")
 	}
 	// An empty solutions list is not the same as solutions left out.
-	b = sampleBundle()
+	b := sampleBundle()
 	b.Items[0].Solutions = []Solution{}
 	got, _, _ = Read(write(t, b), lim)
 	if p := got.Items[0]; !p.HasSolutions() || len(p.Solutions) != 0 {
@@ -406,7 +421,7 @@ func TestIncludesDecideWhatWasExported(t *testing.T) {
 		t.Error("solutions are part of the hash")
 	}
 	// Without includes (an older writer), the files decide.
-	data := write(t, sampleBundle())
+	data = write(t, sampleBundle())
 	data = rewriteJSON(t, data, "bundle.json", func(m map[string]any) { delete(m, "includes") })
 	data = drop(t, data, "items/two-sum-0193b2f0/solutions/")
 	got, _, _ = Read(data, lim)
@@ -416,7 +431,7 @@ func TestIncludesDecideWhatWasExported(t *testing.T) {
 	// Two references: the first one wins, with a warning.
 	b = sampleBundle()
 	b.Items[0].Solutions[1].IsReference = true
-	got, warnings, _ := Read(write(t, b), lim)
+	got, warnings, _ = Read(write(t, b), lim)
 	if !got.Items[0].Solutions[0].IsReference || got.Items[0].Solutions[1].IsReference || !containsWarning(warnings, "more than one reference") {
 		t.Errorf("two references: %+v %v", got.Items[0].Solutions, warnings)
 	}
@@ -495,4 +510,171 @@ func drop(t *testing.T, data []byte, prefix string) []byte {
 	}
 	zw.Close()
 	return buf.Bytes()
+}
+
+// Problems in bundle.json or in one item.json are warnings that say what
+// was wrong and skip as little as possible.
+func TestReaderWarnings(t *testing.T) {
+	const (
+		two    = "0193b2f0-0000-7000-8000-000000000001"
+		reader = "0193b2f4-0000-7000-8000-000000000002"
+		parent = "0193b2f1-0000-7000-8000-000000000001"
+		child  = "0193b2f1-0000-7000-8000-000000000002"
+		other  = "0193b2f1-0000-7000-8000-00000000dead"
+	)
+	capItem := "items/cap-theorem-notes-0193b2f4/item.json"
+	manifest := func(fn func(m map[string]any)) func(*testing.T, []byte) []byte {
+		return func(t *testing.T, data []byte) []byte { return rewriteJSON(t, data, "bundle.json", fn) }
+	}
+	capJSON := func(fn func(m map[string]any)) func(*testing.T, []byte) []byte {
+		return func(t *testing.T, data []byte) []byte { return rewriteJSON(t, data, capItem, fn) }
+	}
+	entry := func(m map[string]any, key string, i int) map[string]any { return m[key].([]any)[i].(map[string]any) }
+	itemIDs := func(b *Bundle) string {
+		var ids []string
+		for _, it := range b.Items {
+			ids = append(ids, it.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	coll := func(b *Bundle, id string) *Collection {
+		for i := range b.Collections {
+			if b.Collections[i].ID == id {
+				return &b.Collections[i]
+			}
+		}
+		return nil
+	}
+	parentOf := func(b *Bundle, id string) string {
+		if c := coll(b, id); c != nil && c.ParentID != nil {
+			return *c.ParentID
+		}
+		return ""
+	}
+	onlyTwoSum := func(t *testing.T, b *Bundle) {
+		if itemIDs(b) != two {
+			t.Errorf("items %s, want only %s", itemIDs(b), two)
+		}
+		if c := coll(b, child); c == nil || strings.Join(c.ItemIDs, ",") != two {
+			t.Errorf("the skipped item is still a member: %+v", c)
+		}
+	}
+	cases := []struct {
+		name    string
+		edit    func(*testing.T, []byte) []byte
+		warning string
+		check   func(*testing.T, *Bundle)
+	}{
+		{"invalid item id", manifest(func(m map[string]any) { entry(m, "items", 1)["id"] = "not-a-uuid" }),
+			`bundle.json: item "CAP theorem notes" has an invalid id; skipped`, onlyTwoSum},
+		{"duplicate item id", manifest(func(m map[string]any) {
+			dup := map[string]any{"id": strings.ToUpper(two), "path": "items/cap-theorem-notes-0193b2f4"}
+			m["items"] = append(m["items"].([]any), dup)
+		}), "bundle.json: duplicate item id " + two + "; skipped", func(t *testing.T, b *Bundle) {
+			if itemIDs(b) != two+","+reader || b.Items[0].Title != "Two Sum" {
+				t.Errorf("items %s", itemIDs(b))
+			}
+		}},
+		{"item.json missing", func(t *testing.T, data []byte) []byte { return drop(t, data, capItem) },
+			"items/cap-theorem-notes-0193b2f4/item.json: missing; item skipped", onlyTwoSum},
+		{"item.json id mismatch", capJSON(func(m map[string]any) { m["id"] = "0193b2f4-0000-7000-8000-000000000099" }),
+			"items/cap-theorem-notes-0193b2f4/item.json: id does not match bundle.json; item skipped", onlyTwoSum},
+		{"unknown type", capJSON(func(m map[string]any) { m["type"] = "video" }),
+			`items/cap-theorem-notes-0193b2f4/item.json: unknown type "video"; item skipped`, onlyTwoSum},
+		{"missing title", capJSON(func(m map[string]any) { delete(m, "title") }),
+			"items/cap-theorem-notes-0193b2f4/item.json: title must be 1-200 characters; item skipped", onlyTwoSum},
+		{"blank title", capJSON(func(m map[string]any) { m["title"] = " \t " }),
+			"item.json: title must be 1-200 characters; item skipped", onlyTwoSum},
+		{"title too long", capJSON(func(m map[string]any) { m["title"] = strings.Repeat("é", domain.MaxTitleChars+1) }),
+			"item.json: title must be 1-200 characters; item skipped", onlyTwoSum},
+		{"invalid collection id", manifest(func(m map[string]any) { entry(m, "collections", 0)["id"] = "nope" }),
+			`bundle.json: collection "Dynamic Programming" has an invalid id; skipped`, func(t *testing.T, b *Bundle) {
+				if len(b.Collections) != 1 || b.Collections[0].ID != child || b.Collections[0].ParentID != nil {
+					t.Errorf("collections %+v; want the child alone, at the top level", b.Collections)
+				}
+			}},
+		{"duplicate collection id", manifest(func(m map[string]any) {
+			m["collections"] = append(m["collections"].([]any), map[string]any{"id": strings.ToUpper(child), "name": "Copy", "itemIds": []any{}})
+		}), "bundle.json: duplicate collection id " + child + "; skipped", func(t *testing.T, b *Bundle) {
+			if len(b.Collections) != 2 || coll(b, child).Name != "Child" {
+				t.Errorf("collections %+v", b.Collections)
+			}
+		}},
+		{"parent not in the bundle", manifest(func(m map[string]any) { entry(m, "collections", 1)["parentId"] = other }),
+			"bundle.json: collection " + child + " refers to a parent that is not in the bundle; placed at the top level",
+			func(t *testing.T, b *Bundle) {
+				if p := parentOf(b, child); p != "" {
+					t.Errorf("parent %s, want none", p)
+				}
+			}},
+		{"own parent", manifest(func(m map[string]any) { entry(m, "collections", 0)["parentId"] = parent }),
+			"bundle.json: collection " + parent + " refers to a parent that is not in the bundle; placed at the top level",
+			func(t *testing.T, b *Bundle) {
+				if p, c := parentOf(b, parent), parentOf(b, child); p != "" || c != parent {
+					t.Errorf("parents %q, %q", p, c)
+				}
+			}},
+		// parent -> child -> parent; a third collection hangs off the cycle.
+		{"parent cycle", manifest(func(m map[string]any) {
+			entry(m, "collections", 0)["parentId"] = child
+			m["collections"] = append(m["collections"].([]any), map[string]any{"id": other, "name": "Leaf", "parentId": parent, "itemIds": []any{}})
+		}), "bundle.json: collections " + child + " and " + parent + " form a parent cycle; " + child + " placed at the top level",
+			func(t *testing.T, b *Bundle) {
+				if p, c, o := parentOf(b, parent), parentOf(b, child), parentOf(b, other); p != child || c != "" || o != parent {
+					t.Errorf("parents: %q %q %q; want only the closing edge cut", p, c, o)
+				}
+			}},
+		{"member not in the bundle", manifest(func(m map[string]any) {
+			entry(m, "collections", 0)["itemIds"] = []any{two, "0193b2f0-0000-7000-8000-00000000beef", strings.ToUpper(two)}
+		}), "bundle.json: collection " + parent + " lists item 0193b2f0-0000-7000-8000-00000000beef, which is not in the bundle; ignored",
+			func(t *testing.T, b *Bundle) {
+				if ids := strings.Join(coll(b, parent).ItemIDs, ","); ids != two {
+					t.Errorf("members %s; want the known item once", ids)
+				}
+			}},
+		{"includes with one key", manifest(func(m map[string]any) { m["includes"] = map[string]any{"solutions": false} }),
+			"bundle.json: includes needs both solutions and hiddenTests; ignored", func(t *testing.T, b *Bundle) {
+				// Inferred from the files instead.
+				if p := b.Items[0]; b.Meta.Includes != nil || !p.HasSolutions() || len(p.Solutions) != 2 || !p.HasHiddenTests() {
+					t.Errorf("includes %+v, solutions %v (%d), hidden %v", b.Meta.Includes, p.HasSolutions(), len(p.Solutions), p.HasHiddenTests())
+				}
+			}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, warnings, err := Read(c.edit(t, write(t, sampleBundle())), lim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !containsWarning(warnings, c.warning) {
+				t.Errorf("missing warning %q in %v", c.warning, warnings)
+			}
+			c.check(t, b)
+		})
+	}
+}
+
+// Item directories are named after the title and the first 8 hex digits of
+// the id; items sharing both get numbered directories and all read back.
+func TestItemDirectoriesDoNotCollide(t *testing.T) {
+	b := &Bundle{Meta: Meta{Name: "same"}, Items: []Item{
+		{ID: "0193b2f0-aaaa-7000-8000-000000000001", Type: domain.TypeReading, Title: "Same title", Body: "first"},
+		{ID: "0193b2f0-bbbb-7000-8000-000000000002", Type: domain.TypeReading, Title: "Same title!", Body: "second"},
+		{ID: "0193b2f0-cccc-7000-8000-000000000003", Type: domain.TypeReading, Title: "same TITLE", Body: "third"},
+	}}
+	data := write(t, b)
+	for i, want := range []string{"items/same-title-0193b2f0", "items/same-title-0193b2f0-2", "items/same-title-0193b2f0-3"} {
+		if b.Items[i].Dir != want {
+			t.Errorf("item %d in %s, want %s", i, b.Items[i].Dir, want)
+		}
+	}
+	got, warnings, err := Read(data, lim)
+	if err != nil || len(warnings) != 0 || len(got.Items) != 3 {
+		t.Fatalf("%v %v %d items", err, warnings, len(got.Items))
+	}
+	for i, want := range []string{"first", "second", "third"} {
+		if got.Items[i].ID != b.Items[i].ID || got.Items[i].Body != want {
+			t.Errorf("item %d: %s %q", i, got.Items[i].ID, got.Items[i].Body)
+		}
+	}
 }

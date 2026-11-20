@@ -50,7 +50,7 @@ func TestGenerationsAreCountedAndLogged(t *testing.T) {
 	e.ai.InputTokens, e.ai.OutputTokens, e.ai.ReasoningTokens, e.ai.CacheReadTokens = &in, &out, &reasoning, &cache
 
 	// A draft: usage in the response, an entry in the log, a count.
-	res := must(newDraft(t, e, `{"text":"two sum"}`, draftJSON()))
+	res := must(draftWith(t, e, `{"text":"two sum"}`, draftJSON()))
 	u := res.Usage
 	if u.LogID == nil || u.Model != "fake-model" || *u.InputTokens != 1000 || *u.OutputTokens != 200 ||
 		*u.ReasoningTokens != 50 || *u.CacheReadTokens != 300 || u.CacheWriteTokens != nil {
@@ -74,10 +74,7 @@ func TestGenerationsAreCountedAndLogged(t *testing.T) {
 
 	// Test generation and a variant of a problem.
 	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
-	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-		return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases": []map[string]any{{"name": "n", "rationale": "r", "stdin": "7 7", "predictedStdout": "14", "isSample": false}}}, nil
-	}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("7 7", "14"), nil }
 	tc := must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1}`)))
 	if tc.Usage.LogID == nil || *tc.Usage.OutputTokens != 200 {
 		t.Errorf("test generation usage: %+v", tc.Usage)
@@ -213,7 +210,7 @@ func TestAILogPagingAndPruning(t *testing.T) {
 	e.enableAI(t)
 	for i := range 7 {
 		c.set(c.now().Add(time.Duration(i%2) * time.Second))
-		must(newDraft(t, e, `{"text":"x"}`, draftJSON()))
+		must(draftWith(t, e, `{"text":"x"}`, draftJSON()))
 	}
 	limit := 3
 	var ids []string
@@ -227,7 +224,7 @@ func TestAILogPagingAndPruning(t *testing.T) {
 			t.Errorf("total %d", page.Total)
 		}
 		if len(ids) == 3 {
-			must(newDraft(t, e, `{"text":"x"}`, draftJSON())) // arrives between pages
+			must(draftWith(t, e, `{"text":"x"}`, draftJSON())) // arrives between pages
 		}
 		if page.Next == nil {
 			break
@@ -255,7 +252,7 @@ func TestAILogPagingAndPruning(t *testing.T) {
 	// A response larger than the cut is kept truncated.
 	big := draftJSON()
 	big["body"] = strings.Repeat("x", 300<<10)
-	res := must(newDraft(t, e, `{"text":"x"}`, big))
+	res := must(draftWith(t, e, `{"text":"x"}`, big))
 	d := must(e.app.GetAILogEntry(e.ctx, *res.Usage.LogID))
 	if !d.Truncated || len(*d.Response) != 256<<10 {
 		t.Errorf("truncation: %v %d", d.Truncated, len(*d.Response))
@@ -286,10 +283,7 @@ func TestGeneratedCasesAddToTheExistingOnes(t *testing.T) {
 		t.Errorf("existing cases in the prompt: %s", u)
 	}
 	// Only duplicates: an empty proposal, not an error.
-	onlyDuplicates := func(ai.GenerateRequest) (any, error) {
-		return map[string]any{"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases": []map[string]any{{"name": "c", "rationale": "x", "stdin": "1 2", "predictedStdout": "3", "isSample": false}}}, nil
-	}
+	onlyDuplicates := func(ai.GenerateRequest) (any, error) { return casesAnswer("1 2", "3"), nil }
 	e.ai.Respond = onlyDuplicates
 	res = must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{}`)))
 	if len(res.Cases) != 0 || res.DuplicatesDropped != 1 {
@@ -299,7 +293,7 @@ func TestGeneratedCasesAddToTheExistingOnes(t *testing.T) {
 	dj := draftJSON()
 	dj["testCases"] = []map[string]any{{"name": "a", "stdin": "1 2", "expectedStdout": "3", "isSample": true},
 		{"name": "b", "stdin": "1 2\n", "expectedStdout": "3", "isSample": true}}
-	if d := must(newDraft(t, e, `{"text":"x"}`, dj)).Draft; len(d.TestCases) != 1 {
+	if d := must(draftWith(t, e, `{"text":"x"}`, dj)).Draft; len(d.TestCases) != 1 {
 		t.Errorf("draft dedupe: %+v", d.TestCases)
 	}
 	// A large existing case is described by name and size only.

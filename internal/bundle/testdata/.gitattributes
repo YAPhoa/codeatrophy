@@ -1,0 +1,2 @@
+# Fixture bytes are compared exactly; keep them as written.
+* -text

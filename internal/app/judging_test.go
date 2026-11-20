@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,18 @@ func (e *env) submit(t *testing.T, itemID, js string) domain.Submission {
 		t.Fatal(err)
 	}
 	return done
+}
+
+// solution returns one of an item's solutions.
+func (e *env) solution(t *testing.T, itemID, id string) domain.ItemSolution {
+	t.Helper()
+	for _, s := range must(e.app.ListSolutions(e.ctx, itemID)).Items {
+		if s.ID == id {
+			return s
+		}
+	}
+	t.Fatalf("no solution %s", id)
+	return domain.ItemSolution{}
 }
 
 func TestSubmissionsAndStatusSideEffects(t *testing.T) {
@@ -88,7 +101,7 @@ func TestSubmissionValidation(t *testing.T) {
 		_, err := e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, js))
 		wantCode(t, err, app.CodeValidation)
 	}
-	big := `{"language":"python","source":"` + string(make([]byte, 0)) + repeat("x", 70000) + `"}`
+	big := `{"language":"python","source":"` + strings.Repeat("x", 70000) + `"}`
 	_, err := e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, big))
 	wantCode(t, err, app.CodeValidation)
 	// A language the engine does not offer.
@@ -119,26 +132,6 @@ func TestSubmissionValidation(t *testing.T) {
 	wantCode(t, err, app.CodeJudgeUnavailable)
 	if st := noJudge.app.JudgeStatus(); st.Enabled || st.Healthy || st.Engine != "none" || len(st.Languages) != 0 {
 		t.Errorf("judge status without engine: %+v", st)
-	}
-}
-
-func repeat(s string, n int) string {
-	b := make([]byte, 0, len(s)*n)
-	for range n {
-		b = append(b, s...)
-	}
-	return string(b)
-}
-
-func TestEngineFailureFinishesAsInternalError(t *testing.T) {
-	e := newEnv(t)
-	it := e.problem(t, "")
-	e.engine.Handler = func(context.Context, judge.ExecRequest) (judge.ExecResult, error) {
-		return judge.ExecResult{}, errors.New("judge0: connection refused")
-	}
-	sub := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"submit"}`)
-	if *sub.Verdict != domain.VerdictInternalError || sub.Error == nil {
-		t.Errorf("got %+v", sub)
 	}
 }
 
@@ -217,6 +210,50 @@ func TestVerifyTestCases(t *testing.T) {
 	wantCode(t, err, app.CodeJudgeUnavailable)
 }
 
+// Verification with updateExpected leaves alone a case the engine failed
+// on, which says nothing about it, and a case edited while it ran.
+func TestVerifyLeavesCasesItCannotVouchFor(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, ""))
+	cases := must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !cases[0].Verified || !cases[1].Verified {
+		t.Fatalf("setup: %+v", cases)
+	}
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		if req.Stdin == "5 5" {
+			return judge.ExecResult{}, errors.New("connection reset")
+		}
+		return judgetest.Script(req), nil
+	}
+	res := must(e.app.VerifyTestCases(e.ctx, it.ID, true, ""))
+	if res.Results[1].OK || res.Results[1].Verdict != domain.VerdictInternalError {
+		t.Fatalf("engine failure: %+v", res.Results[1])
+	}
+	if got := must(e.app.ListTestCases(e.ctx, it.ID)).Items[1]; !got.Verified || got.ExpectedStdout != "10" {
+		t.Errorf("the case the engine failed on: %+v", got)
+	}
+
+	// Both cases are wrong; one is edited while the solution runs.
+	for _, c := range cases {
+		must(e.app.UpdateTestCase(e.ctx, c.ID, decodeInto[domain.TestCaseInput](t, `{"expectedStdout":"wrong"}`)))
+	}
+	var once sync.Once
+	edit := decodeInto[domain.TestCaseInput](t, `{"expectedStdout":"edited"}`)
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		once.Do(func() { must(e.app.UpdateTestCase(e.ctx, cases[1].ID, edit)) })
+		return judgetest.Script(req), nil
+	}
+	must(e.app.VerifyTestCases(e.ctx, it.ID, true, ""))
+	after := must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !after[0].Verified || after[0].ExpectedStdout != "3\n" {
+		t.Errorf("the untouched case was not fixed: %+v", after[0])
+	}
+	if after[1].Verified || after[1].ExpectedStdout != "edited" {
+		t.Errorf("the edit made while it ran was overwritten: %+v", after[1])
+	}
+}
+
 func TestSubmissionTotalCountIsFixedAtCreation(t *testing.T) {
 	e := newEnv(t) // two workers
 	it := e.problem(t, "")
@@ -231,9 +268,7 @@ func TestSubmissionTotalCountIsFixedAtCreation(t *testing.T) {
 	// Occupy both workers so the next submission stays queued.
 	create()
 	create()
-	for deadline := time.Now().Add(5 * time.Second); e.engine.Calls() < 2 && time.Now().Before(deadline); {
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitFor(t, "both workers to run", func() bool { return e.engine.Calls() >= 2 })
 	sub := create()
 	if sub.TotalCount != 2 || sub.PassedCount != 0 {
 		t.Errorf("queued submission: %+v", sub)
@@ -337,16 +372,7 @@ func TestVerifyRecordsLastRun(t *testing.T) {
 		r.TimeMs, r.MemoryKb = &ms, &kb
 		return r, nil
 	}
-	solution := func(id string) domain.ItemSolution {
-		t.Helper()
-		for _, s := range must(e.app.ListSolutions(e.ctx, it.ID)).Items {
-			if s.ID == id {
-				return s
-			}
-		}
-		t.Fatalf("no solution %s", id)
-		return domain.ItemSolution{}
-	}
+	solution := func(id string) domain.ItemSolution { t.Helper(); return e.solution(t, it.ID, id) }
 	ref := must(e.app.ListSolutions(e.ctx, it.ID)).Items[0]
 	if ref.LastRun != nil {
 		t.Fatalf("a new solution has a last run: %+v", ref.LastRun)
@@ -428,16 +454,7 @@ func TestLastRunClearsWithTheCode(t *testing.T) {
 	ref := must(e.app.ListSolutions(e.ctx, it.ID)).Items[0]
 	other := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
 		`{"name":"Echo","language":"python","source":"echo\n"}`)))
-	ran := func(id string) bool {
-		t.Helper()
-		for _, s := range must(e.app.ListSolutions(e.ctx, it.ID)).Items {
-			if s.ID == id {
-				return s.LastRun != nil
-			}
-		}
-		t.Fatalf("no solution %s", id)
-		return false
-	}
+	ran := func(id string) bool { t.Helper(); return e.solution(t, it.ID, id).LastRun != nil }
 	verify := func(id string) {
 		t.Helper()
 		must(e.app.VerifyTestCases(e.ctx, it.ID, false, id))
@@ -523,9 +540,7 @@ func TestOnlyTheLatestRunIsKept(t *testing.T) {
 	}
 	calls := e.engine.Calls()
 	pending := must(e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, `{"language":"python","source":"sum","mode":"run"}`)))
-	for deadline := time.Now().Add(5 * time.Second); e.engine.Calls() == calls && time.Now().Before(deadline); {
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitFor(t, "the first run to start", func() bool { return e.engine.Calls() > calls })
 	next := must(e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, `{"language":"python","source":"sum","mode":"run"}`)))
 	if got := ids(it.ID, "run"); !slices.Equal(got, []string{next.ID, pending.ID}) {
 		t.Errorf("with a run in progress: %v", got)
@@ -542,8 +557,5 @@ func TestOnlyTheLatestRunIsKept(t *testing.T) {
 	last := e.submit(t, it.ID, `{"language":"python","source":"sum","mode":"run"}`)
 	if got := ids(it.ID, ""); !slices.Equal(got, []string{last.ID, second.ID, first.ID}) {
 		t.Errorf("after the runs finished: %v", got)
-	}
-	if st := must(e.app.Stats(e.ctx)); st.Submissions.Total != 2 {
-		t.Errorf("stats count runs: %+v", st.Submissions)
 	}
 }

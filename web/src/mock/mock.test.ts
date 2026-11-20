@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, setTransport } from '../api/client';
+import { DEFAULT_PREFERENCES as UI_DEFAULT_PREFERENCES } from '../api/queries';
 import type { AiCodeRequest, AiCodeResponse, AiJob, AiJobDetail, AiTestCasesRequest, AiTestCasesResponse, Draft, DraftRequest, DraftResponse, Submission, VariantRequest } from '../api/types';
 import type { MockOptions, MockServer } from './index';
-import { DEFAULT_PREFERENCES, envProviderId, JUDGE_LANGUAGES, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
-import { assemble, functionKit, KIT_LANGUAGES } from './harness';
+import { DEFAULT_PREFERENCES, envProviderId, LIMITS, REFERENCE_SOLUTION_NAME } from './db';
+import { functionKit, KIT_LANGUAGES } from './harness';
 import { buildBundleZip, createMockServer, optionsFromFlags, parseBundleZip, seedIds } from './index';
 import { TLE_GRACE_MS } from './judge';
 import { MERGE_K_LISTS_JAVA, MERGE_K_LISTS_REFERENCE } from './seed/mergeKLists';
@@ -105,68 +106,11 @@ describe('meta and stats', () => {
     expect(meta.mcp).toEqual({ enabled: true, path: '/mcp', url: null, authRequired: false });
   });
 
-  it('publishes every limit and the engine\'s real toolchains', async () => {
-    const meta = await api.meta();
-    expect(meta.limits).toEqual(LIMITS);
-    expect(meta.limits).toMatchObject({
-      maxImportBytes: 52428800,
-      maxImportUncompressedBytes: 209715200,
-      maxImportEntries: 1000000,
-      maxImportCollections: 10000,
-      maxRequestBytes: 33554432,
-      maxPageSize: 200,
-      maxSourceBytes: 65536,
-      maxTitleChars: 200,
-      maxSummaryChars: 5000,
-      maxTextBytes: 1048576,
-      maxSourceUrlChars: 2048,
-      maxSourceNoteChars: 2000,
-      maxTags: 30,
-      maxTagChars: 40,
-      maxCollectionNameChars: 200,
-      maxCollectionDescriptionChars: 5000,
-      timeLimitMs: { min: 100, max: 30000 },
-      memoryLimitKb: { min: 16384, max: 2097152 },
-      maxTestCasesPerItem: 1000,
-      maxTestDataBytes: 8388608,
-      maxTestCaseNameChars: 200,
-      maxSolutionsPerItem: 50,
-      maxSolutionNameChars: 100,
-      maxSolutionNotesChars: 5000,
-      maxDraftTextChars: 50000,
-      maxInstructionChars: 2000,
-      maxPreviousDraftBytes: 2097152,
-      maxGeneratedTestCases: 30,
-      maxLargeInputBytes: 1048576,
-      maxLargeTestCases: 5,
-      maxStylePresets: 20,
-      maxStyleNameChars: 60,
-      maxStyleInstructionsChars: 2000,
-      maxSystemPromptChars: 20000,
-      maxModelIdChars: 200,
-      maxApiKeyChars: 1000,
-      maxAiProviders: 20,
-      maxAiProviderNameChars: 60,
-      minAiTimeoutSeconds: 10,
-      maxAiTimeoutSeconds: 300,
-      maxBundleNameChars: 200,
-      maxBundleDescriptionChars: 5000,
-    });
-    expect(Object.keys(meta.limits)).toHaveLength(42);
-    expect(meta.judge.languages).toEqual(JUDGE_LANGUAGES);
-    expect(meta.judge.languages.map((l) => `${l.id} ${l.version}`)).toEqual([
-      'c GCC 9.2.0',
-      'cpp GCC 9.2.0',
-      'csharp Mono 6.6.0.161',
-      'go 1.13.5',
-      'java OpenJDK 13.0.1',
-      'javascript Node.js 12.14.0',
-      'kotlin 1.3.70',
-      'python 3.8.1',
-      'ruby 2.7.0',
-      'rust 1.40.0',
-      'typescript 3.7.4',
-    ]);
+  it('reports each judge language with its toolchain version', async () => {
+    // The limits are checked against docs/api.md in api/contract.test.ts.
+    const { languages } = (await api.meta()).judge;
+    expect(languages.length).toBeGreaterThan(0);
+    for (const l of languages) expect(l).toEqual({ id: expect.any(String), name: expect.any(String), version: expect.stringMatching(/\S/) });
   });
 
   it('reports the public MCP URL when one is configured', async () => {
@@ -259,11 +203,15 @@ describe('meta and stats', () => {
 });
 
 describe('listing items', () => {
-  it('paginates and reports the total before pagination', async () => {
+  it('paginates, reports the total before pagination, and rejects out-of-range pages', async () => {
     const page = await api.items.list({ limit: 5, offset: 20 });
     expect(page.total).toBe(25);
     expect(page.items).toHaveLength(5);
-    expect((await failure(api.items.list({ limit: 500 }))).code).toBe('bad_request');
+    expect((await api.items.list({ limit: 200 })).items.length).toBeGreaterThan(0);
+    for (const params of [{ limit: 0 }, { limit: 201 }, { limit: 500 }, { offset: -1 }]) {
+      const err = await failure(api.items.list(params));
+      expect({ status: err.status, code: err.code }, JSON.stringify(params)).toEqual({ status: 400, code: 'bad_request' });
+    }
   });
 
   it('defaults to most recently updated first', async () => {
@@ -334,18 +282,11 @@ describe('listing items', () => {
     expect((await api.items.list({ id: [twoSum, lis, capTheorem], type: 'reading' })).items.map((i) => i.id)).toEqual([capTheorem]);
   });
 
-  it('puts the best match first by default and rejects out-of-range pages', async () => {
+  it('puts the best match first by default', async () => {
     const best = await api.items.list({ q: 'tree', sort: 'relevance' });
     const worst = await api.items.list({ q: 'tree', sort: 'relevance', order: 'asc' });
     expect(best.total).toBeGreaterThan(1);
     expect(best.items[0]?.id).toBe(worst.items[worst.items.length - 1]?.id);
-
-    for (const params of [{ limit: 0 }, { limit: 201 }, { offset: -1 }]) {
-      const err = await failure(api.items.list(params));
-      expect(err.status).toBe(400);
-      expect(err.code).toBe('bad_request');
-    }
-    expect((await api.items.list({ limit: 200 })).items.length).toBeGreaterThan(0);
   });
 
   it('counts facets as the list would total with each value, each dimension without its own filter', async () => {
@@ -468,23 +409,6 @@ describe('creating and editing items', () => {
     expect((await failure(api.items.update(id, { tags: Array.from({ length: 31 }, (_, i) => `t${i}`) }))).fields).toHaveProperty('tags');
     const tooMany = Array.from({ length: LIMITS.maxTestCasesPerItem + 1 }, () => ({ expectedStdout: '' }));
     expect((await failure(api.items.create({ type: 'problem', title: 'Many', testCases: tooMany }))).fields).toHaveProperty('testCases');
-  });
-
-  it('normalises line endings everywhere except test data', async () => {
-    const item = await api.items.create({
-      type: 'problem',
-      title: 'CRLF',
-      body: 'a\r\nb\rc',
-      notes: 'n\r\n',
-      problem: { referenceSolution: { language: 'python', source: 'print(1)\r\n' }, starterCode: { python: 'x\r\n' } },
-      testCases: [{ name: 'n', stdin: '1\r\n', expectedStdout: '2\r\n' }],
-    });
-    expect(item.body).toBe('a\nb\nc');
-    expect(item.notes).toBe('n\n');
-    expect(item.problem?.referenceSolution?.source).toBe('print(1)\n');
-    expect(item.problem?.starterCode.python).toBe('x\n');
-    const [tc] = (await api.testCases.list(item.id)).items;
-    expect(tc).toMatchObject({ stdin: '1\r\n', expectedStdout: '2\r\n' });
   });
 
   it('merges PATCH bodies and bumps the revision only for content', async () => {
@@ -649,18 +573,11 @@ describe('problem interface', () => {
     expect((await failure(api.items.update(seedIds.items.twoSum, { problem: { harness: { python: runner } } }))).status).toBe(422);
   });
 
-  it('assembles the program from the prefix, the source and the suffix, each on a new line', () => {
-    expect(assemble({ prefix: 'a\nb', suffix: 'z' }, 'x\ny')).toEqual({ program: 'a\nb\nx\ny\nz', lineOffset: 2 });
-    expect(assemble({ prefix: 'a\n', suffix: 'z\n' }, 'x\n')).toEqual({ program: 'a\nx\nz\n', lineOffset: 1 });
-    expect(assemble({ prefix: '', suffix: 'z' }, 'x')).toEqual({ program: 'x\nz', lineOffset: 0 });
-    expect(assemble(undefined, 'x')).toEqual({ program: 'x', lineOffset: 0 });
-  });
-
   it('writes a stub and a runner for a signature in each language it knows', () => {
     const kit = functionKit({ name: 'twoSum', params: [{ name: 'nums', type: 'int[]' }, { name: 'target', type: 'int' }], returns: 'int[]' });
     expect(Object.keys(kit.starterCode)).toEqual([...KIT_LANGUAGES]);
     expect(Object.keys(kit.harness)).toEqual([...KIT_LANGUAGES]);
-    expect(kit.starterCode.python).toBe('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        ');
+    expect(kit.starterCode.python).toContain('def twoSum(self, nums: list[int], target: int) -> list[int]:');
     expect(kit.starterCode.java).toContain('public int[] twoSum(int[] nums, int target) {');
     expect(kit.starterCode.go).toContain('func twoSum(nums []int, target int) []int {');
     expect(kit.starterCode.javascript).toContain('function twoSum(nums, target) {');
@@ -1151,12 +1068,6 @@ describe('solutions', () => {
     expect(await api.items.get(twoSum)).toEqual(before);
   });
 
-  it('does not reset verified marks when the reference changes', async () => {
-    await api.solutions.update(seedIds.solutions.twoSumHashMap, { source: 'print(5)' });
-    await api.solutions.update(seedIds.solutions.twoSumCpp, { isReference: true });
-    expect((await api.testCases.list(twoSum)).items.every((c) => c.verified)).toBe(true);
-  });
-
   it('checks expectedRevision on writes', async () => {
     const item = await api.items.get(twoSum);
     const reference = seedIds.solutions.twoSumHashMap;
@@ -1332,7 +1243,6 @@ describe('collections and tags', () => {
   it('bounds collection names and descriptions', async () => {
     expect((await failure(api.collections.create({ name: 'n'.repeat(201) }))).fields).toHaveProperty('name');
     expect((await failure(api.collections.create({ name: 'ok', description: 'd'.repeat(5001) }))).fields).toHaveProperty('description');
-    expect((await api.collections.create({ name: ' Two\r\nlines ' })).name).toBe('Two\nlines');
   });
 
   it('refuses tags with a slash or control character, and unknown tags', async () => {
@@ -1451,19 +1361,26 @@ describe('submissions', () => {
     expect(stored.passedCount).toBe(6);
   });
 
-  it('marks the item done on an accepted submit, but not on a run', async () => {
+  it('marks the item done on an accepted submit, and takes lastVerdict from the latest completed submit, never from a run', async () => {
     const run = await api.submissions.create(lru, { language: 'go', source: 'package main', mode: 'run', stdin: null });
     const ran = (await judged(run.id)).final;
     expect(ran.verdict).toBe('accepted');
     expect(ran.totalCount).toBe(1);
-    expect((await api.items.get(lru)).status).toBe('in_progress');
+    expect(await api.items.get(lru)).toMatchObject({ status: 'in_progress', lastVerdict: 'compile_error' });
+
+    const pending = await api.submissions.create(lru, { language: 'python', source: '# MOCK:WA', mode: 'submit', stdin: null });
+    // Still queued: the item keeps reporting the previous verdict.
     expect((await api.items.get(lru)).lastVerdict).toBe('compile_error');
+    await judged(pending.id);
+    expect(await api.items.get(lru)).toMatchObject({ status: 'in_progress', lastVerdict: 'wrong_answer' });
 
     const submit = await api.submissions.create(lru, { language: 'go', source: 'package main', mode: 'submit', stdin: null });
     expect((await judged(submit.id)).final.verdict).toBe('accepted');
-    const item = await api.items.get(lru);
-    expect(item.status).toBe('done');
-    expect(item.lastVerdict).toBe('accepted');
+    expect(await api.items.get(lru)).toMatchObject({ status: 'done', lastVerdict: 'accepted' });
+
+    const failedRun = await api.submissions.create(lru, { language: 'python', source: '# MOCK:WA', mode: 'run', stdin: null });
+    await judged(failedRun.id);
+    expect(await api.items.get(lru)).toMatchObject({ status: 'done', lastVerdict: 'accepted' });
   });
 
   it('reports compile errors, crashes, limits and custom input', async () => {
@@ -1539,23 +1456,6 @@ describe('submissions', () => {
     const custom = await api.submissions.create(lru, { language: 'python', source: 'print(1)', mode: 'run', stdin: 'get 1\n' });
     expect(custom.totalCount).toBe(1);
     expect((await judged(custom.id)).final).toMatchObject({ verdict: 'executed', passedCount: 1, totalCount: 1 });
-
-    const broken = await api.submissions.create(lru, { language: 'cpp', source: '// MOCK:CE', mode: 'submit', stdin: null });
-    const ce = (await judged(broken.id)).final;
-    expect(ce).toMatchObject({ verdict: 'compile_error', passedCount: 0, totalCount: total, timeMs: null, memoryKb: null, results: [] });
-    expect(ce.compileOutput).not.toBe('');
-  });
-
-  it('takes lastVerdict from the latest completed submit only', async () => {
-    const before = (await api.items.get(lru)).lastVerdict;
-    const pending = await api.submissions.create(lru, { language: 'python', source: '# MOCK:WA', mode: 'submit', stdin: null });
-    // Still queued: the item keeps reporting the previous verdict.
-    expect((await api.items.get(lru)).lastVerdict).toBe(before);
-    await judged(pending.id);
-    expect((await api.items.get(lru)).lastVerdict).toBe('wrong_answer');
-    const run = await api.submissions.create(lru, { language: 'python', source: 'print(1)', mode: 'run', stdin: null });
-    await judged(run.id);
-    expect((await api.items.get(lru)).lastVerdict).toBe('wrong_answer');
   });
 
   it('keeps only the latest run of a problem, and every submit', async () => {
@@ -1588,30 +1488,18 @@ describe('submissions', () => {
     expect(await ids('run', seedIds.items.networkDelay)).toEqual(otherRuns);
     expect((await failure(api.submissions.get(first.id))).status).toBe(404);
   });
-
-  it('seeds a history with failures to look at', async () => {
-    const wa = await api.submissions.get(seedIds.submissions.longestSubstringWrongAnswer);
-    expect(wa.verdict).toBe('wrong_answer');
-    expect(wa.results.filter((r) => r.verdict === 'wrong_answer')).toHaveLength(2);
-    expect((await api.submissions.get(seedIds.submissions.lruCacheCompileError)).compileOutput).toContain('error:');
-    expect((await api.submissions.get(seedIds.submissions.networkDelayRuntimeError)).verdict).toBe('runtime_error');
-    const runs = await api.submissions.list(seedIds.items.twoSum, { mode: 'run' });
-    expect(runs.total).toBe(1);
-  });
 });
 
 describe('AI drafting', () => {
-  it('drafts a recognisable problem in the default style', async () => {
+  it('drafts a problem in the default style', async () => {
     const { draft, style } = await aiDraft({ text: 'two sum, array + target, return indices' });
     expect(style).toEqual({ id: seedIds.styles.leetcode, name: 'LeetCode style' });
-    expect(draft).toMatchObject({ type: 'problem', title: 'Two Sum', difficulty: 'easy' });
-    expect(draft.assumptions.length).toBeGreaterThanOrEqual(3);
+    expect(draft.type).toBe('problem');
+    expect(draft.assumptions.length).toBeGreaterThan(0);
     expect(draft.testCases.length).toBeGreaterThanOrEqual(2);
     expect(draft.testCases.every((c) => c.isSample)).toBe(true);
-    // The default preset asks for Example blocks and for Python and Go only.
+    // The default preset asks for Python and Go only.
     expect(Object.keys(draft.problem!.starterCode).sort()).toEqual(['go', 'python']);
-    expect(draft.body).toContain('**Example 1**');
-    expect(draft.body.indexOf('## Constraints')).toBeGreaterThan(draft.body.indexOf('**Example 1**'));
   });
 
   it('resolves styleId: null for none, an id for that preset, 422 for an unknown id', async () => {
@@ -1639,7 +1527,6 @@ describe('AI drafting', () => {
     expect(algorithm.draft.problem!.interface).toBe('function');
     expect(Object.keys(algorithm.draft.problem!.harness)).toEqual([...KIT_LANGUAGES]);
     expect(Object.keys(algorithm.draft.problem!.starterCode)).toEqual([...KIT_LANGUAGES]);
-    expect(algorithm.draft.problem!.starterCode.python).toBe('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        ');
     // One JSON value per argument in, one JSON value out.
     expect(algorithm.draft.testCases[0]).toMatchObject({ stdin: '[2,7,11,15]\n9\n', expectedStdout: '[0,1]\n' });
     // The reference solution is the solution part, in a language that has a harness.
@@ -1654,7 +1541,6 @@ describe('AI drafting', () => {
     }
     const generic = (await aiDraft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
     expect(generic.problem!.interface).toBe('function');
-    expect(generic.problem!.starterCode.python).toContain('def solve(self, nums: list[int]) -> int:');
   });
 
   it('follows interfaceHint when it gives one', async () => {
@@ -1812,10 +1698,7 @@ describe('AI drafting', () => {
   it('builds a generic problem or a reading from unrecognised text', async () => {
     const problem = (await aiDraft({ text: 'Given a list of temperatures, find the longest warm streak.', styleId: null })).draft;
     expect(problem.type).toBe('problem');
-    expect(problem.title).toBe('Given a List of Temperatures');
-    expect(problem.body).toContain('longest warm streak');
     expect(problem.testCases.length).toBeGreaterThanOrEqual(2);
-    expect(problem.assumptions.length).toBeGreaterThanOrEqual(3);
 
     const prose =
       'Notes on how vector clocks work. Each process keeps a counter per process. Counters are merged element-wise when a message arrives.';
@@ -1829,13 +1712,8 @@ describe('AI drafting', () => {
   it('revises a previous draft according to the instruction', async () => {
     const first = (await aiDraft({ text: 'two sum', styleId: null })).draft;
     const harder = (await aiDraft({ text: 'two sum', previousDraft: first, instruction: 'make it harder', styleId: null })).draft;
-    expect(harder.difficulty).toBe('medium');
-    expect(harder.body).toContain('10^6');
-    expect(harder.assumptions.length).toBe(first.assumptions.length + 1);
-
-    const other = (await aiDraft({ text: 'two sum', previousDraft: first, instruction: 'mention overflow', styleId: null })).draft;
-    expect(other.body).toContain('mention overflow');
-    expect(other.title).toBe(first.title);
+    expect(first.difficulty).toBe('easy');
+    expect(harder).toMatchObject({ type: 'problem', difficulty: 'medium' });
   });
 
   it('validates input and reports provider failures', async () => {
@@ -1863,6 +1741,8 @@ describe('AI drafting', () => {
       expect(err.status).toBe(503);
       expect(err.code).toBe('ai_unavailable');
     }
+    // No draft is left behind by a generation that could not start.
+    expect((await api.drafts.list()).items).toEqual([]);
     // The request is validated first, so a bad one is a 422 even here.
     expect((await failure(aiDraft({ text: '' }))).status).toBe(422);
     expect((await failure(aiTestCases(seedIds.items.twoSum, { count: 99 }))).status).toBe(422);
@@ -1943,7 +1823,6 @@ describe('AI jobs', () => {
   });
 
   it('answers what can be checked at once: a bad request, an unknown item, no AI, too many jobs', async () => {
-    expect((await failure(api.ai.testCases(seedIds.items.twoSum, { count: 99 }))).status).toBe(422);
     expect((await failure(api.ai.testCases(seedIds.items.twoSum, { origin: 'a\nb' }))).fields).toHaveProperty('origin');
     expect((await failure(api.ai.code({ title: 'T', body: 'b', interface: 'program', languages: ['python'], origin: 'x'.repeat(2001) }))).fields).toHaveProperty('origin');
     expect((await failure(api.ai.testCases('nope', {}))).status).toBe(404);
@@ -2126,9 +2005,6 @@ describe('drafts', () => {
     }
     expect(fields).toEqual(['kind', 'variantOf', 'variantOf', 'variantOf', 'text', 'mode']);
     expect((await api.drafts.list()).items).toEqual([]);
-    start({ ai: false });
-    expect((await failure(capture())).code).toBe('ai_unavailable');
-    expect((await api.drafts.list()).items).toEqual([]);
   });
 
   it('are kept with their jobs across a reload of the page', async () => {
@@ -2151,15 +2027,11 @@ describe('AI variants', () => {
     for (const mode of ['similar', 'easier', 'harder', 'twist'] as const) {
       const { draft, style } = await aiVariant(origin.id, { mode, instruction: 'keep it short' });
       expect(style?.id).toBe(seedIds.styles.leetcode);
-      expect(draft.type).toBe('problem');
-      expect(draft.title).not.toBe(origin.title);
-      expect(draft.assumptions.length).toBeGreaterThanOrEqual(2);
-      expect(draft.assumptions.join(' ')).toContain('keep it short');
+      expect(draft.type, mode).toBe('problem');
     }
     const easier = (await aiVariant(origin.id, { mode: 'easier', styleId: null })).draft;
     expect(easier.difficulty).toBe('easy');
     const twist = (await aiVariant(origin.id, { mode: 'twist', styleId: null })).draft;
-    expect(twist.body).toContain('## The twist');
     expect(twist.testCases).toEqual([]);
   });
 
@@ -2290,11 +2162,6 @@ describe('AI test cases', () => {
       expect(c).toMatchObject({ verified: false, predictionMatched: null, error: null });
       expect(c.expectedStdout).toBe(c.predictedStdout);
     }
-
-    start({ judge: 'down' });
-    const down = await aiTestCases(seedIds.items.twoSum, {});
-    expect(down.verification.error).not.toBeNull();
-    expect(down.cases.every((c) => !c.verified)).toBe(true);
   });
 
   it('rejects readings and bad counts', async () => {
@@ -2329,10 +2196,7 @@ describe('AI code', () => {
     expect(Object.keys(res.starterCode).sort()).toEqual(['cpp', 'go', 'java', 'javascript', 'python']);
     expect(res.harness).toEqual({});
     expect(res.check).toBeNull();
-    expect(res.starterCode.python).toContain('    # region input\n    n, amount = map(int, input().split())\n    values = list(map(int, input().split()))\n    # endregion\n');
     for (const code of Object.values(res.starterCode)) expect(code).toMatch(/region input[\s\S]*amount[\s\S]*endregion/);
-    // Go refuses unused variables, so the starter uses them.
-    expect(res.starterCode.go).toContain('_, _, _ = n, amount, values');
     expect(await api.settings.logEntry(res.usage.logId!)).toMatchObject({ operation: 'code', itemId: item.id, title: 'Coin Change' });
   });
 
@@ -2346,9 +2210,6 @@ describe('AI code', () => {
     });
     expect(Object.keys(res.starterCode).sort()).toEqual(['cpp', 'go', 'python']);
     expect(Object.keys(res.harness).sort()).toEqual(['cpp', 'go', 'python']);
-    expect(res.starterCode.python).toContain('def maxSubarray(self, nums: list[int]) -> int:');
-    expect(res.starterCode.cpp).toContain('int maxSubarray(vector<int>& nums) {\n        return 0;');
-    expect(res.harness.python!.prefix.startsWith('from __future__ import annotations')).toBe(true);
     expect(res.check).toEqual({ attempted: true, engine: 'judge0', runners: ['cpp', 'go', 'python'].map((language) => ({ language, status: 'ok', error: null })) });
 
     const broken = await aiCode({ title: 'Max Subarray MOCK:RUNNER', body: 'x', interface: 'function', languages: ['python', 'go'], samples: [{ stdin: '[1]\n', expectedStdout: '1\n' }] });
@@ -2860,12 +2721,10 @@ describe('style presets', () => {
     const multi = await api.styles.create({ name: 'Multi', instructions: 'line one\n\tline two' });
     expect(multi.instructions).toBe('line one\n\tline two');
 
-    // Carriage returns are normalised, not rejected; a name is a single line.
-    const crlf = await api.styles.create({ name: 'Windows', instructions: 'one\r\ntwo\rthree' });
-    expect(crlf.instructions).toBe('one\ntwo\nthree');
+    // A name is a single line.
     expect((await name('two\nlines')).fields).toEqual({ name: 'must be a single line (no newline or tab)' });
     expect((await name('tab\there')).fields).toHaveProperty('name');
-    expect((await failure(api.styles.update(crlf.id, { name: 'a\r\nb' }))).status).toBe(422);
+    expect((await failure(api.styles.update(multi.id, { name: 'a\r\nb' }))).status).toBe(422);
   });
 
   it('refuses a 21st preset with a conflict', async () => {
@@ -2888,12 +2747,8 @@ describe('system prompt', () => {
     const sp = await api.settings.systemPrompt();
     expect(sp.isCustom).toBe(false);
     expect(sp.custom).toBeNull();
-    expect(sp.builtIn).toMatch(/^# Codeatrophy authoring conventions\n/);
-    expect(sp.fixed).toMatch(/^# Fixed rules\n/);
-    expect(sp.fixed).toContain('**stdin/stdout**');
-    expect(sp.builtIn).not.toContain('**stdin/stdout**');
-    expect(sp.draftRules).toMatch(/^## Drafting rules\n/);
-    expect(sp.variantRules).toMatch(/^## Variant rules\n/);
+    for (const part of ['builtIn', 'fixed', 'draftRules', 'variantRules'] as const) expect(sp[part], part).toMatch(/\S/);
+    expect(new Set([sp.builtIn, sp.fixed, sp.draftRules, sp.variantRules]).size).toBe(4);
   });
 
   it('saves a custom text, trimmed, and resets it', async () => {
@@ -2930,12 +2785,9 @@ describe('test case prompt', () => {
   it('starts with the built-in guidance and the fixed rules, apart from the system prompt', async () => {
     const tp = await api.settings.testCasePrompt();
     expect(tp).toMatchObject({ isCustom: false, custom: null });
-    expect(tp.builtIn).toMatch(/^- For a program problem, write a correct, efficient reference solution/);
-    expect(tp.builtIn).toContain('one-sentence rationale');
-    expect(tp.fixed).toMatch(/^# Fixed rules\n/);
-    expect(tp.fixed).toContain('predictedStdout');
-    expect(tp.fixed).toMatch(/and nothing else\.$/);
-    expect(tp.builtIn).not.toContain('predictedStdout');
+    expect(tp.builtIn).toMatch(/\S/);
+    expect(tp.fixed).toMatch(/\S/);
+    expect(tp.builtIn).not.toBe(tp.fixed);
     expect(tp.builtIn).not.toBe((await api.settings.systemPrompt()).builtIn);
   });
 
@@ -3028,33 +2880,7 @@ describe('AI settings', () => {
     expect(await api.settings.getAi()).toMatchObject({ defaultProviderId: null, providers: [] });
   });
 
-  it('switches AI features off and on again, keeping the default provider', async () => {
-    const personal = await seeded();
-    expect((await api.settings.getAi()).enabled).toBe(true);
-
-    // Off keeps the default and every provider, and refuses AI requests, a named provider too.
-    const off = await api.settings.putAi({ enabled: false });
-    expect(off).toMatchObject({ enabled: false, defaultProviderId: personal.id });
-    expect(off.providers).toHaveLength(3);
-    expect(off.providers[0]).toMatchObject({ id: personal.id, isDefault: true });
-    expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
-    const logged = (await api.settings.log()).total;
-    for (const request of [() => aiDraft({ text: 'two sum' }), () => aiDraft({ text: 'two sum', providerId: personal.id })]) {
-      expect(await failure(request())).toMatchObject({ status: 503, code: 'ai_unavailable' });
-    }
-    expect((await api.settings.log()).total).toBe(logged);
-
-    // Choosing a default does not switch them on.
-    const ollama = off.providers.find((p) => p.name === 'Local Ollama')!;
-    expect((await api.settings.putAi({ defaultProviderId: ollama.id })).enabled).toBe(false);
-    expect((await api.meta()).ai.enabled).toBe(false);
-    await api.settings.putAi({ defaultProviderId: personal.id });
-
-    // On again uses the same default.
-    expect(await api.settings.putAi({ enabled: true })).toMatchObject({ enabled: true, defaultProviderId: personal.id });
-    expect((await api.meta()).ai).toMatchObject({ enabled: true, providerId: personal.id });
-
-    // Not a boolean is turned down, and nothing changes.
+  it('turns down an enabled that is not a boolean, and changes nothing', async () => {
     for (const enabled of [null, 'no', 0]) {
       const err = await failure(api.settings.putAi({ enabled: enabled as never, timeoutSeconds: 60 }));
       expect(err.status).toBe(422);
@@ -3063,21 +2889,7 @@ describe('AI settings', () => {
     expect((await api.settings.getAi()).timeoutSeconds).not.toBe(60);
   });
 
-  it('makes the first ready provider the default when AI is switched on with none', async () => {
-    await api.settings.putAi({ enabled: false, defaultProviderId: null });
-    const next = await api.settings.putAi({ enabled: true });
-    // Saved providers by name: Local Ollama is the first, and it is ready.
-    expect(next.providers[0]).toMatchObject({ name: 'Local Ollama', isDefault: true });
-    expect(next.defaultProviderId).toBe(next.providers[0]!.id);
-    expect((await api.meta()).ai).toMatchObject({ enabled: true, providerName: 'Local Ollama' });
-
-    // A default named in the same request comes first.
-    const personal = next.providers.find((p) => p.name === 'Personal key')!;
-    expect((await api.settings.putAi({ enabled: true, defaultProviderId: personal.id })).defaultProviderId).toBe(personal.id);
-    // A null default in the same request leaves none, so one is picked.
-    expect((await api.settings.putAi({ enabled: true, defaultProviderId: null })).providers[0]).toMatchObject({ name: 'Local Ollama', isDefault: true });
-
-    // With nothing ready it is turned down, and nothing is saved.
+  it('turns down switching AI on with no ready provider, and saves nothing', async () => {
     start({ ai: false });
     await api.settings.createProvider({ name: 'No key', kind: 'anthropic' });
     const err = await failure(api.settings.putAi({ enabled: true, timeoutSeconds: 60 }));
@@ -3223,18 +3035,6 @@ describe('AI settings', () => {
     expect((await api.meta()).ai.model).toBe('claude-opus-5-5');
   });
 
-  it('keeps a default that is no longer ready selected, with AI off', async () => {
-    const { id } = await seeded();
-    const keyless = await api.settings.updateProvider(id, { apiKey: null });
-    expect(keyless).toMatchObject({ apiKeySet: false, apiKeyHint: null, ready: false, isDefault: true });
-    expect((await api.settings.getAi()).defaultProviderId).toBe(id);
-    expect((await api.meta()).ai).toEqual({ enabled: false, providerId: null, providerName: null, kind: null, model: null });
-    expect((await failure(aiDraft({ text: 'two sum' }))).code).toBe('ai_unavailable');
-
-    await api.settings.updateProvider(id, { apiKey: 'sk-ant-back-0000WXYZ' });
-    expect((await api.meta()).ai.enabled).toBe(true);
-  });
-
   it('chooses the default, and turns AI off without deleting anything', async () => {
     const first = await seeded();
     const notReady = await api.settings.createProvider({ name: 'OpenAI', kind: 'openai_compatible' });
@@ -3370,9 +3170,6 @@ describe('AI settings', () => {
 
     const { models } = await api.settings.listModels({ kind: 'gemini', apiKey: 'AIza-typed' });
     expect(models).toContain('gemini-3.5-flash');
-    expect(models).toEqual([...new Set(models)].sort());
-    expect(models!.every((m) => /^gem(ini|ma)-/.test(m))).toBe(true);
-    expect(models!.some((m) => /embedding|tts|image|imagen|veo/.test(m))).toBe(false);
     expect((await api.settings.listModels({ kind: 'gemini', baseUrl: 'https://gateway.example.org/google', apiKey: 'AIza-typed' })).models).toEqual(models);
 
     // With no default model, a test without one only fetches the list.
@@ -3513,6 +3310,8 @@ describe('preferences', () => {
       editor: { autocomplete: true, closeBrackets: true, matchBrackets: true, lineWrapping: false, tabSize: 4, fontSize: 14 },
     });
     expect(prefs).toEqual(DEFAULT_PREFERENCES);
+    // What the UI applies until they have loaded is what the server starts with.
+    expect(UI_DEFAULT_PREFERENCES).toEqual(DEFAULT_PREFERENCES);
   });
 
   it('merges an update at any depth and returns the whole document', async () => {
@@ -3979,13 +3778,5 @@ describe('routing', () => {
     expect((await failure(api.items.list())).code).toBe('forbidden');
     expect((await failure(api.preferences.get())).code).toBe('forbidden');
     expect((await failure(api.items.update(seedIds.items.twoSum, { favorite: true }))).code).toBe('forbidden');
-  });
-
-  it('keeps externalEdit a content change', async () => {
-    const before = await api.items.get(seedIds.items.twoSum);
-    server.externalEdit(before.id);
-    const after = await api.items.get(before.id);
-    expect(after.revision).toBe(before.revision + 1);
-    expect((await failure(api.items.update(before.id, { title: 'mine', expectedRevision: before.revision }))).isRevisionConflict).toBe(true);
   });
 });

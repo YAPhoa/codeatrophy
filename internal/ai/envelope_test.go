@@ -7,7 +7,7 @@ import (
 )
 
 var allBlocks = []string{BlockUserInput, BlockPreviousDraft, BlockOriginal, BlockProblem, BlockExistingSolution,
-	BlockInstruction, BlockStylePreset}
+	BlockInstruction, BlockStylePreset, BlockJudgeLanguages, BlockExistingCases}
 
 // attack returns text that tries every known way out of a block: plain and
 // guessed-nonce closing tags of every block name, mixed case, spaces, a
@@ -26,9 +26,10 @@ func attack(marker, leakedNonce string) string {
 }
 
 // checkContained parses the prompt's data blocks (tags carrying the
-// envelope's nonce) and fails if the marker appears anywhere outside a block,
-// if blocks are malformed, or if a block contains a live block tag.
-func checkContained(t *testing.T, label, prompt, nonce, marker string) {
+// envelope's nonce) and fails if blocks are malformed, if a live block tag
+// is left inside or outside a block, or, unless the text is trusted, if the
+// marker appears anywhere outside a block.
+func checkContained(t *testing.T, label, prompt, nonce, marker string, trusted bool) {
 	t.Helper()
 	if nonce == "" || strings.Count(prompt, nonce) == 0 {
 		t.Fatalf("%s: no nonce in prompt", label)
@@ -46,7 +47,10 @@ func checkContained(t *testing.T, label, prompt, nonce, marker string) {
 		}
 		rest = strings.Replace(rest, m[0], "", 1)
 	}
-	if strings.Contains(rest, marker) {
+	if blockTagRe.MatchString(rest) {
+		t.Errorf("%s: live block tag outside blocks: %q", label, blockTagRe.FindString(rest))
+	}
+	if !trusted && strings.Contains(rest, marker) {
 		i := strings.Index(rest, marker)
 		t.Errorf("%s: attacker text outside its block: …%s…", label, rest[max(0, i-80):min(len(rest), i+40)])
 	}
@@ -67,89 +71,93 @@ func nonceOf(t *testing.T, prompt string) string {
 	return m[1]
 }
 
-func TestDraftPromptSlotsCannotBreakOut(t *testing.T) {
-	leaked := nonceOf(t, func() string { s, u := DraftPrompt{Text: "x"}.Build(); return s + u }())
-	slots := map[string]func(a string) DraftPrompt{
-		"text":          func(a string) DraftPrompt { return DraftPrompt{Text: a} },
-		"instruction":   func(a string) DraftPrompt { return DraftPrompt{Text: "x", Instruction: a} },
-		"previousDraft": func(a string) DraftPrompt { return DraftPrompt{Text: "x", PreviousDraft: a} },
-		"style":         func(a string) DraftPrompt { return DraftPrompt{Text: "x", Style: &Style{Name: "n", Instructions: a}} },
-		"style name":    func(a string) DraftPrompt { return DraftPrompt{Text: "x", Style: &Style{Name: a, Instructions: "i"}} },
+// slot is one place where a prompt takes text it does not control.
+type slot struct {
+	name string
+	// build puts the text in the slot and returns the prompts.
+	build func(text string) (system, user string)
+	// trusted marks the user's own custom prompt text, which is sent outside
+	// the data blocks but must not open or close one.
+	trusted bool
+	// mapped marks a slot whose text is replaced by one of a set of known
+	// values, so that none of it reaches the prompt.
+	mapped bool
+}
+
+func promptSlots() []slot {
+	style := func(a string) *Style { return &Style{Name: "n", Instructions: a} }
+	draft := DraftPrompt{Text: "x"}
+	variant := VariantPrompt{Original: "{}"}
+	tc := TestCasesPrompt{Problem: "{}", Count: 3, Language: "python"}
+	code := CodePrompt{Problem: "{}", Languages: []string{"python"}}
+	guide := func(conventions string, st *Style) (string, string) { return AuthoringGuide(conventions, st), "" }
+	return []slot{
+		{name: "draft/text", build: with(draft, func(p *DraftPrompt, a string) { p.Text = a })},
+		{name: "draft/instruction", build: with(draft, func(p *DraftPrompt, a string) { p.Instruction = a })},
+		{name: "draft/previousDraft", build: with(draft, func(p *DraftPrompt, a string) { p.PreviousDraft = a })},
+		{name: "draft/style", build: with(draft, func(p *DraftPrompt, a string) { p.Style = style(a) })},
+		{name: "draft/style name", build: with(draft, func(p *DraftPrompt, a string) { p.Style = &Style{Name: a, Instructions: "i"} })},
+		{name: "draft/conventions", trusted: true, build: with(draft, func(p *DraftPrompt, a string) { p.Conventions, p.Style = a, style("i") })},
+
+		{name: "variant/original", build: with(variant, func(p *VariantPrompt, a string) { p.Original = a })},
+		{name: "variant/instruction", build: with(variant, func(p *VariantPrompt, a string) { p.Instruction = a })},
+		{name: "variant/previousDraft", build: with(variant, func(p *VariantPrompt, a string) { p.PreviousDraft = a })},
+		{name: "variant/style", build: with(variant, func(p *VariantPrompt, a string) { p.Style = style(a) })},
+		{name: "variant/mode", mapped: true, build: with(variant, func(p *VariantPrompt, a string) { p.Mode = a })},
+		{name: "variant/conventions", trusted: true, build: with(variant, func(p *VariantPrompt, a string) { p.Conventions, p.Style = a, style("i") })},
+
+		{name: "testcases/problem", build: with(tc, func(p *TestCasesPrompt, a string) { p.Problem = a })},
+		{name: "testcases/existingSolution", build: with(tc, func(p *TestCasesPrompt, a string) { p.ExistingSolution = a })},
+		{name: "testcases/existingCases", build: with(tc, func(p *TestCasesPrompt, a string) { p.ExistingCases = a })},
+		{name: "testcases/instruction", build: with(tc, func(p *TestCasesPrompt, a string) { p.Instruction = a })},
+		{name: "testcases/guidance", trusted: true, build: with(tc, func(p *TestCasesPrompt, a string) { p.Guidance, p.Instruction = a, "edge" })},
+
+		{name: "code/problem", build: with(code, func(p *CodePrompt, a string) { p.Problem = a })},
+		{name: "code/style", build: with(code, func(p *CodePrompt, a string) { p.Style = style(a) })},
+		{name: "code/conventions", trusted: true, build: with(code, func(p *CodePrompt, a string) { p.Conventions, p.Style = a, style("i") })},
+
+		{name: "guide/style", build: func(a string) (string, string) { return guide("", style(a)) }},
+		{name: "guide/style name", build: func(a string) (string, string) { return guide("", &Style{Name: a, Instructions: "i"}) }},
+		{name: "guide/conventions", trusted: true, build: func(a string) (string, string) { return guide(a, style("i")) }},
 	}
-	for name, mk := range slots {
-		marker := "INJECTED-" + strings.ReplaceAll(name, " ", "-")
-		sys, user := mk(attack(marker, leaked)).Build()
+}
+
+// builder is a prompt that Build turns into a system and a user prompt.
+type builder interface {
+	DraftPrompt | VariantPrompt | TestCasesPrompt | CodePrompt
+	Build() (system, user string)
+}
+
+// with returns a slot's build function: base, with set putting the text in.
+func with[P builder](base P, set func(p *P, text string)) func(string) (string, string) {
+	return func(text string) (string, string) {
+		p := base
+		set(&p, text)
+		return p.Build()
+	}
+}
+
+// No text in any slot can leave its block, or open or close one: not with
+// the tags of any block, and not with a nonce taken from an earlier prompt,
+// which the new prompt's nonce avoids. The user's own custom prompt is sent
+// outside the blocks, but is defanged and avoided by the nonce the same way.
+func TestPromptSlotsCannotBreakOut(t *testing.T) {
+	for _, sl := range promptSlots() {
+		s, u := sl.build("x")
+		leaked := nonceOf(t, s+u)
+		marker := "INJECTED-" + strings.NewReplacer("/", "-", " ", "-").Replace(sl.name)
+		sys, user := sl.build(attack(marker, leaked))
 		nonce := nonceOf(t, sys+user)
 		if nonce == leaked {
-			t.Fatalf("%s: a nonce present in the input was reused", name)
+			t.Errorf("%s: a nonce present in the input was reused", sl.name)
 		}
-		checkContained(t, "draft/"+name+"/system", sys, nonce, marker)
-		checkContained(t, "draft/"+name+"/user", user, nonce, marker)
-	}
-}
-
-func TestVariantPromptSlotsCannotBreakOut(t *testing.T) {
-	slots := map[string]func(a string) VariantPrompt{
-		"original":      func(a string) VariantPrompt { return VariantPrompt{Original: a} },
-		"instruction":   func(a string) VariantPrompt { return VariantPrompt{Original: "{}", Instruction: a} },
-		"previousDraft": func(a string) VariantPrompt { return VariantPrompt{Original: "{}", PreviousDraft: a} },
-		"style": func(a string) VariantPrompt {
-			return VariantPrompt{Original: "{}", Style: &Style{Name: "n", Instructions: a}}
-		},
-		"mode": func(a string) VariantPrompt { return VariantPrompt{Original: "{}", Mode: a} },
-	}
-	for name, mk := range slots {
-		marker := "INJECTED-" + name
-		sys, user := mk(attack(marker, "")).Build()
-		nonce := nonceOf(t, sys+user)
-		checkContained(t, "variant/"+name+"/system", sys, nonce, marker)
-		checkContained(t, "variant/"+name+"/user", user, nonce, marker)
-	}
-}
-
-func TestTestCasesPromptSlotsCannotBreakOut(t *testing.T) {
-	slots := map[string]func(a string) TestCasesPrompt{
-		"problem": func(a string) TestCasesPrompt { return TestCasesPrompt{Problem: a, Count: 3, Language: "python"} },
-		"existingSolution": func(a string) TestCasesPrompt {
-			return TestCasesPrompt{Problem: "{}", ExistingSolution: a, Count: 3, Language: "python"}
-		},
-		"instruction": func(a string) TestCasesPrompt {
-			return TestCasesPrompt{Problem: "{}", Instruction: a, Count: 3, Language: "python"}
-		},
-	}
-	for name, mk := range slots {
-		marker := "INJECTED-" + name
-		sys, user := mk(attack(marker, "")).Build()
-		nonce := nonceOf(t, user)
-		checkContained(t, "testcases/"+name+"/system", sys, nonce, marker)
-		checkContained(t, "testcases/"+name+"/user", user, nonce, marker)
-	}
-}
-
-func TestCodePromptSlotsCannotBreakOut(t *testing.T) {
-	slots := map[string]func(a string) CodePrompt{
-		"problem": func(a string) CodePrompt { return CodePrompt{Problem: a, Languages: []string{"python"}} },
-		"style": func(a string) CodePrompt {
-			return CodePrompt{Problem: "{}", Style: &Style{Name: "s", Instructions: a}, Languages: []string{"python"}}
-		},
-	}
-	for name, mk := range slots {
-		marker := "INJECTED-" + name
-		sys, user := mk(attack(marker, "")).Build()
-		nonce := nonceOf(t, user)
-		checkContained(t, "code/"+name+"/system", sys, nonce, marker)
-		checkContained(t, "code/"+name+"/user", user, nonce, marker)
-	}
-}
-
-func TestAuthoringGuideStyleCannotBreakOut(t *testing.T) {
-	for _, st := range []*Style{{Name: "n", Instructions: attack("INJECTED-guide", "")}, {Name: attack("INJECTED-name", ""), Instructions: "i"}} {
-		g := AuthoringGuide("", st)
-		marker := "INJECTED-guide"
-		if strings.Contains(st.Name, "INJECTED") {
-			marker = "INJECTED-name"
+		if in := strings.Contains(sys+user, marker); in == sl.mapped {
+			t.Errorf("%s: the text is in the prompt: %v, want %v", sl.name, in, !sl.mapped)
 		}
-		checkContained(t, "guide", g, nonceOf(t, g), marker)
+		checkContained(t, sl.name+"/system", sys, nonce, marker, sl.trusted)
+		if user != "" {
+			checkContained(t, sl.name+"/user", user, nonce, marker, sl.trusted)
+		}
 	}
 }
 

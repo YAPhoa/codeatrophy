@@ -37,6 +37,20 @@ func withToolchains(limit int) option {
 	return func(o *app.Options) { o.Engine = &toolchainEngine{Engine: o.Engine.(*judgetest.Engine), limit: limit} }
 }
 
+// withLanguages makes the fake engine offer more languages. They are set
+// before the app starts, since its health probe reads them.
+func withLanguages(ids ...string) option {
+	return func(o *app.Options) {
+		eng, ok := o.Engine.(*judgetest.Engine)
+		if !ok {
+			eng = o.Engine.(*toolchainEngine).Engine
+		}
+		for _, id := range ids {
+			eng.Langs = append(eng.Langs, judge.Language{ID: id, Name: id})
+		}
+	}
+}
+
 // harnessHandler runs a program built from lines: the first line that is a
 // judgetest.Script command decides the output, a line containing
 // COMPILE_ERROR fails to compile there and one containing RAISE fails at
@@ -124,7 +138,7 @@ func TestFunctionProblemItemRules(t *testing.T) {
 }
 
 func TestFunctionProblemSubmissions(t *testing.T) {
-	e := newEnv(t, withToolchains(0))
+	e := newEnv(t, withToolchains(0), withLanguages("java"))
 	e.engine.Handler = harnessHandler
 	it := e.functionProblem(t)
 
@@ -155,7 +169,6 @@ func TestFunctionProblemSubmissions(t *testing.T) {
 	}
 
 	// A language without a harness cannot be run.
-	e.engine.Langs = append(e.engine.Langs, judge.Language{ID: "java", Name: "Java"})
 	_, err := e.app.CreateSubmission(e.ctx, it.ID, decodeInto[app.SubmissionInput](t, `{"language":"java","source":"x","mode":"run"}`))
 	wantField(t, err, "language")
 	if !strings.Contains(app.AsError(err).Message, "it can be run in cpp, python") {
@@ -192,7 +205,7 @@ func TestProgramSizeLimit(t *testing.T) {
 }
 
 func TestFunctionProblemVerification(t *testing.T) {
-	e := newEnv(t, withToolchains(0))
+	e := newEnv(t, withToolchains(0), withLanguages("java"))
 	e.engine.Handler = harnessHandler
 	it := e.functionProblem(t)
 	_, err := e.app.VerifyTestCases(e.ctx, it.ID, false, "")
@@ -213,7 +226,6 @@ func TestFunctionProblemVerification(t *testing.T) {
 		t.Error("verification did not run inside the harness")
 	}
 	// A solution in a language without a harness is saved but cannot run.
-	e.engine.Langs = append(e.engine.Langs, judge.Language{ID: "java", Name: "Java"})
 	other := must(e.app.CreateSolution(e.ctx, it.ID, decodeInto[domain.ItemSolutionInput](t,
 		`{"name":"java","language":"java","source":"class Solution {}"}`)))
 	_, err = e.app.VerifyTestCases(e.ctx, it.ID, false, other.ID)
@@ -248,7 +260,7 @@ func TestDraftCheck(t *testing.T) {
 	e := newEnv(t, withToolchains(0))
 	e.enableAI(t)
 	e.engine.Handler = harnessHandler
-	res := must(newDraft(t, e, `{"text":"sum it","interfaceHint":"auto"}`, fnDraftJSON()))
+	res := must(draftWith(t, e, `{"text":"sum it","interfaceHint":"auto"}`, fnDraftJSON()))
 	p := res.Draft.Problem
 	// A Python prefix gets the future import a model forgot; unknown
 	// languages are dropped.
@@ -279,7 +291,7 @@ func TestDraftCheck(t *testing.T) {
 	broken := fnDraftJSON()
 	broken["problem"].(map[string]any)["harness"] = []map[string]string{{"language": "cpp", "prefix": "COMPILE_ERROR", "suffix": ""}}
 	broken["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "cpp", "source": "sum"}
-	c = must(newDraft(t, e, `{"text":"x"}`, broken)).Check
+	c = must(draftWith(t, e, `{"text":"x"}`, broken)).Check
 	if !c.Attempted || c.Passed != 0 || c.Error == nil || !strings.Contains(*c.Error, "does not compile") ||
 		!strings.Contains(*c.Error, "<runner prefix>:1:5") {
 		t.Errorf("compile error: %+v %v", c, *c.Error)
@@ -287,19 +299,19 @@ func TestDraftCheck(t *testing.T) {
 	// A reference solution in a language without a harness.
 	noRunner := fnDraftJSON()
 	noRunner["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "cpp", "source": "sum"}
-	c = must(newDraft(t, e, `{"text":"x"}`, noRunner)).Check
+	c = must(draftWith(t, e, `{"text":"x"}`, noRunner)).Check
 	if !c.Attempted || c.Error == nil || !strings.Contains(*c.Error, "no runner code") {
 		t.Errorf("no runner: %+v", c)
 	}
 	// No reference solution, or no test cases: nothing is attempted.
 	none := fnDraftJSON()
 	none["problem"].(map[string]any)["referenceSolution"] = nil
-	c = must(newDraft(t, e, `{"text":"x"}`, none)).Check
+	c = must(draftWith(t, e, `{"text":"x"}`, none)).Check
 	if c.Attempted || c.Engine != nil || c.Total != 2 || c.Error != nil {
 		t.Errorf("no reference: %+v", c)
 	}
 	// The interface hint is the interface, whatever the model chose.
-	res = must(newDraft(t, e, `{"text":"x","interfaceHint":"program"}`, fnDraftJSON()))
+	res = must(draftWith(t, e, `{"text":"x","interfaceHint":"program"}`, fnDraftJSON()))
 	if res.Draft.Problem.Interface != domain.InterfaceProgram || len(res.Draft.Problem.Harness) != 0 {
 		t.Errorf("program hint: %+v", res.Draft.Problem)
 	}
@@ -310,7 +322,7 @@ func TestDraftCheck(t *testing.T) {
 	wantField(t, err, "interfaceHint")
 	// An unreachable engine is reported, not an error.
 	e.engine.SetHealth(errors.New("down"))
-	res = must(newDraft(t, e, `{"text":"x"}`, fnDraftJSON()))
+	res = must(draftWith(t, e, `{"text":"x"}`, fnDraftJSON()))
 	if c := res.Check; !c.Attempted || c.Passed != 0 || c.Error == nil || !strings.Contains(*c.Error, "the judge engine failed: down") {
 		t.Errorf("engine down: %+v", c)
 	}
@@ -318,14 +330,14 @@ func TestDraftCheck(t *testing.T) {
 	// A reading has no check.
 	reading := draftJSON()
 	reading["type"] = "reading"
-	if res := must(newDraft(t, e, `{"text":"x"}`, reading)); res.Check != nil {
+	if res := must(draftWith(t, e, `{"text":"x"}`, reading)); res.Check != nil {
 		t.Errorf("reading: %+v", res.Check)
 	}
 
 	// Without an engine nothing is attempted.
 	ne := newEnv(t, withoutEngine())
 	ne.enableAI(t)
-	res = must(newDraft(t, ne, `{"text":"x"}`, fnDraftJSON()))
+	res = must(draftWith(t, ne, `{"text":"x"}`, fnDraftJSON()))
 	if c := res.Check; c == nil || c.Attempted || c.Engine != nil || c.Total != 2 || res.Draft.TestCases[0].Verified {
 		t.Errorf("no engine: %+v", c)
 	}
@@ -361,16 +373,11 @@ func TestVariantInterface(t *testing.T) {
 }
 
 func TestGenerateTestCasesForFunctionProblem(t *testing.T) {
-	e := newEnv(t, withToolchains(0))
+	e := newEnv(t, withToolchains(0), withLanguages("java"))
 	e.enableAI(t)
 	e.engine.Handler = harnessHandler
 	it := e.functionProblem(t)
-	e.ai.Respond = func(ai.GenerateRequest) (any, error) {
-		return map[string]any{
-			"referenceSolution": map[string]any{"language": "python", "source": "sum"},
-			"cases":             []map[string]any{{"name": "small", "rationale": "min", "stdin": "1 1", "predictedStdout": "2", "isSample": false}},
-		}, nil
-	}
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("1 1", "2"), nil }
 	res := must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1}`)))
 	if !res.Cases[0].Verified || res.Cases[0].ExpectedStdout != "2\n" {
 		t.Errorf("generated: %+v", res.Cases[0])
@@ -387,7 +394,6 @@ func TestGenerateTestCasesForFunctionProblem(t *testing.T) {
 	if !strings.Contains(string(b), "Only the solution part") {
 		t.Errorf("schema: %s", b)
 	}
-	e.engine.Langs = append(e.engine.Langs, judge.Language{ID: "java", Name: "Java"})
 	n := len(e.ai.Requests())
 	_, err := e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"language":"java"}`))
 	wantField(t, err, "language")
@@ -466,10 +472,9 @@ func TestSolutionOnlyProblemsTravelInBundles(t *testing.T) {
 }
 
 func TestDraftCheckRunsEveryRunner(t *testing.T) {
-	e := newEnv(t, withToolchains(0))
+	e := newEnv(t, withToolchains(0), withLanguages("javascript"))
 	e.enableAI(t)
 	e.engine.Handler = harnessHandler
-	e.engine.Langs = append(e.engine.Langs, judge.Language{ID: "javascript", Name: "JavaScript"})
 	d := fnDraftJSON()
 	p := d["problem"].(map[string]any)
 	p["starterCode"] = []map[string]string{
@@ -485,7 +490,7 @@ func TestDraftCheckRunsEveryRunner(t *testing.T) {
 		{"language": "java", "prefix": "", "suffix": ""},
 		{"language": "ruby", "prefix": "", "suffix": ""},
 	}
-	c := must(newDraft(t, e, `{"text":"x"}`, d)).Check
+	c := must(draftWith(t, e, `{"text":"x"}`, d)).Check
 	got := []string{}
 	for _, r := range c.Runners {
 		s := r.Language + ":" + r.Status
@@ -510,11 +515,11 @@ func TestDraftCheckRunsEveryRunner(t *testing.T) {
 	// A program problem, and a check that was not attempted, have none.
 	prog := draftJSON()
 	prog["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "python", "source": "sum"}
-	if c := must(newDraft(t, e, `{"text":"x"}`, prog)).Check; c.Runners == nil || len(c.Runners) != 0 {
+	if c := must(draftWith(t, e, `{"text":"x"}`, prog)).Check; c.Runners == nil || len(c.Runners) != 0 {
 		t.Errorf("program problem runners: %+v", c.Runners)
 	}
 	d["problem"].(map[string]any)["referenceSolution"] = nil
-	if c := must(newDraft(t, e, `{"text":"x"}`, d)).Check; c.Attempted || len(c.Runners) != 0 {
+	if c := must(draftWith(t, e, `{"text":"x"}`, d)).Check; c.Attempted || len(c.Runners) != 0 {
 		t.Errorf("not attempted: %+v", c)
 	}
 }

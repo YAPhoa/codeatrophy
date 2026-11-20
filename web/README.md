@@ -152,38 +152,21 @@ connected over MCP would), then save.
 
 ## Browser smoke tests
 
-`npm run test:e2e` runs a short Playwright suite (`e2e/smoke.spec.ts`) over
-the flows the product stands on: capture → draft → revise → save; the coding
-workspace with a judged submission, a hidden failing case and its panes; the
-submission history, which leaves runs out; the custom input kept across a
-reload; the runner rows and folded regions of the solve editor; completing a
-library name with its import;
-keeping an accepted submission as a solution and making it the reference;
-the last run a solution's card shows, until its code is edited;
-preferences taking effect; large test cases, from their preferences to the
-Test cases page; "Verify all" on a draft and on a saved problem; the pages of Settings; adding an AI provider
-(key → Refresh models → model → connection test → add → default; adding waits for a passed test of its server and key), a Google Gemini one among them;
-editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; filing selected items
-into a collection; the library's views, row verdicts and sort menu; and Import and Export as pages of Settings, reached from their old addresses too.
-`e2e/jobs.spec.ts` covers AI jobs and drafts: leaving a running capture,
-the jobs window and the Drafts count, a draft's edits through a reload,
-cancelling a job, and test cases and code that finish after their page was
-left. It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
-default writing style (`e2e/styles.spec.ts`), "Generate code" on the edit
-page of a problem (`e2e/generate-code.spec.ts`), and the system prompt and
-test case prompt, each edited only after a confirm, reset, and guarded when
-left unsaved (`e2e/system-prompt.spec.ts`), and Mermaid diagrams and
-`data:image` URLs in rendered Markdown (`e2e/markdown.spec.ts`), and the
-reader's text width, from its bar and from Settings, with the outline folding
-into the bar when the pane has no room for it beside the chosen width
-(`e2e/text-width.spec.ts`). It starts its own
-`dev:mock` server (port 5174, or `E2E_PORT`), so it needs no backend, AI
-provider or judge, and it fails on any page error or request to a third-party
-origin. The tests in `e2e/built` check how a reload paints and that a load at
-the mock's normal speed shows nothing as loading, which depend on the
-production build: they run as a second project against a build made with
-the mock and served by `vite preview` (port 5175, or `E2E_BUILT_PORT`), built
-afresh each run. It is separate from `npm test`.
+`npm run test:e2e` runs a Playwright suite (`e2e/`) against the mock. It
+starts its own `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no
+backend, AI provider or judge, and it fails on any page error or request to a
+third-party origin.
+
+| Spec | Covers |
+| --- | --- |
+| `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; a bundle exported and imported back; a server that refuses requests |
+| `jobs` | AI jobs and drafts: leaving a running job, the jobs window, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
+| `judge` | Each verdict and its panes; a judge that is down or missing |
+| `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
+| `library-*`, `tags`, `palette`, `select` | The library list, its filters, paging and sorting; the Tags page; the command palette; selects |
+| `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown; the reader's text width |
+| `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
+| `built/` | How a reload paints, judged on a production build (a second project, served by `vite preview` on port 5175, or `E2E_BUILT_PORT`, built afresh each run) |
 
 The first time, download the browser Playwright drives:
 
@@ -191,10 +174,12 @@ The first time, download the browser Playwright drives:
 npx playwright install chromium
 ```
 
-Keep the suite small and deterministic. It checks that the flows hold
-together; logic belongs in unit tests. Because the mock's state lives in the
-page, every test starts from the seed library, and navigation inside a test
-has to stay client-side (a reload resets the mock).
+Keep the suite small and deterministic: it checks that flows hold together,
+and logic belongs in unit tests. Every test starts from the seed library, and
+navigation stays client-side unless the test is about a reload (a reload
+resets the mock). Steer outcomes with the scenarios and `MOCK:*` markers
+above rather than with sleeps; `e2e/support.ts` has the shared helpers
+(`open`, `mockApi`, `writeCode`, …). It is separate from `npm test`.
 
 ## Structure
 

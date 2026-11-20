@@ -63,6 +63,37 @@ function find(options: Completion[], label: string): Completion | undefined {
   return options.find((o) => o.label === label);
 }
 
+describe('editor completion', () => {
+  it('offers words from the document in every language', async () => {
+    for (const language of ['python', 'cpp', 'java', 'go', 'rust', 'javascript', 'typescript', 'csharp', 'kotlin', 'ruby']) {
+      const offered = await complete(language, 'prefix_sums = 1\nother = pre');
+      expect(labels(offered), language).toContain('prefix_sums');
+    }
+  });
+
+  it('offers the language keywords next to the document words', async () => {
+    expect(labels(await complete('python', 'whi'))).toContain('while');
+    expect(labels(await complete('javascript', 'func'))).toContain('function');
+    expect(labels(await complete('go', 'fu'))).toContain('func');
+    expect(labels(await complete('cpp', 'vec'))).toContain('vector');
+    expect(labels(await complete('c', 'pri'))).toContain('printf');
+    expect(labels(await complete('java', 'Sys'))).toContain('System');
+    expect(labels(await complete('rust', 'prin'))).toContain('println');
+    expect(labels(await complete('kotlin', 'fu'))).toContain('fun');
+    expect(labels(await complete('ruby', 'de'))).toContain('def');
+  });
+
+  it('lists a word only once when the language and the document both have it', async () => {
+    const offered = labels(await complete('cpp', 'vector<int> a;\nvec'));
+    expect(offered.filter((label) => label === 'vector')).toHaveLength(1);
+  });
+
+  it('ranks document words below the language’s own suggestions', async () => {
+    const offered = await complete('cpp', 'int total_count = 0;\ntot');
+    expect(offered.find((o) => o.label === 'total_count')?.boost).toBe(-1);
+  });
+});
+
 describe('library completion: members after a qualifier', () => {
   it('lists a module’s members right after its qualifier, with a signature and a type', async () => {
     const heappush = find(await complete('python', 'import heapq\nheapq.'), 'heappush');
@@ -251,13 +282,14 @@ describe('library completion: after a runner prefix', () => {
 });
 
 describe('library completion: strings and comments', () => {
-  it('offers nothing inside a string or a comment', async () => {
+  it('offers nothing inside a string or a comment, keywords included', async () => {
     const cases: [string, string, string][] = [
       ['python', 'x = "heapq.', 'heappush'],
       ['python', '# deq', 'deque'],
       ['python', 'x = f"{1} heapq.', 'heappush'],
       ['cpp', 'auto s = "std::', 'vector'],
       ['cpp', '// priority_q', 'priority_queue'],
+      ['cpp', '// whi', 'while'],
       ['java', '// Math.', 'max'],
       ['java', 'String s = "ArrayL', 'ArrayList'],
       ['go', 'var s = "fmt.', 'Println'],

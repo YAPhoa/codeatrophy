@@ -1,0 +1,20 @@
+{
+  "id": "0193b2f0-2222-7000-8000-000000000001",
+  "type": "problem",
+  "title": "Add two numbers",
+  "summary": "",
+  "difficulty": "medium",
+  "tags": ["math"],
+  "source": { "url": null, "note": null },
+  "variantOf": null,
+  "createdAt": "2026-02-01T00:00:00Z",
+  "updatedAt": "2026-02-01T00:00:00Z",
+  "problem": {
+    "timeLimitMs": 1000,
+    "memoryLimitKb": 65536,
+    "compare": "tokens",
+    "starter": { "python": "starter/python.py" },
+    "interface": "function",
+    "harness": { "python": { "prefix": "harness/python-prefix.py", "suffix": "" } }
+  }
+}

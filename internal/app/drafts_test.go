@@ -68,7 +68,7 @@ func TestDraftGenerationArrivesWithoutAClient(t *testing.T) {
 	}
 	adopted := must(e.app.UpdateDraft(e.ctx, d.ID, patch(t,
 		`{"content":{"form":{"title":"Two Sum"}},"basedOn":1,"expectedRevision":2}`)))
-	if adopted.State != app.DraftReady && adopted.State != app.DraftEdited || adopted.BasedOn != 1 || !adopted.Job.PickedUp ||
+	if adopted.State != app.DraftReady || adopted.BasedOn != 1 || !adopted.Job.PickedUp ||
 		adopted.Revision != 3 || string(adopted.Content) != `{"form":{"title":"Two Sum"}}` {
 		t.Errorf("adopted: %+v %s", adopted.DraftSummary, adopted.Content)
 	}
@@ -154,6 +154,37 @@ func TestDraftCreateValidation(t *testing.T) {
 	}
 	_, err = e.app.ListDrafts(e.ctx, app.DraftQuery{Kind: "note"})
 	wantCode(t, err, app.CodeBadRequest)
+	_, err = e.app.GenerateDraft(e.ctx, "nope", json.RawMessage(`{"text":"x"}`))
+	wantCode(t, err, app.CodeNotFound)
+	_, err = e.app.RetryDraft(e.ctx, "nope")
+	wantCode(t, err, app.CodeNotFound)
+	_, err = e.app.SaveDraft(e.ctx, "nope", decodeInto[app.DraftSaveInput](t, `{"item":{"type":"reading","title":"T"}}`))
+	wantCode(t, err, app.CodeNotFound)
+}
+
+// A generation of an existing draft is refused, leaving the draft as it
+// was, when its request is invalid, AI features are off or too many jobs
+// are active.
+func TestGenerateDraftRefusals(t *testing.T) {
+	e := newEnv(t)
+	d, _ := e.newDraft(t, `{"kind":"capture","content":{"form":{}}}`)
+	_, err := e.app.GenerateDraft(e.ctx, d.ID, json.RawMessage(`{"text":"x"}`))
+	wantCode(t, err, app.CodeAIUnavailable)
+	e.enableAI(t)
+	_, err = e.app.GenerateDraft(e.ctx, d.ID, json.RawMessage(`{"text":""}`))
+	wantField(t, err, "text")
+	_, err = e.app.GenerateDraft(e.ctx, d.ID, json.RawMessage(`{"text":"x","origin":7}`))
+	wantField(t, err, "origin")
+	release, _ := e.hold()
+	defer close(release)
+	for range app.MaxActiveJobs {
+		must(e.app.StartAIJob(e.ctx, app.JobCode, "", json.RawMessage(codeBody)))
+	}
+	_, err = e.app.GenerateDraft(e.ctx, d.ID, json.RawMessage(`{"text":"x"}`))
+	wantCode(t, err, app.CodeConflict)
+	if got := must(e.app.GetDraft(e.ctx, d.ID)); got.Revision != d.Revision || got.Job != nil || got.Request != nil {
+		t.Errorf("a refused generation changed the draft: %+v %s", got.DraftSummary, got.Request)
+	}
 }
 
 // A failed generation leaves its error on the draft until it is retried;
@@ -173,6 +204,11 @@ func TestDraftFailureRetryAndRevise(t *testing.T) {
 	if failed.State != app.DraftFailed || failed.Error == nil || failed.Error.Code != app.CodeUpstream ||
 		failed.Generation != nil || failed.Title != "two sum" {
 		t.Fatalf("failed: %+v", failed.DraftSummary)
+	}
+	// Writing content over a failed generation clears its error.
+	edited := must(e.app.UpdateDraft(e.ctx, d.ID, patch(t, `{"content":{"form":{}}}`)))
+	if edited.State != app.DraftEdited || edited.Error != nil {
+		t.Errorf("content over a failure: %+v", edited.DraftSummary)
 	}
 	fail = false
 	retried := must(e.app.RetryDraft(e.ctx, d.ID))
@@ -199,6 +235,16 @@ func TestDraftFailureRetryAndRevise(t *testing.T) {
 	}
 	if !strings.Contains(e.ai.Last().User, "harder") {
 		t.Error("the revision's instruction was not sent")
+	}
+	// A dismissed job leaves the draft without one; it can still go.
+	if err := e.app.DismissAIJob(e.ctx, done.Job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := must(e.app.GetDraft(e.ctx, d.ID)); got.Job != nil || got.State != app.DraftReady {
+		t.Errorf("after dismissing its job: %+v", got.DraftSummary)
+	}
+	if err := e.app.DeleteDraft(e.ctx, d.ID); err != nil {
+		t.Errorf("deleting a draft whose job was dismissed: %v", err)
 	}
 }
 

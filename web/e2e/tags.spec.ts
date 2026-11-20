@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { choose, mockApi, mockItem, open } from './support';
 
 // The Tags page lists every tag with its item count, sorted from the column
 // heads (the sort in the URL). A tag outlives its last item, as an empty tag;
@@ -11,16 +11,10 @@ const names = (page: Page) => page.locator('.tags-table tbody tr td:first-child'
 const counts = (page: Page) => page.locator('.tags-table tbody tr td.num');
 const hideEmpty = (page: Page) => page.getByRole('checkbox', { name: 'Hide empty tags' });
 
-type Mock = {
-  db: { items: Map<string, { id: string; title: string; tags: string[]; revision: number }> };
-  fetch: (path: string, init?: RequestInit) => Promise<Response>;
-};
-
-/** Run `change` in the page, where it may change the mock library through its API, before the Tags page first loads its tags. */
+/** Run `change`, which may change the mock library through its API, before the Tags page first loads its tags. */
 async function beforeTagsLoad(page: Page, change: () => Promise<void>) {
   await open(page, '/settings');
-  await page.waitForFunction(() => '__codeatrophyMock' in window);
-  await page.evaluate(change);
+  await change();
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Tags/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tags' })).toBeVisible();
 }
@@ -117,14 +111,8 @@ test('tags: empty tags are hidden until "Hide empty tags" is unticked, which is 
 test('tags: a tag stays, empty, when its last item drops it', async ({ page }) => {
   // "stack" is only on Valid Parentheses.
   await beforeTagsLoad(page, async () => {
-    const mock = (window as unknown as { __codeatrophyMock: Mock }).__codeatrophyMock;
-    const it = [...mock.db.items.values()].find((i) => i.title === 'Valid Parentheses')!;
-    const res = await mock.fetch(`/api/v1/items/${it.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tags: it.tags.filter((t) => t !== 'stack'), expectedRevision: it.revision }),
-    });
-    if (!res.ok) throw new Error(await res.text());
+    const it = await mockItem(page, 'Valid Parentheses');
+    await mockApi(page, `/items/${it.id}`, { method: 'PATCH', body: { tags: it.tags.filter((t) => t !== 'stack'), expectedRevision: it.revision } });
   });
   await expect(names(page).first()).toHaveText('algorithms');
   await expect(names(page)).not.toContainText(['stack']);
@@ -136,14 +124,8 @@ test('tags: a tag stays, empty, when its last item drops it', async ({ page }) =
 
 test('tags: when every tag is empty and hidden, the table says so', async ({ page }) => {
   await beforeTagsLoad(page, async () => {
-    const mock = (window as unknown as { __codeatrophyMock: Mock }).__codeatrophyMock;
-    const items = [...mock.db.items.values()];
-    const res = await mock.fetch('/api/v1/items/bulk', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ids: items.map((i) => i.id), action: 'removeTags', tags: [...new Set(items.flatMap((i) => i.tags))] }),
-    });
-    if (!res.ok) throw new Error(await res.text());
+    const { items } = await mockApi<{ items: { id: string; tags: string[] }[] }>(page, '/items?limit=100');
+    await mockApi(page, '/items/bulk', { method: 'POST', body: { ids: items.map((i) => i.id), action: 'removeTags', tags: [...new Set(items.flatMap((i) => i.tags))] } });
   });
   await expect(page.locator('.tags-table tbody')).toHaveText('All tags are empty and hidden.');
   await hideEmpty(page).uncheck();
@@ -170,12 +152,23 @@ test('tags: deleting a tag, after the confirmation, removes it for good', async 
   await page.getByRole('dialog').getByRole('button', { name: 'Delete tag' }).click();
   await expect(page.getByText('Deleted the tag “stack”')).toBeVisible();
   await expect(names(page)).not.toContainText(['stack']);
-  const listed = await page.evaluate(async () => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (path: string) => Promise<Response> } }).__codeatrophyMock;
-    const { items } = (await (await mock.fetch('/api/v1/tags')).json()) as { items: { name: string }[] };
-    return items.map((t) => t.name);
-  });
+  const listed = (await mockApi<{ items: { name: string }[] }>(page, '/tags')).items.map((t) => t.name);
   expect(listed).not.toContain('trie');
   expect(listed).not.toContain('stack');
   expect(listed).toContain('backtracking');
+});
+
+test('tags: merging a tag into another moves its items there, and it goes', async ({ page }) => {
+  // "stack" is only on Valid Parentheses, which is not tagged "dp".
+  await open(page, '/tags');
+  const dp = page.locator('.tags-table tr', { has: page.locator('td:first-child', { hasText: /^dp$/ }) });
+  const before = Number(await dp.locator('td.num').textContent());
+  await page.getByRole('button', { name: 'Merge stack into another tag' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Merge “stack” into…' });
+  await choose(dialog.getByRole('combobox', { name: 'Target tag' }), /^dp \(/);
+  await dialog.getByRole('button', { name: 'Merge' }).click();
+  await expect(page.getByText('Merged “stack” into “dp” (')).toBeVisible();
+  await expect(names(page)).not.toContainText(['stack']);
+  await expect(dp.locator('td.num')).toHaveText(String(before + 1));
+  expect((await mockItem(page, 'Valid Parentheses')).tags).toContain('dp');
 });

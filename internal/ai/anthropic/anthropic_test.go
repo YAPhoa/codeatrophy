@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,11 +14,21 @@ import (
 	"time"
 
 	"codeatrophy/internal/ai"
+	"codeatrophy/internal/ai/aitest"
 )
 
 const testKey = "sk-ant-test-0000-secret"
 
-func sse(w http.ResponseWriter, text, stopReason string) {
+// usage is the token counts a stream reports: those of message_start, and
+// the cumulative ones of the final message_delta.
+type usage struct{ start, end map[string]any }
+
+// sse streams a message with text that stops for stopReason, reporting u, or
+// 12 input and 7 output tokens when u is nil.
+func sse(w http.ResponseWriter, text, stopReason string, u *usage) {
+	if u == nil {
+		u = &usage{start: map[string]any{"input_tokens": 12, "output_tokens": 1}, end: map[string]any{"output_tokens": 7}}
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	ev := func(name string, v any) {
 		b, _ := json.Marshal(v)
@@ -25,14 +36,14 @@ func sse(w http.ResponseWriter, text, stopReason string) {
 	}
 	ev("message_start", map[string]any{"type": "message_start", "message": map[string]any{
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": []any{},
-		"stop_reason": nil, "usage": map[string]any{"input_tokens": 12, "output_tokens": 1}}})
+		"stop_reason": nil, "usage": u.start}})
 	ev("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
 	half := len(text) / 2
 	for _, part := range []string{text[:half], text[half:]} {
 		ev("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": part}})
 	}
 	ev("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
-	ev("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason}, "usage": map[string]any{"output_tokens": 7}})
+	ev("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason}, "usage": u.end})
 	ev("message_stop", map[string]any{"type": "message_stop"})
 }
 
@@ -56,7 +67,7 @@ func TestGenerateStreamsStructuredOutput(t *testing.T) {
 		headers = r.Header.Clone()
 		b, _ := io.ReadAll(r.Body)
 		json.Unmarshal(b, &body)
-		sse(w, `{"ok": true}`, "end_turn")
+		sse(w, `{"ok": true}`, "end_turn", nil)
 	}))
 	defer srv.Close()
 	p, err := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
@@ -174,7 +185,7 @@ func TestFallbackIsLearnedFromTheAPI(t *testing.T) {
 			return
 		}
 		without.Add(1)
-		sse(w, `{"ok": true}`, "end_turn")
+		sse(w, `{"ok": true}`, "end_turn", nil)
 	}))
 	defer srv.Close()
 	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "some-model"})
@@ -215,17 +226,10 @@ func TestBadRequestIsNotBlamedOnTheFallback(t *testing.T) {
 	}
 }
 
-func TestStopReasonsAndErrors(t *testing.T) {
-	var status int
+func TestStopReasons(t *testing.T) {
 	var stop string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if status != 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(status)
-			fmt.Fprintf(w, `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key %s"}}`, testKey)
-			return
-		}
-		sse(w, `{"ok": true}`, stop)
+		sse(w, `{"ok": true}`, stop, nil)
 	}))
 	defer srv.Close()
 	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
@@ -241,22 +245,115 @@ func TestStopReasonsAndErrors(t *testing.T) {
 	if err := gen(); err == nil || !strings.Contains(err.Error(), "cut off") {
 		t.Errorf("max_tokens: %v", err)
 	}
-	for _, s := range []int{401, 404, 429, 400} {
-		status = s
-		err := gen()
-		if err == nil {
-			t.Fatalf("%d: expected an error", s)
-		}
-		if strings.Contains(err.Error(), testKey) {
-			t.Errorf("%d: the key leaked: %v", s, err)
-		}
-		var pe *ai.Error
-		if !asError(err, &pe) || pe.Status != s {
-			t.Errorf("%d: %T %v", s, err, err)
-		}
-	}
 	if _, err := New(ai.Config{}); err == nil {
 		t.Error("a key is required")
+	}
+}
+
+// Each error status is described in words of its own, with the service's
+// message but never the key. Rate limits, server errors and overload are
+// retried twice before they are reported; other statuses are not retried.
+func TestErrorStatuses(t *testing.T) {
+	var status, attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.WriteHeader(404)
+			return
+		}
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// A retry is sent at once, so that the test does not wait out the
+		// SDK's backoff.
+		w.Header().Set("Retry-After-Ms", "0")
+		w.WriteHeader(int(status.Load()))
+		fmt.Fprintf(w, `{"type":"error","error":{"type":"x","message":"denied for %s"}}`, testKey)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "some-model"})
+	for _, c := range []struct {
+		status, attempts int32
+		want             string
+	}{
+		{400, 1, "the Anthropic API returned HTTP 400: denied for [redacted]"},
+		{401, 1, "the Anthropic API rejected the API key"},
+		{403, 1, "the API key is not permitted to use this model or feature: denied for [redacted]"},
+		{404, 1, `model "some-model" was not found: denied for [redacted]`},
+		{429, 3, "the Anthropic API rate limit was reached; try again later: denied for [redacted]"},
+		{500, 3, "the Anthropic API returned HTTP 500: denied for [redacted]"},
+		{529, 3, "the Anthropic API is overloaded; try again later: denied for [redacted]"},
+	} {
+		status.Store(c.status)
+		attempts.Store(0)
+		_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+		var pe *ai.Error
+		if !asError(err, &pe) || err.Error() != c.want || pe.Status != int(c.status) {
+			t.Errorf("%d: %T %v", c.status, err, err)
+		}
+		if attempts.Load() != c.attempts {
+			t.Errorf("%d: %d attempts, want %d", c.status, attempts.Load(), c.attempts)
+		}
+	}
+}
+
+// A rate limit that clears is retried into an answer.
+func TestRateLimitIsRetried(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			w.WriteHeader(404)
+			return
+		}
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After-Ms", "0")
+			w.WriteHeader(429)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)
+			return
+		}
+		sse(w, `{"ok": true}`, "end_turn", nil)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
+	resp, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+	if err != nil || string(resp.JSON) != `{"ok": true}` || attempts.Load() != 2 {
+		t.Errorf("after %d attempts: %s %v", attempts.Load(), resp.JSON, err)
+	}
+}
+
+// failingTransport fails every request with an error that names the key, as
+// a proxy might, and counts the requests to the Messages API.
+type failingTransport struct{ messages atomic.Int32 }
+
+func (f *failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/messages") {
+		f.messages.Add(1)
+	}
+	return nil, errors.New("proxy refused " + testKey)
+}
+
+// A request that gets no response says why, without the key, after the
+// SDK's retries; a cancelled one says it was cancelled, without trying.
+func TestGenerateWithoutAResponse(t *testing.T) {
+	tr := &failingTransport{}
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: "http://anthropic.invalid", HTTPClient: &http.Client{Transport: tr}})
+	_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
+	var pe *ai.Error
+	if !asError(err, &pe) || err.Error() != "could not reach the Anthropic API: proxy refused [redacted]" || pe.Status != 0 {
+		t.Errorf("unreachable: %v", err)
+	}
+	if tr.messages.Load() != 3 {
+		t.Errorf("%d attempts, want 3", tr.messages.Load())
+	}
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+	defer srv.Close()
+	p, _ = New(ai.Config{APIKey: testKey, BaseURL: srv.URL})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = p.Generate(ctx, ai.GenerateRequest{Schema: ai.PingSchema()})
+	if !asError(err, &pe) || err.Error() != "the request was cancelled" || pe.Status != 0 || calls.Load() != 0 {
+		t.Errorf("cancelled: %v after %d calls", err, calls.Load())
 	}
 }
 
@@ -294,7 +391,7 @@ func TestMaxTokensFitsTheModel(t *testing.T) {
 				}
 				b, _ := io.ReadAll(r.Body)
 				json.Unmarshal(b, &body)
-				sse(w, `{"ok": true}`, "end_turn")
+				sse(w, `{"ok": true}`, "end_turn", nil)
 			}))
 			defer srv.Close()
 			p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Model: "old"})
@@ -333,20 +430,21 @@ func TestTimeoutBoundsRetries(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(done)
-	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Timeout: 400 * time.Millisecond})
+	p, _ := New(ai.Config{APIKey: testKey, BaseURL: srv.URL, Timeout: 300 * time.Millisecond})
 	start := time.Now()
 	_, err := p.Generate(context.Background(), ai.GenerateRequest{Schema: ai.PingSchema()})
-	if err == nil {
-		t.Fatal("expected a timeout")
+	var pe *ai.Error
+	if !asError(err, &pe) || err.Error() != "the Anthropic API did not respond in time" || pe.Status != 0 {
+		t.Errorf("error: %v", err)
 	}
-	if d := time.Since(start); d > 1200*time.Millisecond {
-		t.Errorf("Generate took %s with a 400ms timeout (%d attempts)", d.Round(time.Millisecond), attempts.Load())
+	// The server holds every attempt until the client gives up, so a
+	// per-attempt timeout would retry, and no deadline would never return.
+	if d := time.Since(start); d > 5*time.Second || attempts.Load() > 1 {
+		t.Errorf("Generate took %s with a 300ms timeout (%d attempts)", d.Round(time.Millisecond), attempts.Load())
 	}
 }
 
 func TestListModels(t *testing.T) {
-	var status int
-	var huge bool
 	var queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
@@ -357,22 +455,11 @@ func TestListModels(t *testing.T) {
 			t.Errorf("API key header missing: %v", r.Header)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if status != 0 {
-			w.WriteHeader(status)
-			fmt.Fprintf(w, `{"type":"error","error":{"type":"x","message":"bad key %s"}}`, testKey)
-			return
-		}
 		queries = append(queries, r.URL.RawQuery)
-		model := func(id string) string {
-			return `{"id":"` + id + `","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z"}`
-		}
-		switch {
-		case huge:
-			fmt.Fprintf(w, `{"data":[%s],"has_more":false}`, model(strings.Repeat("x", ai.MaxModelListBytes)))
-		case r.URL.Query().Get("after_id") == "":
-			fmt.Fprintf(w, `{"data":[%s,%s],"has_more":true,"first_id":"claude-b","last_id":"claude-a"}`, model("claude-b"), model("claude-a"))
-		default:
-			fmt.Fprintf(w, `{"data":[%s],"has_more":false,"first_id":"claude-c","last_id":"claude-c"}`, model("claude-c"))
+		if r.URL.Query().Get("after_id") == "" {
+			fmt.Fprintf(w, `{"data":[%s,%s],"has_more":true,"first_id":"claude-b","last_id":"claude-a"}`, modelEntry("claude-b"), modelEntry("claude-a"))
+		} else {
+			fmt.Fprintf(w, `{"data":[%s],"has_more":false,"first_id":"claude-c","last_id":"claude-c"}`, modelEntry("claude-c"))
 		}
 	}))
 	defer srv.Close()
@@ -385,17 +472,36 @@ func TestListModels(t *testing.T) {
 	if len(queries) != 2 || !strings.Contains(queries[0], "limit=1000") || !strings.Contains(queries[1], "after_id=claude-a") {
 		t.Errorf("queries: %v", queries)
 	}
-	for s, want := range map[int]string{401: "rejected the API key", 404: "does not list", 500: "HTTP 500"} {
-		status = s
-		_, err := lister.ListModels(context.Background())
-		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), testKey) {
-			t.Errorf("%d: %v", s, err)
-		}
-	}
-	status, huge = 0, true
-	if _, err := lister.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Errorf("too large: %v", err)
-	}
+}
+
+func modelEntry(id string) string {
+	return `{"id":"` + id + `","type":"model","display_name":"x","created_at":"2026-01-01T00:00:00Z"}`
+}
+
+// The failures every lister reports the same way.
+func TestListModelsFailures(t *testing.T) {
+	aitest.CheckModelLister(t, aitest.ModelListService{
+		Path: "/v1/models",
+		Page: func(ids []string) string {
+			models := make([]string, len(ids))
+			for i, id := range ids {
+				models[i] = modelEntry(id)
+			}
+			return `{"data":[` + strings.Join(models, ",") + `],"has_more":false}`
+		},
+		// A 500 is retried once; at once, so that the test does not wait.
+		ErrorHeader: http.Header{"Retry-After-Ms": {"0"}},
+		Key:         testKey,
+		New: func(t *testing.T, base string) ai.ModelLister {
+			p, err := New(ai.Config{APIKey: testKey, BaseURL: base})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return p.(ai.ModelLister)
+		},
+		Unreachable: "could not list the Anthropic API's models: ",
+		Cancelled:   "the request was cancelled",
+	})
 }
 
 // The usage the API reports: input without the cache's, cache reads and
@@ -407,21 +513,10 @@ func TestGenerateReportsTheTokenBreakdown(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		ev := func(name string, v any) {
-			b, _ := json.Marshal(v)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
-		}
-		ev("message_start", map[string]any{"type": "message_start", "message": map[string]any{
-			"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": []any{},
-			"stop_reason": nil, "usage": map[string]any{"input_tokens": 20, "output_tokens": 1,
-				"cache_read_input_tokens": 300, "cache_creation_input_tokens": 40}}})
-		ev("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
-		ev("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": `{"ok": true}`}})
-		ev("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
-		ev("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"},
-			"usage": map[string]any{"output_tokens": 90, "output_tokens_details": map[string]any{"thinking_tokens": 60}}})
-		ev("message_stop", map[string]any{"type": "message_stop"})
+		sse(w, `{"ok": true}`, "end_turn", &usage{
+			start: map[string]any{"input_tokens": 20, "output_tokens": 1, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 40},
+			end:   map[string]any{"output_tokens": 90, "output_tokens_details": map[string]any{"thinking_tokens": 60}},
+		})
 	}))
 	defer srv.Close()
 	p, err := New(ai.Config{APIKey: testKey, BaseURL: srv.URL})

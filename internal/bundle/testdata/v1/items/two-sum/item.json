@@ -1,0 +1,18 @@
+{
+  "id": "0193b2f0-1111-7000-8000-000000000001",
+  "type": "problem",
+  "title": "Two Sum",
+  "summary": "Find two indices whose values add up to a target.",
+  "difficulty": "easy",
+  "tags": ["hash-map", "array"],
+  "source": { "url": "https://example.com/two-sum", "note": null },
+  "variantOf": null,
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-02T03:04:05Z",
+  "problem": {
+    "timeLimitMs": 2000,
+    "memoryLimitKb": 262144,
+    "compare": "exact",
+    "starter": { "python": "starter/python.py", "cpp": "starter/main.cpp" }
+  }
+}
