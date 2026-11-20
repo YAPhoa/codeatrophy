@@ -5,6 +5,8 @@ readings. Keep the problems you want to practise and the notes you want to
 keep in one place, organise them with collections and tags, and solve problems
 in the browser against your own test cases.
 
+![Drafting a problem with AI from a one-line note, reviewing the draft, and saving it to the library](docs/images/drafting-demo.gif)
+
 - **Problems and readings** in Markdown (with math), with tags, collections,
   difficulty and personal progress.
 - **A judge built in.** Problems carry stdin/stdout test cases; "Run" and
