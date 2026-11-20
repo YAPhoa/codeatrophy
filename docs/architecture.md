@@ -430,12 +430,22 @@ The two features built on it are provider independent:
   link to its origin, so families of related problems stay connected. A
   variant keeps the original's interface unless asked otherwise, and gets
   the same reference solution and check as a draft.
+- **Code generation.** For a problem as it stands in the editor, saved or
+  not, the model writes the code of the languages the editor lists: a
+  program problem's starter code, which reads the documented input inside
+  the folded region and leaves the solving to the user, or a function
+  problem's stubs and harnesses. The request carries the problem (title,
+  statement, interface, samples), so it reads nothing from the library and
+  works on unsaved edits; it uses the conventions and the style preset as a
+  draft does, and only the languages asked for come back. For a function
+  problem the server then proves each runner on the first sample as the
+  draft check does. Nothing is saved; the code goes into the form.
 
 ### Accounting for AI requests
 
 Every request the server sends to a provider — draft, variant, test
-generation, and the generation step of a connection test of a saved or
-environment provider — goes through one application function. When the
+generation, code generation, and the generation step of a connection test of
+a saved or environment provider — goes through one application function. When the
 request ends (answered, failed, cancelled, or answered with something the
 server cannot use) it writes, in one transaction:
 
@@ -508,8 +518,8 @@ The design limits what such text can achieve rather than trying to detect it:
 - **The model has no tools and no authority.** A generation call returns one
   JSON document. It cannot read the library, call the judge, or reach the
   network, so there is nothing for injected text to steer it into doing.
-- **Nothing is saved without review.** Every generated draft, variant and
-  test-case proposal is shown to the user first.
+- **Nothing is saved without review.** Every generated draft, variant,
+  test-case proposal and piece of generated code is shown to the user first.
 - **Output is schema-checked** server-side before it is returned.
 - **Untrusted text is passed as data**, in delimited blocks in the user turn,
   never concatenated into the system prompt. That includes stubs and

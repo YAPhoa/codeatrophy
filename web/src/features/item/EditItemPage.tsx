@@ -30,6 +30,7 @@ import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { useCollectionActions } from '../collections/CollectionActions';
+import { useGenerateCode } from './GenerateCode';
 import { ItemEditor } from './ItemEditor';
 import { ItemMissing } from './ItemPage';
 
@@ -98,6 +99,8 @@ function EditForm({ initial }: { initial: Item }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  // Generated code goes into the form, and is saved with it.
+  const code = useGenerateCode({ form, setForm, itemId: base.id });
 
   const baseForm = useMemo(() => formFromItem(base), [base]);
   const dirty = useMemo(() => changedFields(baseForm, form).length > 0, [baseForm, form]);
@@ -201,6 +204,9 @@ function EditForm({ initial }: { initial: Item }) {
         judgeLanguages={meta.data?.judge.languages.map((l) => l.id) ?? []}
         onCreateCollection={() => collectionActions.create(null, (c) => setForm((f) => ({ ...f, collectionIds: [...f.collectionIds, c.id] })))}
         disabled={saving}
+        codeTools={code.tools}
+        codeNotice={code.notice}
+        runnerResults={code.runnerResults}
       />
 
       {leaveGuard.dialog}

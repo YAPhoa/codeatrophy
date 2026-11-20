@@ -58,6 +58,32 @@ func TestConventionsAndRules(t *testing.T) {
 	}
 }
 
+// Code generation asks for exactly the languages given, and for a harness
+// only for a function problem.
+func TestCodePromptAndSchema(t *testing.T) {
+	system, user := CodePrompt{Problem: "{}", Languages: []string{"python", "go"}}.Build()
+	if !strings.Contains(system, "inside the folded input region") || strings.Contains(system, `the stub ("starterCode")`) ||
+		!strings.Contains(user, "the starter code of this program problem in these languages: python, go.") ||
+		!strings.HasSuffix(system, jsonOnly) {
+		t.Errorf("program prompt:\n%s\n%s", system, user)
+	}
+	system, user = CodePrompt{Problem: "{}", Function: true, Languages: []string{"java"}}.Build()
+	if !strings.Contains(system, `the stub ("starterCode") and the harness`) || strings.Contains(system, "inside the folded input region") ||
+		!strings.Contains(user, "the stub and the harness of this function problem in these languages: java.") {
+		t.Errorf("function prompt:\n%s\n%s", system, user)
+	}
+	for function, want := range map[bool]string{false: "language,starterCode", true: "language,prefix,starterCode,suffix"} {
+		s := CodeSchema([]string{"python", "go"}, function)
+		code := s["properties"].(map[string]any)["code"].(map[string]any)
+		item := code["items"].(map[string]any)
+		lang := item["properties"].(map[string]any)["language"].(map[string]any)
+		if strings.Join(item["required"].([]string), ",") != want || strings.Join(lang["enum"].([]string), ",") != "python,go" ||
+			strings.Join(s["required"].([]string), ",") != "code" {
+			t.Errorf("schema (function %v): %v", function, s)
+		}
+	}
+}
+
 // Large test cases are asked for in every generation that wants them, as
 // many as wanted, and the rules read well for one as for several.
 func TestLargeCaseRulesAndSchema(t *testing.T) {

@@ -17,7 +17,7 @@ const SYSTEM =
 
 const request = (content: string, schema: string) => ({ system: SYSTEM, messages: [{ role: 'user', content }], schema, maxOutputTokens: 64000 });
 
-const SCHEMA: Record<AiOperation, string> = { draft: 'item_draft', variant: 'item_draft', testcases: 'test_cases', test: 'none' };
+const SCHEMA: Record<AiOperation, string> = { draft: 'item_draft', variant: 'item_draft', testcases: 'test_cases', code: 'code', test: 'none' };
 
 type Seeded = Pick<AiLogDetail, 'operation' | 'itemId' | 'title' | 'status' | 'error' | 'durationMs' | 'usage' | 'request' | 'response'> & { truncated?: boolean; model?: string };
 

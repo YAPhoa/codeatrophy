@@ -669,6 +669,47 @@ export interface AiTestCasesResponse {
   cases: ProposedTestCase[];
 }
 
+/** A sample test case of a problem whose code is generated. */
+export interface CodeSample {
+  stdin: string;
+  expectedStdout: string;
+}
+
+/** Body of `POST /ai/code`: a problem as it stands in an editor, saved or not. */
+export interface AiCodeRequest {
+  /** The saved item the problem is, if any; it only labels the request in the AI log. */
+  itemId?: string | null;
+  title: string;
+  body: string;
+  interface: ProblemInterface;
+  /** Code is written for these languages and no others. */
+  languages: string[];
+  /** The first is what a "solution only" problem's runners are checked on. */
+  samples?: CodeSample[];
+  /** Omitted → the default preset; `null` → built-in conventions only; an id → that preset. */
+  styleId?: string | null;
+  providerId?: string | null;
+}
+
+/** Whether each generated runner ran its stub on the first sample. */
+export interface CodeCheck {
+  /** `false` without a judge engine or a sample. */
+  attempted: boolean;
+  engine: string | null;
+  runners: RunnerCheck[];
+}
+
+export interface AiCodeResponse {
+  /** Only languages that were asked for; one the model wrote nothing usable for is missing. */
+  starterCode: Record<string, string>;
+  /** The same languages for a `function` problem, `{}` for a `program` problem. */
+  harness: Record<string, HarnessCode>;
+  /** `null` for a `program` problem. */
+  check: CodeCheck | null;
+  style: AppliedStyle | null;
+  usage: GenerationUsage;
+}
+
 // ---- Style presets ---------------------------------------------------------
 
 /** The user's own standing instructions for how generated items are written. */
@@ -765,7 +806,7 @@ export interface AiProviderUsage {
   lastUsedAt: string | null;
 }
 
-export type AiOperation = 'draft' | 'variant' | 'testcases' | 'test';
+export type AiOperation = 'draft' | 'variant' | 'testcases' | 'code' | 'test';
 
 /** One request the server sent to an AI provider. */
 export interface AiLogEntry {

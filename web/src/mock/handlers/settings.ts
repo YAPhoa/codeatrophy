@@ -365,7 +365,7 @@ async function listModels(db: MockDb, req: Req) {
 
 // ---- AI activity log -----------------------------------------------------------
 
-const LOG_OPERATIONS = ['draft', 'variant', 'testcases', 'test'] as const;
+const LOG_OPERATIONS = ['draft', 'variant', 'testcases', 'code', 'test'] as const;
 const LOG_STATUSES = ['ok', 'failed', 'cancelled'] as const;
 
 /**

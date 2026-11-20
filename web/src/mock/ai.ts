@@ -786,7 +786,7 @@ export function checkDraft(db: MockDb, draft: ItemDraft, mismatch = false): Draf
  * language the engine does not offer, or one without starter code, is
  * skipped, and so is everything when the engine cannot be reached.
  */
-function checkRunners(draft: ItemDraft, engineDown: boolean): RunnerCheck[] {
+export function checkRunners(draft: ItemDraft, engineDown: boolean): RunnerCheck[] {
   const problem = draft.problem;
   if (!problem || problem.interface !== 'function') return [];
   return Object.keys(problem.harness)

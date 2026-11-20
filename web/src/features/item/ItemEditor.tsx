@@ -56,6 +56,11 @@ interface ItemEditorProps {
   /** Controls placed by the Test cases heading, and what they have to say below it. */
   caseTools?: ReactNode;
   caseNotice?: ReactNode;
+  /** The same for the code section, placed before "Add language". */
+  codeTools?: ReactNode;
+  codeNotice?: ReactNode;
+  /** What was found out about the runners otherwise than by `check`, by language; it takes the place of the check's. */
+  runnerResults?: ReadonlyMap<string, RunnerCheck>;
 }
 
 const INTERFACE_OPTIONS: { value: ProblemInterface; label: string }[] = [
@@ -120,6 +125,9 @@ export function ItemEditor({
   checkStale = false,
   caseTools,
   caseNotice,
+  codeTools,
+  codeNotice,
+  runnerResults,
 }: ItemEditorProps) {
   const set = <K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => onChange({ ...form, [key]: value });
   const toast = useToast();
@@ -170,7 +178,7 @@ export function ItemEditor({
   const [runnerOpen, setRunnerOpen] = useState(false);
   const runner = form.harness[activeStarter] ?? NO_RUNNER;
   const runnerEmpty = runner.prefix.trim() === '' && runner.suffix.trim() === '';
-  const runnerChecked = runnerChecks(check, checkStale);
+  const runnerChecked = runnerResults ?? runnerChecks(check, checkStale);
   const activeCheck = runnerChecked.get(activeStarter);
   const runnerFailed = activeCheck?.status === 'failed' ? activeCheck : null;
   const setRunner = (change: Partial<HarnessCode>) => set('harness', { ...form.harness, [activeStarter]: { ...runner, ...change } });
@@ -313,6 +321,7 @@ export function ItemEditor({
               </h2>
               <Segmented size="sm" label="What you write" value={form.interface} onChange={(v) => set('interface', v)} options={INTERFACE_OPTIONS} />
               <span className="spacer" />
+              {codeTools}
               <MenuButton
                 size="sm"
                 icon={<Plus size={14} />}
@@ -330,6 +339,7 @@ export function ItemEditor({
                 Add language
               </MenuButton>
             </div>
+            {codeNotice}
             {errors.code && (
               <div className="field-error" role="alert">
                 {errors.code}

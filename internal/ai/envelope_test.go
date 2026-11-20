@@ -126,6 +126,22 @@ func TestTestCasesPromptSlotsCannotBreakOut(t *testing.T) {
 	}
 }
 
+func TestCodePromptSlotsCannotBreakOut(t *testing.T) {
+	slots := map[string]func(a string) CodePrompt{
+		"problem": func(a string) CodePrompt { return CodePrompt{Problem: a, Languages: []string{"python"}} },
+		"style": func(a string) CodePrompt {
+			return CodePrompt{Problem: "{}", Style: &Style{Name: "s", Instructions: a}, Languages: []string{"python"}}
+		},
+	}
+	for name, mk := range slots {
+		marker := "INJECTED-" + name
+		sys, user := mk(attack(marker, "")).Build()
+		nonce := nonceOf(t, user)
+		checkContained(t, "code/"+name+"/system", sys, nonce, marker)
+		checkContained(t, "code/"+name+"/user", user, nonce, marker)
+	}
+}
+
 func TestAuthoringGuideStyleCannotBreakOut(t *testing.T) {
 	for _, st := range []*Style{{Name: "n", Instructions: attack("INJECTED-guide", "")}, {Name: attack("INJECTED-name", ""), Instructions: "i"}} {
 		g := AuthoringGuide("", st)

@@ -49,6 +49,10 @@ func builtinPrompts() string {
 	s, u = TestCasesPrompt{Problem: "{}", ExistingCases: "--- a\n1\n", Function: true, Count: 2, Language: "go",
 		ExistingSolution: "x", Instruction: "edge", Toolchains: tools, Large: LargeCases{Count: 1, MaxBytes: 100}}.Build()
 	add("testcases full", s, u)
+	s, u = CodePrompt{Problem: "{}", Languages: []string{"python", "cpp"}}.Build()
+	add("code plain", s, u)
+	s, u = CodePrompt{Style: style, Problem: `{"title":"t"}`, Function: true, Languages: []string{"go"}, Toolchains: tools}.Build()
+	add("code full", s, u)
 	add("guide plain", AuthoringGuide("", nil), "")
 	add("guide style", AuthoringGuide("", style), "")
 	env := NewEnvelope(GuideTexts("", style)...)
@@ -126,10 +130,11 @@ func TestCustomConventionsReplaceTheEditableOnes(t *testing.T) {
 	style := &Style{Name: "Terse", Instructions: "Short statements."}
 	draft, _ := DraftPrompt{Conventions: custom, Style: style, Text: "x"}.Build()
 	variant, _ := VariantPrompt{Conventions: custom, Style: style, Original: "{}", Mode: "similar"}.Build()
+	code, _ := CodePrompt{Conventions: custom, Style: style, Problem: "{}", Languages: []string{"python"}}.Build()
 	guide := AuthoringGuide(custom, style)
 	env := NewEnvelope(GuideTexts(custom, style)...)
 	guideIn := AuthoringGuideIn(env, custom, style)
-	for name, p := range map[string]string{"draft": draft, "variant": variant, "guide": guide, "guide in": guideIn} {
+	for name, p := range map[string]string{"draft": draft, "variant": variant, "code": code, "guide": guide, "guide in": guideIn} {
 		if !strings.Contains(p, custom+"\n\n"+FixedConventions+"\n## Style preferences") {
 			t.Errorf("%s: the custom text, then the fixed rules, then the style:\n%s", name, p)
 		}
@@ -147,6 +152,9 @@ func TestCustomConventionsReplaceTheEditableOnes(t *testing.T) {
 	}
 	if !strings.Contains(variant, VariantRules()) || !strings.HasSuffix(variant, jsonOnly) {
 		t.Error("variant lost its rules")
+	}
+	if !strings.Contains(code, "## Code rules") || !strings.HasSuffix(code, jsonOnly) {
+		t.Error("code generation lost its rules")
 	}
 	if !strings.Contains(guide, "## Working with the Codeatrophy tools") {
 		t.Error("guide lost the tool guide")

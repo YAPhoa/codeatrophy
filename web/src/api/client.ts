@@ -4,6 +4,8 @@
 // and turns any non-2xx response (or transport failure) into an `ApiError`.
 
 import type {
+  AiCodeRequest,
+  AiCodeResponse,
   AiProvider,
   AiProviderInput,
   AiProviderPatch,
@@ -314,6 +316,7 @@ export const api = {
       request<DraftResponse>('POST', `/items/${enc(itemId)}/ai/variant`, { body, signal }),
     testCases: (itemId: string, body: AiTestCasesRequest, signal?: AbortSignal) =>
       request<AiTestCasesResponse>('POST', `/items/${enc(itemId)}/ai/testcases`, { body, signal }),
+    code: (body: AiCodeRequest, signal?: AbortSignal) => request<AiCodeResponse>('POST', '/ai/code', { body, signal }),
   },
 
   styles: {

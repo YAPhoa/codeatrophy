@@ -1,7 +1,8 @@
 // The AI endpoints. They never write to the library.
 
-import type { AppliedStyle, DraftCheck, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
-import { applyStyle, breakRunner, checkDraft, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface } from '../ai';
+import type { AppliedStyle, CodeCheck, HarnessCode, CodeSample, DraftCheck, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
+import { applyStyle, breakRunner, checkDraft, checkRunners, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface } from '../ai';
+import { writeCode } from '../code';
 import type { MockDb, StoredAiProvider } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
 import type { Handler, Req } from '../http';
@@ -88,7 +89,7 @@ function providerFor(db: MockDb, named: StoredAiProvider | null): StoredAiProvid
 /** One request to the provider, as the activity log names it. */
 interface Call {
   provider: StoredAiProvider;
-  operation: 'draft' | 'variant' | 'testcases';
+  operation: 'draft' | 'variant' | 'testcases' | 'code';
   itemId: string | null;
   /** The label of its log entry, when the item is known beforehand. */
   title: string | null;
@@ -327,10 +328,101 @@ async function testCases(db: MockDb, req: Req) {
   return ok({ ...proposal, usage });
 }
 
+/** An optional text field; anything but a string or null is a `422`. */
+function parseText(raw: Record<string, unknown>, field: string, v: Validator): string {
+  const value = raw[field];
+  if (value == null) return '';
+  if (typeof value !== 'string') {
+    v.add(field, 'must be a string');
+    return '';
+  }
+  return normaliseText(value);
+}
+
+/** The sample cases a code request shows the model; the first is what the runners are checked on. */
+function parseSamples(raw: Record<string, unknown>, v: Validator): CodeSample[] {
+  const value = raw.samples ?? [];
+  if (!Array.isArray(value)) {
+    v.add('samples', 'must be an array');
+    return [];
+  }
+  if (value.length > LIMITS.maxTestCasesPerItem) v.add('samples', `at most ${LIMITS.maxTestCasesPerItem} test cases`);
+  return value.flatMap((s: unknown, i): CodeSample[] => {
+    if (!isRecord(s) || (s.stdin != null && typeof s.stdin !== 'string') || (s.expectedStdout != null && typeof s.expectedStdout !== 'string')) {
+      v.add(`samples.${i}`, 'must have a string stdin and expectedStdout');
+      return [];
+    }
+    const sample = { stdin: (s.stdin as string | undefined) ?? '', expectedStdout: (s.expectedStdout as string | undefined) ?? '' };
+    if (byteLength(sample.stdin) > LIMITS.maxTestDataBytes || byteLength(sample.expectedStdout) > LIMITS.maxTestDataBytes) {
+      v.add(`samples.${i}`, `stdin and expectedStdout must each be at most ${LIMITS.maxTestDataBytes} bytes`);
+    }
+    return [sample];
+  });
+}
+
+/** The runners of generated code, each stub run unchanged on the first sample; nothing runs without a judge or a sample. */
+function checkCode(db: MockDb, code: { starterCode: Record<string, string>; harness: Record<string, HarnessCode> }, samples: readonly CodeSample[]): CodeCheck {
+  const judge = db.options.judge;
+  if (judge === 'none' || samples.length === 0) return { attempted: false, engine: null, runners: [] };
+  const problem = { interface: 'function' as const, timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens' as const, ...code, referenceSolution: null };
+  const draft: ItemDraft = { type: 'problem', title: '', summary: '', body: '', difficulty: null, tags: [], problem, testCases: [], assumptions: [] };
+  return { attempted: true, engine: 'judge0', runners: checkRunners(draft, judge === 'down') };
+}
+
+async function code(db: MockDb, req: Req) {
+  const raw = objectBody(req);
+  const v = new Validator();
+  const title = parseText(raw, 'title', v).trim();
+  const body = parseText(raw, 'body', v);
+  if (charCount(title) > LIMITS.maxTitleChars) v.add('title', atMostChars(LIMITS.maxTitleChars));
+  if (byteLength(body) > LIMITS.maxTextBytes) v.add('body', `must be at most ${LIMITS.maxTextBytes} bytes`);
+  if (title === '' && body.trim() === '') v.add('body', 'is required');
+  const face = raw.interface ?? 'program';
+  if (face !== 'program' && face !== 'function') v.add('interface', 'must be program or function');
+  const languages: string[] = [];
+  if (!Array.isArray(raw.languages)) v.add('languages', raw.languages == null ? 'is required' : 'must be an array');
+  else if (raw.languages.length === 0) v.add('languages', 'is required');
+  else
+    for (const l of raw.languages as unknown[]) {
+      if (!isLanguage(l)) v.add('languages', `unknown language ${JSON.stringify(l)}`);
+      else if (!languages.includes(l)) languages.push(l);
+    }
+  const samples = parseSamples(raw, v);
+  const itemId = raw.itemId ?? null;
+  if (itemId !== null && (typeof itemId !== 'string' || !db.items.has(itemId))) v.add('itemId', 'item does not exist');
+  const named = parseProvider(db, raw, v);
+  v.check();
+  const style = resolveStyle(db, raw);
+  const provider = providerFor(db, named);
+
+  await sleep(db.delay('aiTests'));
+  const item = itemId === null ? null : db.getItem(itemId as string);
+  const shown = samples.slice(0, 5).map((s) => promptCase({ name: '', ...s })).join('\n---\n');
+  const call: Call = {
+    provider,
+    operation: 'code',
+    itemId: item?.id ?? null,
+    title: title || item?.title || null,
+    schema: 'code',
+    content: said(`Write the ${face === 'function' ? 'stub and the runner' : 'starter code'} of this problem in ${languages.join(', ')}.\n\n# ${title}\n\n${body}\n\nSamples:\n${shown || '(none)'}`, null, null, style),
+  };
+  failIfAsked(db, call, title, body);
+  let written = writeCode({ title, body, face: face as 'program' | 'function', languages, samples });
+  if (face === 'function' && asks(RUNNER_MARKER, title, body)) {
+    // As a model can leave one runner broken; the pretend judge reads the marker as a compile error.
+    const broken = breakRunner({ type: 'problem', title, summary: '', body, difficulty: null, tags: [], testCases: [], assumptions: [],
+      problem: { interface: 'function', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', ...written, referenceSolution: null } });
+    written = { starterCode: broken.problem!.starterCode, harness: broken.problem!.harness };
+  }
+  const usage = spend(db, call, { code: languages.filter((l) => l in written.starterCode).map((l) => ({ language: l, starterCode: written.starterCode[l], ...written.harness[l] })) });
+  return ok({ ...written, check: face === 'function' ? checkCode(db, written, samples) : null, style: applied(style), usage });
+}
+
 export function aiRoutes(db: MockDb): [string, string, Handler][] {
   return [
     ['POST', '/ai/draft', (req) => draft(db, req)],
     ['POST', '/items/:id/ai/variant', (req) => variant(db, req)],
     ['POST', '/items/:id/ai/testcases', (req) => testCases(db, req)],
+    ['POST', '/ai/code', (req) => code(db, req)],
   ];
 }

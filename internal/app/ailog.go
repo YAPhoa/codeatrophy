@@ -64,7 +64,7 @@ type AILogPage struct {
 }
 
 var (
-	logOperations = []string{"draft", "variant", "testcases", "test"}
+	logOperations = []string{"draft", "variant", "testcases", "code", "test"}
 	logStatuses   = []string{"ok", "failed", "cancelled"}
 )
 

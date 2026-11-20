@@ -1954,6 +1954,62 @@ describe('AI test cases', () => {
   });
 });
 
+describe('AI code', () => {
+  const coinChange = async () => {
+    const item = await api.items.get(seedIds.items.coinChange);
+    const cases = (await api.testCases.list(item.id)).items.filter((c) => c.isSample);
+    return { item, samples: cases.map((c) => ({ stdin: c.stdin, expectedStdout: c.expectedStdout })) };
+  };
+
+  it('writes starter code that reads the documented input, for the languages asked for only', async () => {
+    const { item, samples } = await coinChange();
+    const res = await api.ai.code({ itemId: item.id, title: item.title, body: item.body, interface: 'program', languages: ['python', 'cpp', 'java', 'javascript', 'go', 'kotlin'], samples });
+    expect(Object.keys(res.starterCode).sort()).toEqual(['cpp', 'go', 'java', 'javascript', 'python']);
+    expect(res.harness).toEqual({});
+    expect(res.check).toBeNull();
+    expect(res.starterCode.python).toContain('    # region input\n    n, amount = map(int, input().split())\n    values = list(map(int, input().split()))\n    # endregion\n');
+    for (const code of Object.values(res.starterCode)) expect(code).toMatch(/region input[\s\S]*amount[\s\S]*endregion/);
+    // Go refuses unused variables, so the starter uses them.
+    expect(res.starterCode.go).toContain('_, _, _ = n, amount, values');
+    expect(await api.settings.logEntry(res.usage.logId!)).toMatchObject({ operation: 'code', itemId: item.id, title: 'Coin Change' });
+  });
+
+  it('writes stubs and runners for a solution-only problem, and checks the runners on the first sample', async () => {
+    const res = await api.ai.code({
+      title: 'Max Subarray',
+      body: '## Input\n\n- `nums`, an array of integers.',
+      interface: 'function',
+      languages: ['python', 'cpp', 'go', 'rust'],
+      samples: [{ stdin: '[3,-1,4]\n', expectedStdout: '6\n' }],
+    });
+    expect(Object.keys(res.starterCode).sort()).toEqual(['cpp', 'go', 'python']);
+    expect(Object.keys(res.harness).sort()).toEqual(['cpp', 'go', 'python']);
+    expect(res.starterCode.python).toContain('def maxSubarray(self, nums: list[int]) -> int:');
+    expect(res.starterCode.cpp).toContain('int maxSubarray(vector<int>& nums) {\n        return 0;');
+    expect(res.harness.python!.prefix.startsWith('from __future__ import annotations')).toBe(true);
+    expect(res.check).toEqual({ attempted: true, engine: 'judge0', runners: ['cpp', 'go', 'python'].map((language) => ({ language, status: 'ok', error: null })) });
+
+    const broken = await api.ai.code({ title: 'Max Subarray MOCK:RUNNER', body: 'x', interface: 'function', languages: ['python', 'go'], samples: [{ stdin: '[1]\n', expectedStdout: '1\n' }] });
+    expect(broken.check!.runners.map((r) => r.status)).toEqual(['failed', 'ok']);
+    // Without a sample, or a judge, nothing runs.
+    expect((await api.ai.code({ title: 'x', body: '', interface: 'function', languages: ['python'] })).check).toEqual({ attempted: false, engine: null, runners: [] });
+    start({ judge: 'none' });
+    expect((await api.ai.code({ title: 'x', body: '', interface: 'function', languages: ['python'], samples: [{ stdin: '1\n', expectedStdout: '1\n' }] })).check!.attempted).toBe(false);
+  });
+
+  it('validates the request, and fails like the other generations', async () => {
+    const form = { title: 'T', body: 'b', interface: 'program' as const, languages: ['python'] };
+    expect((await failure(api.ai.code({ ...form, languages: [] }))).fields).toEqual({ languages: 'is required' });
+    expect((await failure(api.ai.code({ ...form, languages: ['cobol'] }))).fields).toHaveProperty('languages');
+    expect((await failure(api.ai.code({ ...form, title: ' ', body: '' }))).fields).toEqual({ body: 'is required' });
+    expect((await failure(api.ai.code({ ...form, itemId: 'nope' }))).fields).toEqual({ itemId: 'item does not exist' });
+    expect((await failure(api.ai.code({ ...form, interface: 'api' as never }))).fields).toHaveProperty('interface');
+    expect((await failure(api.ai.code({ ...form, body: 'MOCK:FAIL' }))).status).toBe(502);
+    start(optionsFromFlags(['no-ai', 'instant']));
+    expect((await failure(api.ai.code(form))).code).toBe('ai_unavailable');
+  });
+});
+
 describe('choosing the provider of a request', () => {
   const providers = async () => {
     const { providers: list } = await api.settings.getAi();

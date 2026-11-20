@@ -1019,8 +1019,8 @@ reasoning where the provider says so; `cacheReadTokens` and
 prompt cache, counted in addition to `inputTokens`. `logId` is the entry in
 the [AI activity log](#ai-activity-log) (`null` if it could not be written).
 Every AI endpoint that generates (`/ai/draft`, `/items/{id}/ai/variant`,
-`/items/{id}/ai/testcases`) returns `usage`, and the server's own log gets
-the same figures, never the content.
+`/items/{id}/ai/testcases`, `/ai/code`) returns `usage`, and the server's own
+log gets the same figures, never the content.
 
 For a problem the model also writes a reference solution
 (`problem.referenceSolution`, `null` if it gave none; for a `function`
@@ -1183,6 +1183,83 @@ passing `origin: "ai"`, each case's `verified` flag, and the
 `largeCases` reports on the [large test cases](#large-test-cases): one entry
 for each the request asked for, `[]` when it asked for none.
 
+### `POST /ai/code`
+
+Write the code of a problem's languages: for a `program` problem the starter
+code, and for a `function` problem the stub and the harness of each. The
+problem is given in the request, as it stands in an editor, so it need not
+be saved, and the request reads nothing from the library.
+
+```json
+{
+  "itemId": "...",
+  "title": "Coin Change",
+  "body": "## Problem\n\n...\n\n## Input\n\n...",
+  "interface": "program",
+  "languages": ["python", "cpp", "java"],
+  "samples": [ { "stdin": "3 11\n1 2 5\n", "expectedStdout": "3\n" } ],
+  "styleId": "...",
+  "providerId": null
+}
+```
+
+- `languages` — required, at least one known language id; repeats are
+  ignored. Code is written for these and no others.
+- `interface` — `program` (default) or `function`.
+- `title` and `body` — the problem's title (at most
+  `limits.maxTitleChars`) and statement (at most `limits.maxTextBytes`); at
+  least one of them must not be blank. The statement's input and output
+  format is what the code follows.
+- `samples` — optional sample test cases (at most
+  `limits.maxTestCasesPerItem`, each `stdin` and `expectedStdout` at most
+  `limits.maxTestDataBytes`). The model is shown the first five, one larger
+  than a few kilobytes by its size only. For a `function` problem they show
+  the input the harness reads, and the first one is what the runners are
+  checked on.
+- `itemId` — optional: the saved item the problem is, which only labels the
+  request in the [AI activity log](#ai-activity-log); it must exist (`422`).
+  Its stored content is not used.
+- `styleId` — optional; the [style preset](#choosing-a-preset-for-a-generation)
+  to write in, as for a draft.
+- `providerId` — optional; the [provider](#ai) to use instead of the default.
+
+The prompt carries the authoring conventions (or a
+[custom system prompt](#system-prompt) with the fixed rules) as a draft's
+does: the stdin/stdout contract, the folded input region of a program's
+starter code, the stub, prefix and suffix of a function problem, and the
+judge's language versions.
+
+Response:
+
+```json
+{
+  "starterCode": { "python": "import sys\n\n\ndef main() -> None:\n    # region input\n    ..." },
+  "harness": {},
+  "check": null,
+  "style": null,
+  "usage": { "logId": "...", "model": "claude-haiku-5-5", "durationMs": 14200, "inputTokens": 3100, "outputTokens": 2400, "reasoningTokens": null, "cacheReadTokens": 0, "cacheWriteTokens": 0 }
+}
+```
+
+- `starterCode` has an entry for each language the model wrote usable code
+  for, and only for languages that were asked for: one it left out, or wrote
+  without starter code or over `limits.maxSourceBytes`, is missing. With no
+  usable entry at all the answer is `502 upstream_error`.
+- `harness` has the same languages for a `function` problem, `{}` for a
+  `program` problem. A Python prefix without
+  `from __future__ import annotations` gets it added, as in a draft.
+- `check` is `null` for a `program` problem. For a `function` problem it
+  proves the runners as a [draft's check](#post-aidraft) does:
+  `{ "attempted": true, "engine": "judge0", "runners": [RunnerCheck] }`, one
+  entry per language in language order, each language's stub run unchanged
+  in its harness on the first sample. `attempted` is `false` (with
+  `engine: null` without an engine, and `runners: []`) when there is no
+  judge engine or no sample. The check stops after 50 seconds.
+- `style` and `usage` are as for [`POST /ai/draft`](#post-aidraft).
+
+Nothing is stored: the client puts the code into its form, and saves it with
+the item.
+
 ### Large test cases
 
 A model can write small inputs by hand but not one near a problem's upper
@@ -1328,8 +1405,8 @@ A provider is of one of three kinds:
 
 - `usage` is what this instance has spent through the provider: every request
   the server sent to the service on its behalf — drafts, variants, test
-  generation, and the generation step of a connection test — counted when it
-  ends. `failed` is the part of `requests` that returned no usable answer,
+  generation, code generation, and the generation step of a connection
+  test — counted when it ends. `failed` is the part of `requests` that returned no usable answer,
   cancelled ones included; the token sums are the figures the service
   reported (a request without figures adds nothing to them), and
   `inputTokens` here is every input token it processed, cache reads and
@@ -1600,12 +1677,13 @@ up afterwards.
 }
 ```
 
-- `operation` — `draft`, `variant`, `testcases` or `test` (a connection
-  test).
-- `itemId` is the item the request was about (`null` for a new draft and for
-  a test); `title` is a short label fixed when the entry is written — the
-  item's title (for a variant, the original's), or the title of the draft
-  that came back — or `null`. An entry outlives its item.
+- `operation` — `draft`, `variant`, `testcases`, `code` or `test` (a
+  connection test).
+- `itemId` is the item the request was about (`null` for a new draft, for a
+  test, and for code generation without an `itemId`); `title` is a short
+  label fixed when the entry is written — the item's title (for a variant,
+  the original's; for code generation, the title in the request), or the
+  title of the draft that came back — or `null`. An entry outlives its item.
 - `providerName`, `kind` and `model` are as they were at the time.
 - `status` — `ok`, `failed` (with `error`) or `cancelled` (the client went
   away).
@@ -1712,7 +1790,8 @@ They are independent of the AI provider and remain when it changes.
 
 ### Choosing a preset for a generation
 
-`POST /ai/draft` and `POST /items/{id}/ai/variant` accept a `styleId` field:
+`POST /ai/draft`, `POST /items/{id}/ai/variant` and `POST /ai/code` accept a
+`styleId` field:
 
 | `styleId` | Style applied |
 | --- | --- |
@@ -1720,7 +1799,7 @@ They are independent of the AI provider and remain when it changes.
 | `null` | None — built-in conventions only |
 | a preset id | That preset; unknown id is `422` |
 
-Both responses carry, next to `draft`, the preset that was actually applied:
+Their responses carry the preset that was actually applied:
 `"style": { "id": "...", "name": "LeetCode style" }`, or `"style": null`.
 Presets do not apply to `POST /items/{id}/ai/testcases`.
 
@@ -1776,8 +1855,8 @@ judge's languages in the user turn.
   rejected. Violations are `422 validation_failed` and nothing is saved; the
   text is never truncated. Saving `builtIn` unchanged removes the custom
   text instead, as `DELETE` does.
-- A custom text applies to `POST /ai/draft`, `POST /items/{id}/ai/variant`
-  and the MCP server's authoring guide (instructions, resource and prompts),
+- A custom text applies to `POST /ai/draft`, `POST /items/{id}/ai/variant`,
+  `POST /ai/code` and the MCP server's authoring guide (instructions, resource and prompts),
   from the next request on. Test generation has rules of its own and does
   not use the conventions; their editable part is the separate
   [test case prompt](#test-case-prompt). A saved text stays as it is when a

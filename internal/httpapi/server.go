@@ -124,6 +124,7 @@ func (s *Server) routes() {
 	s.handle("POST /ai/draft", s.aiDraft)
 	s.handle("POST /items/{id}/ai/variant", s.aiVariant)
 	s.handle("POST /items/{id}/ai/testcases", s.aiTestCases)
+	s.handle("POST /ai/code", s.aiCode)
 
 	s.handle("GET /settings/ai", s.getAISettings)
 	s.handle("PUT /settings/ai", s.putAISettings)
@@ -784,6 +785,19 @@ func (s *Server) aiTestCases(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	res, err := s.app.GenerateTestCases(r.Context(), r.PathValue("id"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) aiCode(w http.ResponseWriter, r *http.Request) error {
+	var in app.CodeInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	res, err := s.app.GenerateCode(r.Context(), in)
 	if err != nil {
 		return err
 	}

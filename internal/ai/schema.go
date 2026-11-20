@@ -213,6 +213,31 @@ type ModelTestCases struct {
 	LargeCases []*ModelLargeCase `json:"largeCases"`
 }
 
+// CodeSchema is the output schema of code generation: one entry per
+// language, each language one of those asked for. A function problem's
+// entries carry the harness as well.
+func CodeSchema(languages []string, function bool) map[string]any {
+	entry := map[string]any{
+		"language":    enum("Language id; one of those asked for", languages...),
+		"starterCode": str("Program problem: starter code that reads the input. Function problem: the stub the solver fills in"),
+	}
+	if function {
+		entry["prefix"] = str("Code before the solver's code: imports, helper type definitions (Python: first line `from __future__ import annotations`)")
+		entry["suffix"] = str("Code after the solver's code: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON")
+	}
+	return obj(map[string]any{"code": array(obj(entry), "One entry per language asked for")})
+}
+
+// ModelCode is the decoded output of CodeSchema.
+type ModelCode struct {
+	Code []struct {
+		Language    string `json:"language"`
+		StarterCode string `json:"starterCode"`
+		Prefix      string `json:"prefix"`
+		Suffix      string `json:"suffix"`
+	} `json:"code"`
+}
+
 // PingSchema is the output schema of a connection test.
 func PingSchema() map[string]any {
 	return obj(map[string]any{"ok": boolean("Always true")})

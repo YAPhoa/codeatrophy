@@ -3756,6 +3756,15 @@ button.case-chip:hover {
   min-height: 28px;
 }
 
+/* What "Generate code" wrote, and what it cost; the cost goes under it when the column is narrow. */
+.code-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  min-height: 28px;
+}
+
 .large-case-card {
   padding: var(--space-2) var(--space-4);
 }

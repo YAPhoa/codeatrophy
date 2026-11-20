@@ -8,6 +8,7 @@ export const OPERATION_LABEL: Record<AiOperation, string> = {
   draft: 'Draft',
   variant: 'Variant',
   testcases: 'Test cases',
+  code: 'Code',
   test: 'Connection test',
 };
 

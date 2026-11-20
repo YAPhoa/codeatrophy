@@ -30,13 +30,15 @@ export interface Signature {
   returns: ValueType;
 }
 
-/** The languages `functionKit` can write a stub and a runner for. */
+/** The languages `functionKit` writes a stub and a runner for unless told otherwise. */
 export const KIT_LANGUAGES: readonly string[] = ['python', 'java', 'javascript', 'go'];
 
 const PYTHON_TYPES: Record<ValueType, string> = { int: 'int', 'int[]': 'list[int]', string: 'str', bool: 'bool' };
 const JAVA_TYPES: Record<ValueType, string> = { int: 'int', 'int[]': 'int[]', string: 'String', bool: 'boolean' };
 const JS_TYPES: Record<ValueType, string> = { int: 'number', 'int[]': 'number[]', string: 'string', bool: 'boolean' };
 const GO_TYPES: Record<ValueType, string> = { int: 'int', 'int[]': '[]int', string: 'string', bool: 'bool' };
+const CPP_TYPES: Record<ValueType, string> = { int: 'int', 'int[]': 'vector<int>', string: 'string', bool: 'bool' };
+const CPP_ZERO: Record<ValueType, string> = { int: '0', 'int[]': '{}', string: '""', bool: 'false' };
 
 function python(sig: Signature): { stub: string; harness: HarnessCode } {
   const params = sig.params.map((p) => `, ${p.name}: ${PYTHON_TYPES[p.type]}`).join('');
@@ -180,7 +182,69 @@ function go(sig: Signature): { stub: string; harness: HarnessCode } {
   };
 }
 
-const WRITERS: Record<string, (sig: Signature) => { stub: string; harness: HarnessCode }> = { python, java, javascript, go };
+const CPP_READ: Record<ValueType, string> = { int: 'stoi(readLine())', 'int[]': 'readInts(readLine())', string: 'readString(readLine())', bool: 'readLine().find("true") != string::npos' };
+
+// C++14 as GCC 9 compiles it by default: no structured bindings, no std::optional.
+const CPP_JSON = String.raw`
+static string readLine() {
+    string line;
+    getline(cin, line);
+    return line;
+}
+
+static vector<int> readInts(const string& line) {
+    vector<int> values;
+    string number;
+    for (char c : line) {
+        if (c == '-' || isdigit((unsigned char)c)) {
+            number += c;
+        } else if (!number.empty()) {
+            values.push_back(stoi(number));
+            number.clear();
+        }
+    }
+    if (!number.empty()) values.push_back(stoi(number));
+    return values;
+}
+
+static string readString(const string& line) {
+    size_t first = line.find('"'), last = line.rfind('"');
+    return first == string::npos || last <= first ? string() : line.substr(first + 1, last - first - 1);
+}
+
+static string text(int value) { return to_string(value); }
+static string text(bool value) { return value ? "true" : "false"; }
+static string text(const string& value) { return "\"" + value + "\""; }
+static string text(const vector<int>& values) {
+    string out = "[";
+    for (size_t i = 0; i < values.size(); i++) {
+        if (i > 0) out += ",";
+        out += to_string(values[i]);
+    }
+    return out + "]";
+}
+`;
+
+function cpp(sig: Signature): { stub: string; harness: HarnessCode } {
+  const params = sig.params.map((p) => (p.type === 'int[]' || p.type === 'string' ? `${CPP_TYPES[p.type]}& ${p.name}` : `${CPP_TYPES[p.type]} ${p.name}`)).join(', ');
+  return {
+    stub: `class Solution {\npublic:\n    ${CPP_TYPES[sig.returns]} ${sig.name}(${params}) {\n        return ${CPP_ZERO[sig.returns]};\n    }\n};\n`,
+    harness: {
+      prefix: '#include <bits/stdc++.h>\nusing namespace std;\n\n',
+      suffix: [
+        CPP_JSON,
+        'int main() {',
+        ...sig.params.map((p) => `    ${CPP_TYPES[p.type]} ${p.name} = ${CPP_READ[p.type]};`),
+        `    cout << text(Solution().${sig.name}(${sig.params.map((p) => p.name).join(', ')})) << "\\n";`,
+        '    return 0;',
+        '}',
+        '',
+      ].join('\n'),
+    },
+  };
+}
+
+const WRITERS: Record<string, (sig: Signature) => { stub: string; harness: HarnessCode }> = { python, java, javascript, go, cpp };
 
 /** The stub and the runner for a signature, in each of `languages` the kit knows. */
 export function functionKit(

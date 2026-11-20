@@ -101,11 +101,14 @@ Islands" has starter code of its own with a larger one in Python and C++.
 For the AI endpoints, `MOCK:FAIL` in the input text or instruction produces a
 `502 upstream_error`, `MOCK:MISMATCH` a draft whose reference solution
 disagrees with its last example, and `MOCK:RUNNER` a "solution only" draft
-with one runner that does not compile. `MOCK:REPEAT` in the instruction of a
-test generation leaves two proposals out as repeats, `MOCK:REPEAT-ALL` all of
-them. A request with `largeTestCases: n` gets `n` large test cases of about
-300 KB on one line each, each a different input with a name of its own, the
-same every time; `MOCK:LARGE-FAIL` in the input text or instruction reports
+with one runner that does not compile. "Generate code" (`POST /ai/code`)
+reads those two from the problem's title or statement: its starter code
+reads the first sample's lines into variables named as the statement's Input
+section names them, and its stubs take their signature from that sample.
+`MOCK:REPEAT` in the instruction of a test generation leaves two proposals
+out as repeats, `MOCK:REPEAT-ALL` all of them. A request with
+`largeTestCases: n` gets `n` large test cases of about 300 KB on one line
+each, each a different input with a name of its own, the same every time; `MOCK:LARGE-FAIL` in the input text or instruction reports
 every one as failed (the generator crashed), `MOCK:LARGE-SKIP` as skipped, and
 `MOCK:LARGE-SHORT` adds all but the last, which is reported as failed with no
 name or generator (the model wrote one generator fewer than asked for).
@@ -152,7 +155,8 @@ Test cases page; "Verify all" on a draft and on a saved problem; the pages of Se
 editing one (its models offered without a test, a test asked for only for a new server or key, a typed name kept when the server lists no models); the AI request timeout; choosing the model a draft, revision or test-case generation uses; a problem's Variants tab; filing selected items
 into a collection; the library's views, row verdicts and sort menu; and Import and Export as pages of Settings, reached from their old addresses too.
 It also holds the loading rules (`e2e/loading.spec.ts`), choosing the
-default writing style (`e2e/styles.spec.ts`), and the system prompt and
+default writing style (`e2e/styles.spec.ts`), "Generate code" on the edit
+page of a problem (`e2e/generate-code.spec.ts`), and the system prompt and
 test case prompt, each edited only after a confirm, reset, and guarded when
 left unsaved (`e2e/system-prompt.spec.ts`). It starts its own
 `dev:mock` server (port 5174, or `E2E_PORT`), so it needs no backend, AI

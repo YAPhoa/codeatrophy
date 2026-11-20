@@ -630,6 +630,56 @@ func TestAIRoutesTakeAProvider(t *testing.T) {
 	}
 }
 
+// POST /ai/code works from the problem as the request gives it: no item is
+// needed, and only the languages asked for come back.
+func TestCodeEndpoint(t *testing.T) {
+	c := newServer(t)
+	form := `"title":"Coin Change","body":"## Input\n\nn and amount.","languages":["python","cpp"],"samples":[{"stdin":"3 11\n1 2 5\n","expectedStdout":"3\n"}]`
+	c.expect("POST", api+"/ai/code", `{`+form+`}`, 503)
+	c.expect("POST", api+"/ai/code", `{"body":"x","languages":["cobol"]}`, 422)
+	c.expect("POST", api+"/ai/code", `{"body":"x","languages":"python"}`, 422)
+	c.expect("GET", api+"/ai/code", "", 405)
+	def := c.expect("POST", api+"/settings/ai/providers", `{"name":"Default","kind":"anthropic","apiKey":"sk-ant-def-1111"}`, 201).json(t)
+	c.expect("PUT", api+"/settings/ai", `{"defaultProviderId":"`+def["id"].(string)+`"}`, 200)
+	other := c.expect("POST", api+"/settings/ai/providers", `{"name":"Other","kind":"anthropic","apiKey":"sk-ant-other-2222"}`, 201).json(t)
+	c.ai.Respond = func(ai.GenerateRequest) (any, error) {
+		return map[string]any{"code": []map[string]string{
+			{"language": "python", "starterCode": "sum", "prefix": "", "suffix": ""},
+			{"language": "go", "starterCode": "package main", "prefix": "", "suffix": ""},
+		}}, nil
+	}
+	res := c.expect("POST", api+"/ai/code", `{`+form+`}`, 200)
+	got := res.json(t)
+	if sc := got["starterCode"].(map[string]any); len(sc) != 1 || sc["python"] != "sum" || got["check"] != nil || got["style"] != nil {
+		t.Errorf("program: %s", res.body)
+	}
+	if !strings.Contains(string(res.body), `"harness":{}`) || got["usage"].(map[string]any)["logId"] == nil {
+		t.Errorf("program: %s", res.body)
+	}
+	lastKey := func() string {
+		cs := c.ai.Configs()
+		return cs[len(cs)-1].APIKey
+	}
+	res = c.expect("POST", api+"/ai/code", `{`+form+`,"interface":"function","providerId":"`+other["id"].(string)+`"}`, 200)
+	got = res.json(t)
+	if k := lastKey(); k != "sk-ant-other-2222" {
+		t.Errorf("providerId: used %q", k)
+	}
+	ch := got["check"].(map[string]any)
+	if h := got["harness"].(map[string]any); len(h) != 1 || h["python"] == nil || ch["attempted"] != true || len(ch["runners"].([]any)) != 1 {
+		t.Errorf("function: %s", res.body)
+	}
+	c.expect("POST", api+"/ai/code", `{`+form+`,"providerId":"nope"}`, 422)
+	entry := c.expect("GET", api+"/settings/ai/log?operation=code", "", 200).json(t)
+	if entry["total"] != float64(2) {
+		t.Errorf("log: %v", entry)
+	}
+	c.ai.Respond = func(ai.GenerateRequest) (any, error) { return map[string]any{"code": []any{}}, nil }
+	if r := c.expect("POST", api+"/ai/code", `{`+form+`}`, 502); r.errorCode(t) != "upstream_error" {
+		t.Error("upstream error code")
+	}
+}
+
 func TestSubmissionsEndpoints(t *testing.T) {
 	c := newServer(t)
 	id := c.expect("POST", api+"/items", `{"type":"problem","title":"P","testCases":[{"stdin":"1 2","expectedStdout":"3","isSample":true}]}`, 201).json(t)["id"].(string)
