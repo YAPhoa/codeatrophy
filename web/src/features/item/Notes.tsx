@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, Lock, Pencil } from 'lucide-react';
+import { Check, Lock, Pencil, X } from 'lucide-react';
 import { api } from '../../api/client';
-import { qk } from '../../api/queries';
+import { qk, useLimits } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { errorLine } from '../../lib/errors';
+import { charCount } from '../../lib/itemForm';
 import { StatusSwap } from '../../ui/Animated';
-import { Button } from '../../ui/Button';
+import { Button, cx, IconButton } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
 import { Spinner } from '../../ui/misc';
 
@@ -29,18 +30,29 @@ const unsaved = new Map<string, string>();
 const SAVE_AFTER_PAUSE_MS = 3000;
 const SAVE_AT_MOST_EVERY_MS = 15000;
 
+/** The count turns to a warning past this share of the limit. */
+const NEAR_LIMIT = 0.9;
+
 /**
  * Private notes on an item, saved automatically (see SAVE_AFTER_PAUSE_MS)
  * and when the notes close.
  * Empty notes open ready to write; notes with text show it rendered, with
  * Edit to change it. Notes are personal state: they do not change the
- * item's revision and are never exported.
+ * item's revision and are never exported. Notes over the server's
+ * `maxNotesChars` are not sent; ones saved under a higher limit still show.
+ *
+ * With `onClose` (the reader's panel) the notes carry their own title row;
+ * without it (the solve page's tab, which already says "Notes") they do not.
  */
-export function Notes({ item }: { item: Item }) {
+export function Notes({ item, onClose }: { item: Item; onClose?: () => void }) {
   const qc = useQueryClient();
+  const maxChars = useLimits()?.maxNotesChars;
   const [text, setText] = useState(() => unsaved.get(item.id) ?? item.notes);
   const [state, setState] = useState<SaveState>(() => (unsaved.has(item.id) ? 'dirty' : 'saved'));
   const [error, setError] = useState<string | null>(null);
+  // Whether a save has gone through since these notes opened: only then do
+  // notes being read say "Saved".
+  const [savedHere, setSavedHere] = useState(false);
   // Notes that open empty stay in the editing space once typing starts.
   const [editing, setEditing] = useState(() => text.trim() === '');
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -53,6 +65,8 @@ export function Notes({ item }: { item: Item }) {
   const inFlight = useRef(false);
   const save = async (value: string, lastChance = false) => {
     if (value === latest.current.saved) return;
+    // Over the limit the server would refuse it; the count says so.
+    if (maxChars !== undefined && charCount(value) > maxChars) return;
     // One request at a time; what changes meanwhile goes in the next. A last
     // chance goes anyway, since there may be no next.
     if (inFlight.current && !lastChance) return;
@@ -64,6 +78,7 @@ export function Notes({ item }: { item: Item }) {
       if (unsaved.get(updated.id) === value) unsaved.delete(updated.id);
       qc.setQueryData(qk.item(updated.id), updated);
       setState(latest.current.text === value ? 'saved' : 'dirty');
+      setSavedHere(true);
       setError(null);
     } catch (e) {
       setState('error');
@@ -121,28 +136,41 @@ export function Notes({ item }: { item: Item }) {
     };
   }, []);
 
+  const count = charCount(text);
+  const over = maxChars !== undefined && count > maxChars;
+  const near = maxChars !== undefined && !over && count > maxChars * NEAR_LIMIT;
+
   // How the last save went, while it matters: notes left empty, or only being
-  // read, say nothing once saved.
-  const status = state === 'saving' ? 'Saving…' : state === 'dirty' ? 'Unsaved' : text === '' || !writing ? '' : 'Saved';
+  // read, say nothing once saved, unless they were just saved here.
+  const status =
+    state === 'saving'
+      ? 'Saving…'
+      : state === 'dirty'
+        ? over
+          ? 'Too long'
+          : 'Unsaved'
+        : text === '' || (!writing && !savedHere)
+          ? ''
+          : 'Saved';
+
+  const privateChip = (
+    <span className="notes-private" title="Notes are private: never exported or shared">
+      <Lock size={11} aria-hidden="true" />
+      Private
+    </span>
+  );
 
   return (
     <div className="notes">
+      {onClose && (
+        <div className="row notes-head">
+          <h2>Notes</h2>
+          {privateChip}
+          <span className="spacer" />
+          <IconButton size="sm" label="Close notes" icon={<X size={14} />} onClick={onClose} />
+        </div>
+      )}
       <div className="row notes-bar">
-        <span className="notes-private" title="Notes are private: never exported or shared">
-          <Lock size={12} aria-hidden="true" />
-          Private notes
-        </span>
-        <span className="spacer" />
-        <span className="notes-state">
-          {/* An error may be long, so it wraps as plain text; the states that swap fit on one line. */}
-          {state === 'error' ? (
-            <span className="field-error" role="status">
-              Not saved: {error}
-            </span>
-          ) : (
-            <StatusSwap icon={state === 'saving' ? <Spinner size={12} /> : status === 'Saved' && <Check size={12} />} text={status} />
-          )}
-        </span>
         {!writing && (
           <Button
             size="sm"
@@ -167,6 +195,18 @@ export function Notes({ item }: { item: Item }) {
             Done
           </Button>
         )}
+        <span className="spacer" />
+        <span className={cx('notes-state', status === 'Too long' && 'is-over')}>
+          {/* An error may be long, so it wraps as plain text; the states that swap fit on one line. */}
+          {state === 'error' ? (
+            <span className="field-error" role="status">
+              Not saved: {error}
+            </span>
+          ) : (
+            <StatusSwap icon={state === 'saving' ? <Spinner size={12} /> : status === 'Saved' && <Check size={12} />} text={status} />
+          )}
+        </span>
+        {!onClose && privateChip}
       </div>
       {writing ? (
         <textarea
@@ -175,7 +215,8 @@ export function Notes({ item }: { item: Item }) {
           className="input textarea notes-text"
           aria-label="Private notes (Markdown)"
           autoComplete="off"
-          placeholder="Approach, gotchas, or things to revisit… (Markdown supported)"
+          placeholder="Approach, gotchas, or things to revisit…"
+          aria-invalid={over || undefined}
           value={text}
           onChange={(e) => {
             latest.current.text = e.target.value;
@@ -189,6 +230,13 @@ export function Notes({ item }: { item: Item }) {
           <Markdown source={text} />
         </div>
       )}
+      <div className="row notes-foot">
+        <span>{writing ? 'Markdown supported' : 'Click Edit to modify'}</span>
+        <span className="spacer" />
+        <span className={cx('notes-count', near && 'is-near', over && 'is-over')}>
+          {maxChars === undefined ? `${count.toLocaleString()} chars` : `${count.toLocaleString()} / ${maxChars.toLocaleString()}`}
+        </span>
+      </div>
     </div>
   );
 }

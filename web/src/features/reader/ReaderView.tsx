@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
-import { ArrowLeft, ExternalLink, MoreHorizontal, MoveHorizontal, NotebookPen, TableOfContents, X } from 'lucide-react';
+import { ArrowLeft, ExternalLink, MoreHorizontal, MoveHorizontal, NotebookPen, TableOfContents } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
@@ -267,11 +267,7 @@ export function ReaderView({ item }: { item: Item }) {
             style={{ '--notes-width': `${notesWidth}px` } as CSSProperties}
           >
             <NotesResizer width={notesWidth} onChange={setNotesWidth} />
-            <div className="reader-notes-head">
-              <h2>Notes</h2>
-              <IconButton size="sm" label="Close notes" icon={<X size={14} />} onClick={() => setNotesOpen(false)} />
-            </div>
-            <Notes item={item} />
+            <Notes item={item} onClose={() => setNotesOpen(false)} />
           </aside>
         )}
       </div>

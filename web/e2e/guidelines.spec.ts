@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { open, TWO_SUM_TEXT } from './support';
+import { mockApi, mockItem, open, TWO_SUM_TEXT } from './support';
 
 // Keyboard, focus and screen-reader behaviour the UI is held to. Like the
 // smoke suite, these run against the API mock.
@@ -108,6 +108,125 @@ test('notes: empty ones open ready to write, ones with text show it with Edit, a
   await expect(field).toHaveValue('Partition **first**.');
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(panel.locator('.notes-preview')).toContainText('Partition first.');
+});
+
+test('notes: a title row with a Private chip, Edit on the left, then a hint and the count', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, '/');
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: 'Private notes' });
+  const chip = panel.locator('.notes-private');
+  await expect(panel.getByRole('heading', { level: 2, name: 'Notes' })).toBeVisible();
+  await expect(chip).toHaveText('Private');
+  await expect(chip).toHaveAttribute('title', 'Notes are private: never exported or shared');
+  const foot = panel.locator('.notes-foot');
+  const count = panel.locator('.notes-count');
+  await expect(foot).toContainText('Markdown supported');
+  await expect(count).toHaveText('0 / 4,000');
+
+  // Code points, as the server counts them.
+  const field = page.getByLabel('Private notes (Markdown)');
+  await field.fill('Partition **first** 😀');
+  await expect(count).toHaveText('21 / 4,000');
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(foot).toContainText('Click Edit to modify');
+  // Just saved, so the status says so while reading.
+  const state = panel.locator('.notes-state').getByRole('status');
+  await expect(state).toHaveText('Saved');
+
+  // One row each: the heading with its chip, then Edit on the left and the status on the right.
+  const box = async (l: ReturnType<typeof page.locator>) => (await l.boundingBox())!;
+  const [heading, chipBox, close, edit, status, panelBox] = await Promise.all([
+    box(panel.getByRole('heading', { name: 'Notes' })),
+    box(chip),
+    box(panel.getByRole('button', { name: 'Close notes' })),
+    box(panel.getByRole('button', { name: 'Edit', exact: true })),
+    box(state),
+    box(panel),
+  ]);
+  expect(chipBox.x).toBeGreaterThan(heading.x + heading.width);
+  expect(chipBox.x - (heading.x + heading.width)).toBeLessThan(16);
+  expect(Math.abs(chipBox.y + chipBox.height / 2 - (close.y + close.height / 2))).toBeLessThan(3);
+  expect(close.x + close.width).toBeGreaterThan(panelBox.x + panelBox.width - 24);
+  expect(edit.y).toBeGreaterThan(close.y + close.height);
+  expect(edit.x - heading.x).toBeLessThan(2);
+  expect(status.x).toBeGreaterThan(edit.x + edit.width + 100);
+
+  // Opened again, notes only being read say nothing.
+  await panel.getByRole('button', { name: 'Close notes' }).click();
+  await expect(page.locator('.reader-notes')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(panel.locator('.notes-preview')).toBeVisible();
+  await expect(state).toHaveText('');
+
+  // On the solve page the tab is the title: the chip sits in the action row, and there is nothing to close.
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await page.getByRole('tab', { name: /^Notes/ }).click();
+  const tab = page.locator('.notes');
+  await expect(tab.locator('.notes-bar .notes-private')).toHaveText('Private');
+  await expect(tab.getByRole('heading', { name: 'Notes' })).toHaveCount(0);
+  await expect(tab.getByRole('button', { name: 'Close notes' })).toHaveCount(0);
+  await expect(tab.locator('.notes-foot')).toContainText('Click Edit to modify');
+});
+
+test('notes: over the limit the count turns red and nothing is saved', async ({ page }) => {
+  await page.clock.install();
+  await open(page, '/');
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  const { id } = await mockItem(page, 'CAP Theorem Notes');
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: 'Private notes' });
+  const field = page.getByLabel('Private notes (Markdown)');
+  const count = panel.locator('.notes-count');
+  const state = panel.locator('.notes-state').getByRole('status');
+
+  await field.fill('n'.repeat(3601));
+  await expect(count).toHaveClass(/is-near/);
+  await field.fill('n'.repeat(4001));
+  await expect(count).toHaveText('4,001 / 4,000');
+  await expect(count).toHaveClass(/is-over/);
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(state).toHaveText('Too long');
+  // Past every autosave delay, and on leaving the field: still not sent.
+  await page.clock.runFor(20_000);
+  await field.blur();
+  await page.clock.runFor(1000);
+  await expect(state).toHaveText('Too long');
+  expect((await mockApi<{ notes: string }>(page, `/items/${id}`)).notes).toBe('');
+
+  // Back within the limit, it saves.
+  await field.press('End');
+  await field.press('Backspace');
+  await expect(count).not.toHaveClass(/is-over/);
+  await page.clock.runFor(4000);
+  await expect(state).toHaveText('Saved');
+  expect((await mockApi<{ notes: string }>(page, `/items/${id}`)).notes).toHaveLength(4000);
+});
+
+test('notes: long notes scroll inside a capped box', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, '/');
+  const { id } = await mockItem(page, 'CAP Theorem Notes');
+  const long = Array.from({ length: 80 }, (_, i) => `Line ${i + 1}`).join('\n\n');
+  await mockApi(page, `/items/${id}`, { method: 'PATCH', body: { notes: long } });
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: 'Private notes' });
+  const preview = panel.locator('.notes-preview');
+  await expect(preview).toContainText('Line 80');
+  // min(480px, 60vh) at 900px high.
+  const size = await preview.evaluate((el) => ({ height: el.getBoundingClientRect().height, scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(size.height).toBe(480);
+  expect(size.scroll).toBeGreaterThan(size.client);
+  // The hint and count stay in view below it.
+  await expect(panel.locator('.notes-foot')).toBeInViewport();
+  // A short window caps it lower, still inside the panel.
+  await page.setViewportSize({ width: 1400, height: 600 });
+  const short = await preview.evaluate((el) => el.getBoundingClientRect().height);
+  expect(short).toBeLessThanOrEqual(360);
+  await expect(panel.locator('.notes-foot')).toBeInViewport();
 });
 
 test('notes: typing that never pauses is still saved now and then, but not on every key', async ({ page }) => {
@@ -602,6 +721,8 @@ test('notes: the panel drags a little wider or narrower, and the box drags talle
   const edge = panel.getByRole('separator', { name: 'Notes width' });
   const width = () => panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
   expect(await width()).toBe(380);
+  // Where the edge is once the panel has slid in.
+  await panel.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   // Dragged far to the left, it stops at its widest; the keys move it too.
   const box = (await edge.boundingBox())!;
   await page.mouse.move(box.x + 4, box.y + 200);
