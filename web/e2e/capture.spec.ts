@@ -17,7 +17,7 @@ test('capture: drafting with AI keeps the text in view on the way to the draft',
   });
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page).toHaveURL(/\/drafts\//);
-  await page.waitForTimeout(300);
+  await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   const seen = await page.evaluate(() => (window as unknown as { seen: string[] }).seen);
   expect(seen.length).toBeGreaterThan(0);
   expect(seen.filter((v) => v !== TWO_SUM_TEXT)).toEqual([]);
