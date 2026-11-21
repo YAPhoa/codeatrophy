@@ -2758,16 +2758,16 @@ fieldset.stack legend {
   gap: var(--space-2);
 }
 
-/* The size of a top-level heading in the text above it: a problem
-   statement's `.md h1`, or a reading's `.md-longform h1`. */
+/* The size of a section heading in the text above it: a problem
+   statement's `.md h2`, or a reading's `.md-longform h2`. */
 .related-title {
-  font-size: calc(15px * var(--reading-scale) * 1.3);
+  font-size: calc(15px * var(--reading-scale) * 1.1);
   font-weight: 600;
   line-height: 1.3;
 }
 
 .reader-article .related-title {
-  font-size: calc(17px * var(--reading-scale) * 1.45);
+  font-size: calc(17px * var(--reading-scale) * 1.32);
   letter-spacing: -0.01em;
 }
 
@@ -2833,8 +2833,13 @@ fieldset.stack legend {
   color: var(--text-3);
 }
 
-.status-gone {
+/* A row's number, in the column where an icon would go. */
+.related-num {
+  flex: none;
+  min-width: 2.5ch;
   color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* A link to an item no longer in the library, red as on a wiki; it leads nowhere. */

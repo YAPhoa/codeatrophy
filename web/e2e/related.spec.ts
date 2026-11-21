@@ -10,8 +10,20 @@ const TWO_SUM_SORTED = '/items/11111111-1111-4111-8111-000000000002';
 
 const section = (page: Page) => page.getByRole('region', { name: 'Related items' });
 
+/**
+ * Wait for the reading's layout to settle: its outline shows once the
+ * Markdown renderer has drawn the headings. Until then the text is a hidden
+ * placeholder, and when it renders (and the outline docks, narrowing the
+ * column) the section moves down: a search box focused before that is left
+ * off screen with its list of matches.
+ */
+async function readingSettled(page: Page) {
+  await expect(page.getByRole('navigation', { name: 'On this page' }).or(page.getByRole('button', { name: 'On this page' }))).toBeVisible();
+}
+
 /** Find an item with the section's search box and link it. */
 async function linkItem(page: Page, query: string, title: string) {
+  await readingSettled(page);
   const search = section(page).getByRole('combobox', { name: 'Link an item' });
   await search.fill(query);
   const exactly = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
@@ -32,8 +44,12 @@ async function deleteShownItem(page: Page) {
 
 test('related items: a reading links an item found by title, the link shows at both ends, and is undone', async ({ page }) => {
   await open(page, CAP);
+  await readingSettled(page);
   const related = section(page);
   await expect(related.getByRole('heading', { name: 'Related items' })).toBeVisible();
+  // As large as a section heading of the reading above it.
+  const h2Size = await page.locator('.md-longform h2').first().evaluate((el) => getComputedStyle(el).fontSize);
+  await expect(related.getByRole('heading', { name: 'Related items' })).toHaveCSS('font-size', h2Size);
 
   // The search leaves out the reading itself.
   const search = related.getByRole('combobox', { name: 'Link an item' });
@@ -52,6 +68,9 @@ test('related items: a reading links an item found by title, the link shows at b
   // Keyboard: the first match is taken with Enter.
   await search.press('Enter');
   await expect(related.getByRole('list', { name: 'Linked items' }).getByRole('link')).toHaveCount(2);
+  // Numbered, with no status icons.
+  await expect(related.getByRole('list', { name: 'Linked items' }).locator('.related-num')).toHaveText(['1.', '2.']);
+  await expect(related.locator('.status-icon')).toHaveCount(0);
 
   // The problem lists the reading at the bottom of its description.
   await related.getByRole('link', { name: 'Two Sum', exact: true }).click();

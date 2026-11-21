@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router';
-import { CircleDashed, CornerLeftUp, X } from 'lucide-react';
+import { CornerLeftUp, X } from 'lucide-react';
 import { useItemLinks, useItemQuery, useLimits, useLinkItem, useMeta, useUnlinkItem } from '../../api/queries';
 import type { Item, LinkedItem } from '../../api/types';
 import { useLoadingShown } from '../../lib/motion';
@@ -18,6 +18,18 @@ const OPEN_KEY = 'related:open';
 
 /** What a dead link is called when the library never knew its title. */
 const MISSING = 'Missing item';
+
+/** How many of an item's variants are listed. */
+const VARIANT_LIMIT = 50;
+
+/** A row's place in the Related items list, in place of an icon. */
+function RowNumber({ n }: { n: number }) {
+  return (
+    <span className="related-num" aria-hidden="true">
+      {n}.
+    </span>
+  );
+}
 
 /** The title of an item a link points at: a link while it is in the library, red once it is gone. */
 function LinkedTitle({ linked }: { linked: LinkedItem }) {
@@ -48,16 +60,20 @@ function Origin({ item }: { item: Item }) {
   );
 }
 
-/** The items derived from this one, oldest first. */
-function Derived({ item }: { item: Item }) {
-  const variants = useItemQuery({ variantOf: item.id, sort: 'created', limit: 50 }, item.variantCount > 0);
+/**
+ * The items derived from this one, oldest first: numbered under Related items,
+ * with their status in a problem's Variants tab.
+ */
+function Derived({ item, numbered = false }: { item: Item; numbered?: boolean }) {
+  const variants = useItemQuery({ variantOf: item.id, sort: 'created', limit: VARIANT_LIMIT }, item.variantCount > 0);
   const loadingShown = useLoadingShown(variants.isPending);
   if (item.variantCount === 0) return null;
+  const List = numbered ? 'ol' : 'ul';
   return (
-    <ul className="related-list" aria-label="Variants">
-      {(variants.data?.items ?? []).map((v) => (
+    <List className="related-list" aria-label="Variants">
+      {(variants.data?.items ?? []).map((v, i) => (
         <li key={v.id}>
-          <StatusIcon status={v.status} size={14} />
+          {numbered ? <RowNumber n={i + 1} /> : <StatusIcon status={v.status} size={14} />}
           <Link to={`/items/${v.id}`} className="truncate">
             {v.title}
           </Link>
@@ -65,21 +81,24 @@ function Derived({ item }: { item: Item }) {
         </li>
       ))}
       {variants.isPending && <li className={cx('muted', 'loading-delay', !loadingShown && 'is-pending')}>Loading…</li>}
-    </ul>
+    </List>
   );
 }
 
-/** The items linked to this one by hand, each with a way to unlink it. */
-function Links({ item, links, pending }: { item: Item; links: LinkedItem[]; pending: boolean }) {
+/**
+ * The items linked to this one by hand, numbered on from `start`, each with a
+ * way to unlink it. One that is gone shows its title in red.
+ */
+function Links({ item, links, pending, start }: { item: Item; links: LinkedItem[]; pending: boolean; start: number }) {
   const unlink = useUnlinkItem(item.id);
   const toast = useToast();
   const loadingShown = useLoadingShown(pending);
   if (links.length === 0 && !pending) return null;
   return (
-    <ul className="related-list" aria-label="Linked items">
-      {links.map((l) => (
+    <ol className="related-list" aria-label="Linked items" start={start}>
+      {links.map((l, i) => (
         <li key={l.id} className={cx(!l.available && 'is-dead')}>
-          {l.available && l.status ? <StatusIcon status={l.status} size={14} /> : <CircleDashed size={14} className="status-icon status-gone" aria-hidden="true" />}
+          <RowNumber n={start + i} />
           <LinkedTitle linked={l} />
           <DifficultyBadge difficulty={l.difficulty} />
           <IconButton
@@ -92,7 +111,7 @@ function Links({ item, links, pending }: { item: Item; links: LinkedItem[]; pend
         </li>
       ))}
       {pending && <li className={cx('muted', 'loading-delay', !loadingShown && 'is-pending')}>Loading…</li>}
-    </ul>
+    </ol>
   );
 }
 
@@ -215,8 +234,13 @@ function RelatedBody({ item, id }: { item: Item; id: string }) {
   return (
     <div id={id} className="related-body">
       {reading && <Origin item={item} />}
-      {reading && <Derived item={item} />}
-      <Links item={item} links={list} pending={item.linkCount > 0 && links.isPending} />
+      {reading && <Derived item={item} numbered />}
+      <Links
+        item={item}
+        links={list}
+        pending={item.linkCount > 0 && links.isPending}
+        start={reading ? Math.min(item.variantCount, VARIANT_LIMIT) + 1 : 1}
+      />
       {full ? <p className="related-full">At most {max} links.</p> : <LinkSearch item={item} linked={list} />}
     </div>
   );
