@@ -81,7 +81,9 @@ export function TagInput({ value, onChange, suggestions = [], placeholder = 'Add
     <div ref={wrapRef} className="taginput" onClick={() => inputRef.current?.focus()}>
       {value.map((tag) => (
         <span key={tag} className="chip chip-tag">
-          {tag}
+          <span className="truncate" title={tag}>
+            {tag}
+          </span>
           <button
             type="button"
             className="chip-remove"

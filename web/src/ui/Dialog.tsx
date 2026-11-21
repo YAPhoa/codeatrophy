@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Button, IconButton, cx } from './Button';
 import { exitOnRemove } from '../lib/motion';
+import { titleIfCut } from '../lib/titleIfCut';
 
 interface DialogProps {
   open: boolean;
@@ -123,7 +124,9 @@ export function Dialog({ open, onClose, title, children, footer, size = 'md', lo
     >
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cx('dialog', `dialog-${size}`)}>
         <header className="dialog-header">
-          <h2 id={titleId}>{title}</h2>
+          <h2 id={titleId} onMouseEnter={titleIfCut}>
+            {title}
+          </h2>
           <IconButton label="Close" size="sm" icon={<X size={16} />} onClick={requestClose} disabled={locked} />
         </header>
         <div className="dialog-body">{children}</div>

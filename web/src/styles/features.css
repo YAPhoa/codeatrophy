@@ -207,6 +207,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
+  min-width: 0;
+  max-width: 32ch;
   height: 26px;
   padding: 0 9px;
   border: 1px solid var(--border);
@@ -214,6 +216,11 @@
   background: var(--surface);
   color: var(--text);
   font-weight: 500;
+}
+
+/* The name gives way (.truncate); the folder and the count keep their size. */
+.subcollection > :not(.truncate) {
+  flex: none;
 }
 
 .subcollection:hover {
@@ -3243,6 +3250,11 @@ button.case-chip:hover {
   gap: var(--space-2) var(--space-2);
 }
 
+.case-detail-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .verdict-text {
   font-weight: 600;
 }
@@ -3475,6 +3487,11 @@ button.case-chip:hover {
   margin: var(--space-3) 0 var(--space-3);
   color: var(--text-3);
   font-size: calc(var(--text-sm) * var(--reading-scale));
+}
+
+.reader-meta > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .reader-meta a {
@@ -4026,12 +4043,14 @@ button.case-chip:hover {
 
 .proposal-name {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .proposal-rationale {
   color: var(--text-2);
   font-size: var(--text-sm);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .proposal-sample {
@@ -4663,8 +4682,14 @@ button.case-chip:hover {
   color: var(--text-3);
 }
 
+/* On one line, cut short past a long id; its title has the rest. */
 .provider-meta code {
-  overflow-wrap: anywhere;
+  display: inline-block;
+  max-width: 40ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 .provider-key svg {

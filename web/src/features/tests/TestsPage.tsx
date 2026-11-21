@@ -543,7 +543,9 @@ function TestsManager({ item }: { item: Item }) {
                     <li key={c.id} className={cx('case-row', selectedId === c.id && 'is-selected')}>
                       <button type="button" className="case-row-main" onClick={() => void select(c.id)} aria-current={selectedId === c.id || undefined}>
                         <span className="case-no">{i + 1}</span>
-                        <span className="grow truncate">{name || <span className="muted">{name === c.name ? 'Unnamed' : 'Hidden case'}</span>}</span>
+                        <span className="grow truncate" title={name || undefined}>
+                          {name || <span className="muted">{name === c.name ? 'Unnamed' : 'Hidden case'}</span>}
+                        </span>
                         {c.isSample && <Badge tone="accent">sample</Badge>}
                         {c.generator && <LargeBadge stdin={c.stdin} />}
                         {c.origin !== 'manual' && <Badge>{ORIGIN_LABEL[c.origin]}</Badge>}

@@ -8,6 +8,7 @@ import { ITEM_STATUSES } from '../../api/types';
 import { exportItemsPath } from '../../lib/exportLink';
 import { STATUS_LABEL, plural } from '../../lib/format';
 import { buildTree, flattenTree } from '../../lib/tree';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
@@ -286,7 +287,9 @@ export function BulkBar({ selected, collection, onClear, className }: BulkBarPro
                   checked={targetCollection === node.collection.id}
                   onChange={() => setTargetCollection(node.collection.id)}
                 />
-                <span className="truncate">{node.collection.name}</span>
+                <span className="truncate" onMouseEnter={titleIfCut}>
+                  {node.collection.name}
+                </span>
                 <span className="picklist-count">{node.collection.itemCount}</span>
               </label>
             ))}

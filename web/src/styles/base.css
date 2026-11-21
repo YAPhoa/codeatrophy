@@ -50,11 +50,14 @@ summary,
   touch-action: manipulation;
 }
 
+/* A word longer than the line (a pasted URL) breaks rather than spilling out;
+   "anywhere", unlike "break-word", also lets a flex item shrink to fit. */
 h1,
 h2,
 h3,
 h4 {
   text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
 h1,

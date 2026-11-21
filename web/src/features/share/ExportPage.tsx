@@ -8,6 +8,7 @@ import { saveBlob } from '../../lib/download';
 import { formatBytes, plural } from '../../lib/format';
 import { buildTree, descendantIds, flattenTree } from '../../lib/tree';
 import { useUrlMirror, useUrlState } from '../../lib/urlState';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx } from '../../ui/Button';
 import { Checkbox, SelectField, TextAreaField, TextField } from '../../ui/Field';
 import { Callout, ErrorCallout } from '../../ui/misc';
@@ -155,7 +156,7 @@ export function ExportSection() {
           <div className="card card-pad export-items">
             <ul>
               {selectedTitles.map((i) => (
-                <li key={i.id} className="truncate">
+                <li key={i.id} className="truncate" onMouseEnter={titleIfCut}>
                   {i.title}
                 </li>
               ))}

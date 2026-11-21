@@ -116,7 +116,7 @@ test('related items: a link to a deleted item stays, red and going nowhere, and 
   const list = section(page).getByRole('list', { name: 'Linked items' });
   const dead = list.locator('.link-dead');
   await expect(dead).toHaveText(/^Coin Change/);
-  await expect(dead).toHaveAttribute('title', 'No longer in your library');
+  await expect(dead).toHaveAttribute('title', 'Coin Change (no longer in your library)');
   await expect(list.getByRole('link')).toHaveCount(0);
   const red = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--link-dead').trim());
   expect(red).not.toBe('');
@@ -144,7 +144,7 @@ test('related items: a variant whose origin is deleted still names it, in red', 
   await page.getByRole('tab', { name: 'Variants' }).click();
   const origin = page.getByRole('tabpanel').locator('.related-origin');
   await expect(origin).toContainText('A variant of Two Sum');
-  await expect(origin.locator('.link-dead')).toHaveAttribute('title', 'No longer in your library');
+  await expect(origin.locator('.link-dead')).toHaveAttribute('title', 'Two Sum (no longer in your library)');
   await expect(origin.getByRole('link')).toHaveCount(0);
 });
 

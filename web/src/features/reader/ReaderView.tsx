@@ -8,6 +8,7 @@ import { exitDuration, slideFrom, token, useChangeCount, usePresence, useSliding
 import { readJson, writeJson } from '../../lib/storage';
 import { useReadingSize } from '../../lib/readingSize';
 import { columnCap, outlineDocks, outlineWidth, setTextWidth, TEXT_WIDTHS, useTextWidth, type TextWidth } from '../../lib/textWidth';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
 import { MenuButton, Popover } from '../../ui/Popover';
@@ -200,7 +201,9 @@ export function ReaderView({ item }: { item: Item }) {
         <Link to={libraryHref()} className="btn btn-ghost btn-icon" aria-label="Back to the library" title="Back to the library">
           <ArrowLeft size={16} />
         </Link>
-        <span className="reader-bar-title truncate">{item.title}</span>
+        <span className="reader-bar-title truncate" onMouseEnter={titleIfCut}>
+          {item.title}
+        </span>
         <span className="spacer" />
         <StatusControl item={item} size="sm" />
         <FavoriteButton item={item} size="sm" labelled />

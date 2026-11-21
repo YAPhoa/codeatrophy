@@ -475,7 +475,9 @@ export function LibraryPage() {
               {path.slice(0, -1).map((c, i) => (
                 <span key={c.id} className="row row-tight">
                   {i > 0 && <ChevronRight size={12} aria-hidden="true" />}
-                  <Link to={`/collections/${c.id}`}>{c.name}</Link>
+                  <Link to={`/collections/${c.id}`} className="truncate" title={c.name}>
+                    {c.name}
+                  </Link>
                 </span>
               ))}
               <ChevronRight size={12} aria-hidden="true" />
@@ -504,9 +506,9 @@ export function LibraryPage() {
           {children.length > 0 && (
             <div className="subcollections">
               {children.map((c) => (
-                <Link key={c.id} to={`/collections/${c.id}`} className="subcollection">
+                <Link key={c.id} to={`/collections/${c.id}`} className="subcollection" title={c.name}>
                   <Folder size={14} aria-hidden="true" />
-                  {c.name}
+                  <span className="truncate">{c.name}</span>
                   <span className="muted">{c.itemCount}</span>
                 </Link>
               ))}

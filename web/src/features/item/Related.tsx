@@ -6,6 +6,7 @@ import type { Item, LinkedItem } from '../../api/types';
 import { useLoadingShown } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
 import { useDebounced } from '../../lib/useDebounced';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { IconButton, cx } from '../../ui/Button';
 import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { Popover } from '../../ui/Popover';
@@ -35,13 +36,13 @@ function RowNumber({ n }: { n: number }) {
 function LinkedTitle({ linked }: { linked: LinkedItem }) {
   if (linked.available) {
     return (
-      <Link to={`/items/${linked.id}`} className="truncate">
+      <Link to={`/items/${linked.id}`} className="truncate" onMouseEnter={titleIfCut}>
         {linked.title}
       </Link>
     );
   }
   return (
-    <span className="link-dead truncate" title="No longer in your library">
+    <span className="link-dead truncate" title={`${linked.title ?? MISSING} (no longer in your library)`}>
       {linked.title ?? MISSING}
       <span className="sr-only"> (no longer in your library)</span>
     </span>
@@ -74,7 +75,7 @@ function Derived({ item, numbered = false }: { item: Item; numbered?: boolean })
       {(variants.data?.items ?? []).map((v, i) => (
         <li key={v.id}>
           {numbered ? <RowNumber n={i + 1} /> : <StatusIcon status={v.status} size={14} />}
-          <Link to={`/items/${v.id}`} className="truncate">
+          <Link to={`/items/${v.id}`} className="truncate" onMouseEnter={titleIfCut}>
             {v.title}
           </Link>
           <DifficultyBadge difficulty={v.difficulty} />
@@ -210,7 +211,9 @@ function LinkSearch({ item, linked }: { item: Item; linked: readonly LinkedItem[
                 onMouseMove={() => setActive(i)}
               >
                 <TypeIcon type={m.type} size={14} />
-                <span className="truncate">{m.title}</span>
+                <span className="truncate" onMouseEnter={titleIfCut}>
+                  {m.title}
+                </span>
               </li>
             ))}
           </ul>

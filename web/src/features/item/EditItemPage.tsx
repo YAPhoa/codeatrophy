@@ -172,7 +172,9 @@ function EditForm({ initial }: { initial: Item }) {
       <div className="review-bar">
         <div>
           <nav className="crumbs" aria-label="Breadcrumb">
-            <Link to={`/items/${base.id}`}>{base.title}</Link>
+            <Link to={`/items/${base.id}`} className="truncate" title={base.title}>
+              {base.title}
+            </Link>
             <span aria-hidden="true">/</span>
             <span>Edit</span>
           </nav>

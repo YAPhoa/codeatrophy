@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { invalidateLibrary, useMeta } from '../../api/queries';
 import type { ImportItemState, ImportPreview, ImportResult, ImportStrategy } from '../../api/types';
 import { absoluteTime, describeChanges, formatBytes, plural, type Tone } from '../../lib/format';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { Badge, Callout, ErrorCallout, Spinner } from '../../ui/misc';
 import { TypeIcon } from '../item/controls';
@@ -157,7 +158,9 @@ export function ImportSection() {
               <>
                 <FileArchive size={20} aria-hidden="true" />
                 <div className="grow">
-                  <strong className="truncate">{file.name}</strong>
+                  <strong className="truncate" title={file.name}>
+                    {file.name}
+                  </strong>
                   <div className="muted">{formatBytes(file.size)}</div>
                 </div>
                 {previewing && <Spinner label="Reading the bundle…" />}
@@ -272,7 +275,9 @@ export function ImportSection() {
                           <td className="cell-main">
                             <span className="row row-tight">
                               <TypeIcon type={it.type} size={14} />
-                              <span className="truncate">{it.title}</span>
+                              <span className="truncate" onMouseEnter={titleIfCut}>
+                                {it.title}
+                              </span>
                             </span>
                             {it.state === 'changed' && (it.changes ?? []).length > 0 && (
                               <div className="import-changes">Differs in {describeChanges(it.changes, it.type)}</div>
@@ -316,7 +321,9 @@ export function ImportSection() {
                   <ul className="import-collections">
                     {preview.collections.map((c) => (
                       <li key={c.id}>
-                        <span className="truncate">{c.name}</span>
+                        <span className="truncate" onMouseEnter={titleIfCut}>
+                          {c.name}
+                        </span>
                         <span className="muted">{plural(c.itemCount, 'item')}</span>
                         <Badge tone={c.state === 'new' ? 'ok' : 'neutral'}>{c.state === 'new' ? 'Will be created' : 'Exists'}</Badge>
                       </li>

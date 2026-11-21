@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { Check, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { IconButton, cx } from '../../ui/Button';
 import { Field } from '../../ui/Field';
 import { Popover } from '../../ui/Popover';
@@ -187,7 +188,9 @@ export function ModelField({ value, onChange, models, loading, onLoad, loadOnFoc
                       }}
                     >
                       {/* The name starts where the text of the field does; the mark of the chosen one goes after it. */}
-                      <span className="grow mono">{m}</span>
+                      <span className="grow mono truncate" onMouseEnter={titleIfCut}>
+                        {m}
+                      </span>
                       <span className="menu-item-icon" aria-hidden="true">
                         {m === value.trim() && <Check size={14} />}
                       </span>

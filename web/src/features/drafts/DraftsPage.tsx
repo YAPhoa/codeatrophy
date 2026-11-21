@@ -6,6 +6,7 @@ import { invalidateJobs, qk, useDrafts } from '../../api/queries';
 import type { DraftSummary } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { absoluteTime, relativeTime } from '../../lib/format';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { cx, IconButton, LinkButton } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Badge, EmptyState, ErrorState, PageLoading, Spinner } from '../../ui/misc';
@@ -69,7 +70,9 @@ export default function DraftsPage() {
             return (
               <li key={d.id} className={cx('draft-row', d.state === 'ready' && 'is-ready')}>
                 <Link to={`/drafts/${d.id}`} className="draft-link">
-                  <span className="draft-title truncate">{d.title}</span>
+                  <span className="draft-title truncate" onMouseEnter={titleIfCut}>
+                    {d.title}
+                  </span>
                   <span className="draft-meta">
                     {d.kind === 'variant' && <span className="draft-kind">Variant</span>}
                     <Badge tone={state.tone} className="draft-state">

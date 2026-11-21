@@ -252,6 +252,8 @@
   border-radius: calc(var(--radius) - 1px);
   color: var(--text-2);
   font-weight: 500;
+  /* Lets the summary's text, a flex item of its own, shrink and wrap. */
+  overflow-wrap: anywhere;
   list-style: none;
   cursor: pointer;
   user-select: none;

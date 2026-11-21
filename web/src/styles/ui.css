@@ -22,6 +22,13 @@
   flex: none;
 }
 
+/* A label cut short inside a button (the label itself is a flex item, the
+   text in it is not): a block, so it can clip, tall enough for descenders. */
+.btn-label > .truncate {
+  display: block;
+  line-height: 1.25;
+}
+
 .btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--surface-3);
   text-decoration: none;
@@ -608,6 +615,7 @@ input[type='radio'] {
   white-space: nowrap;
   text-decoration: none;
   border: none;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -626,6 +634,7 @@ button.chip:hover {
 
 .chip-remove {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 14px;
@@ -1104,9 +1113,16 @@ button.chip:hover {
   border-bottom: 1px solid var(--border);
 }
 
+/* A title quoting a long name stops at two lines; its tooltip has the rest. */
 .dialog-header h2 {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--text-lg);
   font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .dialog-body {
@@ -1266,6 +1282,16 @@ button.chip:hover {
 .toast-icon {
   margin-top: var(--space-0-5);
   flex: none;
+}
+
+/* At most three lines; its tooltip has the rest. */
+.toast-message {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .toast-success .toast-icon {

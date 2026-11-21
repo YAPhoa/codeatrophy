@@ -5,6 +5,7 @@ import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../a
 import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
 import { isLargeText, textFilename } from '../../lib/largeText';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx } from '../../ui/Button';
 import { DiffView } from '../../ui/DiffView';
 import { LargeText } from '../../ui/LargeText';
@@ -182,7 +183,9 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
   ) : alreadySaved ? (
     <Link to={alreadySaved.to} className="result-saved" title="Open the saved solutions">
       <BookmarkCheck size={14} aria-hidden="true" />
-      <span className="truncate">Already saved as “{alreadySaved.name}”</span>
+      <span className="truncate" onMouseEnter={titleIfCut}>
+        Already saved as “{alreadySaved.name}”
+      </span>
     </Link>
   ) : onSaveSolution ? (
     <Button size="sm" icon={<BookmarkPlus size={14} />} onClick={onSaveSolution}>

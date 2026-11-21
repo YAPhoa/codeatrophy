@@ -9,6 +9,7 @@ import { resolveTheme, setThemePreference, getThemePreference } from '../lib/the
 import { cx } from '../ui/Button';
 import { Spinner } from '../ui/misc';
 import { exitOnRemove } from '../lib/motion';
+import { titleIfCut } from '../lib/titleIfCut';
 import { useDebounced } from '../lib/useDebounced';
 
 interface Entry {
@@ -118,8 +119,14 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       <span className="palette-icon" aria-hidden="true">
         {entry.icon}
       </span>
-      <span className="grow truncate">{entry.label}</span>
-      {entry.hint && <span className="palette-hint">{entry.hint}</span>}
+      <span className="grow truncate" onMouseEnter={titleIfCut}>
+        {entry.label}
+      </span>
+      {entry.hint && (
+        <span className="palette-hint" onMouseEnter={titleIfCut}>
+          {entry.hint}
+        </span>
+      )}
     </>
   );
 

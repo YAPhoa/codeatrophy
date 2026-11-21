@@ -7,6 +7,7 @@ import { prefetchItem } from '../../api/queries';
 import type { ItemSummary } from '../../api/types';
 import { ItemPage } from '../../app/screens';
 import { useIntent } from '../../lib/intent';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { STATUS_LABEL, VERDICT_LABEL, absoluteDate, absoluteTime, isFailedVerdict, plural, shortRelativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { preloadCodeEditor } from '../../ui/CodeEditor';
@@ -31,12 +32,6 @@ interface ItemRowProps {
   onDragOver: (index: number, e: DragEvent) => void;
   onDrop: (index: number, e: DragEvent) => void;
   onDragEnd: () => void;
-}
-
-/** On hover, gives text cut off with an ellipsis its full wording as a tooltip, and none when it fits. */
-function titleIfCut(e: MouseEvent<HTMLElement>) {
-  const el = e.currentTarget;
-  el.title = el.scrollWidth > el.clientWidth ? (el.textContent ?? '') : '';
 }
 
 /** The id of a row's details, for the controls that open them. */

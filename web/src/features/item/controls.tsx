@@ -6,6 +6,7 @@ import { ITEM_STATUSES } from '../../api/types';
 import { useQuickUpdate } from '../../api/queries';
 import { DIFFICULTY_LABEL, STATUS_LABEL, VERDICT_BRIEF, VERDICT_LABEL, verdictTone } from '../../lib/format';
 import { buildTree, flattenTree } from '../../lib/tree';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx, type ButtonSize } from '../../ui/Button';
 import { MenuButton, Popover } from '../../ui/Popover';
 import { IconSwap } from '../../ui/Animated';
@@ -201,7 +202,7 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="truncate" style={{ maxWidth: 180 }}>
+        <span className="truncate" style={{ maxWidth: 180 }} onMouseEnter={titleIfCut}>
           {text}
         </span>
       </Button>
@@ -231,7 +232,9 @@ export function CollectionPicker({ collections, selected, onToggle, onCreate, si
                   checked={selected.includes(n.collection.id)}
                   onChange={(e) => onToggle(n.collection.id, e.target.checked)}
                 />
-                <span className="truncate">{n.collection.name}</span>
+                <span className="truncate" onMouseEnter={titleIfCut}>
+                  {n.collection.name}
+                </span>
                 <span className="picklist-count">{n.collection.itemCount}</span>
               </label>
             ))}

@@ -51,7 +51,13 @@ export default function VariantPage() {
 function Crumbs({ original }: { original: Item | null }) {
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
-      {original ? <Link to={`/items/${original.id}`}>{original.title}</Link> : <Link to="/drafts">Drafts</Link>}
+      {original ? (
+        <Link to={`/items/${original.id}`} className="truncate" title={original.title}>
+          {original.title}
+        </Link>
+      ) : (
+        <Link to="/drafts">Drafts</Link>
+      )}
       <span aria-hidden="true">/</span>
       <span>Variant</span>
     </nav>

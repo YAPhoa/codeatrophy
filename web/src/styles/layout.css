@@ -595,6 +595,7 @@ button.nav-twisty:hover {
   margin-top: var(--space-1);
   color: var(--text-2);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .crumbs {
@@ -607,7 +608,10 @@ button.nav-twisty:hover {
   font-size: var(--text-sm);
 }
 
+/* Each step of the path is cut short past a few words (with .truncate); its title has the rest. */
 .crumbs a {
+  min-width: 0;
+  max-width: 24ch;
   color: var(--text-2);
 }
 
@@ -736,8 +740,13 @@ button.nav-twisty:hover {
 }
 
 .palette-hint {
+  flex: none;
+  max-width: 24ch;
+  overflow: hidden;
   color: var(--text-3);
   font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .palette-empty {

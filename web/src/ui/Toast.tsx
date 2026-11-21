@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { errorLine } from '../lib/errors';
 import { isAbort } from '../api/client';
 import { exitDuration } from '../lib/motion';
+import { titleIfCut } from '../lib/titleIfCut';
 import { cx } from './Button';
 
 type ToastKind = 'success' | 'error' | 'info';
@@ -159,7 +160,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <div key={t.id} className={cx('toast-slot', t.leaving && 'is-leaving')} inert={t.leaving}>
                 <div className={`toast toast-${t.kind}`} role={t.kind === 'error' ? 'alert' : undefined}>
                   <Icon size={16} aria-hidden="true" className="toast-icon" />
-                  <span className="grow">{t.message}</span>
+                  <span className="grow toast-message" onMouseEnter={titleIfCut}>
+                    {t.message}
+                  </span>
                   {t.action && (
                     <button
                       type="button"

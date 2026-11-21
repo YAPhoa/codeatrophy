@@ -3,6 +3,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import type { Item, TestCase } from '../../api/types';
 import { describeCases } from '../../lib/format';
 import { textFilename } from '../../lib/largeText';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, LinkButton } from '../../ui/Button';
 import { Callout, ErrorState, PageLoading } from '../../ui/misc';
 import { LargeBadge, LargeCaseGenerator } from '../tests/LargeCaseOutcome';
@@ -99,7 +100,9 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
             return (
               <li key={c.id} className="tcase">
                 <div className="tcase-head">
-                  <span className="tcase-name">{c.name || `Case ${number}`}</span>
+                  <span className="tcase-name" onMouseEnter={titleIfCut}>
+                    {c.name || `Case ${number}`}
+                  </span>
                   {/* While a hidden case is revealed, a Hide button takes the place of its tag. */}
                   {reveal.hiding && !c.isSample ? (
                     <Button size="sm" variant="ghost" icon={<EyeOff size={14} />} onClick={() => reveal.hide(c.id)} aria-label={`Hide case ${number}`}>

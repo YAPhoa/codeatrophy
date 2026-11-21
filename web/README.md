@@ -171,6 +171,7 @@ third-party origin.
 | `library-*`, `tags`, `palette`, `select` | The library list, its filters, paging and sorting; the Tags page; the command palette; selects |
 | `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks; the reader's text width |
 | `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
+| `long-text` | Values at their longest with nothing to break at (titles, collection names, tags, test case names, a model id) stay inside their boxes on each screen that shows them, wrapped or cut short with their full text on hover |
 | `built/` | How a reload paints, judged on a production build (a second project, served by `vite preview` on port 5175, or `E2E_BUILT_PORT`, built afresh each run) |
 
 The first time, download the browser Playwright drives:

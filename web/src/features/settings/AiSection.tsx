@@ -8,6 +8,7 @@ import type { AiProvider, AiProviderKind, AiSettings, AiTestResponse, Meta } fro
 import { aiLogPath } from '../../lib/aiLog';
 import { errorLine, sentence } from '../../lib/errors';
 import { absoluteTime, formatMs, plural, relativeTime } from '../../lib/format';
+import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
@@ -331,7 +332,9 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
     <li className={cx('card provider-item', p.isDefault && 'is-default')}>
       <div className="grow">
         <div className="row provider-title">
-          <strong className="truncate">{p.name}</strong>
+          <strong className="truncate" onMouseEnter={titleIfCut}>
+            {p.name}
+          </strong>
           {p.isDefault && (
             <Badge tone="accent" title="Used for drafting, test cases and variants">
               default
@@ -344,7 +347,9 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
           <span>{kindName(p.kind)}</span>
           {model ? (
             <span>
-              <code translate="no">{model}</code>
+              <code translate="no" title={model}>
+                {model}
+              </code>
               {p.model === null && ' (the default)'}
             </span>
           ) : (
@@ -352,7 +357,10 @@ function ProviderRow({ provider: p, settings, test, onDefault, onTest, onEdit, o
           )}
           {host && (
             <span>
-              at <code translate="no">{host}</code>
+              at{' '}
+              <code translate="no" title={host}>
+                {host}
+              </code>
             </span>
           )}
           {p.effort !== null && <span>{p.effort} effort</span>}
