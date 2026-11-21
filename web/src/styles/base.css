@@ -132,7 +132,7 @@ textarea.mono {
 }
 
 ::selection {
-  background: var(--editor-selection);
+  background: var(--selection);
 }
 
 * {

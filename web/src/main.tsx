@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from './api/client';
 import { routes } from './App';
 import { initTheme } from './lib/theme';
+import { applyCodeTheme } from './lib/codeThemes';
 import { initReadingSize } from './lib/readingSize';
 import { revealWhenSettled } from './lib/boot';
 import { ConfirmProvider } from './ui/Dialog';
@@ -33,6 +34,7 @@ async function start() {
   }
 
   initTheme();
+  applyCodeTheme();
   initReadingSize();
 
   const queryClient = new QueryClient({

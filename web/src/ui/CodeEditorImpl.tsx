@@ -7,7 +7,6 @@ import {
   defaultHighlightStyle,
   foldGutter,
   foldKeymap,
-  HighlightStyle,
   indentOnInput,
   indentUnit,
   syntaxHighlighting,
@@ -30,10 +29,10 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { tags as t } from '@lezer/highlight';
-import { parameterName } from './pythonTypes';
 import { usePreferences } from '../api/queries';
+import { roleColor } from '../lib/codeThemes';
 import { cx } from './Button';
+import { codeHighlightStyle, roleMarkTheme } from './codeHighlight';
 import { documentWords, loadLanguage } from './editorLanguages';
 import { codeBefore } from './editorLibrary';
 import { FONT_SIZE_DEFAULT, lineHeightFor, resolveEditorOptions, type EditorOptions } from './editorOptions';
@@ -87,26 +86,27 @@ export interface CodeEditorProps {
 /** Marks a transaction that mirrors a new `value` prop, so it is not echoed back through `onChange`. */
 const externalChange = Annotation.define<boolean>();
 
-// Colours come from CSS custom properties, so one theme serves light and
-// dark. The type size comes from two more, set on each editor from the user's
-// preferences (see `metrics` below).
+// Colours come from the code theme's custom properties (lib/codeThemes.ts),
+// so one editor theme serves light and dark; the popups (completion, search)
+// take the app's own. The type size comes from two more, set on each editor
+// from the user's preferences (see `metrics` below).
 const theme = EditorView.theme({
-  '&': { color: 'var(--text)', backgroundColor: 'transparent', height: '100%', fontSize: `var(--editor-font-size, ${FONT_SIZE_DEFAULT}px)` },
+  '&': { color: roleColor('text'), backgroundColor: roleColor('background'), height: '100%', fontSize: `var(--editor-font-size, ${FONT_SIZE_DEFAULT}px)` },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
     lineHeight: `var(--editor-line-height, ${lineHeightFor(FONT_SIZE_DEFAULT)}px)`,
     overflow: 'auto',
   },
-  '.cm-content': { caretColor: 'var(--text)', padding: '8px 0' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
+  '.cm-content': { caretColor: roleColor('cursor'), padding: '8px 0' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: roleColor('cursor') },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'var(--editor-selection)',
+    backgroundColor: roleColor('selection'),
   },
-  '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--text-3)', border: 'none', paddingLeft: '4px' },
-  '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--editor-active-line)', color: 'var(--text-2)' },
-  '.cm-foldPlaceholder': { backgroundColor: 'var(--surface-3)', border: 'none', color: 'var(--text-2)', margin: '0 4px', padding: '0 4px' },
+  '.cm-gutters': { backgroundColor: roleColor('gutterBackground'), color: roleColor('gutterText'), border: 'none', paddingLeft: '4px' },
+  '.cm-activeLine': { backgroundColor: roleColor('activeLine') },
+  '.cm-activeLineGutter': { backgroundColor: roleColor('activeLineGutter'), color: roleColor('activeLineGutterText') },
+  '.cm-foldPlaceholder': { backgroundColor: roleColor('foldPlaceholder'), border: 'none', color: roleColor('foldPlaceholderText'), margin: '0 4px', padding: '0 4px' },
   // The runner rows of the solve editor (see editorRunner.ts), set like code lines.
   '.cm-runner-toggle': {
     display: 'flex',
@@ -118,27 +118,27 @@ const theme = EditorView.theme({
     border: 'none',
     borderRadius: 0,
     background: 'none',
-    color: 'var(--text-3)',
+    color: roleColor('gutterText'),
     font: 'inherit',
     textAlign: 'left',
     cursor: 'pointer',
   },
-  '.cm-runner-toggle:hover': { backgroundColor: 'var(--editor-active-line)', color: 'var(--text-2)' },
+  '.cm-runner-toggle:hover': { backgroundColor: roleColor('activeLine'), color: roleColor('activeLineGutterText') },
   '.cm-runner-toggle:focus-visible': { outline: '2px solid var(--focus)', outlineOffset: '-2px' },
   '.cm-runner-chevron': { flex: 'none', transition: 'transform 120ms ease' },
   '.cm-runner-toggle[aria-expanded="true"] .cm-runner-chevron': { transform: 'rotate(90deg)' },
-  '.cm-runner-more': { padding: '0 4px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--surface-3)', color: 'var(--text-2)' },
+  '.cm-runner-more': { padding: '0 4px', borderRadius: 'var(--radius-sm)', backgroundColor: roleColor('foldPlaceholder'), color: roleColor('foldPlaceholderText') },
   '.cm-runner-code': { opacity: '0.55', cursor: 'default' },
   '.cm-runner-line': { padding: '0 2px 0 6px' },
   // Where the runner meets the solver's code, while it is expanded.
-  '.cm-runner-prefix.cm-runner-open': { borderBottom: '1px dashed var(--border-strong)' },
-  '.cm-runner-suffix.cm-runner-open': { borderTop: '1px dashed var(--border-strong)' },
+  '.cm-runner-prefix.cm-runner-open': { borderBottom: `1px dashed ${roleColor('border')}` },
+  '.cm-runner-suffix.cm-runner-open': { borderTop: `1px dashed ${roleColor('border')}` },
   '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
-    backgroundColor: 'var(--surface-3)',
-    outline: '1px solid var(--border-strong)',
+    backgroundColor: roleColor('selectionMatch'),
+    outline: `1px solid ${roleColor('border')}`,
   },
-  '.cm-selectionMatch': { backgroundColor: 'var(--surface-3)' },
-  '.cm-placeholder': { color: 'var(--text-3)' },
+  '.cm-selectionMatch': { backgroundColor: roleColor('selectionMatch') },
+  '.cm-placeholder': { color: roleColor('placeholder') },
   '.cm-tooltip': {
     backgroundColor: 'var(--surface)',
     color: 'var(--text)',
@@ -164,27 +164,6 @@ const theme = EditorView.theme({
     color: 'var(--text)',
   },
 });
-
-const highlight = HighlightStyle.define([
-  // Declaring keywords (def, class, const) apart from those that steer or import (if, return, from), as VS Code does.
-  { tag: [t.keyword, t.definitionKeyword, t.modifier], color: 'var(--syn-keyword)' },
-  { tag: [t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: 'var(--syn-control)' },
-  { tag: [t.string, t.special(t.string), t.character, t.regexp], color: 'var(--syn-string)' },
-  { tag: [t.number, t.bool, t.null, t.atom], color: 'var(--syn-number)' },
-  { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: 'var(--syn-comment)', fontStyle: 'italic' },
-  { tag: [t.function(t.variableName), t.function(t.propertyName), t.macroName], color: 'var(--syn-fn)' },
-  { tag: [t.typeName, t.className, t.namespace, t.standard(t.typeName)], color: 'var(--syn-type)' },
-  // A parameter where it is declared (Python's, see pythonTypes.ts); its uses stay plain.
-  { tag: parameterName, color: 'var(--syn-var)' },
-  { tag: [t.meta, t.annotation, t.processingInstruction, t.self], color: 'var(--syn-meta)' },
-  { tag: [t.heading], color: 'var(--text)', fontWeight: '600' },
-  { tag: [t.strong], fontWeight: '600' },
-  { tag: [t.emphasis], fontStyle: 'italic' },
-  { tag: [t.link, t.url], color: 'var(--syn-fn)' },
-  { tag: [t.monospace], color: 'var(--syn-string)' },
-  { tag: [t.quote], color: 'var(--text-2)' },
-  { tag: [t.invalid], color: 'var(--danger)' },
-]);
 
 const activeLine = Decoration.line({ class: 'cm-activeLine' });
 
@@ -385,7 +364,8 @@ export default function CodeEditorImpl({
           prose ? minimalSetup : codeSetup,
           keymap.of([indentWithTab]),
           theme,
-          syntaxHighlighting(highlight),
+          syntaxHighlighting(codeHighlightStyle),
+          roleMarkTheme,
           langC.of([]),
           roC.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
           runnerC.of(runnerRef.current),

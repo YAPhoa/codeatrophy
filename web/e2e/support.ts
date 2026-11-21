@@ -161,3 +161,39 @@ export async function mockItem(page: Page, title: string): Promise<{ id: string;
   if (!item) throw new Error(`no item titled ${title}`);
   return item;
 }
+
+/**
+ * The colour each token under `scope` is drawn in, beside the colour of the
+ * code theme's role it should take (`var(--code-<role>)`, as the page
+ * resolves it now). A token is the `nth` element (from 0) whose whole text it
+ * is; compare the two lists.
+ */
+export async function codeColours(scope: Locator, tokens: [text: string, role: string, nth?: number][]): Promise<{ drawn: string[]; role: string[] }> {
+  return scope.evaluate((root, tokens) => {
+    const leaves = [...root.querySelectorAll('*')].filter((el) => el.children.length === 0);
+    const probe = document.createElement('span');
+    root.appendChild(probe);
+    const drawn: string[] = [];
+    const role: string[] = [];
+    for (const [text, name, nth = 0] of tokens) {
+      const el = leaves.filter((leaf) => leaf.textContent === text)[nth];
+      probe.style.color = `var(--code-${name})`;
+      drawn.push(`${text} ${el ? getComputedStyle(el).color : 'missing'}`);
+      role.push(`${text} ${getComputedStyle(probe).color}`);
+    }
+    probe.remove();
+    return { drawn, role };
+  }, tokens);
+}
+
+/** The background a code theme role resolves to on the page now. */
+export async function codeRoleBackground(page: Page, name: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = `var(--code-${name})`;
+    document.body.appendChild(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  }, name);
+}

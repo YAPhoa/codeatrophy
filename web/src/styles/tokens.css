@@ -1,8 +1,9 @@
 /* Design tokens. Every colour in the app comes from here so that the light
-   and dark themes stay in step. `data-theme` is set on <html> by lib/theme.ts.
-   Type sizes, spacing, radii, control heights and motion live here too: use a
-   token rather than a raw pixel value. Phones (900px and below) raise the
-   control heights in layout.css. */
+   and dark themes stay in step, except the colours of code, which come from
+   the code theme (lib/codeThemes.ts, as --code-* properties). `data-theme`
+   is set on <html> by lib/theme.ts. Type sizes, spacing, radii, control
+   heights and motion live here too: use a token rather than a raw pixel
+   value. Phones (900px and below) raise the control heights in layout.css. */
 
 :root {
   --font-sans: 'IBM Plex Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans',
@@ -145,17 +146,9 @@
   --shadow-dialog: 0 18px 60px rgb(20 22 30 / 26%);
   --overlay: rgb(24 26 32 / 42%);
 
-  --syn-keyword: #7d3fc4;
-  --syn-control: #b0247f;
-  --syn-string: #0b6b4c;
-  --syn-number: #a24e00;
-  --syn-comment: #5f646c;
-  --syn-fn: #1c58b5;
-  --syn-type: #8f4a00;
-  --syn-var: #0b5f7f;
-  --syn-meta: #9a3168;
-  --editor-active-line: #ebf0ed;
-  --editor-selection: #c8dfd7;
+  /* Selected text, on the page and in the editor. The code colours are in
+     lib/codeThemes.ts. */
+  --selection: #c8dfd7;
 
   /* The pixel-art logo (ui/Logo.tsx). The fade steps grow fainter away from
      the solid brace; they are tuned for the sidebar (--surface-2). The glow
@@ -216,17 +209,7 @@
   --shadow-dialog: 0 18px 60px rgb(0 0 0 / 65%);
   --overlay: rgb(0 0 0 / 58%);
 
-  --syn-keyword: #c3a6ff;
-  --syn-control: #ee8ad2;
-  --syn-string: #7fdcb2;
-  --syn-number: #f0a56a;
-  --syn-comment: #8e949e;
-  --syn-fn: #86b4ff;
-  --syn-type: #efc66f;
-  --syn-var: #9cdcfe;
-  --syn-meta: #f29bc3;
-  --editor-active-line: #171f2b;
-  --editor-selection: #0f493c;
+  --selection: #0f493c;
 
   --logo-solid: var(--accent);
   --logo-fade-1: #158068;

@@ -60,10 +60,10 @@ export async function loadLanguage(id: string | null | undefined): Promise<Exten
     case 'python':
       return withLibrary(
         id,
-        Promise.all([import('@codemirror/lang-python'), import('./pythonTypes')]).then(([m, { pythonTypeTags }]) => {
-          // The language with its annotations' names tagged as types, and the rest of its support.
-          const language = m.pythonLanguage.configure({ props: [pythonTypeTags] });
-          return [new LanguageSupport(language, m.python().support), language];
+        Promise.all([import('@codemirror/lang-python'), import('./pythonSyntax')]).then(([m, { pythonStyleTags, pythonDecorations }]) => {
+          // The language with the tags and marks of pythonSyntax.ts, and the rest of its support.
+          const language = m.pythonLanguage.configure({ props: [pythonStyleTags] });
+          return [new LanguageSupport(language, [m.python().support, pythonDecorations]), language];
         }),
         import('./libraries/python'),
       );

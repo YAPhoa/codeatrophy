@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { codeColours, codeRoleBackground, open } from './support';
 
 // Mermaid diagrams and images embedded as data URLs in rendered Markdown. The
 // seed's "Untrusted Markdown" reading has a diagram that draws, one that does
 // not parse, and an SVG image as a data URL with a script inside.
 const UNTRUSTED = '/items/11111111-1111-4111-8111-000000000023';
 const RAFT = '/items/11111111-1111-4111-8111-000000000024';
+const B_TREES = '/items/11111111-1111-4111-8111-000000000018';
 
 const noDialogs = (page: Page) =>
   page.on('dialog', (dialog) => {
@@ -59,6 +60,36 @@ test('markdown: a diagram follows the theme', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect.poll(() => diagram.evaluate((svg) => svg.querySelector('style')?.textContent ?? '')).toContain('#1f2937');
+});
+
+test('markdown: a code block takes the colours of the code theme\'s roles, in light and in dark', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await open(page, B_TREES);
+  const block = page.locator('.md pre code.language-python');
+  await expect(block).toContainText('def search(node, key):');
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    const { drawn, role } = await codeColours(block, [
+      ['def', 'declare'],
+      ['search', 'function'],
+      ['len', 'type'],
+      ['None', 'constant'],
+      ['# first separator > key', 'comment'],
+    ]);
+    expect(drawn).toEqual(role);
+    expect(await block.evaluate((el) => getComputedStyle(el).color)).toBe(
+      await block.evaluate((el) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--code-text)';
+        el.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }),
+    );
+    expect(await page.locator('.md pre').first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await codeRoleBackground(page, 'block-background'));
+  }
 });
 
 test('markdown: the editor preview draws a diagram once typing pauses', async ({ page }) => {

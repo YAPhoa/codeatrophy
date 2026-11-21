@@ -64,8 +64,8 @@
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--code-block-background);
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-variant-ligatures: none;
   white-space: pre;
@@ -82,19 +82,27 @@
   outline-offset: -1px;
 }
 
-.prefs-preview-code .tok-keyword {
-  color: var(--syn-keyword);
+.prefs-preview-code .tok-declare {
+  color: var(--code-declare);
 }
 
-.prefs-preview-code .tok-fn {
-  color: var(--syn-fn);
+.prefs-preview-code .tok-control {
+  color: var(--code-control);
+}
+
+.prefs-preview-code .tok-function {
+  color: var(--code-function);
+}
+
+.prefs-preview-code .tok-parameter {
+  color: var(--code-parameter);
 }
 
 .prefs-preview-code .tok-number {
-  color: var(--syn-number);
+  color: var(--code-number);
 }
 
 .prefs-preview-code .tok-comment {
-  color: var(--syn-comment);
+  color: var(--code-comment);
   font-style: italic;
 }

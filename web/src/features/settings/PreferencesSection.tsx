@@ -105,10 +105,10 @@ function EditorPreview({ editor }: { editor: EditorPreferences }) {
         // Scrolls sideways when lines are not wrapped, so it has to be reachable by keyboard.
         tabIndex={0}
       >
-        <span className="tok-keyword">def</span> <span className="tok-fn">sum_of_even</span>(numbers):{'\n'}
+        <span className="tok-declare">def</span> <span className="tok-function">sum_of_even</span>(<span className="tok-parameter">numbers</span>):{'\n'}
         {indent}
-        <span className="tok-keyword">return</span> <span className="tok-fn">sum</span>(n <span className="tok-keyword">for</span> n <span className="tok-keyword">in</span> numbers{' '}
-        <span className="tok-keyword">if</span> n % <span className="tok-number">2</span> == <span className="tok-number">0</span>){'  '}
+        <span className="tok-control">return</span> <span className="tok-function">sum</span>(n <span className="tok-control">for</span> n <span className="tok-control">in</span> numbers{' '}
+        <span className="tok-control">if</span> n % <span className="tok-number">2</span> == <span className="tok-number">0</span>){'  '}
         <span className="tok-comment"># 0 when there are none</span>
       </pre>
     </figure>

@@ -83,6 +83,8 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     environment: 'node',
+    // The code themes' contrast test reads the tokens as text (`?raw`); other CSS stays out.
+    css: { include: /tokens\.css/ },
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
 }));

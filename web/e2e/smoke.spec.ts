@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { choose, mockApi, open, openList, TWO_SUM_TEXT, writeCode } from './support';
+import { choose, codeColours, codeRoleBackground, mockApi, open, openList, TWO_SUM_TEXT, writeCode } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
 // against the API mock, whose state lives in the page: every test starts from
@@ -171,6 +171,49 @@ test('solve: the lines that read the input open folded, and unfold in place', as
   await choose(page.getByRole('combobox', { name: 'Language' }), /^C\+\+/);
   await expect(editor.locator('.cm-line').filter({ hasText: '// region input' })).toBeVisible();
   await expect(editor.getByText('cin >> rows')).toHaveCount(0);
+});
+
+test('solve: code takes the colours of the code theme\'s roles, and the editor its background, in light and in dark', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await open(page, '/items/11111111-1111-4111-8111-000000000001');
+  const editor = page.locator('.editor-host');
+  await writeCode(
+    page,
+    'class Box(object):\n    @cache\n    def area(self, side: int) -> float:\n        for k in range(side):\n            print(k, sep="\\t")\n        return side if side in SIZES else None\n',
+  );
+  await expect(editor.getByText('SIZES')).toBeVisible();
+  const tokens: [string, string, number?][] = [
+    ['class', 'declare'],
+    ['Box', 'type'],
+    ['object', 'type'],
+    ['cache', 'decorator'],
+    ['def', 'declare'],
+    ['area', 'function'],
+    ['self', 'parameter'],
+    ['int', 'type'],
+    ['for', 'control'],
+    ['in', 'control', 0],
+    ['range', 'function'],
+    ['sep', 'parameter'],
+    ['\\t', 'escape'],
+    ['return', 'control'],
+    ['in', 'operator-word', 1],
+    ['None', 'constant'],
+  ];
+  const seen: Record<string, string> = {};
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    const { drawn, role } = await codeColours(editor, tokens);
+    expect(drawn).toEqual(role);
+    seen[scheme] = role[0] ?? '';
+    // The background is the theme's, which is the app's surface in both modes.
+    const background = await codeRoleBackground(page, 'background');
+    expect(await editor.locator('.cm-editor').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(background);
+    expect(await editor.locator('.cm-gutters').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await codeRoleBackground(page, 'gutter-background'));
+    expect(background).toBe(await page.locator('.workspace').evaluate((el) => getComputedStyle(el).backgroundColor));
+  }
+  expect(seen).toEqual({ light: 'class rgb(125, 63, 196)', dark: 'class rgb(195, 166, 255)' });
 });
 
 test('test cases to generate: the preference is where the generate page starts', async ({ page }) => {
