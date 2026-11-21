@@ -640,8 +640,9 @@ The *editable* parts are about the prose: statement sections, readings,
 titles, tags, what makes a good test set. The *fixed* parts are what the app
 depends on: stdin/stdout judging, the two interfaces and the harness
 protocol, the folded input region, comparison, limits, language ids and
-versions, expected outputs from a reference solution, and the one HTML
-block that renders (`<details>`). A user may replace
+versions, expected outputs from a reference solution, the one HTML
+block that renders (`<details>`) and code blocks marked as language tabs.
+A user may replace
 all the editable parts with one text of their own, a **custom system
 prompt**, kept as an instance setting. A prompt then carries that text,
 then the fixed parts gathered under their own heading, then the style
@@ -826,6 +827,10 @@ collapsible block: `<details>` (or `<details open>`), an optional
 `<summary>…</summary>` and `</details>` around Markdown become a real details
 element, rebuilt from those tags alone; the summary is plain text, and a tag
 with any other attribute, or without its partner, stays text like other HTML.
+Fenced code blocks marked `tab` after their language (```` ```cpp tab ````),
+two or more one right after another, are drawn as one block with a tab per
+language. The language picked in one group is picked in every group on the
+page that has it, and remembered in the browser.
 
 ## Deployment
 

@@ -155,6 +155,9 @@ func TestCustomConventionsReplaceTheEditableOnes(t *testing.T) {
 		if !strings.Contains(p, "collapsible block: `<details>`") {
 			t.Errorf("%s lost the one HTML block that renders", name)
 		}
+		if !strings.Contains(p, "fenced block with `tab` after the language") {
+			t.Errorf("%s lost the language tabs", name)
+		}
 	}
 	if !strings.Contains(draft, DraftRules()) || !strings.HasSuffix(draft, jsonOnly) {
 		t.Error("draft lost its rules")

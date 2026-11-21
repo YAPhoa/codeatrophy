@@ -176,7 +176,7 @@ third-party origin.
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
 | `library-*`, `tags`, `palette`, `select` | The library list, the count by its title, its filters, paging and sorting; the Tags page; the command palette; selects |
-| `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks; the reader's text width |
+| `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks, language tabs; the reader's text width |
 | `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
 | `long-text` | Values at their longest with nothing to break at (titles, collection names, tags, test case names, a model id) stay inside their boxes on each screen that shows them, wrapped or cut short with their full text on hover |
 | `built/` | How a reload paints, judged on a production build (a second project, served by `vite preview` on port 5175, or `E2E_BUILT_PORT`, built afresh each run) |
@@ -305,7 +305,8 @@ A few conventions worth knowing:
 - **Item bodies are untrusted.** They can come from imported bundles. The
   Markdown renderer never turns raw HTML into elements (the one exception, a
   `<details>` block, is rebuilt from its tags alone by `detailsBlocks` in
-  `src/ui/markdownPlugins.ts`), drops unsafe URLs
+  `src/ui/markdownPlugins.ts`; code blocks marked `tab` are grouped there
+  too, by `codeTabs`, into `src/ui/CodeTabs.tsx`), drops unsafe URLs
   (an image may be a `data:image/` URL, `src/ui/markdownUrl.ts`), and does
   not load remote images until asked. `src/ui/Markdown.test.tsx` guards this;
   do not add `rehype-raw`. Mermaid diagrams are drawn at its `strict` level,

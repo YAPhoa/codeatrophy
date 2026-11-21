@@ -47,6 +47,8 @@ export function headingSlugs() {
 interface MdastNode {
   type: string;
   value?: string;
+  lang?: string | null;
+  meta?: string | null;
   data?: Record<string, unknown>;
   position?: { start: { offset?: number }; end: { offset?: number } };
   children?: MdastNode[];
@@ -216,6 +218,71 @@ export function detailsBlocks(this: { parse(text: string): unknown }) {
   };
 
   return (tree: MdastNode): void => transform(tree);
+}
+
+// Language tabs. Fenced code blocks marked `tab` after their language
+// (```` ```cpp tab ````), two or more one right after another in the same
+// block, become one block with a tab per language (ui/CodeTabs.tsx). A lone
+// marked block, a mermaid block and a fence with no language stay as they
+// are. Runs after `detailsBlocks`, so tabs work inside a details block too.
+
+/** Fence names that mean one of the app's language ids, so `py` and `python` are one tab language. */
+const FENCE_ALIASES: Readonly<Record<string, string>> = {
+  py: 'python',
+  python3: 'python',
+  'c++': 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  js: 'javascript',
+  ts: 'typescript',
+  cs: 'csharp',
+  'c#': 'csharp',
+  golang: 'go',
+  rs: 'rust',
+  kt: 'kotlin',
+  rb: 'ruby',
+};
+
+/** The language id a fence's language stands for; an unknown one is itself, lower-cased. */
+export function tabLanguage(lang: string): string {
+  const id = lang.toLowerCase();
+  return FENCE_ALIASES[id] ?? id;
+}
+
+const TAB_CONTAINERS = new Set([...CONTAINERS, 'details']);
+
+const isTabBlock = (node: MdastNode): node is MdastNode & { lang: string } =>
+  node.type === 'code' && !!node.lang && node.lang.toLowerCase() !== 'mermaid' && (node.meta ?? '').trim().split(/\s+/)[0] === 'tab';
+
+export function codeTabs() {
+  const group = (blocks: (MdastNode & { lang: string })[]): MdastNode => ({
+    type: 'codeTabs',
+    data: { hName: 'div', hProperties: { className: ['md-code-tabs'], dataLanguages: blocks.map((b) => tabLanguage(b.lang)).join(' ') } },
+    children: blocks,
+  });
+
+  const visit = (node: MdastNode): void => {
+    if (!TAB_CONTAINERS.has(node.type) || !node.children) return;
+    node.children.forEach(visit);
+    const out: MdastNode[] = [];
+    let run: (MdastNode & { lang: string })[] = [];
+    const flush = () => {
+      if (run.length >= 2) out.push(group(run));
+      else out.push(...run);
+      run = [];
+    };
+    for (const child of node.children) {
+      if (isTabBlock(child)) run.push(child);
+      else {
+        flush();
+        out.push(child);
+      }
+    }
+    flush();
+    node.children = out;
+  };
+
+  return (tree: MdastNode): void => visit(tree);
 }
 
 function stripPositions(node: MdastNode): void {

@@ -25,6 +25,7 @@
 .md blockquote,
 .md .md-table-wrap,
 .md .md-mermaid,
+.md .md-code-tabs,
 .md .katex-display {
   margin: 0 0 0.9em;
 }
@@ -296,6 +297,60 @@
   margin-bottom: 1.15em;
 }
 
+/* The same code in several languages, a tab each (```cpp tab` in the source;
+   ui/CodeTabs.tsx). The selected tab is drawn as part of the code box: its
+   lower edge covers the box's top border. A row too long for the column
+   scrolls on its own. */
+.md .md-code-tabs-list {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  margin-bottom: -1px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.md .md-code-tab {
+  flex: none;
+  padding: 0.3em 0.9em;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--duration-hover) ease-out;
+}
+
+.md .md-code-tab:hover {
+  color: var(--text);
+}
+
+.md .md-code-tab.is-selected {
+  border-color: var(--border);
+  background: var(--code-block-background);
+  color: var(--accent-text);
+}
+
+.md .md-code-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.md .md-code-tabs pre {
+  margin: 0;
+}
+
+.md .md-code-tabs.is-first pre {
+  border-top-left-radius: 0;
+}
+
+.md .md-code-tabs-panel:focus-visible {
+  outline-offset: 1px;
+  border-radius: var(--radius);
+}
+
 /* Under the source of a diagram that could not be drawn. */
 .md .md-mermaid-note {
   margin-top: -0.5em;
@@ -316,7 +371,8 @@
 .md-longform pre,
 .md-longform blockquote,
 .md-longform .md-table-wrap,
-.md-longform .md-mermaid {
+.md-longform .md-mermaid,
+.md-longform .md-code-tabs {
   margin-bottom: 1.15em;
 }
 

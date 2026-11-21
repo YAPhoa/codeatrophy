@@ -171,3 +171,72 @@ describe('collapsible details blocks', () => {
     expect(render('See <details><summary>S</summary>x</details> here.')).toBe('<p>See &lt;details&gt;&lt;summary&gt;S&lt;/summary&gt;x&lt;/details&gt; here.</p>');
   });
 });
+
+// Fenced blocks marked `tab` after their language, one right after another,
+// are one block with a tab per language (CodeTabs.tsx).
+describe('language tabs', () => {
+  const groups = (html: string) => html.match(/class="md-code-tabs[ "]/g)?.length ?? 0;
+  const tabs = (html: string) => [...html.matchAll(/role="tab"[^>]*>([^<]*)</g)].map((m) => m[1]);
+
+  it('groups two or more marked blocks in a row, the first tab selected', () => {
+    const html = render('```cpp tab\nint x;\n```\n\n```java tab\nint x;\n```\n```python tab\nx = 1\n```');
+    expect(groups(html)).toBe(1);
+    expect(tabs(html)).toEqual(['C++', 'Java', 'Python']);
+    expect(html.match(/role="tabpanel"/g)?.length).toBe(3);
+    expect(html.match(/aria-selected="true"/g)?.length).toBe(1);
+    expect(html).toMatch(/aria-selected="true"[^>]*>C\+\+</);
+    expect(html.match(/role="tabpanel"[^>]*hidden=""/g)?.length).toBe(2);
+    // Each tab names its panel, and each panel its tab.
+    for (const [, id] of html.matchAll(/aria-controls="([^"]+)"/g)) expect(html).toContain(`id="${id}"`);
+    expect(html.match(/role="tab"[^>]*tabindex="0"/g)?.length).toBe(1);
+  });
+
+  it('highlights each tab and keeps code untranslated', () => {
+    const html = render('```cpp tab\nint main() { return 0; }\n```\n\n```python tab\ndef f():\n    return 1\n```');
+    expect(html).toContain('<pre translate="no"><code translate="no" class="hljs language-cpp">');
+    expect(html).toContain('<pre translate="no"><code translate="no" class="hljs language-python">');
+    expect(html).toContain('hljs-keyword');
+    expect(html).toContain('hljs-type');
+  });
+
+  it('leaves a lone marked block, unmarked blocks and a bare `tab` fence as plain code', () => {
+    const plain = render('```cpp\nint x;\n```');
+    expect(render('```cpp tab\nint x;\n```')).toBe(plain);
+    expect(groups(render('```cpp\nint x;\n```\n\n```java\nint x;\n```'))).toBe(0);
+    expect(groups(render('```cpp tab\nint x;\n```\n\n```java\nint x;\n```'))).toBe(0);
+    expect(groups(render('```tab\nx\n```\n\n```tab\ny\n```'))).toBe(0);
+  });
+
+  it('ends a group at anything between the blocks', () => {
+    const html = render('```cpp tab\na\n```\n\nOr in Java:\n\n```java tab\nb\n```\n\n```python tab\nc\n```\n\n```go tab\nd\n```');
+    expect(groups(html)).toBe(1);
+    expect(tabs(html)).toEqual(['Java', 'Python', 'Go']);
+    expect(html.indexOf('language-cpp')).toBeLessThan(html.indexOf('md-code-tabs'));
+    // An unmarked block in the middle splits the run.
+    expect(groups(render('```cpp tab\na\n```\n\n```java\nb\n```\n\n```python tab\nc\n```'))).toBe(0);
+  });
+
+  it('numbers a language that appears twice, and reads its common fence names', () => {
+    expect(tabs(render('```python tab\na\n```\n\n```py tab\nb\n```\n\n```c++ tab\nc\n```\n\n```cs tab\nd\n```\n\n```js tab\ne\n```\n\n```sql tab\nf\n```'))).toEqual(['Python', 'Python 2', 'C++', 'C#', 'JavaScript', 'sql']);
+  });
+
+  it('never groups a mermaid block', () => {
+    const html = render('```mermaid tab\nflowchart LR\n  A --> B\n```\n\n```python tab\nx = 1\n```');
+    expect(groups(html)).toBe(0);
+    expect(html).toContain('<code class="language-mermaid">flowchart LR');
+    expect(groups(render('```cpp tab\na\n```\n\n```mermaid tab\nflowchart LR\n  A --> B\n```\n\n```python tab\nb\n```'))).toBe(0);
+  });
+
+  it('works inside a details block, and only among blocks with the same parent', () => {
+    const html = render('<details>\n<summary>Solution</summary>\n\n```cpp tab\na\n```\n\n```python tab\nb\n```\n\n</details>');
+    expect(html.startsWith('<details class="md-details"><summary class="md-details-summary">Solution</summary><div class="md-code-tabs')).toBe(true);
+    expect(tabs(html)).toEqual(['C++', 'Python']);
+    expect(groups(render('```cpp tab\na\n```\n\n<details>\n\n```python tab\nb\n```\n\n</details>'))).toBe(0);
+    expect(groups(render('> ```cpp tab\n> a\n> ```\n>\n> ```java tab\n> b\n> ```'))).toBe(1);
+    expect(groups(render('- ```cpp tab\n  a\n  ```\n- ```java tab\n  b\n  ```'))).toBe(0);
+  });
+
+  it('leaves heading ids as they were', () => {
+    expect(render('## Code\n\n```cpp tab\na\n```\n\n```java tab\nb\n```\n\n## Code')).toMatch(/id="h-code"[\s\S]*md-code-tabs[\s\S]*id="h-code-1"/);
+  });
+});

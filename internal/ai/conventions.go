@@ -12,8 +12,8 @@ import "strings"
 // depends on: the stdin/stdout judging, the program and function interfaces
 // and their harness protocol, the folded input region, comparison, limits,
 // language ids and versions, expected outputs coming from a reference
-// solution, and the one HTML block the renderer draws (`<details>`). They
-// always apply.
+// solution, the one HTML block the renderer draws (`<details>`) and code
+// blocks marked as language tabs. They always apply.
 //
 // Without a custom text the parts are sent interleaved, in their order here,
 // as AuthoringConventions. With one, the custom text is sent followed by
@@ -218,6 +218,10 @@ prefix, the solver's code and the suffix, each starting on a new line:
   collapsible block: ` + "`<details>`" + `, ` + "`<summary>Answer</summary>`" + `, a blank
   line, the Markdown, a blank line and ` + "`</details>`" + `. The reader clicks the
   summary to show it.
+- When the same code is shown in more than one language, write each as a
+  fenced block with ` + "`tab`" + ` after the language (` + "```cpp tab" + `), one right after
+  another; they appear as tabs. This adds no languages: show only those the
+  source or the user gives.
 `},
 }
 

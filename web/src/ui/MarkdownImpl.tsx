@@ -6,7 +6,8 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import { ImageOff } from 'lucide-react';
-import { detailsBlocks, displayMathAlone, headingSlugs } from './markdownPlugins';
+import { CodeTabs } from './CodeTabs';
+import { codeTabs, detailsBlocks, displayMathAlone, headingSlugs } from './markdownPlugins';
 import { markdownUrlTransform } from './markdownUrl';
 import { MermaidDiagram } from './Mermaid';
 import { hashTarget, revealTarget } from './revealTarget';
@@ -18,7 +19,8 @@ import { hashTarget, revealTarget } from './revealTarget';
 // (an image may still be a data URL of an image: `markdownUrl.ts`). The one
 // exception to the first is a collapsible `<details>` block, which
 // `detailsBlocks` rebuilds from its tags alone (`markdownPlugins.ts`).
-const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath, displayMathAlone, detailsBlocks];
+// `codeTabs` groups code blocks marked `tab` into one with a tab per language.
+const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath, displayMathAlone, detailsBlocks, codeTabs];
 const rehypePlugins: Options['rehypePlugins'] = [
   // KaTeX writes errorColor inline on a command it will not render; its own
   // #cc0000 is too faint on the dark theme.
@@ -111,6 +113,14 @@ function mermaidSource(pre: Element | undefined): string | null {
   return textOf(code).replace(/\n$/, '');
 }
 
+/** The tab languages of a group made by `codeTabs`, or null for any other `div`. */
+function tabLanguages(div: Element | undefined): string[] | null {
+  const classes = div?.properties.className;
+  const languages = div?.properties.dataLanguages;
+  if (!Array.isArray(classes) || !classes.includes('md-code-tabs') || typeof languages !== 'string') return null;
+  return languages.split(' ');
+}
+
 const components: Options['components'] = {
   input: ({ node: _node, ...props }) => <TaskCheckbox {...props} />,
   img: ({ node: _node, ...props }) => <SafeImage {...props} />,
@@ -121,6 +131,10 @@ const components: Options['components'] = {
   pre: ({ node, ...props }) => {
     const diagram = mermaidSource(node);
     return diagram === null ? <pre translate="no" {...props} /> : <MermaidDiagram source={diagram} />;
+  },
+  div: ({ node, ...props }) => {
+    const languages = tabLanguages(node);
+    return languages === null ? <div {...props} /> : <CodeTabs languages={languages}>{props.children}</CodeTabs>;
   },
 };
 

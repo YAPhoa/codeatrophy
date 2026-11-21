@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { codeColours, codeRoleBackground, open } from './support';
 
 // Mermaid diagrams and images embedded as data URLs in rendered Markdown. The
@@ -202,4 +202,69 @@ test('markdown: an answer in a details block is hidden until its summary is clic
   await expect(solution.locator('pre code')).toContainText('def search');
   // The other closed block stays closed.
   await expect(answer).not.toHaveAttribute('open');
+});
+
+// The seed's "Consistent Hashing" reading shows its code in a few languages,
+// in two tab groups: Python, Go and C++, then Go and Python.
+const HASHING = '/items/11111111-1111-4111-8111-000000000017';
+
+test('markdown: language tabs switch by pointer and keyboard, together across the page, and are remembered', async ({ page }) => {
+  await open(page, HASHING);
+  const groups = page.locator('.md .md-code-tabs');
+  await expect(groups).toHaveCount(2);
+  const [first, second] = [groups.nth(0), groups.nth(1)];
+  await expect(first.getByRole('tab')).toHaveText(['Python', 'Go', 'C++']);
+  await expect(second.getByRole('tab')).toHaveText(['Go', 'Python']);
+  const shown = (group: Locator) => group.locator('[role="tabpanel"]:not([hidden]) code');
+  await expect(first.getByRole('tab', { name: 'Python' })).toHaveAttribute('aria-selected', 'true');
+  await expect(shown(first)).toHaveClass(/language-python/);
+  await expect(shown(second)).toHaveClass(/language-go/);
+  // Each tab is highlighted, and the selected one is drawn as part of the code box.
+  await expect(shown(first).locator('.hljs-keyword').first()).toBeVisible();
+  const tab = await first.getByRole('tab', { name: 'Python' }).boundingBox();
+  const box = await shown(first).locator('xpath=..').boundingBox();
+  expect(Math.abs((tab?.y ?? 0) + (tab?.height ?? 0) - 1 - (box?.y ?? 0))).toBeLessThanOrEqual(1);
+
+  // A click picks Go here and in the other group.
+  await first.getByRole('tab', { name: 'Go' }).click();
+  await expect(shown(first)).toHaveClass(/language-go/);
+  await expect(shown(first)).toBeVisible();
+  await expect(shown(second)).toHaveClass(/language-go/);
+
+  // The arrows, Home and End move the selection and the focus; C++ is only in the first group.
+  await page.keyboard.press('ArrowRight');
+  await expect(first.getByRole('tab', { name: 'C++' })).toBeFocused();
+  await expect(first.getByRole('tab', { name: 'C++' })).toHaveAttribute('tabindex', '0');
+  await expect(first.getByRole('tab', { name: 'Go' })).toHaveAttribute('tabindex', '-1');
+  await expect(shown(first)).toHaveClass(/language-cpp/);
+  await expect(shown(second)).toHaveClass(/language-go/);
+  await page.keyboard.press('ArrowRight');
+  await expect(first.getByRole('tab', { name: 'Python' })).toBeFocused();
+  await expect(shown(second)).toHaveClass(/language-python/);
+  await page.keyboard.press('End');
+  await expect(first.getByRole('tab', { name: 'C++' })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(first.getByRole('tab', { name: 'Python' })).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(first.getByRole('tab', { name: 'C++' })).toBeFocused();
+  await expect(first.locator('[role="tabpanel"]:not([hidden])')).toHaveAttribute('aria-labelledby', (await first.getByRole('tab', { name: 'C++' }).getAttribute('id')) ?? '');
+
+  // The second group picks Go, and the choice outlives a reload.
+  await second.getByRole('tab', { name: 'Go' }).click();
+  await expect(shown(first)).toHaveClass(/language-go/);
+  await page.reload();
+  await expect(shown(page.locator('.md .md-code-tabs').nth(0))).toHaveClass(/language-go/);
+  await expect(shown(page.locator('.md .md-code-tabs').nth(1))).toHaveClass(/language-go/);
+});
+
+test('markdown: a row of language tabs too wide for a narrow window scrolls on its own', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 800 });
+  await open(page, HASHING);
+  const row = page.locator('.md .md-code-tabs-list').first();
+  await expect(row.getByRole('tab')).toHaveCount(3);
+  await row.evaluate((el) => {
+    el.style.maxWidth = '120px';
+  });
+  expect(await row.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

@@ -394,6 +394,9 @@ are left out.
   GIF, WebP, SVG); raw HTML is never rendered, except a collapsible block:
   `<details>` (or `<details open>`), an optional `<summary>…</summary>` of
   plain text, and `</details>` around Markdown, with no other attributes.
+  Two or more fenced code blocks marked `tab` after their language
+  (```` ```cpp tab ````), one right after another, are drawn as one block
+  with a tab per language; a lone one is an ordinary code block.
 - `notes` is the user's private Markdown notes, at most
   `limits.maxNotesChars` characters. A write that changes them to anything
   longer is refused with `422` on `notes`; notes already longer (saved under
@@ -2469,11 +2472,11 @@ a text of their own. The second kind, the **fixed rules**, always applies:
 judging on stdin/stdout, the `program` and `function` interfaces and their
 harness protocol, the folded input region, how output is compared, limits,
 language ids and versions, expected outputs coming from a reference
-solution, and the one HTML block that renders (`<details>`, for answers and
-hints). So do the rules each request adds after the conventions and the
-style preset (sample test cases with correct outputs, the reference
-solution, assumptions, large test cases, the JSON-only answer), and the
-judge's languages in the user turn.
+solution, the one HTML block that renders (`<details>`, for answers and
+hints) and code blocks marked as language tabs. So do the rules each request
+adds after the conventions and the style preset (sample test cases with
+correct outputs, the reference solution, assumptions, large test cases, the
+JSON-only answer), and the judge's languages in the user turn.
 
 | Endpoint | Behaviour |
 | --- | --- |

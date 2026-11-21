@@ -191,7 +191,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
   exercise, or a hint that should not be seen at a glance, goes in a
   collapsible block: \`<details>\`, \`<summary>Answer</summary>\`, a blank
   line, the Markdown, a blank line and \`</details>\`. The reader clicks the
-  summary to show it.`;
+  summary to show it.
+- When the same code is shown in more than one language, write each as a
+  fenced block with \`tab\` after the language (\`\`\`cpp tab), one right after
+  another; they appear as tabs. This adds no languages: show only those the
+  source or the user gives.`;
 
 export const DRAFT_RULES = `## Drafting rules
 

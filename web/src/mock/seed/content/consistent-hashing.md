@@ -2,9 +2,21 @@
 
 Suppose you have a cache cluster of $N$ servers and you want to decide which server holds a given key. The obvious scheme is
 
-```python
+```python tab
 def server_for(key, servers):
     return servers[hash(key) % len(servers)]
+```
+
+```go tab
+func serverFor(key string, servers []string) string {
+	return servers[hash32(key)%uint32(len(servers))]
+}
+```
+
+```cpp tab
+std::string server_for(const std::string& key, const std::vector<std::string>& servers) {
+    return servers[std::hash<std::string>{}(key) % servers.size()];
+}
 ```
 
 It is uniform, stateless and trivially fast. It is also a disaster the moment $N$ changes. Go from 4 servers to 5 and a key stays where it was only if `h % 4 == h % 5`, which holds for roughly one key in five. **About 80% of the keys move.** For a cache that means a near-total miss storm; for a storage system it means copying most of your data across the network because one machine was added.
@@ -28,7 +40,7 @@ With $N$ servers placed at random, each owns $1/N$ of the ring on average, so a 
 
 The server positions are kept in a sorted array. Finding the owner of a key is a binary search for the first position $\ge$ the key's hash, wrapping around to index 0 at the end:
 
-```go
+```go tab
 type Ring struct {
 	points []uint32          // sorted
 	owner  map[uint32]string // point -> server
@@ -42,6 +54,19 @@ func (r *Ring) Lookup(key string) string {
 	}
 	return r.owner[r.points[i]]
 }
+```
+
+```python tab
+class Ring:
+    def __init__(self):
+        self.points = []  # sorted
+        self.owner = {}   # point -> server
+
+    def lookup(self, key):
+        i = bisect.bisect_left(self.points, hash32(key))
+        if i == len(self.points):
+            i = 0  # wrap around
+        return self.owner[self.points[i]]
 ```
 
 That is $O(\log N)$ per lookup with the ring in memory, which is negligible next to the network hop that follows.
