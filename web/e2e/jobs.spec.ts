@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mockApi, open, TWO_SUM_TEXT } from './support';
 
 // AI generations run as jobs on the server: leaving a screen never stops
-// one, the jobs window (bottom right) follows them, and new items in
+// one, the AI jobs in the sidebar's footer follow them, and new items in
 // progress are drafts on the server, listed under Drafts. With `?mock=default`
 // a generation takes a few seconds, time enough to leave its screen first.
 
@@ -10,25 +10,39 @@ const TWO_SUM = '11111111-1111-4111-8111-000000000001';
 const COIN_CHANGE = '11111111-1111-4111-8111-000000000008';
 
 const jobsWindow = (page: Page) => page.getByRole('region', { name: 'AI jobs' });
+/** The footer's jobs entry, named for what it counts ("AI jobs: 1 running"). */
+const jobsEntry = (page: Page) => page.getByRole('complementary', { name: 'Navigation' }).getByRole('button', { name: /^AI jobs/ });
+/** Opens the list from the footer, unless it is open already. */
+async function openJobs(page: Page) {
+  if ((await jobsWindow(page).count()) === 0) await jobsEntry(page).click();
+  await expect(jobsWindow(page)).toBeVisible();
+}
 const drafts = (page: Page) => page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Drafts/ });
 
-test('jobs: a capture drafts on after its page is left, shows in the jobs window and under Drafts, and is reviewed on return', async ({ page }) => {
+test('jobs: a capture drafts on after its page is left, shows in the footer and under Drafts, and is reviewed on return', async ({ page }) => {
   await open(page, '/new', 'default');
   await expect(drafts(page)).toHaveText('Drafts');
+  // Nothing in the footer until there is a job.
+  await expect(jobsEntry(page)).toHaveCount(0);
   await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('button', { name: 'Draft with AI' }).click();
   await expect(page.getByText('Drafting…')).toBeVisible();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/);
 
-  // Elsewhere: a pill says it runs, and the sidebar counts the draft.
+  // Elsewhere: the footer says it runs, and the sidebar counts the draft.
   await page.getByRole('link', { name: /^All items/ }).click();
-  await expect(page.getByRole('button', { name: 'AI jobs: 1 running' })).toBeVisible();
+  await expect(jobsEntry(page)).toHaveAccessibleName('AI jobs: 1 running');
+  await expect(jobsEntry(page)).toHaveText('1 running');
   await expect(drafts(page)).toHaveText('Drafts1');
 
-  // Done while the user is elsewhere: the window opens to say so.
+  // Done while the user is elsewhere: the list opens to say so, leaving focus where it was, and it is announced.
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('Two Sum', { timeout: 10_000 });
   await expect(row).toContainText('Draft · Ready');
+  await expect(jobsWindow(page)).not.toBeFocused();
+  await expect(page.getByRole('status').filter({ hasText: /^Draft “.+”: ready$/ })).toBeAttached();
+  await expect(jobsEntry(page)).toHaveAccessibleName('AI jobs: 1 done');
+  await expect(jobsEntry(page)).toHaveText('1 done');
 
   await drafts(page).click();
   const listed = page.getByRole('list', { name: 'Drafts' }).getByRole('listitem');
@@ -36,12 +50,15 @@ test('jobs: a capture drafts on after its page is left, shows in the jobs window
   await expect(listed).toContainText('Two Sum');
   await expect(listed).toContainText('Ready to review');
 
-  await jobsWindow(page).getByRole('button', { name: 'Open' }).click();
+  // Clicking outside closed the list; the footer opens it again, and the row leads to the draft.
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await openJobs(page);
+  await jobsWindow(page).getByRole('link', { name: /Two Sum/ }).click();
   await expect(page.getByRole('heading', { name: 'Review the draft' })).toBeVisible();
   await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
-  // Taken in, the job leaves the window.
+  // Taken in, the job leaves the footer.
   await expect(jobsWindow(page)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^AI jobs/ })).toHaveCount(0);
+  await expect(jobsEntry(page)).toHaveCount(0);
 });
 
 test('jobs: a draft keeps its edits through a reload, and saving it to the library takes it off the Drafts count', async ({ page }) => {
@@ -71,7 +88,7 @@ test('jobs: a draft keeps its edits through a reload, and saving it to the libra
   await expect(page.getByRole('heading', { name: 'No drafts' })).toBeVisible();
 });
 
-test('jobs: a running job is cancelled from the jobs window, and the draft keeps what it had', async ({ page }) => {
+test('jobs: a running job is cancelled from the AI jobs list, and the draft keeps what it had', async ({ page }) => {
   await open(page, '/new');
   // The mock takes a minute over a generation asked with MOCK:SLOW.
   await page.getByLabel('What you have').fill('two sum MOCK:SLOW');
@@ -80,7 +97,7 @@ test('jobs: a running job is cancelled from the jobs window, and the draft keeps
   await drafts(page).click();
   await expect(page.getByRole('list', { name: 'Drafts' }).getByRole('listitem')).toContainText('Drafting…');
 
-  await page.getByRole('button', { name: 'AI jobs: 1 running' }).click();
+  await jobsEntry(page).click();
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('two sum MOCK:SLOW');
   await expect(row).toContainText(/Draft · \d+\u00a0s/);
@@ -96,6 +113,85 @@ test('jobs: a running job is cancelled from the jobs window, and the draft keeps
   await expect(page.getByRole('button', { name: 'Draft with AI' })).toBeVisible();
 });
 
+test('jobs: a running job’s row leads to its draft; the list closes on Escape and gives focus back', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum MOCK:SLOW');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  const draft = new URL(page.url()).pathname;
+  await page.getByRole('link', { name: /^All items/ }).click();
+
+  await jobsEntry(page).click();
+  // Focus goes into the list as it opens, and back to the footer as Escape closes it.
+  await expect(jobsWindow(page).getByRole('button', { name: 'Minimise AI jobs' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(jobsEntry(page)).toBeFocused();
+  await expect(jobsEntry(page)).toHaveAttribute('aria-expanded', 'false');
+
+  await page.keyboard.press('Enter');
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText(/Draft · \d+\u00a0s/);
+  // Still running, its row is a link to the draft, which shows the progress.
+  await expect(row.getByRole('link')).toHaveAttribute('href', draft);
+  await row.getByRole('link', { name: /two sum MOCK:SLOW/ }).click();
+  await expect(page).toHaveURL(new RegExp(`${draft}$`));
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  await expect(jobsWindow(page)).toHaveCount(0);
+  // Its own screen follows it now.
+  await expect(jobsEntry(page)).toHaveCount(0);
+});
+
+test('jobs: on the rail, the jobs entry counts them and opens the same list', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill('two sum MOCK:SLOW');
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  // A problem's workspace starts with the navigation as a rail.
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  const rail = page.locator('.sidebar.is-rail');
+  await expect(rail).toBeVisible();
+  const entry = rail.getByRole('button', { name: 'AI jobs: 1 running' });
+  await expect(entry).toBeVisible();
+  await expect(entry.locator('.rail-badge')).toHaveText('1');
+
+  await entry.click();
+  await expect(jobsWindow(page).getByRole('listitem')).toContainText('two sum MOCK:SLOW');
+  await page.keyboard.press('Escape');
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(entry).toBeFocused();
+});
+
+test('jobs: on a narrow window the menu button is marked, and the list waits in the drawer', async ({ page }) => {
+  // The sidebar is a drawer below 900px.
+  await page.setViewportSize({ width: 800, height: 800 });
+  await open(page, '/new', 'default');
+  const dot = page.locator('.topbar .topbar-jobs-dot');
+  await expect(dot).toHaveCount(0);
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByText('Drafting…')).toBeVisible();
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await page.getByRole('link', { name: /^All items/ }).click();
+  await expect(page.locator('.sidebar')).not.toHaveClass(/is-open/);
+  await expect(dot).toBeVisible();
+
+  // It finishes while the drawer is closed: the list does not open, and the job stays listed.
+  await expect(page.locator('.sidebar .svc-jobs')).toHaveAttribute('aria-label', 'AI jobs: 1 done', { timeout: 10_000 });
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(dot).toBeVisible();
+
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await jobsEntry(page).click();
+  await expect(jobsWindow(page).getByRole('listitem')).toContainText('Draft · Ready');
+  // Escape closes the list first, then the drawer.
+  await page.keyboard.press('Escape');
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(page.locator('.sidebar')).toHaveClass(/is-open/);
+});
+
 test('jobs: generated test cases wait for their page, and are shown there once', async ({ page }) => {
   await open(page, `/items/${TWO_SUM}/tests/generate`, 'default');
   await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
@@ -106,7 +202,7 @@ test('jobs: generated test cases wait for their page, and are shown there once',
 
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('Test cases · Ready', { timeout: 10_000 });
-  await row.getByRole('button', { name: 'Open' }).click();
+  await row.getByRole('link').click();
   await expect(page).toHaveURL(new RegExp(`/items/${TWO_SUM}/tests/generate$`));
   await expect(page.getByRole('heading', { name: 'Proposed cases' })).toBeVisible();
   await expect(jobsWindow(page)).toHaveCount(0);
@@ -132,7 +228,7 @@ test('jobs: code generated after its edit page was left is offered there, not ap
 
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('Code · Ready', { timeout: 10_000 });
-  await row.getByRole('button', { name: 'Open' }).click();
+  await row.getByRole('link').click();
   await expect(page).toHaveURL(new RegExp(`/items/${COIN_CHANGE}/edit$`));
   await expect(section.getByText('Generated code is ready')).toBeVisible();
   // The form is as it was until the code is applied.
@@ -153,7 +249,7 @@ test('jobs: a draft that fails while its page is left is listed as failed, and i
 
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('Draft · Failed', { timeout: 10_000 });
-  await row.getByRole('button', { name: 'Open' }).click();
+  await row.getByRole('link').click();
   const failed = page.getByRole('alert').filter({ hasText: 'Drafting failed' });
   await expect(failed).toContainText('The AI provider returned an error');
   await expect(jobsWindow(page)).toHaveCount(0);
@@ -204,7 +300,7 @@ test('jobs: test cases whose generation failed while their page was left show th
 
   const row = jobsWindow(page).getByRole('listitem');
   await expect(row).toContainText('Test cases · Failed', { timeout: 10_000 });
-  await row.getByRole('button', { name: 'Open' }).click();
+  await row.getByRole('link').click();
   await expect(page.getByRole('alert').filter({ hasText: 'Generation failed' })).toContainText('The AI provider returned an error');
   await expect(page.getByRole('heading', { name: 'Proposed cases' })).toHaveCount(0);
   await expect(jobsWindow(page)).toHaveCount(0);

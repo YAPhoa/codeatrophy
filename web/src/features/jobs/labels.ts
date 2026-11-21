@@ -29,14 +29,27 @@ export function jobTarget(job: Pick<AiJob, 'draftId' | 'origin'>): string | null
   return job.origin;
 }
 
-/** Whether a job's outcome is collected on the screen at `pathname`, so the jobs window leaves it to that screen. */
+/**
+ * Where a job in the AI jobs list leads: the screen that collects it, or else
+ * the nearest page that is still there, its item or the Drafts list. A draft
+ * missing from `drafts` (the ids of those that exist, once known) is gone, so
+ * its job leads to the list.
+ */
+export function jobLink(job: Pick<AiJob, 'kind' | 'itemId' | 'draftId' | 'origin'>, drafts?: ReadonlySet<string> | null): string {
+  if (job.draftId) return drafts && !drafts.has(job.draftId) ? '/drafts' : `/drafts/${job.draftId}`;
+  if (job.origin) return job.origin;
+  if (job.itemId) return `/items/${job.itemId}`;
+  return job.kind === 'draft' || job.kind === 'variant' ? '/drafts' : '/';
+}
+
+/** Whether a job's outcome is collected on the screen at `pathname`, so the AI jobs list leaves it to that screen. */
 export function jobBelongsTo(job: Pick<AiJob, 'draftId' | 'origin'>, pathname: string): boolean {
   const target = jobTarget(job);
   if (!target) return false;
   return target.split(/[?#]/)[0] === pathname;
 }
 
-/** Seconds as the jobs window shows them: "8 s", "1:05". */
+/** Seconds as the AI jobs list shows them: "8 s", "1:05". */
 export function elapsedLabel(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}\u00a0s`;

@@ -16,7 +16,7 @@ import { CommandPalette } from './CommandPalette';
 import { ShellLayoutContext, isRememberedReading, type ShellLayout } from './shellLayout';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { Sidebar } from './Sidebar';
-import { JobsTray } from '../features/jobs/JobsTray';
+import { JobsProvider, useJobs } from '../features/jobs/JobsContext';
 
 /** Routes that show a problem workspace: the coding page and the pages that share its header. */
 const WORKSPACE_ROUTES = ['/items/:id', '/items/:id/tests', '/items/:id/tests/generate', '/items/:id/solutions'];
@@ -31,6 +31,17 @@ function readNavPrefs(): NavPrefs {
   const stored = readJson<Partial<NavPrefs> | null>('layout:nav', null);
   // In a workspace the code needs the width, so the navigation starts out as a rail there.
   return { workspace: typeof stored?.workspace === 'boolean' ? stored.workspace : true, other: typeof stored?.other === 'boolean' ? stored.other : false };
+}
+
+/** The menu button of a narrow screen, marked while the drawer has AI jobs to show. */
+function MenuIconWithJobs() {
+  const { shown } = useJobs();
+  return (
+    <span className="topbar-menu-icon">
+      <MenuIcon size={18} />
+      {shown.length > 0 && <span className="topbar-jobs-dot" aria-hidden="true" />}
+    </span>
+  );
 }
 
 /** Application frame: sidebar, routed content, and the global keyboard shortcuts. */
@@ -135,13 +146,15 @@ export function Shell() {
   return (
     <ShellLayoutContext.Provider value={layout}>
       <CollectionActionsProvider>
+        {/* The jobs list opens only where the sidebar is on screen: not in a closed drawer. */}
+        <JobsProvider canOpen={!narrow || drawerOpen}>
         <div className={cx('shell', navMinimised && 'is-rail', arriving && 'is-arriving')}>
         <a href="#main" className="skip-link">
           Skip to content
         </a>
         {/* While the drawer is open, the page behind it is out of reach of Tab and of assistive technology. */}
         <header className="topbar" inert={drawer}>
-          <IconButton label="Open navigation" icon={<MenuIcon size={18} />} onClick={() => setDrawerOpen(true)} />
+          <IconButton label="Open navigation" icon={<MenuIconWithJobs />} onClick={() => setDrawerOpen(true)} />
           <Link to="/" className="topbar-brand" translate="no">
             Codeatrophy
           </Link>
@@ -168,9 +181,9 @@ export function Shell() {
           </Suspense>
         </main>
       </div>
-      <JobsTray />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        </JobsProvider>
       </CollectionActionsProvider>
     </ShellLayoutContext.Provider>
   );

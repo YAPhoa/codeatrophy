@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { draftStateLabel, elapsedLabel, jobBelongsTo, jobKindLabel, jobTarget } from './labels';
+import type { AiJob, AiJobKind, AiJobStatus } from '../../api/types';
+import { draftStateLabel, elapsedLabel, jobBelongsTo, jobKindLabel, jobLink, jobTarget } from './labels';
 
 describe('draftStateLabel', () => {
   it('names each state, in the tone it is shown in', () => {
@@ -30,6 +31,34 @@ describe('where a job belongs', () => {
     expect(jobBelongsTo({ draftId: 'd1', origin: '/items/i1' }, '/drafts/d1')).toBe(true);
     expect(jobBelongsTo({ draftId: 'd1', origin: '/items/i1' }, '/items/i1')).toBe(false);
     expect(jobBelongsTo({ draftId: null, origin: null }, '/')).toBe(false);
+  });
+});
+
+describe('where a job leads from the AI jobs list', () => {
+  const STATUSES: AiJobStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled'];
+  type Linked = Pick<AiJob, 'kind' | 'itemId' | 'draftId' | 'origin'>;
+  const cases: [string, Linked, string][] = [
+    ['a capture to its draft', { kind: 'draft', itemId: null, draftId: 'd1', origin: null }, '/drafts/d1'],
+    ['a variant to its draft', { kind: 'variant', itemId: 'i1', draftId: 'd2', origin: '/items/i1?tab=variants' }, '/drafts/d2'],
+    ['test cases to the screen that collects them', { kind: 'testcases', itemId: 'i1', draftId: null, origin: '/items/i1/tests/generate' }, '/items/i1/tests/generate'],
+    ['code to the screen that collects it', { kind: 'code', itemId: 'i1', draftId: null, origin: '/items/i1/edit' }, '/items/i1/edit'],
+    ['test cases with no screen to their item', { kind: 'testcases', itemId: 'i1', draftId: null, origin: null }, '/items/i1'],
+    ['code with no screen to its item', { kind: 'code', itemId: 'i1', draftId: null, origin: null }, '/items/i1'],
+    ['code with neither screen nor item to the library', { kind: 'code', itemId: null, draftId: null, origin: null }, '/'],
+    ['a draft job without its draft to the Drafts list', { kind: 'draft', itemId: null, draftId: null, origin: null }, '/drafts'],
+  ];
+
+  it.each(cases)('takes %s, in every state', (_name, job, to) => {
+    // Where a job leads does not change as it runs, finishes, fails or is cancelled.
+    for (const status of STATUSES) expect(jobLink({ ...job, status } as Linked)).toBe(to);
+  });
+
+  it('takes a job whose draft is gone to the Drafts list, once the drafts are known', () => {
+    const job: Linked = { kind: 'draft', itemId: null, draftId: 'd1', origin: null };
+    expect(jobLink(job, new Set(['d2']))).toBe('/drafts');
+    expect(jobLink(job, new Set(['d1']))).toBe('/drafts/d1');
+    expect(jobLink(job, null)).toBe('/drafts/d1');
+    expect(jobLink({ ...job, kind: 'variant' as AiJobKind, itemId: 'i1' }, new Set())).toBe('/drafts');
   });
 });
 

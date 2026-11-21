@@ -4932,98 +4932,23 @@ button.log-row:hover {
   }
 }
 
-/* ---- Jobs window ----
-   Bottom right on every page, under dialogs and menus. The toasts sit above
-   it and pages leave room for it at their end (--jobs-tray-space). It opens
-   as a popover does and closes in --duration-quick; at rest when the app
-   loads with it already there. */
+/* ---- AI jobs list ----
+   A popover above the sidebar's footer, opened from its jobs entry
+   (app/Sidebar.tsx, features/jobs). */
 
-.jobs-tray {
-  position: fixed;
-  right: var(--space-4);
-  bottom: var(--space-4);
-  z-index: 180;
+.popover.jobs-panel {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  pointer-events: none;
-}
-
-/* Clear of the solve workspace's bottom bar and what it says on its right. */
-.shell:has(.drawer-bar) ~ .jobs-tray {
-  bottom: calc(32px + var(--space-3));
-}
-
-.jobs-tray > * {
-  pointer-events: auto;
-}
-
-.jobs-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  height: var(--control-h-sm);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-2);
-  font: inherit;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  box-shadow: var(--shadow-pop);
-  cursor: pointer;
-}
-
-.jobs-pill:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.jobs-pill > svg {
-  color: var(--accent-text);
-}
-
-.jobs-pill.is-arriving,
-.jobs-panel.is-arriving {
-  transform-origin: bottom right;
-  animation: jobs-in var(--duration-fast) var(--ease-out);
-}
-
-.jobs-pill.is-closing,
-.jobs-panel.is-closing {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  transform-origin: bottom right;
-  animation: jobs-out var(--duration-quick) var(--ease-in-out) forwards;
-}
-
-@keyframes jobs-in {
-  from {
-    opacity: 0;
-    transform: translateY(var(--distance-small)) scale(var(--scale-popover));
-  }
-}
-
-@keyframes jobs-out {
-  to {
-    opacity: 0;
-    transform: scale(var(--scale-popover-out));
-  }
-}
-
-.jobs-panel {
-  display: flex;
-  flex-direction: column;
-  width: min(340px, calc(100vw - 32px));
-  max-height: min(340px, 60vh);
+  width: min(340px, calc(100vw - 16px));
   overflow: hidden;
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
+}
+
+.jobs-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(340px, 60vh);
 }
 
 .jobs-head {
@@ -5043,21 +4968,47 @@ button.log-row:hover {
 }
 
 .jobs-list {
+  min-height: 0;
   margin: 0;
   padding: var(--space-1) 0;
   overflow-y: auto;
   list-style: none;
 }
 
+/* The row is a link to where its job is looked at, as a draft row is; Cancel
+   and Dismiss sit beside it. */
 .job-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 44px;
-  padding: var(--space-1) var(--space-1-5) var(--space-1) var(--space-3);
+  gap: var(--space-1);
+  padding-right: var(--space-1-5);
 }
 
-.job-row > .spin-wrap,
+.job-row:hover {
+  background: var(--surface-2);
+}
+
+.job-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  color: var(--text);
+}
+
+.job-link:hover {
+  text-decoration: none;
+}
+
+/* Inside the row, so the list's scrolling edge does not cut the ring off. */
+.job-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.job-link > .spin-wrap,
 .job-icon {
   flex: none;
   color: var(--text-3);

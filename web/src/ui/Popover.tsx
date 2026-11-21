@@ -17,6 +17,8 @@ import { exitOnRemove } from '../lib/motion';
 
 interface PopoverProps {
   anchorRef: RefObject<HTMLElement | null>;
+  /** What it is placed against, when that is not its anchor (a bar the anchor sits in). */
+  placeRef?: RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
   align?: 'start' | 'end';
@@ -39,7 +41,7 @@ interface PopoverProps {
  * A floating panel positioned under (or, when there is no room, above) its
  * anchor, or the other way round with `side="above"`. Closes on Escape, on a click outside, and when focus leaves it.
  */
-export function Popover({ anchorRef, open, onClose, align = 'start', side = 'below', matchWidth, className, role, label, id, children, noAutoFocus, exitToken }: PopoverProps) {
+export function Popover({ anchorRef, placeRef, open, onClose, align = 'start', side = 'below', matchWidth, className, role, label, id, children, noAutoFocus, exitToken }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; minWidth?: number; maxHeight: number; origin: string } | null>(null);
   const attach = useCallback(
@@ -55,7 +57,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', side = 'bel
   );
 
   const place = useCallback(() => {
-    const anchor = anchorRef.current;
+    const anchor = placeRef?.current ?? anchorRef.current;
     const el = ref.current;
     if (!anchor || !el) return;
     const a = anchor.getBoundingClientRect();
@@ -76,7 +78,7 @@ export function Popover({ anchorRef, open, onClose, align = 'start', side = 'bel
     // It grows out of the corner nearest its anchor.
     const origin = `${align === 'end' ? 'right' : 'left'} ${openUp ? 'bottom' : 'top'}`;
     setPos({ top, left, minWidth: matchWidth ? a.width : undefined, maxHeight, origin });
-  }, [anchorRef, align, side, matchWidth]);
+  }, [anchorRef, placeRef, align, side, matchWidth]);
 
   useLayoutEffect(() => {
     if (!open) {

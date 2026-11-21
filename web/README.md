@@ -163,7 +163,8 @@ third-party origin.
 | Spec | Covers |
 | --- | --- |
 | `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; a bundle exported and imported back; a server that refuses requests |
-| `jobs` | AI jobs and drafts: leaving a running job, the jobs window, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
+| `jobs` | AI jobs and drafts: leaving a running job, the AI jobs in the sidebar's footer, on the rail and behind a narrow window's menu, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
+| `capture` | The capture text stays in view on the way to a new draft |
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
@@ -197,7 +198,7 @@ src/
     collections/  create / rename / move / delete dialogs
     capture/      paste → AI draft → review → save; variants; "what next"
     drafts/       drafts on the server: the list, a draft's page, autosave
-    jobs/         the jobs window, and following a screen's AI job
+    jobs/         the AI jobs list, and following a screen's AI job
     item/         item page dispatch, shared header and controls, editor form,
                   edit page with revision-conflict handling, notes, variants,
                   related items
@@ -293,9 +294,10 @@ A few conventions worth knowing:
   each change with the revision it was based on (`features/drafts`); the
   Drafts page lists them, and the sidebar counts them. Test-case and code
   generation find their job again on return by kind, item and `origin`
-  (`features/jobs/useScreenJob.ts`). The jobs window (`features/jobs`),
-  bottom right, lists what no open screen has collected, and polls only
-  while a job runs or it is open.
+  (`features/jobs/useScreenJob.ts`). The AI jobs entry in the sidebar's
+  footer (`features/jobs`) lists what no open screen has collected, each row
+  a link to where its job is looked at, and polls only while a job runs or
+  its list is open.
 - **Work in progress is kept locally.** Solution code is stored per item and
   language in `localStorage`, and the custom input per item (up to 64 KB);
   so is the capture text typed before a draft exists. The

@@ -42,7 +42,7 @@ export const qk = {
   preferences: ['settings', 'preferences'] as const,
   submissions: (itemId: string) => ['submissions', 'list', itemId] as const,
   submission: (id: string) => ['submissions', 'detail', id] as const,
-  /** The jobs whose outcome has not been collected: what the jobs window lists. */
+  /** The jobs whose outcome has not been collected: what the sidebar's AI jobs list. */
   aiJobs: ['ai-jobs', 'list'] as const,
   /** Prefix of every cached job lookup, the list included. */
   aiJobsAll: ['ai-jobs'] as const,
@@ -424,7 +424,7 @@ export const isActiveJob = (job: Pick<AiJob, 'status'>): boolean => job.status =
 /**
  * The AI jobs whose outcome has not been collected, newest first. Polled every
  * two seconds while one is active; otherwise every few seconds while `watching`
- * (the jobs window is open), and else only when asked.
+ * (the AI jobs list is open), and else only when asked.
  */
 export function useAiJobs(watching = false) {
   return useQuery({
@@ -445,7 +445,7 @@ export function useDrafts() {
   });
 }
 
-/** Something started or ended a generation: the jobs window and the drafts look again. */
+/** Something started or ended a generation: the AI jobs and the drafts look again. */
 export function invalidateJobs(qc: QueryClient): Promise<unknown> {
   return Promise.all([qc.invalidateQueries({ queryKey: qk.aiJobsAll }), qc.invalidateQueries({ queryKey: qk.drafts })]);
 }

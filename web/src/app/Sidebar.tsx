@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, NavLink, useLocation, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -20,6 +20,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Star,
   Sun,
   Tags,
@@ -30,16 +31,18 @@ import { api } from '../api/client';
 import { invalidateLibrary, useCollections, useDrafts, useStats } from '../api/queries';
 import type { Collection, Meta } from '../api/types';
 import { useCollectionActions } from '../features/collections/CollectionActions';
+import { useJobs } from '../features/jobs/JobsContext';
+import { JobsPopover } from '../features/jobs/JobsPopover';
 import { MOD } from '../lib/hotkeys';
 import { useIntent } from '../lib/intent';
 import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { setThemePreference, useThemePreference, type ThemePreference } from '../lib/theme';
 import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
-import { NumberChange } from '../ui/Animated';
+import { IconSwap, MorphText, NumberChange } from '../ui/Animated';
 import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
-import { Kbd } from '../ui/misc';
+import { Kbd, Spinner } from '../ui/misc';
 import { DraftsPage, SettingsPage, TagsPage } from './screens';
 import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
@@ -112,6 +115,53 @@ function RailEntry({ to, icon, label, badge, active, preload }: Omit<NavEntryPro
       {icon}
       {badge != null && <NavBadge value={badge} className="rail-badge" />}
     </Link>
+  );
+}
+
+/**
+ * The AI jobs in the sidebar's footer, while there are any to show: what
+ * runs, or else what is done, opening the list of them above the footer
+ * (`footRef`). On the rail, an icon with their count.
+ */
+function JobsEntry({ rail, footRef }: { rail?: boolean; footRef: RefObject<HTMLDivElement | null> }) {
+  const { shown, active, summary, loaded, open, setOpen } = useJobs();
+  const ref = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const listed = shown.length > 0;
+  // It fades in when a job comes after it was seen with none, not when a page opens on jobs already there.
+  const [seenEmpty, setSeenEmpty] = useState(false);
+  if (loaded && !listed && !seenEmpty) setSeenEmpty(true);
+  if (!listed) return null;
+  const running = active > 0;
+  const label = `AI jobs: ${summary}`;
+  const size = rail ? 16 : 13;
+  const icon = <IconSwap swapKey={running}>{running ? <Spinner size={size} /> : <Sparkles size={size} aria-hidden="true" />}</IconSwap>;
+  const trigger = {
+    ref,
+    type: 'button' as const,
+    'aria-label': label,
+    title: label,
+    'aria-expanded': open,
+    'aria-controls': open ? id : undefined,
+    onClick: () => setOpen(!open),
+  };
+  return (
+    <>
+      {rail ? (
+        <button {...trigger} className={cx('rail-item rail-jobs', seenEmpty && 'is-arriving', open && 'is-active')}>
+          {icon}
+          <NavBadge value={shown.length} className="rail-badge" />
+        </button>
+      ) : (
+        <button {...trigger} className={cx('svc svc-jobs', seenEmpty && 'is-arriving', open && 'is-open')}>
+          {icon}
+          <span className="svc-jobs-text" aria-hidden="true">
+            <MorphText text={running ? `${active} running` : `${shown.length} done`} />
+          </span>
+        </button>
+      )}
+      <JobsPopover anchorRef={ref} placeRef={footRef} id={id} />
+    </>
   );
 }
 
@@ -242,6 +292,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const onDrafts = location.pathname === '/drafts' || location.pathname.startsWith('/drafts/');
   const actions = useCollectionActions();
   const theme = useThemePreference();
+  const footRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readJson<string[]>('sidebar:collapsed', [])));
 
   const tree = useMemo(() => buildTree(collections.data ?? []), [collections.data]);
@@ -317,7 +368,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} preload={TagsPage.preload} />
           <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} preload={SettingsPage.preload} />
         </nav>
-        <div className="rail-foot">
+        <div className="rail-foot" ref={footRef}>
           <Link to="/settings/ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
             <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
             <span aria-hidden="true">AI</span>
@@ -326,6 +377,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
             <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
             <span aria-hidden="true">Judge</span>
           </Link>
+          <JobsEntry rail footRef={footRef} />
           <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
           {themeMenu}
         </div>
@@ -412,7 +464,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         </ul>
       </nav>
 
-      <div className="sidebar-foot">
+      <div className="sidebar-foot" ref={footRef}>
         <Link to="/settings/ai" className="svc" title={aiTitle}>
           <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
           AI<span className="sr-only">: {meta.ai.enabled ? 'on' : 'off'}</span>
@@ -421,6 +473,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
           Judge<span className="sr-only">: {judgeState === 'ok' ? 'healthy' : judgeState === 'down' ? 'not responding' : 'off'}</span>
         </Link>
+        <JobsEntry footRef={footRef} />
         <span className="spacer" />
         <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
         {themeMenu}

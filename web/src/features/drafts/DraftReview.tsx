@@ -142,7 +142,7 @@ export function DraftReview(props: DraftReviewProps) {
     sd.forget();
     try {
       await api.drafts.remove(id);
-      // Its generation goes with it, from the jobs window too.
+      // Its generation goes with it, from the AI jobs list too.
       if (draft.job) await api.ai.dismiss(draft.job.id).catch(() => undefined);
     } catch (e) {
       if (!(isApiError(e) && e.code === 'not_found')) throw e;

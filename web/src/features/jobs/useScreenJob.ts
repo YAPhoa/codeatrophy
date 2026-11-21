@@ -31,7 +31,7 @@ interface ScreenJobOptions<R> {
  * screen does not stop it, and coming back finds it again by its kind, item
  * and origin. While it runs the screen shows its progress; when it is done
  * the result is handed to `onResult` once, and the job is collected
- * (`pickup`) so it is not offered again, here or in the jobs window. A
+ * (`pickup`) so it is not offered again, here or in the AI jobs list. A
  * failure is shown as `error` and collected too.
  */
 export function useScreenJob<R>({ kind, itemId, origin, onResult }: ScreenJobOptions<R>) {
