@@ -62,11 +62,6 @@ export function useSubmissionRunner(itemId: string) {
     [itemId, qc],
   );
 
-  /** Show an earlier submission (from the history) in place of the live one. */
-  const view = useCallback((id: string | null) => {
-    setStartError(null);
-    setActiveId(id);
-  }, []);
 
   const judging = starting !== null || (submission !== null && submission.status !== 'completed');
 
@@ -79,7 +74,5 @@ export function useSubmissionRunner(itemId: string) {
     startError,
     judging,
     start,
-    view,
-    clear: () => view(null),
   };
 }

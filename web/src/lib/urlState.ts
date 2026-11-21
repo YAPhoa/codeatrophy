@@ -103,11 +103,12 @@ export function useUrlMirror(key: string, current: string | null, onExternal: (r
  * Component state kept in the query parameter `key`. `parse` turns the
  * parameter (or `null` when absent) into a value and decides the default;
  * `format` gives the parameter for a value, or `null` to leave it out.
+ * With `push`, each change is a step of the history (see `useUrlMirror`).
  */
-export function useUrlState<T>(key: string, parse: (raw: string | null) => T, format: (value: T) => string | null): [T, Dispatch<SetStateAction<T>>] {
+export function useUrlState<T>(key: string, parse: (raw: string | null) => T, format: (value: T) => string | null, push = false): [T, Dispatch<SetStateAction<T>>] {
   const [params] = useSearchParams();
   const [value, setValue] = useState<T>(() => parse(params.get(key)));
-  useUrlMirror(key, format(value), (raw) => setValue(parse(raw)));
+  useUrlMirror(key, format(value), (raw) => setValue(parse(raw)), push);
   return [value, setValue];
 }
 

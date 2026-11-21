@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { BookmarkCheck, BookmarkPlus, Check, CircleCheck, Clock, Cpu, Eye, EyeOff, History, Loader2, Minus, RotateCcw, X } from 'lucide-react';
+import { BookmarkCheck, BookmarkPlus, Check, CircleCheck, Clock, Cpu, Eye, EyeOff, Loader2, Minus, X } from 'lucide-react';
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
-import { VERDICT_LABEL, absoluteTime, describeRun, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
-import { languageName } from '../../lib/languages';
+import { VERDICT_LABEL, describeRun, formatMemoryKb, formatRunTime, verdictTone } from '../../lib/format';
 import { isLargeText, textFilename } from '../../lib/largeText';
 import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx } from '../../ui/Button';
+import { ClampedOutput } from '../../ui/Clamped';
 import { DiffView } from '../../ui/DiffView';
 import { LargeText } from '../../ui/LargeText';
 import { Callout } from '../../ui/misc';
@@ -41,7 +41,9 @@ export function Output({ label, note, text, tone, wrap, filename, concealed }: O
       {(concealed && text !== '') || isLargeText(text) ? (
         <LargeText text={text} filename={filename ?? textFilename(label)} label={label} />
       ) : (
-        <pre translate="no" className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
+        <ClampedOutput text={text}>
+          <pre translate="no" className={cx('code-block', wrap && 'code-block-wrap', text === '' && 'code-block-empty', tone === 'danger' && 'code-block-danger')}>{text}</pre>
+        </ClampedOutput>
       )}
     </div>
   );
@@ -136,16 +138,7 @@ function CaseIo({ result, number, compare, failedCompare }: { result: Submission
   );
 }
 
-interface ResultPanelProps {
-  submission: Submission;
-  compare: CompareMode;
-  /** Set when the panel shows a past submission rather than one just started. */
-  historic: boolean;
-  /** The problem's time limit, to present time-limit verdicts as exceeding it. */
-  timeLimitMs: number;
-  reveal: Reveal;
-  onLoadCode?: () => void;
-  onClose?: () => void;
+interface SaveSolutionActionProps {
   /** Keep this submission's code as one of the problem's saved solutions. */
   onSaveSolution?: () => void;
   /** The code of this submission has been saved as a solution during this visit. */
@@ -154,8 +147,48 @@ interface ResultPanelProps {
   alreadySaved?: { name: string; to: string } | null;
 }
 
-/** Live progress and the final outcome of one submission, case by case. */
-export function ResultPanel({ submission: s, compare, historic, timeLimitMs, reveal, onLoadCode, onClose, onSaveSolution, savedAsSolution, alreadySaved }: ResultPanelProps) {
+/** "Save as solution" for a submission's code, or where it is saved already. */
+export function SaveSolutionAction({ onSaveSolution, savedAsSolution, alreadySaved }: SaveSolutionActionProps) {
+  if (savedAsSolution) {
+    return (
+      <span className="result-saved">
+        <BookmarkCheck size={14} aria-hidden="true" />
+        Saved as a solution
+      </span>
+    );
+  }
+  if (alreadySaved) {
+    return (
+      <Link to={alreadySaved.to} className="result-saved" title="Open the saved solutions">
+        <BookmarkCheck size={14} aria-hidden="true" />
+        <span className="truncate" onMouseEnter={titleIfCut}>
+          Already saved as “{alreadySaved.name}”
+        </span>
+      </Link>
+    );
+  }
+  if (!onSaveSolution) return null;
+  return (
+    <Button size="sm" icon={<BookmarkPlus size={14} />} onClick={onSaveSolution}>
+      Save as solution
+    </Button>
+  );
+}
+
+interface OutcomeProps {
+  submission: Submission;
+  compare: CompareMode;
+  /** The problem's time limit, to present time-limit verdicts as exceeding it. */
+  timeLimitMs: number;
+  reveal: Reveal;
+}
+
+/**
+ * What a submission came to below its verdict: a judge error, the compiler's
+ * output, and the cases one by one, the first failure open. Shared by the
+ * latest run in the drawer and a past submission's details.
+ */
+export function SubmissionOutcome({ submission: s, compare, timeLimitMs, reveal }: OutcomeProps) {
   const done = s.status === 'completed';
   const firstFailed = s.results.findIndex((r) => r.verdict !== 'accepted' && r.verdict !== 'executed');
   const [picked, setPicked] = useState<number | null>(null);
@@ -163,107 +196,9 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
   // Until the user picks a case, follow the most useful one: the first failure, else the first case.
   const selected = picked ?? (firstFailed !== -1 ? firstFailed : s.results.length > 0 ? 0 : null);
   const current = selected != null ? s.results[selected] : undefined;
-  const custom = s.mode === 'run' && s.results.length > 0 && s.results.every((r) => r.testCaseId === null);
-  const finished = s.results.length;
-  const tone = s.verdict ? verdictTone(s.verdict) : 'neutral';
-  // Judged while on screen: this very submission was seen running, so its
-  // verdict is news. A past one, or one opened already finished, is not.
-  const [judged, setJudged] = useState({ id: s.id, done, fresh: false });
-  let fresh = judged.fresh;
-  if (judged.id !== s.id || judged.done !== done) {
-    fresh = judged.id === s.id && !judged.done && done && !historic;
-    setJudged({ id: s.id, done, fresh });
-  }
-  const celebrate = fresh && s.verdict === 'accepted';
-  const saveSolution = savedAsSolution ? (
-    <span className="result-saved">
-      <BookmarkCheck size={14} aria-hidden="true" />
-      Saved as a solution
-    </span>
-  ) : alreadySaved ? (
-    <Link to={alreadySaved.to} className="result-saved" title="Open the saved solutions">
-      <BookmarkCheck size={14} aria-hidden="true" />
-      <span className="truncate" onMouseEnter={titleIfCut}>
-        Already saved as “{alreadySaved.name}”
-      </span>
-    </Link>
-  ) : onSaveSolution ? (
-    <Button size="sm" icon={<BookmarkPlus size={14} />} onClick={onSaveSolution}>
-      Save as solution
-    </Button>
-  ) : null;
-
+  const custom = isCustomRun(s);
   return (
-    <div className="result">
-      {historic && (
-        <div className="result-historic">
-          <History size={14} aria-hidden="true" />
-          <span className="grow">
-            {s.mode === 'submit' ? 'Submission' : 'Run'} from <time title={absoluteTime(s.createdAt)}>{relativeTime(s.createdAt)}</time> · {languageName(s.language)}
-          </span>
-          {onLoadCode && (
-            <Button size="sm" icon={<RotateCcw size={14} />} onClick={onLoadCode}>
-              Load this code
-            </Button>
-          )}
-          {saveSolution}
-          {onClose && (
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Close
-            </Button>
-          )}
-        </div>
-      )}
-
-      <div className={cx('result-head', `tone-${tone}`, celebrate && 'is-fresh')} role="status" aria-live="polite">
-        {!done ? (
-          <>
-            <Loader2 size={18} className="spin" aria-hidden="true" />
-            <div className="grow">
-              <div className="result-verdict">{s.status === 'queued' ? 'Queued…' : `Running… ${finished} of ${s.totalCount} done`}</div>
-              <div
-                className="progress"
-                role="progressbar"
-                aria-label="Judging progress"
-                aria-valuemin={0}
-                aria-valuemax={Math.max(1, s.totalCount)}
-                aria-valuenow={finished}
-              >
-                <div className="progress-fill" style={{ transform: `scaleX(${s.totalCount > 0 ? finished / s.totalCount : 0})` }} />
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            {s.verdict === 'accepted' && (
-              <span className="result-check" aria-hidden="true">
-                <CircleCheck size={18} />
-              </span>
-            )}
-            <div className="result-verdict">{s.verdict ? VERDICT_LABEL[s.verdict] : 'Finished'}</div>
-            {!custom && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' && (
-              <span className="result-count">{describeRun(s.mode, s.totalCount, s.passedCount)}</span>
-            )}
-            <span className="spacer" />
-            <span className="result-stats">
-              {s.timeMs != null && s.results.length > 0 && (
-                <span title="Slowest case">
-                  <Clock size={12} aria-hidden="true" /> {formatRunTime(s.timeMs, s.verdict, timeLimitMs)}
-                </span>
-              )}
-              {s.memoryKb != null && s.results.length > 0 && (
-                <span title="Peak memory">
-                  <Cpu size={12} aria-hidden="true" /> {formatMemoryKb(s.memoryKb)}
-                </span>
-              )}
-              {custom && <span className="muted">custom input</span>}
-            </span>
-            {/* An accepted submission is the natural moment to keep the code; offered once, in place, never as a prompt. */}
-            {!historic && s.mode === 'submit' && s.verdict === 'accepted' && saveSolution}
-          </>
-        )}
-      </div>
-
+    <>
       {done && s.verdict === 'internal_error' && (
         <Callout tone="warn" title="The judge could not complete this run">
           {s.error ?? 'The judge engine reported an internal error.'} Your code was not at fault; try again in a moment.
@@ -276,7 +211,9 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
             Compiler output
             {lineOffsetNote(s.lineOffset) && <span className="io-note"> · {lineOffsetNote(s.lineOffset)}</span>}
           </div>
-          <pre translate="no" className="code-block code-block-danger compile-output">{s.compileOutput || 'The compiler reported an error but produced no output.'}</pre>
+          <ClampedOutput text={s.compileOutput}>
+            <pre translate="no" className="code-block code-block-danger compile-output">{s.compileOutput || 'The compiler reported an error but produced no output.'}</pre>
+          </ClampedOutput>
         </div>
       )}
 
@@ -324,6 +261,85 @@ export function ResultPanel({ submission: s, compare, historic, timeLimitMs, rev
       )}
 
       {current && selected != null && <CaseDetail result={current} number={selected + 1} compare={compare} timeLimitMs={timeLimitMs} reveal={reveal} lineOffset={s.lineOffset} />}
+    </>
+  );
+}
+
+/** A run on custom input: no test case among its results. */
+export function isCustomRun(s: Submission): boolean {
+  return s.mode === 'run' && s.results.length > 0 && s.results.every((r) => r.testCaseId === null);
+}
+
+interface ResultPanelProps extends OutcomeProps, SaveSolutionActionProps {}
+
+/** Live progress and the final outcome of the latest run or submission, case by case. */
+export function ResultPanel({ submission: s, compare, timeLimitMs, reveal, ...save }: ResultPanelProps) {
+  const done = s.status === 'completed';
+  const custom = isCustomRun(s);
+  const finished = s.results.length;
+  const tone = s.verdict ? verdictTone(s.verdict) : 'neutral';
+  // Judged while on screen: this very submission was seen running, so its
+  // verdict is news. One opened already finished is not.
+  const [judged, setJudged] = useState({ id: s.id, done, fresh: false });
+  let fresh = judged.fresh;
+  if (judged.id !== s.id || judged.done !== done) {
+    fresh = judged.id === s.id && !judged.done && done;
+    setJudged({ id: s.id, done, fresh });
+  }
+  const celebrate = fresh && s.verdict === 'accepted';
+
+  return (
+    <div className="result">
+      <div className={cx('result-head', `tone-${tone}`, celebrate && 'is-fresh')} role="status" aria-live="polite">
+        {!done ? (
+          <>
+            <Loader2 size={18} className="spin" aria-hidden="true" />
+            <div className="grow">
+              <div className="result-verdict">{s.status === 'queued' ? 'Queued…' : `Running… ${finished} of ${s.totalCount} done`}</div>
+              <div
+                className="progress"
+                role="progressbar"
+                aria-label="Judging progress"
+                aria-valuemin={0}
+                aria-valuemax={Math.max(1, s.totalCount)}
+                aria-valuenow={finished}
+              >
+                <div className="progress-fill" style={{ transform: `scaleX(${s.totalCount > 0 ? finished / s.totalCount : 0})` }} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {s.verdict === 'accepted' && (
+              <span className="result-check" aria-hidden="true">
+                <CircleCheck size={18} />
+              </span>
+            )}
+            <div className="result-verdict">{s.verdict ? VERDICT_LABEL[s.verdict] : 'Finished'}</div>
+            {!custom && s.verdict !== 'compile_error' && s.verdict !== 'internal_error' && (
+              <span className="result-count">{describeRun(s.mode, s.totalCount, s.passedCount)}</span>
+            )}
+            <span className="spacer" />
+            <span className="result-stats">
+              {s.timeMs != null && s.results.length > 0 && (
+                <span title="Slowest case">
+                  <Clock size={12} aria-hidden="true" /> {formatRunTime(s.timeMs, s.verdict, timeLimitMs)}
+                </span>
+              )}
+              {s.memoryKb != null && s.results.length > 0 && (
+                <span title="Peak memory">
+                  <Cpu size={12} aria-hidden="true" /> {formatMemoryKb(s.memoryKb)}
+                </span>
+              )}
+              {custom && <span className="muted">custom input</span>}
+            </span>
+            {/* An accepted submission is the natural moment to keep the code; offered once, in place, never as a prompt. */}
+            {s.mode === 'submit' && s.verdict === 'accepted' && <SaveSolutionAction {...save} />}
+          </>
+        )}
+      </div>
+
+      <SubmissionOutcome submission={s} compare={compare} timeLimitMs={timeLimitMs} reveal={reveal} />
     </div>
   );
 }

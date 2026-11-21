@@ -1,14 +1,17 @@
+import { useEffect } from 'react';
 import { BookmarkPlus, History } from 'lucide-react';
 import { useSubmissionList } from '../../api/queries';
 import type { SubmissionSummary } from '../../api/types';
-import { VERDICT_BRIEF, VERDICT_LABEL, absoluteTime, formatMemoryKb, formatRunTime, relativeTime, verdictTone } from '../../lib/format';
+import { VERDICT_BRIEF, VERDICT_LABEL, absoluteTime, relativeTime, verdictTone } from '../../lib/format';
+import { submissionFigures } from '../../lib/submissions';
 import { languageName } from '../../lib/languages';
 import { IconButton, cx } from '../../ui/Button';
 import { EmptyState, ErrorState, PageLoading } from '../../ui/misc';
 
 interface HistoryListProps {
   itemId: string;
-  activeId: string | null;
+  /** The submission whose details were just left: its row takes the focus back. */
+  focusId: string | null;
   /** The problem's time limit, to present time-limit verdicts as exceeding it. */
   timeLimitMs: number;
   onOpen: (submissionId: string) => void;
@@ -16,9 +19,15 @@ interface HistoryListProps {
   onSaveSolution: (submission: SubmissionSummary) => void;
 }
 
-/** Past submissions of a problem, newest first; runs are not kept. Opening one shows its results and code. */
-export function HistoryList({ itemId, activeId, timeLimitMs, onOpen, onSaveSolution }: HistoryListProps) {
+const rowId = (submissionId: string) => `history-row-${submissionId}`;
+
+/** Past submissions of a problem, newest first; runs are not kept. Opening one shows its details in place of the list. */
+export function HistoryList({ itemId, focusId, timeLimitMs, onOpen, onSaveSolution }: HistoryListProps) {
   const list = useSubmissionList(itemId);
+  const ready = list.isSuccess;
+  useEffect(() => {
+    if (ready && focusId) document.getElementById(rowId(focusId))?.focus();
+  }, [ready, focusId]);
   if (list.isPending) return <PageLoading />;
   if (list.isError) return <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />;
   if (list.data.items.length === 0) {
@@ -46,19 +55,18 @@ export function HistoryList({ itemId, activeId, timeLimitMs, onOpen, onSaveSolut
         </div>
         <ul className="history-list">
           {list.data.items.map((s) => {
-            // Compile and judge errors have no meaningful count, time or memory.
-            const measured = s.verdict !== null && s.verdict !== 'compile_error' && s.verdict !== 'internal_error';
+            const figures = submissionFigures(s, timeLimitMs);
             return (
               <li key={s.id} className="history-entry">
-                <button type="button" className={cx('history-row history-grid', activeId === s.id && 'is-active')} onClick={() => onOpen(s.id)} aria-current={activeId === s.id || undefined}>
+                <button type="button" id={rowId(s.id)} className="history-row history-grid" onClick={() => onOpen(s.id)}>
                   <span className={cx('history-verdict', s.verdict ? `tone-${verdictTone(s.verdict)}` : 'tone-neutral')} title={s.verdict ? VERDICT_LABEL[s.verdict] : undefined}>
                     {s.verdict ? VERDICT_BRIEF[s.verdict] : s.status === 'queued' ? 'Queued' : 'Running'}
                     {s.verdict && VERDICT_BRIEF[s.verdict] !== VERDICT_LABEL[s.verdict] && <span className="sr-only"> ({VERDICT_LABEL[s.verdict]})</span>}
                   </span>
                   <span>{languageName(s.language)}</span>
-                  <span className="muted history-count">{measured && s.verdict !== 'executed' && s.totalCount > 0 && <><span className="sr-only">Passed </span>{s.passedCount}/{s.totalCount}</>}</span>
-                  <span className="muted history-time">{measured && s.timeMs != null && <><span className="sr-only">Runtime </span>{formatRunTime(s.timeMs, s.verdict, timeLimitMs)}</>}</span>
-                  <span className="muted history-memory">{measured && s.timeMs != null && s.memoryKb != null && <><span className="sr-only">Memory </span>{formatMemoryKb(s.memoryKb)}</>}</span>
+                  <span className="muted history-count">{figures.passed && <><span className="sr-only">Passed </span>{figures.passed}</>}</span>
+                  <span className="muted history-time">{figures.runtime && <><span className="sr-only">Runtime </span>{figures.runtime}</>}</span>
+                  <span className="muted history-memory">{figures.memory && <><span className="sr-only">Memory </span>{figures.memory}</>}</span>
                   <time className="muted history-when" dateTime={s.createdAt} title={absoluteTime(s.createdAt)}>
                     {relativeTime(s.createdAt)}
                   </time>

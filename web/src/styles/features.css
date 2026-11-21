@@ -3081,18 +3081,6 @@ fieldset.stack legend {
   gap: var(--space-3);
 }
 
-.result-historic {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 5px var(--space-1-5) 5px var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: var(--text-sm);
-}
-
 .result-head {
   display: flex;
   align-items: center;

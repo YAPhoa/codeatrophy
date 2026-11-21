@@ -5,8 +5,6 @@ import { choose, mockApi, open, writeCode } from './support';
 // per language. The mock keeps them across a reload, as the server does.
 
 const TWO_SUM = '11111111-1111-4111-8111-000000000001';
-/** Seeded with past submissions. */
-const LONGEST_SUBSTRING = '11111111-1111-4111-8111-000000000005';
 
 const editor = (page: Page) => page.locator('.editor-host .cm-content');
 const languageSelect = (page: Page) => page.getByRole('combobox', { name: 'Language' });
@@ -187,21 +185,4 @@ test('workspace: a save that fails says so, keeps the edit through a reload, and
     before,
   );
   expect(puts).toEqual([`PUT /items/${TWO_SUM}/workspace/python`]);
-});
-
-test('workspace: the code of a past submission, loaded into the editor, is saved like an edit', async ({ page }) => {
-  await open(page, `/items/${LONGEST_SUBSTRING}`);
-  await choose(languageSelect(page), /^Python/);
-  await writeCode(page, 'print("mine")');
-  await expect.poll(() => copies(page, LONGEST_SUBSTRING)).toEqual([['python', 'print("mine")']]);
-
-  await page.getByRole('tab', { name: /Submissions/ }).click();
-  await page.getByRole('tabpanel', { name: 'Submissions' }).locator('.history-row').first().click();
-  await page.getByRole('button', { name: 'Load this code' }).click();
-  await expect(editor(page)).not.toHaveText('print("mine")');
-  const loaded = await mockApi<{ items: { id: string }[] }>(page, `/items/${LONGEST_SUBSTRING}/submissions?mode=submit`);
-  const { language, source } = await mockApi<{ language: string; source: string }>(page, `/submissions/${loaded.items[0]!.id}`);
-  // In its own language, which the editor switched to; the code written before stays that language's.
-  await expect.poll(async () => (await copies(page, LONGEST_SUBSTRING))[0]).toEqual([language, source]);
-  if (language !== 'python') expect(await copies(page, LONGEST_SUBSTRING)).toContainEqual(['python', 'print("mine")']);
 });

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, BookmarkPlus, ChevronDown, ChevronUp, CloudOff, ExternalLink, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Play, RotateCcw, Send, ServerOff } from 'lucide-react';
 import { api } from '../../api/client';
 import { useMeta, useSolutions, useTestCases } from '../../api/queries';
-import type { Item, SubmissionSummary, WorkingCopy } from '../../api/types';
+import type { Item, Submission, SubmissionSummary, WorkingCopy } from '../../api/types';
 import { useShellLayout } from '../../app/shellLayout';
 import { StatusSwap } from '../../ui/Animated';
 import { clearLegacy, clearUnsaved, codeFor, loadCustomInput, openingLanguage, openWorkspace, readLegacy, readUnsaved, rememberedLanguage, rememberLanguage, saveCustomInput, sendOrder } from '../../lib/codeStore';
@@ -14,7 +14,8 @@ import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { LANGUAGES, languageName, sortLanguages } from '../../lib/languages';
 import { isLargeText, textFilename } from '../../lib/largeText';
 import { readJson, writeJson } from '../../lib/storage';
-import { useUrlChoice } from '../../lib/urlState';
+import { replaceNeedsConfirm } from '../../lib/submissions';
+import { useUrlChoice, useUrlState } from '../../lib/urlState';
 import { useMediaQuery } from '../../lib/useMediaQuery';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
@@ -33,6 +34,7 @@ import { SaveSolutionDialog } from '../solutions/SaveSolutionDialog';
 import { savedWithCode, type RunFigures } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
 import { HistoryList } from './HistoryList';
+import { SubmissionDetails } from './SubmissionDetails';
 import { ResultPanel } from './ResultPanel';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
@@ -50,6 +52,8 @@ const STATEMENT_PANE_MAX = 880;
 const LEFT_TABS = ['description', 'notes', 'submissions', 'variants'] as const;
 const DRAWER_TABS = ['tests', 'result', 'custom'] as const;
 const NARROW_PANES = ['problem', 'code'] as const;
+const parseId = (raw: string | null): string | null => raw || null;
+const formatId = (id: string | null): string | null => id;
 type DrawerTab = (typeof DRAWER_TABS)[number];
 
 /** What is remembered about the workspace's panes, per browser. Their sizes are kept by the split panes themselves. */
@@ -139,7 +143,13 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
   const [saving, setSaving] = useState<{ language: string; source: string; name?: string; run?: RunFigures; submissionId?: string; accepted?: boolean } | null>(null);
   const [savedFrom, setSavedFrom] = useState<ReadonlySet<string>>(() => new Set());
   const [customInput, setCustomInput] = useState(() => loadCustomInput(item.id));
-  const [historic, setHistoric] = useState(false);
+  // The past submission open in the Submissions tab, in place of the list:
+  // part of the address, each opening a step that Back undoes.
+  const [openSubmission, setOpenSubmission] = useUrlState('submission', parseId, formatId, true);
+  /** The details were opened from the list in this visit, so the list is one step back. */
+  const openedFromList = useRef(false);
+  /** The submission whose details were last left, so its row takes the focus back. */
+  const [leftSubmission, setLeftSubmission] = useState<string | null>(null);
   const [narrowPane, setNarrowPane] = useUrlChoice('pane', NARROW_PANES, 'problem');
   const runner = useSubmissionRunner(item.id);
 
@@ -350,7 +360,6 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
       toast.error(`The input is ${formatBytes(new Blob([stdin]).size)}; the limit is ${formatBytes(maxInput)}.`);
       return;
     }
-    setHistoric(false);
     showInDrawer('result');
     if (narrow) setNarrowPane('code');
     void runner.start(language, code, mode, stdin);
@@ -414,10 +423,10 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
     }
     setSaving({ language, source: code });
   };
-  const saveSubmission = (summary: SubmissionSummary) => {
+  const saveSubmission = (summary: SubmissionSummary | Submission) => {
     const name = `${summary.verdict === 'accepted' ? 'Accepted' : languageName(summary.language)} ${summary.mode === 'submit' ? 'submission' : 'run'}, ${new Date(summary.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
-    const shown = runner.submission;
-    if (shown && shown.id === summary.id) {
+    const shown = 'source' in summary ? summary : runner.submission?.id === summary.id ? runner.submission : null;
+    if (shown) {
       setSaving({ language: shown.language, source: shown.source, name, run: shown, submissionId: shown.id });
       return;
     }
@@ -435,32 +444,89 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
   const justJudged = runner.submission;
   useEffect(() => {
     const s = justJudged;
-    if (!s || historic || s.status !== 'completed' || s.mode !== 'submit' || s.verdict !== 'accepted') return;
+    if (!s || s.status !== 'completed' || s.mode !== 'submit' || s.verdict !== 'accepted') return;
     if (solutions === undefined || offered.current.has(s.id)) return;
     offered.current.add(s.id);
     if (savedWithCode(solutions, s)) return;
     setSaving((open) => open ?? { language: s.language, source: s.source, run: s, submissionId: s.id, accepted: true });
-  }, [justJudged, historic, solutions]);
+  }, [justJudged, solutions]);
 
-  const loadSubmissionCode = () => {
-    const s = runner.submission;
-    if (!s) return;
-    const previous = { language, code };
-    // Saved like an edit: the submission's code is the language's code from now on.
-    if (languages.includes(s.language) && s.language !== language) {
+  // ---- Past submissions ----
+
+  /** Set by "Open in editor": the editor takes the focus once it shows the code. */
+  const focusEditor = useRef(false);
+  /** Why a language's code cannot go into the editor, or `null`. */
+  const blockedReason = (l: string): string | null => (languages.includes(l) ? null : `${languageName(l)} is not offered here`);
+
+  /**
+   * Put a past submission's code into the editor, in its language, saved as
+   * an edit. Work of the user's own in that language is only replaced after
+   * they agree.
+   */
+  const openInEditor = async (s: Submission) => {
+    if (blockedReason(s.language) !== null) return;
+    // What the editor would show for that language: this visit's code, from an unsaved edit, the working copy or older code kept here.
+    const current = s.language === language ? code : sources.current[s.language];
+    if (replaceNeedsConfirm(current, starter[s.language], s.source)) {
+      const name = languageName(s.language);
+      const ok = await confirm({
+        title: `Replace your ${name} code?`,
+        body: `You have work in ${name} on this problem. Opening this submission replaces it.`,
+        confirmLabel: 'Replace',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    if (s.language !== language) {
       record();
       if (language) void saver.send(language);
       rememberLanguage(item.id, s.language);
-      load(s.language, codeFor(sources.current, starter, s.language));
     }
+    latest.current = { language: s.language, code: s.source };
+    setLanguageState(s.language);
     setCode(s.source);
-    toast.success('Loaded the code from that submission', {
-      label: 'Undo',
-      onClick: () => {
-        if (previous.language) setLanguageState(previous.language);
-        setCode(previous.code);
-      },
-    });
+    record();
+    void saver.send(s.language);
+    if (narrow) setNarrowPane('code');
+    focusEditor.current = true;
+  };
+
+  // After "Open in editor", the editor takes the focus once it is there (a new language mounts a new one).
+  useEffect(() => {
+    if (!focusEditor.current) return;
+    let frames = 0;
+    let raf = 0;
+    const tryFocus = () => {
+      const target = document.querySelector<HTMLElement>('.editor-host .cm-content');
+      if (target) {
+        focusEditor.current = false;
+        target.focus();
+      } else if (++frames < 60) raf = requestAnimationFrame(tryFocus);
+    };
+    // A frame later: a new editor can be set up twice as it mounts (React's strict mode), the first one gone.
+    raf = requestAnimationFrame(tryFocus);
+    return () => cancelAnimationFrame(raf);
+  }, [language, code, narrowPane]);
+
+  // A link to a submission opens the Submissions tab on it.
+  useEffect(() => {
+    if (openSubmission && !new URLSearchParams(window.location.search).has('tab')) setLeftTab('submissions');
+    // Only as the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const showSubmission = (id: string) => {
+    openedFromList.current = true;
+    setLeftSubmission(null);
+    setOpenSubmission(id);
+  };
+  const backToList = () => {
+    setLeftSubmission(openSubmission);
+    // Opened from the list: the list is the step before, so Back and this agree.
+    if (openedFromList.current) {
+      openedFromList.current = false;
+      window.history.back();
+    } else setOpenSubmission(null);
   };
 
   if (!problem) return <PageLoading />;
@@ -532,20 +598,26 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
         {leftTab === 'description' && description}
         {leftTab === 'notes' && <Notes item={item} />}
         {leftTab === 'variants' && <Variants item={item} />}
-        {leftTab === 'submissions' && (
-          <HistoryList
-            itemId={item.id}
-            activeId={runner.submission?.id ?? null}
-            timeLimitMs={problem.timeLimitMs}
-            onOpen={(id) => {
-              setHistoric(true);
-              showInDrawer('result');
-              runner.view(id);
-              if (narrow) setNarrowPane('code');
-            }}
-            onSaveSolution={saveSubmission}
-          />
-        )}
+        {leftTab === 'submissions' &&
+          (openSubmission ? (
+            <SubmissionDetails
+              key={openSubmission}
+              itemId={item.id}
+              submissionId={openSubmission}
+              compare={problem.compare}
+              timeLimitMs={problem.timeLimitMs}
+              reveal={reveal}
+              focusOnOpen={openedFromList.current}
+              onBack={backToList}
+              blockedReason={blockedReason}
+              onOpenInEditor={(s) => void openInEditor(s)}
+              onSaveSolution={saveSubmission}
+              savedFrom={savedFrom}
+              solutions={solutions}
+            />
+          ) : (
+            <HistoryList itemId={item.id} focusId={leftSubmission} timeLimitMs={problem.timeLimitMs} onOpen={showSubmission} onSaveSolution={saveSubmission} />
+          ))}
       </div>
     </div>
   );
@@ -717,12 +789,6 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
           compare={problem.compare}
           timeLimitMs={problem.timeLimitMs}
           reveal={reveal}
-          historic={historic}
-          onLoadCode={loadSubmissionCode}
-          onClose={() => {
-            setHistoric(false);
-            runner.clear();
-          }}
           onSaveSolution={sub.status === 'completed' && sub.source.trim() !== '' ? () => saveSubmission(sub) : undefined}
           savedAsSolution={savedFrom.has(sub.id)}
           alreadySaved={kept ? { name: kept.name, to: `/items/${item.id}/solutions` } : null}

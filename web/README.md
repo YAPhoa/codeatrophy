@@ -170,6 +170,7 @@ third-party origin.
 | `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; a bundle exported and imported back; a server that refuses requests |
 | `jobs` | AI jobs and drafts: leaving a running job, the AI jobs in the sidebar's footer, on the rail and behind a narrow window's menu, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
 | `capture` | The capture text stays in view on the way to a new draft |
+| `submissions` | A past submission's details in the Submissions tab: its address, Back, a link to one gone, Show more, "Open in editor" and when it asks first, a narrow window |
 | `workspace` | The solve editor's working copies: a reload that shows the saved code from its first frame, switching language, Reset, a past submission's code, code older versions kept in the browser, a save that fails |
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
@@ -255,14 +256,21 @@ A few conventions worth knowing:
   below it that is a slim bar until something is run. The statement, the
   drawer and the navigation can each be minimised (the shortcuts dialog, `?`,
   lists the keys); what is minimised and the pane sizes are remembered in
-  `localStorage`, per browser.
+  `localStorage`, per browser. The drawer's Result tab shows only this
+  visit's latest run or submission.
+- **A past submission opens in the Submissions tab**, in place of the list
+  (`features/solve/SubmissionDetails.tsx`), at
+  `/items/<id>?tab=submissions&submission=<submission id>`; opening one is a
+  step Back undoes. "Open in editor" puts its code into the editor in its
+  language, saved as an edit, and asks first only when that language has
+  work of its own that it would replace (`src/lib/submissions.ts`).
 - **The solve editor holds only the solver's code.** For a "solution only"
   problem the runner is shown as collapsed rows above and below that code
   (block widgets, `src/ui/editorRunner.ts`) that expand to it read-only; it is
   never part of the editor's text, so line numbers, selection, copying, undo,
   working copies and submissions cover the solver's code alone. Code put into
   the editor from outside (opening the problem, changing language, reset,
-  loading a submission) opens with its
+  opening a past submission's code) opens with its
   [marked regions](../docs/api.md#folded-regions) folded; typing never folds.
   Every code editor can fold a marked region from the gutter, in any
   language.

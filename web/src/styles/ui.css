@@ -2185,3 +2185,40 @@ details[open] > :not(summary) {
     animation-timing-function: var(--ease-out);
   }
 }
+
+/* ---- Clamped: a long block cut to a few lines, with "Show more" ---- */
+
+.clamped {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.clamped-body {
+  align-self: stretch;
+  min-width: 0;
+}
+
+/* Cut to --clamp-lines lines of the block's own type, fading out at the cut. */
+.clamped.is-clamped .code-block {
+  max-height: calc(var(--clamp-lines) * 1lh + 2 * var(--space-2));
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.clamped .code-editor {
+  height: auto;
+}
+
+.clamped.is-clamped .cm-scroller {
+  max-height: calc(var(--clamp-lines) * var(--editor-line-height, 20px) + 8px);
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.clamped.is-clamped .code-editor-fallback {
+  max-height: calc(var(--clamp-lines) * 1lh + 2 * var(--space-2));
+  overflow-y: hidden;
+}

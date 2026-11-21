@@ -287,6 +287,60 @@ a.result-saved:hover {
   color: var(--accent-text);
 }
 
+/* ---- A past submission, in place of the list ---- */
+
+.submission {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.submission-back {
+  align-self: flex-start;
+  margin: -4px 0 0 -8px;
+}
+
+.submission-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.submission-verdict {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.submission-verdict:focus {
+  outline: none;
+}
+
+.submission-facts {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.submission-facts > * + *::before {
+  content: '·';
+  margin: 0 var(--space-1-5);
+}
+
+.submission-actions {
+  gap: var(--space-1-5);
+}
+
+/* Its code reads as a block, as the outputs above it do. */
+.submission-code .code-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 /* The history sits in the statement pane, whose width the user chooses (or
    the screen does, on a phone), so its columns follow the pane's width. */
 .pane-body:has(> .history) {
