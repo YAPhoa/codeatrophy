@@ -26,10 +26,11 @@
 
   @starting-style {
     /* A shell that arrives after the reveal (a slow start) fades in whole,
-       its page with it rather than after it. Within a problem, its bar stays
-       put while going from one tab to another (`is-continued`). */
+       its page with it rather than after it. Going from one of a problem's
+       tabs to another (its bar `is-continued`), nothing fades: the content
+       swaps at once, as a fade from blank reads as a flicker. */
     :root:not(.is-booting) .shell.is-arriving,
-    :root:not(.is-booting) .shell:not(.is-arriving) :is(.page:not(.workspace .page), .workspace > :not(.is-continued), .reader) {
+    :root:not(.is-booting) .shell:not(.is-arriving) :is(.page:not(.workspace .page), .workspace:not(:has(> .is-continued)) > *, .reader) {
       opacity: 0;
     }
   }

@@ -99,16 +99,18 @@ test('motion: a screen fades in when it opens, not when its view changes', async
   await page.waitForTimeout(400);
   expect(entrances(await recorded(page))).toEqual([]);
 
-  // Between a problem's tabs only the content below its bar fades in.
+  // Opening a problem fades it in; between its tabs the content swaps at once.
   await page.getByPlaceholder(/^Filter /).first().fill('');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await expect(page.locator('.workspace-body')).toBeVisible();
   await page.waitForTimeout(300);
-  await recorded(page);
+  expect(entrances(await recorded(page))).toContain('entrance on header.itembar');
   await page.locator('.itembar-tabs').getByRole('link', { name: /Test cases/ }).click();
   await expect(page.locator('.workspace-scroll')).toBeVisible();
+  await page.locator('.itembar-tabs').getByRole('link', { name: /Solutions/ }).click();
+  await expect(page.locator('.itembar-tabs .tab.is-selected')).toContainText('Solutions');
   await page.waitForTimeout(300);
-  expect(entrances(await recorded(page))).toEqual(['entrance on div.workspace-scroll']);
+  expect(entrances(await recorded(page))).toEqual([]);
 });
 
 test('motion: a change made on screen does animate', async ({ page }) => {
