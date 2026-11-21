@@ -47,7 +47,7 @@ export default function DraftsPage() {
   const list = drafts.data;
 
   return (
-    <div className="page page-narrow drafts-page">
+    <div className="page page-wide drafts-page">
       <div className="page-header">
         <h1 className="page-title">
           Drafts
