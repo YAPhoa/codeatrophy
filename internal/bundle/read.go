@@ -406,6 +406,7 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 			Note *string `json:"note"`
 		} `json:"source"`
 		VariantOf *string    `json:"variantOf"`
+		Related   []string   `json:"related"`
 		CreatedAt *time.Time `json:"createdAt"`
 		UpdatedAt *time.Time `json:"updatedAt"`
 		Problem   *struct {
@@ -492,6 +493,25 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 		} else {
 			r.warn("%s/item.json: invalid variantOf; ignored", dir)
 		}
+	}
+	related := map[string]bool{}
+	for _, rel := range j.Related {
+		if !ValidID(rel) {
+			r.warn("%s/item.json: invalid id %q in related; ignored", dir, rel)
+			continue
+		}
+		if v := strings.ToLower(rel); v != id {
+			related[v] = true
+		}
+	}
+	if len(related) > domain.MaxLinksPerItem {
+		r.warn("%s/item.json: more than %d related items; the rest are ignored", dir, domain.MaxLinksPerItem)
+	}
+	for _, rel := range slices.Sorted(maps.Keys(related)) {
+		if len(it.Related) == domain.MaxLinksPerItem {
+			break
+		}
+		it.Related = append(it.Related, rel)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	it.CreatedAt, it.UpdatedAt = now, now

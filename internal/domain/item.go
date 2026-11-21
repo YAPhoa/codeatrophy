@@ -115,6 +115,7 @@ type ItemSummary struct {
 	CollectionIDs []string    `json:"collectionIds"`
 	VariantOf     *string     `json:"variantOf"`
 	VariantCount  int         `json:"variantCount"`
+	LinkCount     int         `json:"linkCount"`
 	TestCaseCount int         `json:"testCaseCount"`
 	SolutionCount int         `json:"solutionCount"`
 	LastVerdict   *Verdict    `json:"lastVerdict"`
@@ -131,6 +132,9 @@ type Item struct {
 	RawInput *string      `json:"rawInput"`
 	Source   Source       `json:"source"`
 	Problem  *ProblemSpec `json:"problem"`
+	// VariantOrigin describes the item VariantOf names, nil when it is
+	// nil. It is filled on read and ignored on write.
+	VariantOrigin *LinkedItem `json:"variantOrigin"`
 }
 
 // Normalize replaces nil slices and maps with empty ones so that they encode
@@ -167,6 +171,7 @@ func (it Item) Clone() Item {
 	c.CollectionIDs = slices.Clone(it.CollectionIDs)
 	c.Difficulty = clonePtr(it.Difficulty)
 	c.VariantOf = clonePtr(it.VariantOf)
+	c.VariantOrigin = clonePtr(it.VariantOrigin)
 	c.LastVerdict = clonePtr(it.LastVerdict)
 	c.RawInput = clonePtr(it.RawInput)
 	c.Source = Source{URL: clonePtr(it.Source.URL), Note: clonePtr(it.Source.Note)}

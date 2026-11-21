@@ -167,7 +167,19 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 					return err
 				}
 			}
-			b.Items = append(b.Items, bundle.FromDomain(it, cases, sols, includeSolutions, includeHidden))
+			bi := bundle.FromDomain(it, cases, sols, includeSolutions, includeHidden)
+			// Every link is exported, also those to items left out of the
+			// bundle or deleted: an import keeps them as links to an
+			// unavailable item until that item arrives.
+			links, err := tx.ItemLinks(id)
+			if err != nil {
+				return err
+			}
+			for _, l := range links {
+				bi.Related = append(bi.Related, l.ID)
+			}
+			slices.Sort(bi.Related)
+			b.Items = append(b.Items, bi)
 		}
 		return nil
 	})
@@ -315,26 +327,6 @@ type itemPlan struct {
 
 // plan compares the bundle with the library by id.
 func (a *App) plan(ctx context.Context, tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]bool, error) {
-	inBundle := make(map[string]bool, len(b.Items))
-	var targets []string
-	for _, it := range b.Items {
-		inBundle[it.ID] = true
-		if it.VariantOf != nil {
-			targets = append(targets, *it.VariantOf)
-		}
-	}
-	// A variantOf link to an item in neither the bundle nor the library is
-	// dropped on import; drop it before comparing too, so that re-importing
-	// the same bundle is "unchanged".
-	exists, err := tx.ExistingItemIDs(targets)
-	if err != nil {
-		return nil, nil, err
-	}
-	for i := range b.Items {
-		if v := b.Items[i].VariantOf; v != nil && !inBundle[*v] && !exists[*v] {
-			b.Items[i].VariantOf = nil
-		}
-	}
 	plans := make([]itemPlan, 0, len(b.Items))
 	for _, it := range b.Items {
 		if err := ctx.Err(); err != nil {
@@ -505,17 +497,15 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 				}
 			}
 		}
-		// Variant links are kept when the target exists in the library. A
-		// link to an item duplicated by this import points at the copy.
+		// Variant links are kept, also when the origin is in neither the
+		// bundle nor the library (it is then unavailable until it is
+		// imported). A link to an item duplicated by this import points at
+		// the copy.
 		for _, d := range linkVariants {
 			if target, ok := finalID[*d.VariantOf]; ok {
 				d.VariantOf = &target
 			}
-			ok, err := tx.ExistingItemIDs([]string{*d.VariantOf})
-			if err != nil {
-				return err
-			}
-			if !ok[*d.VariantOf] || *d.VariantOf == d.ID {
+			if *d.VariantOf == d.ID {
 				continue // the link is dropped (it was stored as null)
 			}
 			cur, err := tx.GetItem(d.ID)
@@ -526,6 +516,9 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 			if err := tx.UpdateItem(&cur); err != nil {
 				return err
 			}
+		}
+		if err := a.importLinks(tx, plans, finalID, now, &res); err != nil {
+			return err
 		}
 		// Collections, parents first.
 		all, err := tx.ListCollections()
@@ -575,6 +568,75 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 		return ImportResult{}, err
 	}
 	return res, nil
+}
+
+// importLinks adds the links of every bundle item to the item it became
+// (or, for a skipped item, the local one), whatever the strategy: links are
+// not content, and an import only ever adds them. A link to an item
+// duplicated by this import points at the copy; one to an item in neither
+// the bundle nor the library is kept, unavailable until that item is
+// imported. A link that would give an item more than domain.MaxLinksPerItem
+// links is left out with a warning.
+func (a *App) importLinks(tx store.Tx, plans []itemPlan, finalID map[string]string, now time.Time, res *ImportResult) error {
+	counts := map[string]int{}
+	count := func(id string) (int, error) {
+		if n, ok := counts[id]; ok {
+			return n, nil
+		}
+		links, err := tx.ItemLinks(id)
+		counts[id] = len(links)
+		return len(links), err
+	}
+	for _, p := range plans {
+		from := finalID[p.item.ID]
+		for _, rel := range p.item.Related {
+			to := rel
+			if id, ok := finalID[rel]; ok {
+				to = id
+			}
+			if to == from {
+				continue
+			}
+			nf, err := count(from)
+			if err != nil {
+				return err
+			}
+			nt, err := count(to)
+			if err != nil {
+				return err
+			}
+			if nf >= domain.MaxLinksPerItem || nt >= domain.MaxLinksPerItem {
+				already, err := linked(tx, from, to)
+				if err != nil {
+					return err
+				}
+				if already {
+					continue
+				}
+				res.Warnings = append(res.Warnings, fmt.Sprintf("%s: the link to %s would give an item more than %d links; left out",
+					p.item.Dir, rel, domain.MaxLinksPerItem))
+				continue
+			}
+			added, err := tx.LinkItems(from, to, now)
+			if err != nil {
+				return err
+			}
+			if added {
+				counts[from]++
+				counts[to]++
+			}
+		}
+	}
+	return nil
+}
+
+// linked reports whether two items are linked.
+func linked(tx store.Tx, x, y string) (bool, error) {
+	links, err := tx.ItemLinks(x)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(links, func(l domain.LinkedItem) bool { return l.ID == y }), nil
 }
 
 func parentKey(p *string) string {

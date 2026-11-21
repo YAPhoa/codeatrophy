@@ -227,6 +227,9 @@ var downMigrations = map[int]string{
 		DROP COLUMN last_run_memory_kb, DROP COLUMN last_run_at;`,
 	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
 	13: `ALTER TABLE test_cases DROP COLUMN generator_language, DROP COLUMN generator_source;`,
+	14: `DROP TABLE item_links; DROP TABLE deleted_items;
+		ALTER TABLE items ADD CONSTRAINT items_variant_of_fkey
+			FOREIGN KEY (variant_of) REFERENCES items (id) ON DELETE SET NULL DEFERRABLE;`,
 }
 
 // undoMigrationsFrom takes the database back to the version before from.

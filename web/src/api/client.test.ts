@@ -43,6 +43,20 @@ describe('buildQuery', () => {
   });
 });
 
+describe('item links', () => {
+  it('lists, adds and removes the links of an item', async () => {
+    const calls = stub((c) => (c.init.method === 'DELETE' ? new Response(null, { status: 204 }) : json({ links: [] })));
+    expect(await api.items.links.list('a b')).toEqual({ links: [] });
+    await api.items.links.add('a', 'b');
+    await api.items.links.remove('a', 'b/c');
+    expect(calls.map((c) => `${c.init.method} ${c.url} ${c.init.body ?? ''}`)).toEqual([
+      'GET /api/v1/items/a%20b/links ',
+      'POST /api/v1/items/a/links {"itemId":"b"}',
+      'DELETE /api/v1/items/a/links/b%2Fc ',
+    ]);
+  });
+});
+
 describe('request', () => {
   it('marks a last-chance save as a request that outlives the page', async () => {
     const calls = stub(() => json({ id: '1' }));

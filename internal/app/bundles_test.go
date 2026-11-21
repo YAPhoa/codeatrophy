@@ -258,8 +258,16 @@ func TestImportVariantOfOutsideBundle(t *testing.T) {
 	if res.Created != 1 {
 		t.Fatalf("import: %+v", res)
 	}
-	if got := must(dst.app.GetItem(dst.ctx, v.ID)); got.VariantOf != nil {
-		t.Error("a variantOf link to an item missing from the target library is dropped")
+	got := must(dst.app.GetItem(dst.ctx, v.ID))
+	if got.VariantOf == nil || *got.VariantOf != *v.VariantOf || got.VariantOrigin == nil || got.VariantOrigin.Available ||
+		got.VariantOrigin.Title != nil {
+		t.Errorf("a variantOf link to an item missing from the target library is kept, unavailable: %v %+v",
+			ptrString(got.VariantOf), got.VariantOrigin)
+	}
+	// Importing the origin later brings it to life.
+	must(dst.app.Import(dst.ctx, src.export(t, `{"scope":"all"}`), ""))
+	if got := must(dst.app.GetItem(dst.ctx, v.ID)); got.VariantOrigin == nil || !got.VariantOrigin.Available {
+		t.Errorf("origin after importing it: %+v", got.VariantOrigin)
 	}
 }
 

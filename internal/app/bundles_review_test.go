@@ -54,17 +54,18 @@ func ptrString(p *string) string {
 	return *p
 }
 
-// A variantOf link dropped on import (its target is in neither the bundle
-// nor the library) does not make the item "changed" forever.
-func TestReviewDroppedVariantLinkIsIdempotent(t *testing.T) {
+// A variantOf link whose target is in neither the bundle nor the library
+// is kept on import, and does not make the item "changed" when the same
+// bundle is imported again.
+func TestReviewMissingVariantLinkIsIdempotent(t *testing.T) {
 	src := newEnv(t)
 	_, _, _, _, v := src.library(t)
 	data := src.export(t, `{"scope":"items","itemIds":["`+v.ID+`"]}`)
 	dst := newEnv(t)
 	must(dst.app.Import(dst.ctx, data, ""))
 	before := must(dst.app.GetItem(dst.ctx, v.ID))
-	if before.VariantOf != nil {
-		t.Fatalf("a link to a missing item is dropped: %v", ptrString(before.VariantOf))
+	if before.VariantOf == nil || *before.VariantOf != *v.VariantOf {
+		t.Fatalf("a link to a missing item is kept: %v", ptrString(before.VariantOf))
 	}
 	pre := must(dst.app.PreviewImport(dst.ctx, data))
 	if pre.Counts.Unchanged != 1 {

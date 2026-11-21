@@ -678,3 +678,44 @@ func TestItemDirectoriesDoNotCollide(t *testing.T) {
 		}
 	}
 }
+
+// An item's related ids are written sorted (and not at all when there are
+// none), read back as they were, kept when they name items outside the
+// bundle, and left out of the content hash. A reader drops invalid ids
+// and the item's own id.
+func TestRelatedLinks(t *testing.T) {
+	src := sampleBundle()
+	outside := "0193b2f9-0000-7000-8000-00000000000a"
+	src.Items[0].Related = []string{outside, src.Items[1].ID}
+	src.Items[1].Related = []string{src.Items[0].ID}
+	hash := ContentHash(&src.Items[0])
+	data := write(t, src)
+	got, warnings, err := Read(data, lim)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("read: %v %v", err, warnings)
+	}
+	if fmt.Sprint(got.Items[0].Related) != fmt.Sprint([]string{src.Items[1].ID, outside}) ||
+		fmt.Sprint(got.Items[1].Related) != fmt.Sprint([]string{src.Items[0].ID}) {
+		t.Errorf("related: %v %v", got.Items[0].Related, got.Items[1].Related)
+	}
+	plain := sampleBundle()
+	if ContentHash(&got.Items[0]) != hash || hash != ContentHash(&plain.Items[0]) {
+		t.Error("related ids change the content hash")
+	}
+	if c := Changes(&plain.Items[0], &got.Items[0]); len(c) != 0 {
+		t.Errorf("related ids are a change: %v", c)
+	}
+	if strings.Contains(string(write(t, plain)), `"related"`) {
+		t.Error("an item without links has a related field")
+	}
+	data = rewriteJSON(t, data, got.Items[0].Dir+"/item.json", func(m map[string]any) {
+		m["related"] = []any{"not-an-id", src.Items[0].ID, strings.ToUpper(outside)}
+	})
+	got, warnings, err = Read(data, lim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got.Items[0].Related) != fmt.Sprint([]string{outside}) || !containsWarning(warnings, "invalid id") {
+		t.Errorf("related after rewriting: %v, warnings %v", got.Items[0].Related, warnings)
+	}
+}

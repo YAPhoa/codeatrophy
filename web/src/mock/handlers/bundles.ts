@@ -23,6 +23,7 @@ function toBundleItem(db: MockDb, item: StoredItem, includeSolutions: boolean, i
     tags: [...item.tags],
     source: { ...item.source },
     variantOf: item.variantOf,
+    ...(db.linkCount(item.id) > 0 ? { related: db.relatedIds(item.id) } : {}),
     body: item.body,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -166,9 +167,7 @@ function comparison(db: MockDb, incoming: BundleItem): { local: BundleItem; inco
   if (!stored) return null;
   const samplesOnly = incoming.testCases.every((c) => c.isSample);
   const hasSolutions = incoming.solutions !== undefined;
-  // A link to an item this library does not have would be dropped on import, so it is not a difference.
-  const variantOf = incoming.variantOf !== null && db.items.has(incoming.variantOf) ? incoming.variantOf : null;
-  return { local: toBundleItem(db, stored, hasSolutions, !samplesOnly), incoming: { ...incoming, variantOf } };
+  return { local: toBundleItem(db, stored, hasSolutions, !samplesOnly), incoming };
 }
 
 function classify(db: MockDb, incoming: BundleItem): ImportItemState {
@@ -328,32 +327,46 @@ async function importBundle(db: MockDb, req: Req) {
     collectionsCreated: 0,
     warnings: bundle.warnings,
   };
-  // Where each bundle item ended up, for collection membership.
+  // Where each bundle item ended up, for collection membership and links.
   const localId = new Map<string, string>();
-  const fresh: StoredItem[] = [];
+  // The items written from the bundle: created, duplicated or overwritten.
+  const written: StoredItem[] = [];
   for (const incoming of bundle.items) {
     const state = classify(db, incoming);
     localId.set(incoming.id, incoming.id);
     if (state === 'new') {
-      fresh.push(createFromBundle(db, incoming, incoming.id));
+      written.push(createFromBundle(db, incoming, incoming.id));
       result.created++;
     } else if (state === 'unchanged') {
       result.unchanged++;
     } else if (strategy === 'skip') {
       result.skipped++;
     } else if (strategy === 'overwrite') {
-      overwrite(db, db.getItem(incoming.id), incoming);
+      const local = db.getItem(incoming.id);
+      overwrite(db, local, incoming);
+      written.push(local);
       result.updated++;
     } else {
       const copy = createFromBundle(db, incoming, uuid());
-      fresh.push(copy);
+      written.push(copy);
       localId.set(incoming.id, copy.id);
       result.duplicated++;
     }
   }
-  // A variant link survives only if its target exists in this library.
-  for (const item of [...fresh, ...bundle.items.flatMap((i) => db.items.get(i.id) ?? [])]) {
-    if (item.variantOf !== null && !db.items.has(item.variantOf)) item.variantOf = null;
+  // A variant of an item duplicated in this import points at the copy. One
+  // naming an item the library does not have is kept as it is.
+  for (const item of written) {
+    if (item.variantOf !== null) item.variantOf = localId.get(item.variantOf) ?? item.variantOf;
+  }
+
+  // Links are added for every bundle item, whatever became of it; none is removed.
+  for (const incoming of bundle.items) {
+    const self = localId.get(incoming.id)!;
+    for (const id of incoming.related ?? []) {
+      const other = localId.get(id) ?? id;
+      if (other === self) continue;
+      if (db.addLink(self, other) === 'full') result.warnings.push(`“${incoming.title}”: a link to ${other} would pass ${LIMITS.maxLinksPerItem} links; left out`);
+    }
   }
 
   // Parents before children, so a new child can attach to a parent created just before it.

@@ -124,6 +124,7 @@ them and locate items through `bundle.json`.
   "tags": ["array", "hash-map"],
   "source": { "url": null, "note": null },
   "variantOf": null,
+  "related": ["0193b2f3-...", "0193b2f4-..."],
   "createdAt": "2026-01-31T12:00:00Z",
   "updatedAt": "2026-01-31T12:00:00Z",
   "problem": {
@@ -158,10 +159,18 @@ them and locate items through `bundle.json`.
   In a version 1 bundle neither field has a meaning: a reader ignores them
   (with a warning when `interface` is not `program`), and the problem is a
   full program.
-- `variantOf` may name an item that is not in the bundle. On import the link
-  is kept if that item exists in the target library and dropped otherwise;
-  a dropped link is set to `null` before the content hash is compared, so
-  importing the same bundle again finds the item `unchanged`.
+- `variantOf` may name an item that is not in the bundle, nor in the
+  target library. On import it is kept either way: it then names an item
+  the library does not have (yet), shown as unavailable until an item with
+  that id is imported, so importing the same bundle again finds the item
+  `unchanged`.
+- `related` (optional) lists the ids of the items linked to this one, sorted,
+  at most 50. Links have no direction: an item linked to another in the same
+  bundle appears in both items' lists. Writers include every link of the
+  item, also to items left out of the bundle, and omit the field when there
+  are none. A reader ignores an invalid id, and the item's own id. Links are
+  not content: they are not part of the content hash and never make an item
+  `changed`.
 - Field values follow the same rules as the HTTP API (`docs/api.md`).
 
 ## `solutions/solutions.json`
@@ -264,8 +273,8 @@ with the runner code itself. A full-program problem has neither, so its
 hash is the same in both versions and the hashes of version 1 bundles stay
 valid.
 
-Ids, timestamps, `origin`, `verified`, a test case's `generator`, a
-solution's `lastRun` and everything personal are excluded.
+Ids, timestamps, `related`, `origin`, `verified`, a test case's
+`generator`, a solution's `lastRun` and everything personal are excluded.
 `problem`, `solutions` and `testCases` are omitted for readings. The hash
 always describes what is *in the bundle*: if solutions or hidden tests were
 left out of the export, they are left out of the hash too (`solutions` is
@@ -311,6 +320,16 @@ are not yet members are appended in bundle order. Items imported under the
 and a bundle item whose `variantOf` names an item duplicated in the same
 import points at the new copy.
 
+The links in `related` are added for every item in the bundle, whatever its
+state and the strategy: to the item created, to the local item when it is
+unchanged, skipped or overwritten, and to the copy when it is duplicated.
+An import only adds links; it never removes a local one. A link to an item
+duplicated in the same import points at the new copy, as `variantOf` does,
+and a link to an item in neither the bundle nor the library is kept as a
+link to an unavailable item, which comes alive if that item is imported
+later. A link that would give an item more than 50 links is left out with
+a warning.
+
 An `overwrite` increases the local item's revision only when its content
 other than test cases changes; replacing only test cases moves its
 `updatedAt` and leaves the revision alone. For a `changed` item, an importer
@@ -349,7 +368,7 @@ and say what is wrong, and skip as little as possible:
 | `id` in `item.json` differs from `bundle.json`, or `type` is not `problem`/`reading` | The item is skipped |
 | `title` missing, too long or not a single line | The item is skipped |
 | `body.md` missing, not valid UTF-8 or larger than `maxTextBytes` | The body is empty |
-| Invalid optional field (`summary`, `difficulty`, a limit, `compare`, a tag, `source`, `variantOf`) | That field takes its default; extra tags beyond the limit are dropped |
+| Invalid optional field (`summary`, `difficulty`, a limit, `compare`, a tag, `source`, `variantOf`, an id in `related`) | That field takes its default (an invalid id in `related` is left out); extra tags and related ids beyond the limit are dropped |
 | Unknown language, or missing/too large/non-UTF-8 source file, in `starter` | That language's starter code is skipped |
 | Version 2: unknown `interface`, or `harness` that is not an object of `{prefix, suffix}` paths | The item is skipped (imported without its runner, it could not be solved) |
 | Version 2: unknown language, or a missing/too large/non-UTF-8 file, in `harness` | That language's harness is skipped, so the problem cannot be run in it |
@@ -371,7 +390,7 @@ never changes within a version.
 
 | Version | Adds |
 | --- | --- |
-| 1 | Items, test cases, solutions, collections; later, without a new version, test case generators (an optional field) |
+| 1 | Items, test cases, solutions, collections; later, without a new version, test case generators and an item's `related` links (optional fields) |
 | 2 | Solution-only problems: `problem.interface`, `problem.harness` and the `harness/` directory, and the interface and harness in the content hash |
 
 Version 2 is a version of its own rather than optional fields because a

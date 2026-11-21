@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, Pencil, Trash2 } from 'lucide-react';
+import { Download, GitBranch, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateLibrary, qk } from '../../api/queries';
 import type { Item } from '../../api/types';
@@ -49,7 +49,7 @@ export function useItemActions(item: Item) {
       title: `Delete “${item.title}”?`,
       body:
         item.type === 'problem'
-          ? 'Its test cases, submissions and your notes are deleted too. Variants of it stay, unlinked. This cannot be undone.'
+          ? 'Its test cases, submissions and your notes are deleted too. This cannot be undone.'
           : 'Your notes on it are deleted too. This cannot be undone.',
       confirmLabel: item.type === 'problem' ? 'Delete problem' : 'Delete reading',
       danger: true,
@@ -66,10 +66,13 @@ export function useItemActions(item: Item) {
     }
   }, [item, confirm, qc, toast, navigate]);
 
-  // Test cases and variants have their own way in (the Tests page, the Variants tab, Related readings).
+  // A problem's test cases and variants have their own way in (the Tests page,
+  // the Variants tab); a reading is reworked from here, and its variants are
+  // listed under Related items.
   const menu: MenuEntry[] = [
     { label: 'Edit details…', icon: <Pencil size={14} />, to: `/items/${item.id}/edit` },
     { label: 'Export this item…', icon: <Download size={14} />, to: exportItemsPath([item.id]) },
+    ...(item.type === 'reading' ? [{ label: 'Rework this reading…', icon: <GitBranch size={14} />, to: `/items/${item.id}/variant` }] : []),
     'separator',
     { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove() },
   ];

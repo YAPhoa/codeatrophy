@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -143,7 +144,7 @@ func TestToolsListAndAnnotations(t *testing.T) {
 		names[tool.Name] = tool
 	}
 	want := []string{"get_overview", "search_items", "get_item", "list_test_cases", "list_solutions", "get_submission", "list_style_presets",
-		"create_item", "update_item", "edit_item_text", "delete_item", "bulk_update_items",
+		"create_item", "update_item", "edit_item_text", "delete_item", "bulk_update_items", "link_items", "unlink_items",
 		"create_collection", "update_collection", "delete_collection", "set_collection_items", "add_items_to_collection",
 		"remove_item_from_collection", "rename_tag", "delete_tag",
 		"add_test_cases", "update_test_case", "delete_test_case", "verify_test_cases", "save_solution", "delete_solution", "run_code"}
@@ -193,6 +194,7 @@ func TestToolsListAndAnnotations(t *testing.T) {
 		"get_overview": ro, "search_items": ro, "get_item": ro, "list_test_cases": ro, "list_solutions": ro,
 		"get_submission": ro, "list_style_presets": ro,
 		"create_item": add, "update_item": idm, "edit_item_text": add, "delete_item": del, "bulk_update_items": del,
+		"link_items": idm, "unlink_items": idm,
 		"create_collection": add, "update_collection": idm, "delete_collection": del, "set_collection_items": ovw,
 		"add_items_to_collection": idm, "remove_item_from_collection": idm, "rename_tag": idm, "delete_tag": del,
 		"add_test_cases": add, "update_test_case": idm, "delete_test_case": del, "verify_test_cases": add,
@@ -444,6 +446,7 @@ func TestPromptDataCannotBreakOut(t *testing.T) {
 		"draft_item":       get("draft_item", map[string]string{"text": attack("INJECTED-TEXT")}),
 		"create_variant":   get("create_variant", map[string]string{"itemId": it.ID, "instruction": attack("INJECTED-INSTRUCTION")}),
 		"write_test_cases": get("write_test_cases", map[string]string{"itemId": it.ID}),
+		"link_related":     get("link_related", map[string]string{"itemId": it.ID}),
 	}
 	nonceRe := regexp.MustCompile(`<[a-z_]+-([0-9a-f]{24})>`)
 	for name, text := range prompts {
@@ -847,4 +850,70 @@ func wrongTyped(schema map[string]any, prefix string) []probe {
 		}
 	}
 	return out
+}
+
+// link_items and unlink_items link an item to several others, with an
+// error per bad id; get_item shows the links and a variant's origin, which
+// stay when the items they name are deleted; link_related asks for links.
+func TestLinkTools(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	mk := func(title string, extra map[string]any) string {
+		args := map[string]any{"type": "reading", "title": title}
+		maps.Copy(args, extra)
+		it, isErr := call(t, s, "create_item", args)
+		if isErr {
+			t.Fatalf("create_item: %v", it)
+		}
+		return it["id"].(string)
+	}
+	a, b, c := mk("Graphs", nil), mk("BFS", nil), mk("DFS", nil)
+	v := mk("Graphs again", map[string]any{"variantOf": a})
+	errRes, isErr := call(t, s, "link_items", map[string]any{"itemId": a, "otherIds": []string{b, "nope", a}})
+	fields, _ := errRes["error"].(map[string]any)["fields"].(map[string]any)
+	if !isErr || fields["otherIds.1"] != "item nope does not exist" || fields["otherIds.2"] == nil || fields["otherIds.0"] != nil {
+		t.Errorf("per-id errors: %v", errRes)
+	}
+	res, isErr := call(t, s, "link_items", map[string]any{"itemId": a, "otherIds": []string{b, c}})
+	if links, _ := res["links"].([]any); isErr || len(links) != 2 || links[0].(map[string]any)["title"] != "BFS" ||
+		links[0].(map[string]any)["available"] != true {
+		t.Fatalf("link_items: %v", res)
+	}
+	full, _ := call(t, s, "get_item", map[string]any{"id": a})
+	if links, _ := full["links"].([]any); len(links) != 2 || full["item"].(map[string]any)["linkCount"] != float64(2) ||
+		full["item"].(map[string]any)["revision"] != float64(1) {
+		t.Errorf("get_item links: %v", full)
+	}
+	if o, ok := full["item"].(map[string]any)["variantOrigin"]; !ok || o != nil {
+		t.Errorf("variantOrigin of an item that is no variant: %v", full["item"])
+	}
+	if r, isErr := call(t, s, "delete_item", map[string]any{"id": a}); isErr {
+		t.Fatalf("delete_item: %v", r)
+	}
+	full, _ = call(t, s, "get_item", map[string]any{"id": b})
+	link := full["links"].([]any)[0].(map[string]any)
+	if link["id"] != a || link["available"] != false || link["title"] != "Graphs" || link["status"] != nil {
+		t.Errorf("a link to a deleted item: %v", link)
+	}
+	full, _ = call(t, s, "get_item", map[string]any{"id": v})
+	origin, _ := full["item"].(map[string]any)["variantOrigin"].(map[string]any)
+	if full["item"].(map[string]any)["variantOf"] != a || origin["available"] != false || origin["title"] != "Graphs" {
+		t.Errorf("variant of a deleted item: %v", full["item"])
+	}
+	res, isErr = call(t, s, "unlink_items", map[string]any{"itemId": b, "otherIds": []string{a, c}})
+	if links, _ := res["links"].([]any); isErr || len(links) != 0 {
+		t.Errorf("unlink_items: %v", res)
+	}
+	if res, isErr := call(t, s, "unlink_items", map[string]any{"itemId": "nope", "otherIds": []string{b}}); !isErr ||
+		res["error"].(map[string]any)["code"] != "not_found" {
+		t.Errorf("unlink_items on a missing item: %v", res)
+	}
+	p, err := s.GetPrompt(f.ctx, &mcp.GetPromptParams{Name: "link_related", Arguments: map[string]string{"itemId": c}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := p.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(text, "search_items") ||
+		!strings.Contains(text, "link_items") || !strings.Contains(text, `"title": "DFS"`) {
+		t.Errorf("link_related: %s", text)
+	}
 }

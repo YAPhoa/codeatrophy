@@ -26,7 +26,7 @@ import { useToast } from '../../ui/Toast';
 import { TagChips } from '../item/controls';
 import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
-import { Variants } from '../item/Related';
+import { Related, Variants } from '../item/Related';
 import { SaveSolutionDialog } from '../solutions/SaveSolutionDialog';
 import { savedWithCode, type RunFigures } from '../solutions/solutionWrites';
 import { CaseList } from './CaseList';
@@ -415,6 +415,7 @@ export function SolveView({ item }: { item: Item }) {
           {item.source.note && <span className="muted">· {item.source.note}</span>}
         </div>
       </div>
+      <Related item={item} />
     </div>
   );
 

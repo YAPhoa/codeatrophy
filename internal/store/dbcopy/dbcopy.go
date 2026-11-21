@@ -169,6 +169,8 @@ func Summary(counts []store.TableCount) string {
 		"drafts":             {"draft", "drafts"},
 		"style_presets":      {"style preset", "style presets"},
 		"items":              {"item", "items"},
+		"item_links":         {"item link", "item links"},
+		"deleted_items":      {"deleted item", "deleted items"},
 		"tags":               {"tag", "tags"},
 		"item_tags":          {"tag assignment", "tag assignments"},
 		"collections":        {"collection", "collections"},

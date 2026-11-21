@@ -166,6 +166,7 @@ third-party origin.
 | `jobs` | AI jobs and drafts: leaving a running job, the jobs window, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
+| `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
 | `library-*`, `tags`, `palette`, `select` | The library list, its filters, paging and sorting; the Tags page; the command palette; selects |
 | `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown; the reader's text width |
 | `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
@@ -198,7 +199,8 @@ src/
     drafts/       drafts on the server: the list, a draft's page, autosave
     jobs/         the jobs window, and following a screen's AI job
     item/         item page dispatch, shared header and controls, editor form,
-                  edit page with revision-conflict handling, notes, variants
+                  edit page with revision-conflict handling, notes, variants,
+                  related items
     solve/        problem workspace: editor, run / submit, the tests and
                   results drawer, history
     solutions/    saved solutions of a problem, the reference solution

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"codeatrophy/internal/domain"
@@ -84,6 +85,13 @@ func (t *tx) GetItem(id string) (domain.Item, error) {
 	sums := []*domain.ItemSummary{&r.item.ItemSummary}
 	if err := t.hydrate(sums); err != nil {
 		return domain.Item{}, err
+	}
+	if v := r.item.VariantOf; v != nil {
+		origin, err := t.linkedItem(*v)
+		if err != nil {
+			return domain.Item{}, err
+		}
+		r.item.VariantOrigin = &origin
 	}
 	if r.item.Problem != nil {
 		sols, err := t.ListSolutions(id)
@@ -181,6 +189,9 @@ func (t *tx) InsertItem(it *domain.Item) error {
 	if err := t.writeTags(it.ID, it.Tags); err != nil {
 		return err
 	}
+	if _, err := t.exec(`DELETE FROM deleted_items WHERE id = ?`, it.ID); err != nil {
+		return err
+	}
 	return t.index(seq, it)
 }
 
@@ -230,7 +241,7 @@ func (t *tx) index(seq int64, it *domain.Item) error {
 	return err
 }
 
-func (t *tx) DeleteItem(id string) (bool, error) {
+func (t *tx) DeleteItem(id string, at time.Time) (bool, error) {
 	var seq int64
 	err := t.queryRow(`SELECT seq FROM items WHERE id = ?`, id).Scan(&seq)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -242,7 +253,10 @@ func (t *tx) DeleteItem(id string) (bool, error) {
 	if _, err := t.exec(`DELETE FROM items_fts WHERE rowid = ?`, seq); err != nil {
 		return false, err
 	}
-	if _, err := t.exec(`UPDATE items SET variant_of = NULL WHERE variant_of = ?`, id); err != nil {
+	if _, err := t.exec(`INSERT INTO deleted_items (id, title, type, deleted_at)
+		SELECT id, title, type, ? FROM items WHERE id = ?
+		ON CONFLICT (id) DO UPDATE SET title = excluded.title, type = excluded.type, deleted_at = excluded.deleted_at`,
+		toUnix(at), id); err != nil {
 		return false, err
 	}
 	if _, err := t.exec(`DELETE FROM items WHERE id = ?`, id); err != nil {
@@ -296,10 +310,23 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 		ids = append(ids, it.ID)
 		it.Tags = []string{}
 		it.CollectionIDs = []string{}
-		it.VariantCount, it.TestCaseCount, it.SolutionCount, it.LastVerdict = 0, 0, 0, nil
+		it.VariantCount, it.LinkCount, it.TestCaseCount, it.SolutionCount, it.LastVerdict = 0, 0, 0, 0, nil
 	}
 	for _, ch := range chunks(ids, 500) {
 		ph, args := placeholders(len(ch)), anyArgs(ch)
+		if err := t.eachRow(`SELECT id, COUNT(*) FROM (SELECT item_a AS id FROM item_links WHERE item_a IN (`+ph+`)
+			UNION ALL SELECT item_b FROM item_links WHERE item_b IN (`+ph+`)) GROUP BY id`, append(args, args...),
+			func(r *sql.Rows) error {
+				var id string
+				var n int
+				if err := r.Scan(&id, &n); err != nil {
+					return err
+				}
+				byID[id].LinkCount = n
+				return nil
+			}); err != nil {
+			return err
+		}
 		if err := t.eachRow(`SELECT item_id, tag FROM item_tags WHERE item_id IN (`+ph+`) ORDER BY tag`, args,
 			func(r *sql.Rows) error {
 				var id, tag string

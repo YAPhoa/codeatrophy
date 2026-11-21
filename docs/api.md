@@ -174,7 +174,8 @@ to show.
     "maxSolutionsPerItem": 50,
     "maxSolutionNameChars": 100,
     "maxSolutionNotesChars": 5000,
-    "maxNotesChars": 4000
+    "maxNotesChars": 4000,
+    "maxLinksPerItem": 50
   }
 }
 ```
@@ -211,7 +212,8 @@ to show.
   (which sets `maxImportBytes` and, at four times that,
   `maxImportUncompressedBytes`).
   `maxSolutionsPerItem`, `maxSolutionNameChars` and `maxSolutionNotesChars`
-  bound [solutions](#solutions). `maxSystemPromptChars` bounds a
+  bound [solutions](#solutions); `maxLinksPerItem` bounds an item's
+  [links](#links). `maxSystemPromptChars` bounds a
   [custom system prompt](#system-prompt) and a
   [custom test case prompt](#test-case-prompt).
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
@@ -271,6 +273,7 @@ are left out.
   "collectionIds": ["0193b2f1-..."],
   "variantOf": null,
   "variantCount": 0,
+  "linkCount": 2,
   "testCaseCount": 6,
   "lastVerdict": "accepted",
   "revision": 3,
@@ -293,7 +296,12 @@ are left out.
   under starring and status changes.
 - `variantOf` is the id of the item this one was derived from, or `null`.
   `variantCount` is the number of items whose `variantOf` is this item.
-  Deleting an item clears `variantOf` on its variants.
+  Deleting an item keeps `variantOf` on its variants: it then names an
+  unavailable item (see `variantOrigin` on `Item`). A `PATCH` may keep such
+  a value but not set one anew: a new `variantOf` must name an existing
+  item.
+- `linkCount` is the number of the item's [links](#links), links to
+  unavailable items included.
 - `difficulty` is nullable for both types.
 - `testCaseCount` is `0` and `lastVerdict` is `null` for readings.
 - `solutionCount` (a number, next to `testCaseCount`) is how many
@@ -320,9 +328,14 @@ are left out.
     "starterCode": { "python": "import sys\n..." },
     "harness": {},
     "referenceSolution": { "id": "...", "language": "python", "source": "..." }
-  }
+  },
+  "variantOrigin": null
 }
 ```
+
+- `variantOrigin` is `null` when `variantOf` is, and otherwise the
+  `LinkedItem` (see [Links](#links)) of the item `variantOf` names, with
+  `linkedAt` `null`. It is computed on read; a client sends `variantOf`.
 
 - `problem.referenceSolution` is a view of the item's saved
   [solution](#solutions) that is marked as the reference, or `null` when none
@@ -584,9 +597,13 @@ Returns `Item`.
 
 ### `DELETE /items/{id}`
 
-Deletes the item, its test cases, its solutions and its submissions. Items
-that were variants of it lose their `variantOf` link; for each of them that
-is a content change, so its `revision` increases and its `updatedAt` moves.
+Deletes the item, its test cases, its solutions and its submissions. Its
+[links](#links) and the `variantOf` of items that were variants of it are
+kept, and the server keeps the item's id, title and type, so that those
+can still show what they name: the other items list it as unavailable, and
+nothing about them changes (no `revision`, no `updatedAt`). If an item with
+that id is created again (by an import, say), they name it again. The same
+holds for the `delete` action of `POST /items/bulk`.
 
 ### `POST /items/bulk`
 
@@ -606,6 +623,60 @@ Apply one action to many items.
 
 Returns `{ "affected": n }`, the number of the given ids that exist (whether
 or not the action changed them). Unknown ids are ignored.
+
+### Links
+
+Any two items, problems or readings, can be linked by hand. A link has no
+direction and no label. It is made between two existing items and stays
+when either of them is deleted: the other item then lists it as
+unavailable (a client can show it as a dead link) until an item with that
+id exists again. An [import](#import-and-export) can also bring a link to
+an item this library never had. Linking and unlinking are not content
+changes: neither `revision` nor `updatedAt` moves. An item has at most
+`limits.maxLinksPerItem` (50) links, unavailable ones included.
+
+`LinkedItem` — the other item of a link:
+
+```json
+{
+  "id": "0193b2f0-...",
+  "available": true,
+  "title": "Two Sum",
+  "type": "problem",
+  "status": "todo",
+  "difficulty": "easy",
+  "linkedAt": "2026-01-31T12:00:00Z"
+}
+```
+
+- `available` is `false` when no item with this id exists. `title` and
+  `type` are then the ones it had when it was deleted, or `null` when this
+  library never had it; `status` and `difficulty` are `null`.
+- `linkedAt` is when the link was made. In a `variantOrigin` it is `null`.
+
+### `GET /items/{id}/links`
+
+Returns `{ "links": [LinkedItem] }`: available items first, each group
+oldest link first. `404` if the item does not exist.
+
+### `POST /items/{id}/links`
+
+```json
+{ "itemId": "0193b2f1-..." }
+```
+
+Links the item to `itemId`. Returns `200` with `{ "links": [LinkedItem] }`,
+the item's links after the change. Linking a pair that is already linked
+(either way round) changes nothing and succeeds. `404` if the item does not
+exist; `422` on `itemId` when it is missing, names the item itself or an item
+that does not exist, or when either item would have more than
+`limits.maxLinksPerItem` links.
+
+### `DELETE /items/{id}/links/{otherId}`
+
+Removes the link between the item and `otherId`, whether or not `otherId`
+still exists. `204`, also when there was no such link; `404` if the item
+does not exist.
 
 ## Test cases
 
@@ -2467,6 +2538,8 @@ Bundle layout and semantics are specified in `bundle-format.md`.
   knows that missing solutions or hidden cases were left out rather than
   absent.
 - `name` defaults to the collection name or `"Codeatrophy library"`.
+- Each exported item carries the ids of all its [links](#links), also to
+  items left out of the bundle or deleted.
 
 Returns `200` `application/zip` with
 `Content-Disposition: attachment; filename="<slug>.codeatrophy.zip"`.
@@ -2517,10 +2590,18 @@ the user can choose a strategy knowingly. Values are content field names —
 overwrite increases an item's `revision` only when its content (as for
 `PATCH /items/{id}`) changes; one that changes only test cases moves
 `updatedAt` and leaves `revision` alone. A `variantOf` that names an item in
-neither the bundle nor the library is dropped (set to `null`) before the
-comparison, so re-importing the same bundle stays `unchanged`. Under
-`duplicate`, a bundle item whose `variantOf` names another item duplicated in
-the same import points at the new copy.
+neither the bundle nor the library is kept, naming an unavailable item until
+that item is imported. Under `duplicate`, a bundle item whose `variantOf`
+names another item duplicated in the same import points at the new copy.
+
+The bundle's [links](#links) are added for every bundle item, whatever its
+state and the strategy (a skipped item gets them on the local item, a
+duplicated one on its copy); an import never removes a link. A link to an
+item duplicated in the same import points at the copy; one to an item in
+neither the bundle nor the library is kept as a link to an unavailable item.
+Links are not content: they never make an item `changed`. A link that would
+give an item more than `limits.maxLinksPerItem` links is left out with a
+warning.
 Collections are created if missing; bundle membership is merged into existing
 collections (items not already members are appended in bundle order). The
 whole import is one transaction.

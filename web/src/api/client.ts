@@ -45,6 +45,7 @@ import type {
   ItemCheckResponse,
   ItemFacets,
   ItemInput,
+  ItemLinks,
   ItemListParams,
   ItemPatch,
   ItemSummary,
@@ -257,6 +258,12 @@ export const api = {
     bulk: (body: BulkRequest) => request<{ affected: number }>('POST', '/items/bulk', { body }),
     /** Runs the reference solution of a problem not saved yet on its test cases; nothing is stored. */
     check: (body: ItemCheckRequest, signal?: AbortSignal) => request<ItemCheckResponse>('POST', '/items/check', { body, signal }),
+    /** The items linked to an item, by hand. A link goes both ways and does not change either item's revision. */
+    links: {
+      list: (id: string, signal?: AbortSignal) => request<ItemLinks>('GET', `/items/${enc(id)}/links`, { signal }),
+      add: (id: string, itemId: string) => request<ItemLinks>('POST', `/items/${enc(id)}/links`, { body: { itemId } }),
+      remove: (id: string, otherId: string) => request<void>('DELETE', `/items/${enc(id)}/links/${enc(otherId)}`),
+    },
   },
 
   testCases: {

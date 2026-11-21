@@ -50,6 +50,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0011LastRun", testLastRunMigration},
 		{"0012AIJobs", testAIJobsMigration},
 		{"0013Generator", testGeneratorMigration},
+		{"0014Links", testLinksMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -311,6 +312,55 @@ func testGeneratorMigration(t *testing.T, h MigrationHarness) {
 		c.Generator.Source != "print(1)" {
 		t.Errorf("after migrating: %+v", c)
 	}
+}
+
+// Migration 14 adds links and the records of deleted items, and makes
+// variantOf outlive its origin (SQLite rebuilds items for it): a database
+// at version 13 keeps every row, and deleting an origin then keeps its
+// variant's variantOf and the links to it.
+func testLinksMigration(t *testing.T, h MigrationHarness) {
+	want, db := h.rerun(t, 14, func(db MigrationDB) {
+		Populate(t, db)
+		ClearNewerData(t, db)
+	}, func(db MigrationDB) {
+		for _, table := range []string{"item_links", "deleted_items"} {
+			if err := h.Exec(db, `SELECT COUNT(*) FROM `+table); err == nil {
+				t.Errorf("version 13 has a %s table", table)
+			}
+		}
+	}, Dump)
+	if len(want["test_cases"]) == 0 || len(want["item_tags"]) == 0 || len(want["submission_results"]) == 0 {
+		t.Fatal("the fixture has no rows that refer to items")
+	}
+	SameDump(t, "after migration 14", want, Dump(t, db))
+	// The search index still finds the items it found.
+	if got := ids(t, db, store.ItemFilter{Query: "sorted input"}); got != "variant" {
+		t.Errorf("search after migrating: %q", got)
+	}
+	Write(t, db, func(tx store.Tx) error {
+		if _, err := tx.LinkItems("variant", "origin", now); err != nil {
+			return err
+		}
+		_, err := tx.DeleteItem("origin", now)
+		return err
+	})
+	v := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("variant") })
+	if v.VariantOf == nil || *v.VariantOf != "origin" || v.VariantOrigin == nil || v.VariantOrigin.Available ||
+		*v.VariantOrigin.Title != "Two Sum (original)" {
+		t.Errorf("variant after deleting its origin: %v %+v", v.VariantOf, v.VariantOrigin)
+	}
+	if got := linkIDs(t, db, "variant"); got != "origin!" {
+		t.Errorf("links of the variant: %q", got)
+	}
+	// Rows that referred to the deleted item went with it.
+	if n := len(Read(t, db, func(tx store.Tx) ([]domain.TestCase, error) { return tx.ListTestCases("origin") })); n != 0 {
+		t.Errorf("%d test cases of the deleted item remain", n)
+	}
+	h.rejects(t, db, map[string]string{
+		"a pair in the wrong order": `INSERT INTO item_links (item_a, item_b, created_at) VALUES ('z', 'a', 0)`,
+		"a pair stored twice":       `INSERT INTO item_links (item_a, item_b, created_at) VALUES ('origin', 'variant', 0)`,
+		"a test case of no item":    `INSERT INTO test_cases (id, item_id, position, name, stdin, expected_stdout, is_sample, origin, verified, created_at, updated_at) VALUES ('x', 'nobody', 0, '', '', '', false, 'manual', false, 0, 0)`,
+	})
 }
 
 // DumpWithout is Dump without some columns, by table.

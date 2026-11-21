@@ -447,7 +447,8 @@ func (a *App) UpdateItem(ctx context.Context, id string, in domain.ItemInput) (d
 		if err := errValidation(fe); err != nil {
 			return err
 		}
-		if in.VariantOf.HasValue() {
+		// An origin that has been deleted may be kept, not set anew.
+		if in.VariantOf.HasValue() && !samePtr(next.VariantOf, cur.VariantOf) {
 			if err := checkVariantOf(tx, id, next.VariantOf); err != nil {
 				return err
 			}
@@ -541,26 +542,12 @@ func (a *App) EditItemText(ctx context.Context, id string, in EditTextInput) (do
 	return out, err
 }
 
-// DeleteItem deletes an item with its test cases and submissions.
+// DeleteItem deletes an item with its test cases and submissions. Its
+// links, and the variantOf of its variants, are kept: they now name an
+// unavailable item.
 func (a *App) DeleteItem(ctx context.Context, id string) error {
 	return a.store.Write(ctx, func(tx store.Tx) error {
-		// Variants lose their link, which is a content change for them.
-		variants, _, err := tx.ListItems(store.ItemFilter{VariantOf: id})
-		if err != nil {
-			return err
-		}
-		for _, v := range variants {
-			before, err := tx.GetItem(v.ID)
-			if err != nil {
-				return err
-			}
-			after := before
-			after.VariantOf = nil
-			if err := a.saveItem(tx, &before, &after); err != nil {
-				return err
-			}
-		}
-		ok, err := tx.DeleteItem(id)
+		ok, err := tx.DeleteItem(id, a.clock())
 		if err != nil {
 			return err
 		}
@@ -637,8 +624,9 @@ func (a *App) BulkItems(ctx context.Context, in BulkInput) (BulkResult, error) {
 		res.Affected = len(targets)
 		switch in.Action {
 		case "delete":
+			now := a.clock()
 			for _, id := range targets {
-				if _, err := tx.DeleteItem(id); err != nil {
+				if _, err := tx.DeleteItem(id, now); err != nil {
 					return err
 				}
 			}

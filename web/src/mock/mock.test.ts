@@ -81,6 +81,12 @@ const aiCode = (body: AiCodeRequest) => outcome<AiCodeResponse>(api.ai.code(body
 const zipFile = (bytes: Uint8Array<ArrayBuffer>, name = 'bundle.codeatrophy.zip') =>
   new File([bytes], name, { type: 'application/zip' });
 
+/** One item as a bundle carries it, read back from an export. */
+async function bundled(id: string) {
+  const { blob } = await api.bundle.export({ scope: 'items', itemIds: [id], includeSolutions: true, includeHiddenTests: true });
+  return (await parseBundleZip(new Uint8Array(await blob.arrayBuffer()))).items[0]!;
+}
+
 async function exportAll(): Promise<File> {
   const { blob, filename } = await api.bundle.export({ scope: 'all', includeSolutions: true, includeHiddenTests: true });
   return new File([blob], filename ?? 'export.zip');
@@ -331,9 +337,93 @@ describe('listing items', () => {
     const variants = await api.items.list({ variantOf: origin.id });
     expect(variants.items.map((i) => i.id).sort()).toEqual([seedIds.items.twoSumSorted, seedIds.items.countPairs].sort());
 
+    const before = await api.items.get(seedIds.items.twoSumSorted);
+    expect(before.variantOrigin).toMatchObject({ id: origin.id, available: true, title: 'Two Sum', type: 'problem', status: origin.status, difficulty: origin.difficulty });
     await api.items.remove(origin.id);
-    expect((await api.items.get(seedIds.items.twoSumSorted)).variantOf).toBeNull();
+    // The variant still names its origin, now gone, and is not touched by the delete.
+    const after = await api.items.get(seedIds.items.twoSumSorted);
+    expect(after.variantOf).toBe(origin.id);
+    expect(after.variantOrigin).toEqual({ id: origin.id, available: false, title: 'Two Sum', type: 'problem', status: null, difficulty: null, linkedAt: null });
+    expect(after.revision).toBe(before.revision);
+    expect(after.updatedAt).toBe(before.updatedAt);
     expect((await failure(api.items.get(origin.id))).code).toBe('not_found');
+
+    // An edit may send the dead origin back unchanged, but not name another missing item.
+    await api.items.update(after.id, { variantOf: origin.id, summary: 'kept' });
+    const err = await failure(api.items.update(after.id, { variantOf: '00000000-0000-4000-8000-000000000000' }));
+    expect(err).toMatchObject({ status: 422 });
+    expect(err.fields.variantOf).toBeDefined();
+  });
+
+  it('has no origin for an item that is not a variant', async () => {
+    expect((await api.items.get(seedIds.items.twoSum)).variantOrigin).toBeNull();
+  });
+});
+
+describe('links between items', () => {
+  const { twoSum, coinChange, capTheorem, bTrees } = seedIds.items;
+
+  it('links two items both ways, without touching their revisions', async () => {
+    const before = await api.items.get(twoSum);
+    expect(before.linkCount).toBe(0);
+    const { links } = await api.items.links.add(twoSum, capTheorem);
+    expect(links).toEqual([{ id: capTheorem, available: true, title: 'CAP Theorem Notes', type: 'reading', status: 'done', difficulty: null, linkedAt: expect.any(String) }]);
+    expect((await api.items.links.list(capTheorem)).links.map((l) => l.id)).toEqual([twoSum]);
+    const after = await api.items.get(twoSum);
+    expect(after).toMatchObject({ linkCount: 1, revision: before.revision, updatedAt: before.updatedAt });
+    expect((await api.items.get(capTheorem)).linkCount).toBe(1);
+    expect((await api.items.list({ id: [twoSum, capTheorem] })).items.map((i) => i.linkCount)).toEqual([1, 1]);
+  });
+
+  it('makes nothing new when a pair is linked again, from either end', async () => {
+    await api.items.links.add(twoSum, capTheorem);
+    await api.items.links.add(capTheorem, twoSum);
+    expect((await api.items.links.add(twoSum, capTheorem)).links).toHaveLength(1);
+    expect((await api.items.get(capTheorem)).linkCount).toBe(1);
+  });
+
+  it('refuses a missing item, the item itself and a missing item id', async () => {
+    for (const body of ['00000000-0000-4000-8000-000000000000', twoSum]) {
+      const err = await failure(api.items.links.add(twoSum, body));
+      expect(err).toMatchObject({ status: 422, code: 'validation_failed' });
+      expect(err.fields.itemId).toBeDefined();
+    }
+    expect((await failure(api.items.links.list('00000000-0000-4000-8000-000000000000'))).code).toBe('not_found');
+  });
+
+  it('lists live links first, oldest first, and keeps a link to a deleted item as a dead one', async () => {
+    await api.items.links.add(twoSum, coinChange);
+    await api.items.links.add(twoSum, capTheorem);
+    await api.items.links.add(bTrees, twoSum);
+    await api.items.remove(coinChange);
+    const { links } = await api.items.links.list(twoSum);
+    expect(links.map((l) => [l.id, l.available])).toEqual([
+      [capTheorem, true],
+      [bTrees, true],
+      [coinChange, false],
+    ]);
+    expect(links[2]).toMatchObject({ title: 'Coin Change', type: 'problem', status: null, difficulty: null });
+    // Dead links still count, and can be removed.
+    expect((await api.items.get(twoSum)).linkCount).toBe(3);
+    await api.items.links.remove(twoSum, coinChange);
+    expect((await api.items.get(twoSum)).linkCount).toBe(2);
+  });
+
+  it('removes a link from either end', async () => {
+    await api.items.links.add(twoSum, capTheorem);
+    await api.items.links.remove(capTheorem, twoSum);
+    expect((await api.items.links.list(twoSum)).links).toEqual([]);
+    // Removing a link that is not there is not an error.
+    await api.items.links.remove(capTheorem, twoSum);
+  });
+
+  it('allows at most 50 links an item', async () => {
+    const ids = (await api.items.list({ limit: 200 })).items.map((i) => i.id).filter((id) => id !== twoSum);
+    for (let i = ids.length; i < 50; i++) ids.push((await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
+    for (const id of ids.slice(0, 50)) await api.items.links.add(twoSum, id);
+    const extra = (await api.items.create({ type: 'reading', title: 'One too many' })).id;
+    expect(await failure(api.items.links.add(twoSum, extra))).toMatchObject({ status: 422, code: 'validation_failed' });
+    expect((await failure(api.items.links.add(extra, twoSum))).status).toBe(422);
   });
 });
 
@@ -3760,7 +3850,9 @@ describe('export and import', () => {
     const result = await api.bundle.import(zipFile(bytes), 'skip');
     expect(result).toMatchObject({ created: 1, collectionsCreated: 1 });
     const item = await api.items.get('99999999-0000-4000-8000-000000000001');
-    expect(item).toMatchObject({ tags: ['warm-up'], variantOf: null, collectionIds: ['99999999-0000-4000-8000-0000000000c1'] });
+    // A variantOf naming an item this library never had is kept, as unavailable.
+    expect(item).toMatchObject({ tags: ['warm-up'], variantOf: '99999999-0000-4000-8000-00000000dead', collectionIds: ['99999999-0000-4000-8000-0000000000c1'] });
+    expect(item.variantOrigin).toEqual({ id: '99999999-0000-4000-8000-00000000dead', available: false, title: null, type: null, status: null, difficulty: null, linkedAt: null });
     expect(item.problem).toMatchObject({ compare: 'exact', timeLimitMs: 1000 });
     expect(item.solutionCount).toBe(2);
     const solutions = (await api.solutions.list(item.id)).items;
@@ -3810,6 +3902,63 @@ describe('export and import', () => {
       ['First', true],
       ['Second reference', false],
     ]);
+  });
+
+  it('carries links as related ids, sorted, also to items outside the bundle and to deleted ones', async () => {
+    const { twoSum, capTheorem, coinChange, bTrees } = seedIds.items;
+    await api.items.links.add(twoSum, coinChange);
+    await api.items.links.add(twoSum, capTheorem);
+    await api.items.links.add(twoSum, bTrees);
+    await api.items.remove(bTrees);
+    const { blob } = await api.bundle.export({ scope: 'items', itemIds: [twoSum], includeSolutions: true, includeHiddenTests: true });
+    const parsed = await parseBundleZip(new Uint8Array(await blob.arrayBuffer()));
+    expect(parsed.items[0]!.related).toEqual([coinChange, capTheorem, bTrees].sort());
+    // Links are not content: a library with other links finds the item unchanged.
+    await api.items.links.remove(twoSum, coinChange);
+    const preview = await api.bundle.preview(new File([blob], 'links.zip'));
+    expect(preview.items[0]).toMatchObject({ state: 'unchanged', changes: [] });
+    // An item with no links has no `related` at all.
+    const plain = await api.bundle.export({ scope: 'items', itemIds: [seedIds.items.lis], includeSolutions: true, includeHiddenTests: true });
+    expect((await parseBundleZip(new Uint8Array(await plain.blob.arrayBuffer()))).items[0]).not.toHaveProperty('related');
+  });
+
+  it('adds the links of every bundle item on import, never removing one', async () => {
+    const { twoSum, capTheorem, coinChange, lis } = seedIds.items;
+    const missing = '99999999-0000-4000-8000-00000000beef';
+    const bytes = buildBundleZip({
+      name: 'Links',
+      items: [
+        { ...(await bundled(twoSum)), related: [capTheorem, missing, twoSum, 'not-an-id'] },
+        { ...(await bundled(coinChange)), title: 'Coin Change, again', related: [twoSum] },
+      ],
+    });
+    await api.items.links.add(twoSum, lis);
+    // Two Sum is unchanged and Coin Change changed: under `skip` both still get their links.
+    const result = await api.bundle.import(zipFile(bytes), 'skip');
+    expect(result).toMatchObject({ unchanged: 1, skipped: 1, warnings: [] });
+    const links = (await api.items.links.list(twoSum)).links;
+    expect(links.map((l) => [l.id, l.available])).toEqual([
+      [lis, true],
+      [capTheorem, true],
+      [coinChange, true],
+      [missing, false],
+    ]);
+    expect(links[3]).toMatchObject({ title: null, type: null });
+
+    // Under `duplicate` the copy gets the links, pointing at the other copy.
+    const dup = await api.bundle.import(zipFile(bytes), 'duplicate');
+    expect(dup.duplicated).toBe(1);
+    const copy = (await api.items.list({ q: 'Coin Change, again' })).items.find((i) => i.title === 'Coin Change, again')!;
+    expect((await api.items.links.list(copy.id)).links.map((l) => l.id)).toEqual([twoSum]);
+  });
+
+  it('leaves out, with a warning, a bundle link that would pass the limit', async () => {
+    const { twoSum } = seedIds.items;
+    for (let i = 0; i < 50; i++) await api.items.links.add(twoSum, (await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
+    const bytes = buildBundleZip({ name: 'Too many', items: [{ ...(await bundled(seedIds.items.lis)), related: [twoSum] }] });
+    const result = await api.bundle.import(zipFile(bytes), 'skip');
+    expect(result.warnings).toHaveLength(1);
+    expect((await api.items.get(seedIds.items.lis)).linkCount).toBe(0);
   });
 
   it('rejects files that are not bundles', async () => {

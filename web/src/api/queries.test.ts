@@ -1,7 +1,7 @@
 import { QueryClient, type InfiniteData } from '@tanstack/react-query';
 import { afterEach, describe, expect, it } from 'vitest';
-import { patchItemsNow, qk } from './queries';
-import type { Item, ItemFacets, ItemSummary, Page } from './types';
+import { patchItemsNow, qk, storeLinks } from './queries';
+import type { Item, ItemFacets, ItemLinks, ItemSummary, LinkedItem, Page } from './types';
 
 const summary = (id: string, over: Partial<ItemSummary> = {}): ItemSummary => ({
   id,
@@ -15,6 +15,7 @@ const summary = (id: string, over: Partial<ItemSummary> = {}): ItemSummary => ({
   collectionIds: [],
   variantOf: null,
   variantCount: 0,
+  linkCount: 0,
   testCaseCount: 0,
   solutionCount: 0,
   lastVerdict: null,
@@ -41,7 +42,7 @@ function seed() {
     infinite: { pages: [{ items: [summary('c')], total: 2 }, { items: [summary('a')], total: 2 }], pageParams: [0, 50] } satisfies InfiniteData<Page<ItemSummary>>,
     array: [summary('b'), summary('a')],
     facets: { byType: { problem: 2, reading: 0 }, byStatus: { todo: 2, in_progress: 0, done: 0 }, byDifficulty: { easy: 0, medium: 0, hard: 0, none: 2 }, byTag: {} } satisfies ItemFacets,
-    detail: { ...summary('a'), body: 'b', notes: '', rawInput: null, source: { url: null, note: null }, problem: null } as Item,
+    detail: { ...summary('a'), body: 'b', notes: '', rawInput: null, source: { url: null, note: null }, problem: null, variantOrigin: null } as Item,
   };
   for (const name of Object.keys(keys) as (keyof typeof keys)[]) qc.setQueryData(keys[name], data[name]);
   const original = structuredClone(data);
@@ -78,5 +79,31 @@ describe('patchItemsNow', () => {
     expect(read().page.items.every((s) => s.favorite)).toBe(true);
     restore();
     expect(read()).toEqual(original);
+  });
+});
+
+describe('storeLinks', () => {
+  const linked = (id: string): LinkedItem => ({ id, available: true, title: `Item ${id}`, type: 'problem', status: 'todo', difficulty: null, linkedAt: null });
+
+  it('stores the links of the item, shows its count at once, and fetches the other end again', async () => {
+    const { read } = seed();
+    qc.setQueryData<ItemLinks>(qk.links('b'), { links: [] });
+    qc.setQueryData(qk.item('b'), { ...summary('b'), body: '', notes: '', rawInput: null, source: { url: null, note: null }, problem: null, variantOrigin: null } as Item);
+    storeLinks(qc, 'a', 'b', [linked('b'), linked('c')]);
+    expect(qc.getQueryData(qk.links('a'))).toEqual({ links: [linked('b'), linked('c')] });
+    const now = read();
+    expect(now.detail.linkCount).toBe(2);
+    expect(now.page.items.map((i) => i.linkCount)).toEqual([2, 0]);
+    expect(now.array.map((i) => i.linkCount)).toEqual([0, 2]);
+    // The other item's count is not known here: it is fetched again, as are the lists.
+    expect(qc.getQueryState(qk.links('b'))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(qk.item('b'))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(qk.itemPage({}, 50, 0))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(qk.item('a'))?.isInvalidated).toBe(false);
+  });
+
+  it('keeps the links apart from the lists, so a list refresh leaves them be', () => {
+    expect(qk.links('a').slice(0, qk.itemLists.length)).not.toEqual([...qk.itemLists]);
+    expect(qk.links('a').slice(0, qk.items.length)).toEqual([...qk.items]);
   });
 });

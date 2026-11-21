@@ -65,6 +65,7 @@ type itemJSON struct {
 	Tags       []string      `json:"tags"`
 	Source     domain.Source `json:"source"`
 	VariantOf  *string       `json:"variantOf"`
+	Related    []string      `json:"related,omitempty"`
 	CreatedAt  time.Time     `json:"createdAt"`
 	UpdatedAt  time.Time     `json:"updatedAt"`
 	Problem    *problemJSON  `json:"problem,omitempty"`
@@ -185,6 +186,9 @@ func Write(w io.Writer, b *Bundle) error {
 		ij := itemJSON{
 			ID: it.ID, Type: string(it.Type), Title: it.Title, Summary: it.Summary, Tags: it.Tags,
 			Source: it.Source, VariantOf: it.VariantOf, CreatedAt: it.CreatedAt, UpdatedAt: it.UpdatedAt,
+		}
+		if len(it.Related) > 0 {
+			ij.Related = slices.Sorted(slices.Values(it.Related))
 		}
 		if ij.Tags == nil {
 			ij.Tags = []string{}

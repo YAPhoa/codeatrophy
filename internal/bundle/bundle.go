@@ -106,11 +106,15 @@ type Item struct {
 	Tags       []string
 	Source     domain.Source
 	VariantOf  *string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Body       string
-	Problem    *Problem
-	TestCases  []TestCase
+	// Related are the ids of the items linked to this one, sorted, which
+	// may include items not in the bundle. Links are not content: they are
+	// left out of the content hash and of Changes.
+	Related   []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Body      string
+	Problem   *Problem
+	TestCases []TestCase
 	// Solutions are the item's saved solutions, in order, when
 	// SolutionsIncluded; a bundle exported without solutions carries none
 	// and says so (SolutionsIncluded false).

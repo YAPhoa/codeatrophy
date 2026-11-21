@@ -9,6 +9,7 @@ import { resolveTheme, setThemePreference, getThemePreference } from '../lib/the
 import { cx } from '../ui/Button';
 import { Spinner } from '../ui/misc';
 import { exitOnRemove } from '../lib/motion';
+import { useDebounced } from '../lib/useDebounced';
 
 interface Entry {
   key: string;
@@ -20,15 +21,6 @@ interface Entry {
   run: () => void;
   /** Where the entry goes, when it is a destination: lets it be opened in a new tab. */
   to?: string;
-}
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = window.setTimeout(() => setV(value), ms);
-    return () => window.clearTimeout(t);
-  }, [value, ms]);
-  return v;
 }
 
 /** A run of entries, under a label when it has one. */

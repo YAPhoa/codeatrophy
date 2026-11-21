@@ -65,6 +65,45 @@ var DownMigrations = map[int]string{
 	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
 	13: `ALTER TABLE test_cases DROP COLUMN generator_source;
 		ALTER TABLE test_cases DROP COLUMN generator_language;`,
+	// The items table of 0013, whose variant_of refers to items. It is
+	// rebuilt with foreign key enforcement off, as migration 14 is, so that
+	// dropping the table deletes nothing.
+	14: `PRAGMA foreign_keys = OFF;
+		DROP TABLE item_links;
+		DROP TABLE deleted_items;
+		CREATE TABLE items_old (
+			seq                INTEGER PRIMARY KEY,
+			id                 TEXT    NOT NULL UNIQUE,
+			type               TEXT    NOT NULL,
+			title              TEXT    NOT NULL,
+			summary            TEXT    NOT NULL DEFAULT '',
+			body               TEXT    NOT NULL DEFAULT '',
+			difficulty         TEXT,
+			status             TEXT    NOT NULL,
+			favorite           INTEGER NOT NULL DEFAULT 0,
+			notes              TEXT    NOT NULL DEFAULT '',
+			raw_input          TEXT,
+			source_url         TEXT,
+			source_note        TEXT,
+			variant_of         TEXT REFERENCES items (id) ON DELETE SET NULL,
+			revision           INTEGER NOT NULL DEFAULT 1,
+			time_limit_ms      INTEGER,
+			memory_limit_kb    INTEGER,
+			compare_mode       TEXT,
+			starter_code       TEXT,
+			created_at         INTEGER NOT NULL,
+			updated_at         INTEGER NOT NULL,
+			problem_interface  TEXT CHECK (problem_interface IN ('program', 'function')),
+			harness            TEXT);
+		INSERT INTO items_old SELECT seq, id, type, title, summary, body, difficulty, status, favorite, notes, raw_input,
+			source_url, source_note, variant_of, revision, time_limit_ms, memory_limit_kb, compare_mode, starter_code,
+			created_at, updated_at, problem_interface, harness FROM items;
+		DROP TABLE items;
+		ALTER TABLE items_old RENAME TO items;
+		CREATE INDEX items_variant_of ON items (variant_of);
+		CREATE INDEX items_updated_at ON items (updated_at);
+		CREATE INDEX items_created_at ON items (created_at);
+		PRAGMA foreign_keys = ON;`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

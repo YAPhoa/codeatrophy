@@ -89,6 +89,9 @@ func (s *Server) routes() {
 	s.handle("PATCH /items/{id}", s.updateItem)
 	s.handle("DELETE /items/{id}", s.deleteItem)
 	s.handle("POST /items/{id}/edits", s.editItem)
+	s.handle("GET /items/{id}/links", s.listItemLinks)
+	s.handle("POST /items/{id}/links", s.linkItem)
+	s.handle("DELETE /items/{id}/links/{otherId}", s.unlinkItem)
 
 	s.handle("GET /items/{id}/testcases", s.listTestCases)
 	s.handle("POST /items/{id}/testcases", s.addTestCase)
@@ -467,6 +470,38 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) error {
 	if err := s.app.DeleteItem(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listItemLinks(w http.ResponseWriter, r *http.Request) error {
+	l, err := s.app.ItemLinks(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) linkItem(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		ItemID string `json:"itemId"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	l, err := s.app.LinkItem(r.Context(), r.PathValue("id"), in.ItemID)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) unlinkItem(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.UnlinkItem(r.Context(), r.PathValue("id"), r.PathValue("otherId")); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

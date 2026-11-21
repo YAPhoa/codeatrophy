@@ -165,7 +165,18 @@ type migration struct {
 	version int
 	name    string
 	sql     string
+	// noForeignKeys is set for a migration whose first line is
+	// "-- foreign_keys=off": one that rebuilds a table other tables refer
+	// to. It runs with foreign key enforcement off, as SQLite's procedure
+	// for such changes asks, so that dropping the old table deletes nothing
+	// and changes no reference, and it commits only if PRAGMA
+	// foreign_key_check then finds every reference intact.
+	noForeignKeys bool
 }
+
+// noForeignKeysLine marks a migration that runs with foreign key
+// enforcement off.
+const noForeignKeysLine = "-- foreign_keys=off"
 
 func loadMigrations() ([]migration, error) {
 	entries, err := fs.ReadDir(migrationFS, "migrations")
@@ -187,7 +198,9 @@ func loadMigrations() ([]migration, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, migration{version: v, name: name, sql: string(b)})
+		first, _, _ := strings.Cut(string(b), "\n")
+		out = append(out, migration{version: v, name: name, sql: string(b),
+			noForeignKeys: strings.TrimSpace(first) == noForeignKeysLine})
 	}
 	slices.SortFunc(out, func(a, b migration) int { return a.version - b.version })
 	return out, nil
@@ -290,8 +303,26 @@ func (db *DB) migrate(ctx context.Context) error {
 
 // apply runs one migration in its own transaction. It reports false when
 // another process applied it first.
-func (db *DB) apply(ctx context.Context, m migration) (bool, error) {
-	tx, err := db.writer.BeginTx(ctx, nil) // BEGIN IMMEDIATE: one migrating process at a time
+func (db *DB) apply(ctx context.Context, m migration) (applied bool, err error) {
+	// The writer's only connection, held for the whole migration so that
+	// the foreign key setting applies to the transaction.
+	conn, err := db.writer.Conn(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	if m.noForeignKeys {
+		// The setting cannot change inside a transaction.
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return false, err
+		}
+		defer func() {
+			if _, rerr := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); rerr != nil && err == nil {
+				err = rerr
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil) // BEGIN IMMEDIATE: one migrating process at a time
 	if err != nil {
 		return false, err
 	}
@@ -306,11 +337,35 @@ func (db *DB) apply(ctx context.Context, m migration) (bool, error) {
 	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
 		return false, err
 	}
+	if m.noForeignKeys {
+		if err := checkForeignKeys(ctx, tx); err != nil {
+			return false, err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 		m.version, m.name, time.Now().Unix()); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// checkForeignKeys fails if any row refers to a row that does not exist.
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowid sql.NullInt64
+		var fk int
+		if err := rows.Scan(&table, &rowid, &parent, &fk); err != nil {
+			return err
+		}
+		return fmt.Errorf("a row of %s refers to a missing row of %s", table, parent)
+	}
+	return rows.Err()
 }
 
 func (db *DB) version(ctx context.Context, conn interface {

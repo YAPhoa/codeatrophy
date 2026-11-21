@@ -48,7 +48,7 @@ test('text width: the reader switch changes the column at once, and the choice l
   const [text, nav] = await Promise.all([page.locator('.reader-article').boundingBox(), outline.boundingBox()]);
   expect(text!.x + text!.width).toBeLessThan(nav!.x);
   await page.locator('.reader-scroll').evaluate((el) => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }));
-  await expect(outline.locator('a[aria-current="location"]')).toHaveText('Related readings');
+  await expect(outline.locator('a[aria-current="location"]')).toHaveText('Related items');
 
   await chooseWidth(page, 'Wide');
   await expect.poll(() => columnWidth(page)).toBe(940);

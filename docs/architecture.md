@@ -160,6 +160,22 @@ to change:
 the application, HTTP and MCP tests run on either (`make test`,
 `make test-postgres`).
 
+### Links and deleted items
+
+Items can be linked by hand: `item_links` holds one row per unordered pair
+of item ids, the smaller id first, with the time it was made. Neither id
+refers to `items`, and neither does `items.variant_of`: a link or a
+variant's origin outlives the item it names. Deleting an item, by any path,
+writes its id, title and type to `deleted_items`, so that the items that
+still name it can show it as unavailable (a dead link, in the UI's red);
+creating an item with that id again (an import brings it back, say) removes
+the record, and the links come alive again. An import may also bring links
+to items the library never had, which are unavailable without a title.
+Links are not content: they leave `revision` and `updatedAt` alone, a bundle
+carries them outside the content hash, and the rules (both items exist when
+linked, at most 50 per item) live in the application service that both
+transports call.
+
 ### Schema migrations
 
 Each backend has its own embedded, numbered, forward-only migrations and a
@@ -175,6 +191,14 @@ the same new number**, bump `store.SchemaVersion`, and update `store.Tables`
 if tables or columns change. A test fails when the two backends' latest
 versions differ or a number is missing on one side, and another when a
 backend's tables differ from `store.Tables`.
+
+SQLite cannot drop a constraint, so a change to one rebuilds the table. A
+SQLite migration that rebuilds a table other tables refer to (as 0014 does
+with `items`) starts with the line `-- foreign_keys=off`: the runner then
+applies it with foreign key enforcement off, as SQLite's documented
+procedure asks, so that dropping the old table deletes no rows that refer to
+it, and commits only if `PRAGMA foreign_key_check` then finds every
+reference intact.
 
 - A database whose version is newer than the server knows is not opened:
   startup fails with "this database was last used by a newer Codeatrophy;
@@ -440,7 +464,8 @@ The two features built on it are provider independent:
 - **Variants.** From an existing item the model drafts a related new one — the
   same technique in a different setting, an easier or harder version, or a
   twist that breaks the original approach. A saved variant keeps a `variantOf`
-  link to its origin, so families of related problems stay connected. A
+  link to its origin, so families of related problems stay connected; the
+  link stays, naming an unavailable item, if the origin is deleted. A
   variant keeps the original's interface unless asked otherwise, and gets
   the same reference solution and check as a draft.
 - **Code generation.** For a problem as it stands in the editor, saved or

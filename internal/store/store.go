@@ -208,6 +208,14 @@ type DraftFilter struct {
 	VariantOf string
 }
 
+// LinkPair orders the ids of a link as it is stored: the smaller first.
+func LinkPair(a, b string) (string, string) {
+	if b < a {
+		return b, a
+	}
+	return a, b
+}
+
 // UsageDay is the UTC day of t, in days since 1970-01-01: the unit AI usage
 // is kept in.
 func UsageDay(t time.Time) int64 {
@@ -231,8 +239,10 @@ type Store interface {
 // Tx is the set of operations available inside a transaction. Methods
 // returning a single record return ErrNotFound when it does not exist.
 type Tx interface {
-	// Items. Computed fields (collectionIds, variantCount, testCaseCount,
-	// lastVerdict) are filled on read and ignored on write.
+	// Items. Computed fields (collectionIds, variantCount, linkCount,
+	// testCaseCount, lastVerdict, variantOrigin) are filled on read and
+	// ignored on write. Inserting an item removes the record kept of a
+	// deleted item with its id.
 	GetItem(id string) (domain.Item, error)
 	ListItems(f ItemFilter) ([]domain.ItemSummary, int, error)
 	// CountItemsBy counts the items ListItems selects for f (its order and
@@ -244,11 +254,25 @@ type Tx interface {
 	InsertItem(it *domain.Item) error
 	UpdateItem(it *domain.Item) error
 	// DeleteItem removes an item with its test cases, submissions and
-	// memberships, and clears variantOf on its variants.
-	DeleteItem(id string) (bool, error)
+	// memberships, and keeps a record of it (its id, title and type, and
+	// the time given) for the links and variants that still name it. Its
+	// links and its variants' variantOf are kept.
+	DeleteItem(id string, at time.Time) (bool, error)
 	// SetItemCollections makes the item a member of exactly these
 	// collections; new memberships are appended at the end.
 	SetItemCollections(itemID string, collectionIDs []string) error
+
+	// Links between items: unordered pairs of different item ids. A link
+	// stays when either item is deleted (or was never in this library), so
+	// the other end may be unavailable. ItemLinks returns the links of an
+	// item, available items first, each group oldest link first.
+	ItemLinks(id string) ([]domain.LinkedItem, error)
+	// LinkItems links two items; a pair already linked is left as it is.
+	// It reports whether it added the link.
+	LinkItems(a, b string, at time.Time) (bool, error)
+	// UnlinkItems removes the link between two items, reporting whether
+	// there was one.
+	UnlinkItems(a, b string) (bool, error)
 
 	// Tags are records of their own, and a tag stays when no item carries
 	// it any more. Writing an item registers the tags it carries.

@@ -1,6 +1,6 @@
 ---
 name: codeatrophy
-description: Work on a Codeatrophy library (a self-hosted collection of coding problems and technical readings) through its MCP server - turn a rough or half-remembered problem into a complete saved item, write and verify test cases, check or add solutions, make variants, and keep collections and tags tidy. Use this whenever the user mentions Codeatrophy or their problem/reading library, pastes or describes a coding problem or article they want kept ("add this", "save this LeetCode question", "I remember a problem where..."), asks for test cases, a variant or a fix to something already in the library, or whenever Codeatrophy tools such as get_overview, create_item or add_test_cases are available - even if they do not name the app.
+description: Work on a Codeatrophy library (a self-hosted collection of coding problems and technical readings) through its MCP server - turn a rough or half-remembered problem into a complete saved item, write and verify test cases, check or add solutions, make variants, link related items, and keep collections and tags tidy. Use this whenever the user mentions Codeatrophy or their problem/reading library, pastes or describes a coding problem or article they want kept ("add this", "save this LeetCode question", "I remember a problem where..."), asks for test cases, a variant or a fix to something already in the library, or whenever Codeatrophy tools such as get_overview, create_item or add_test_cases are available - even if they do not name the app.
 ---
 
 # Codeatrophy companion
@@ -77,6 +77,12 @@ Fetch the item again with `get_item` (`include: ["testCases", "solutions"]`) and
 ## Variants
 
 For "give me another one like this", read the original, then create a new item with `variantOf` set to it. A variant keeps the technique and changes the surface (or, when asked, the difficulty or one rule). It needs its own tests — the original's never apply — so finish with the test-case steps above.
+
+## Linking related items
+
+After saving an item, or when the user asks, look for the few items closely related to it: `search_items` by its core idea, its technique and its tags, across problems and readings. Suggest only the genuinely close ones — a reading that explains what a problem needs, a problem that practises what a reading teaches, the same idea in another form — each with a line on why, and link the ones the user agrees to with `link_items`. A shared broad tag is not a reason; suggesting none is fine. Links go both ways and are not content, so they need no `expectedRevision`.
+
+`get_item` returns an item's `links`. One whose item was deleted stays, marked `available: false`; remove it with `unlink_items` only if the user wants that.
 
 ## Readings
 

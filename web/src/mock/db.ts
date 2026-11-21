@@ -17,6 +17,7 @@ import type {
   ItemType,
   JudgeLanguage,
   Limits,
+  LinkedItem,
   Meta,
   Preferences,
   ProblemSpec,
@@ -90,6 +91,14 @@ export interface StoredItem {
   createdAt: string;
   updatedAt: string;
   /** Monotonic counter that breaks ties between equal timestamps. */
+  seq: number;
+}
+
+/** A link made by hand between two items; it goes both ways. */
+export interface StoredLink {
+  a: string;
+  b: string;
+  createdAt: string;
   seq: number;
 }
 
@@ -207,6 +216,7 @@ export const LIMITS: Limits = {
   maxSolutionNameChars: 100,
   maxSolutionNotesChars: 5000,
   maxNotesChars: 4000,
+  maxLinksPerItem: 50,
   maxDraftTextChars: 50000,
   maxInstructionChars: 2000,
   maxPreviousDraftBytes: 2097152,
@@ -303,6 +313,10 @@ export class MockDb {
   solutions: StoredSolution[] = [];
   /** Oldest first. */
   submissions: Submission[] = [];
+  /** Oldest first. A link outlives the items it joins. */
+  links: StoredLink[] = [];
+  /** The last title and type of each deleted item, for the links and variants that still point at it. */
+  readonly deleted = new Map<string, { title: string; type: ItemType }>();
   /**
    * What a correct solution "really" prints for a test case, when that
    * differs from the stored expected output. Code is never executed here, so
@@ -638,6 +652,7 @@ export class MockDb {
       collectionIds: this.collectionIdsOf(item.id),
       variantOf: item.variantOf,
       variantCount,
+      linkCount: this.linkCount(item.id),
       testCaseCount: item.type === 'problem' ? this.testCases.filter((c) => c.itemId === item.id).length : 0,
       solutionCount: item.type === 'problem' ? this.solutions.filter((s) => s.itemId === item.id).length : 0,
       lastVerdict: item.type === 'problem' ? this.lastVerdict(item.id) : null,
@@ -657,7 +672,54 @@ export class MockDb {
       problem: item.problem
         ? { ...structuredClone(item.problem), referenceSolution: this.referenceView(item.id) }
         : null,
+      variantOrigin: item.variantOf === null ? null : this.linkedItem(item.variantOf),
     };
+  }
+
+  /** Another item as a link shows it: alive, deleted (with what it was), or never seen here. */
+  linkedItem(id: string): LinkedItem {
+    const item = this.items.get(id);
+    if (item) return { id, available: true, title: item.title, type: item.type, status: item.status, difficulty: item.difficulty, linkedAt: null };
+    const gone = this.deleted.get(id);
+    return { id, available: false, title: gone?.title ?? null, type: gone?.type ?? null, status: null, difficulty: null, linkedAt: null };
+  }
+
+  /** How many links an item has, to items alive or gone. */
+  linkCount(id: string): number {
+    return this.links.filter((l) => l.a === id || l.b === id).length;
+  }
+
+  isLinked(a: string, b: string): boolean {
+    return this.links.some((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a));
+  }
+
+  /**
+   * Link two items (either may be gone or never have been here). `exists`
+   * when they already were, `full` when one of them has as many links as it
+   * may have; nothing changes then.
+   */
+  addLink(a: string, b: string): 'added' | 'exists' | 'full' {
+    if (this.isLinked(a, b)) return 'exists';
+    if (this.linkCount(a) >= LIMITS.maxLinksPerItem || this.linkCount(b) >= LIMITS.maxLinksPerItem) return 'full';
+    this.links.push({ a, b, createdAt: this.now(), seq: this.nextSeq() });
+    return 'added';
+  }
+
+  /** The ids an item is linked to, sorted, as a bundle lists them. */
+  relatedIds(id: string): string[] {
+    return this.links
+      .filter((l) => l.a === id || l.b === id)
+      .map((l) => (l.a === id ? l.b : l.a))
+      .sort();
+  }
+
+  /** What an item is linked to: live items first, then dead ones; oldest link first within each. */
+  linksOf(id: string): LinkedItem[] {
+    const views = this.links
+      .filter((l) => l.a === id || l.b === id)
+      .sort((x, y) => x.seq - y.seq)
+      .map((l) => ({ ...this.linkedItem(l.a === id ? l.b : l.a), linkedAt: l.createdAt }));
+    return [...views.filter((v) => v.available), ...views.filter((v) => !v.available)];
   }
 
   /**
@@ -668,19 +730,20 @@ export class MockDb {
     this.submissions = this.submissions.filter((s) => s.itemId !== itemId || s.mode !== 'run' || s.status !== 'completed');
   }
 
+  /**
+   * Delete an item and what belongs to it. Its links, and the `variantOf` of
+   * its variants, stay: they now point at an item that is gone.
+   */
   deleteItem(id: string): void {
-    if (!this.items.delete(id)) return;
+    const item = this.items.get(id);
+    if (!item) return;
+    this.items.delete(id);
+    this.deleted.set(id, { title: item.title, type: item.type });
     for (const c of this.testCases) if (c.itemId === id) this.truth.delete(c.id);
     this.testCases = this.testCases.filter((c) => c.itemId !== id);
     this.solutions = this.solutions.filter((s) => s.itemId !== id);
     this.submissions = this.submissions.filter((s) => s.itemId !== id);
     for (const c of this.collections) c.itemIds = c.itemIds.filter((x) => x !== id);
-    for (const other of this.items.values()) {
-      if (other.variantOf === id) {
-        other.variantOf = null;
-        this.touch(other);
-      }
-    }
   }
 
   // ---- Collections --------------------------------------------------------

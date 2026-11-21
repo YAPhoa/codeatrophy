@@ -51,6 +51,8 @@ export interface BundleItem {
   tags: string[];
   source: ItemSource;
   variantOf: string | null;
+  /** The ids of the items linked to this one, sorted; absent when there are none. Not content: no part of the hash. */
+  related?: string[];
   body: string;
   /** `null` for a reading. */
   problem: BundleProblem | null;
@@ -176,6 +178,7 @@ export function buildBundleZip(data: BundleData): Uint8Array<ArrayBuffer> {
       tags: item.tags,
       source: item.source,
       variantOf: item.variantOf,
+      ...(item.related && item.related.length > 0 ? { related: [...item.related].sort() } : {}),
       createdAt: item.createdAt ?? createdAt,
       updatedAt: item.updatedAt ?? createdAt,
     };
@@ -258,6 +261,20 @@ export interface ParsedBundle {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * An item's `related` ids: invalid ones and its own id are left out, and
+ * those past the limit dropped with a warning.
+ */
+function readRelated(value: unknown, self: string, path: string, warnings: string[]): { related?: string[] } {
+  if (!Array.isArray(value)) return {};
+  const ids = [...new Set(value.filter((v): v is string => typeof v === 'string' && ID.test(v) && v !== self))].sort();
+  if (ids.length > LIMITS.maxLinksPerItem) warnings.push(`${path}: more than ${LIMITS.maxLinksPerItem} related items; the rest are ignored`);
+  const kept = ids.slice(0, LIMITS.maxLinksPerItem);
+  return kept.length > 0 ? { related: kept } : {};
+}
+
 const nullableText = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null);
 
 const unixLines = (value: string) => value.replace(/\r\n?/g, '\n');
@@ -432,6 +449,7 @@ export async function parseBundleZip(bytes: Uint8Array): Promise<ParsedBundle> {
       tags: Array.isArray(meta.tags) ? meta.tags.filter((t): t is string => typeof t === 'string') : [],
       source: { url: nullableText(source.url), note: nullableText(source.note) },
       variantOf: nullableText(meta.variantOf),
+      ...readRelated(meta.related, ref.id, `${dir}/item.json`, warnings),
       body,
       problem: null,
       testCases: [],

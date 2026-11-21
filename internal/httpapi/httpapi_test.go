@@ -286,6 +286,61 @@ func TestItemsLifecycle(t *testing.T) {
 	c.expect("DELETE", api+"/items/"+id, "", 404)
 }
 
+// The link endpoints, and the shapes of a link, a variant's origin and an
+// item's link count, also once the items they name are deleted.
+func TestItemLinksEndpoints(t *testing.T) {
+	c := newServer(t)
+	a := c.expect("POST", api+"/items", `{"type":"problem","title":"Two Sum","difficulty":"easy"}`, 201).json(t)["id"].(string)
+	b := c.expect("POST", api+"/items", `{"type":"reading","title":"Hash maps"}`, 201).json(t)["id"].(string)
+	v := c.expect("POST", api+"/items", `{"type":"problem","title":"Three Sum","variantOf":"`+a+`"}`, 201).json(t)
+	if o, ok := v["variantOrigin"].(map[string]any); !ok || o["id"] != a || o["available"] != true ||
+		o["title"] != "Two Sum" || o["type"] != "problem" || o["status"] != "todo" || o["difficulty"] != "easy" {
+		t.Errorf("variantOrigin: %v", v["variantOrigin"])
+	} else if at, ok := o["linkedAt"]; !ok || at != nil || len(o) != 7 {
+		t.Errorf("variantOrigin keys: %v", o)
+	}
+	if got := c.expect("GET", api+"/items/"+b, "", 200).json(t); got["linkCount"] != float64(0) || got["variantOrigin"] != nil {
+		t.Errorf("an unlinked item: %v", got)
+	}
+	links := c.expect("POST", api+"/items/"+a+"/links", `{"itemId":"`+b+`"}`, 200).json(t)["links"].([]any)
+	l := links[0].(map[string]any)
+	if len(links) != 1 || l["id"] != b || l["available"] != true || l["title"] != "Hash maps" || l["type"] != "reading" ||
+		l["status"] != "todo" || l["difficulty"] != nil || l["linkedAt"] == nil || len(l) != 7 {
+		t.Errorf("link: %v", links)
+	}
+	c.expect("POST", api+"/items/"+b+"/links", `{"itemId":"`+a+`"}`, 200)
+	if got := c.expect("GET", api+"/items/"+b+"/links", "", 200).json(t)["links"].([]any); len(got) != 1 ||
+		got[0].(map[string]any)["id"] != a {
+		t.Errorf("the other side: %v", got)
+	}
+	list := c.expect("GET", api+"/items?id="+a, "", 200).json(t)["items"].([]any)
+	if got := list[0].(map[string]any); got["linkCount"] != float64(1) || got["revision"] != float64(1) {
+		t.Errorf("summary: %v", got)
+	}
+	c.expectField("POST", api+"/items/"+a+"/links", `{"itemId":"nope"}`, "itemId")
+	c.expectField("POST", api+"/items/"+a+"/links", `{"itemId":"`+a+`"}`, "itemId")
+	c.expectField("POST", api+"/items/"+a+"/links", `{}`, "itemId")
+	c.expect("POST", api+"/items/nope/links", `{"itemId":"`+a+`"}`, 404)
+	c.expect("GET", api+"/items/nope/links", "", 404)
+
+	c.expect("DELETE", api+"/items/"+a, "", 204)
+	l = c.expect("GET", api+"/items/"+b+"/links", "", 200).json(t)["links"].([]any)[0].(map[string]any)
+	if l["available"] != false || l["title"] != "Two Sum" || l["type"] != "problem" || l["status"] != nil || l["difficulty"] != nil {
+		t.Errorf("a link to a deleted item: %v", l)
+	}
+	got := c.expect("GET", api+"/items/"+v["id"].(string), "", 200).json(t)
+	if o := got["variantOrigin"].(map[string]any); got["variantOf"] != a || o["available"] != false || o["title"] != "Two Sum" ||
+		o["status"] != nil || got["revision"] != float64(1) {
+		t.Errorf("the variant of a deleted item: %v", got)
+	}
+	c.expect("DELETE", api+"/items/"+b+"/links/"+a, "", 204)
+	c.expect("DELETE", api+"/items/"+b+"/links/"+a, "", 204)
+	c.expect("DELETE", api+"/items/nope/links/"+a, "", 404)
+	if got := c.expect("GET", api+"/items/"+b+"/links", "", 200).json(t)["links"].([]any); len(got) != 0 {
+		t.Errorf("after unlinking: %v", got)
+	}
+}
+
 func TestErrorShapesAndRouting(t *testing.T) {
 	c := newServer(t)
 	r := c.expect("POST", api+"/items", `{"title":"no type"}`, 422)
@@ -444,20 +499,20 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
 		"maxLargeInputBytes", "maxLargeTestCases", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxSystemPromptChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxAiProviders", "maxAiProviderNameChars", "minAiTimeoutSeconds", "maxAiTimeoutSeconds", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
-		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars", "maxNotesChars"} {
+		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars", "maxNotesChars", "maxLinksPerItem"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 43 {
-		t.Errorf("limits has %d keys, want 43", len(lim))
+	if len(lim) != 44 {
+		t.Errorf("limits has %d keys, want 44", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
 	}
 	for k, want := range map[string]float64{"maxGeneratedTestCases": 30, "maxSummaryChars": 5000, "maxTextBytes": 1048576,
 		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
-		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxNotesChars": 4000, "maxImportCollections": 10000,
+		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxNotesChars": 4000, "maxLinksPerItem": 50, "maxImportCollections": 10000,
 		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60,
 		"minAiTimeoutSeconds": 10, "maxAiTimeoutSeconds": 300, "maxSourceBytes": 1024, "maxRequestBytes": 33554432} {
 		if lim[k] != want {

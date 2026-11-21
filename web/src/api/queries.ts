@@ -11,7 +11,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { AiJob, AiLogFilters, DraftSummary, Item, ItemListParams, ItemType, ItemStatus, ItemSummary, Limits, Page, Preferences, PreferencesUpdate } from './types';
+import type { AiJob, AiLogFilters, DraftSummary, Item, ItemLinks, ItemListParams, ItemType, ItemStatus, ItemSummary, LinkedItem, Limits, Page, Preferences, PreferencesUpdate } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -35,6 +35,8 @@ export const qk = {
   itemPage: (params: ItemListParams, limit: number, offset: number) => ['items', 'list', 'page', params, limit, offset] as const,
   itemQuery: (params: ItemListParams) => ['items', 'list', 'query', params] as const,
   item: (id: string) => ['items', 'detail', id] as const,
+  /** The items linked to an item. Under `items`, so whatever refreshes the library (a delete) refreshes them too. */
+  links: (id: string) => ['items', 'links', id] as const,
   testCases: (itemId: string) => ['testcases', itemId] as const,
   solutions: (itemId: string) => ['solutions', itemId] as const,
   preferences: ['settings', 'preferences'] as const,
@@ -348,6 +350,70 @@ export function useQuickUpdate() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.itemLists });
       void qc.invalidateQueries({ queryKey: qk.stats });
+    },
+  });
+}
+
+/** The items linked to an item: live ones first, then those no longer in the library. */
+export function useItemLinks(id: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.links(id),
+    queryFn: ({ signal }) => api.items.links.list(id, signal),
+    select: (data) => data.links,
+    enabled,
+  });
+}
+
+/**
+ * Keep the cache in step with a link between `id` and `otherId` made or
+ * removed: `links` is what `id` is linked to now. Its count shows at once;
+ * the other item's links and count, and the lists, are fetched again.
+ * Neither item's revision moves.
+ */
+export function storeLinks(qc: QueryClient, id: string, otherId: string, links: LinkedItem[]): void {
+  qc.setQueryData<ItemLinks>(qk.links(id), { links });
+  patchLists(qc, id, { linkCount: links.length });
+  void qc.invalidateQueries({ queryKey: qk.links(otherId) });
+  void qc.invalidateQueries({ queryKey: qk.item(otherId) });
+  void qc.invalidateQueries({ queryKey: qk.itemLists });
+}
+
+/** Link another item to `id`. */
+export function useLinkItem(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (otherId: string) => api.items.links.add(id, otherId),
+    onSuccess: (data, otherId) => storeLinks(qc, id, otherId, data.links),
+  });
+}
+
+/**
+ * Remove the link between `id` and another item. The row goes at once and
+ * comes back if the server refuses.
+ */
+export function useUnlinkItem(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (otherId: string) => api.items.links.remove(id, otherId),
+    onMutate: async (otherId) => {
+      await qc.cancelQueries({ queryKey: qk.links(id) });
+      const previous = qc.getQueryData<ItemLinks>(qk.links(id));
+      if (previous) qc.setQueryData<ItemLinks>(qk.links(id), { links: previous.links.filter((l) => l.id !== otherId) });
+      return { previous };
+    },
+    onError: (_err, _otherId, ctx) => {
+      if (ctx?.previous) qc.setQueryData(qk.links(id), ctx.previous);
+    },
+    onSuccess: (_data, otherId) => {
+      const now = qc.getQueryData<ItemLinks>(qk.links(id));
+      if (now) storeLinks(qc, id, otherId, now.links);
+      else {
+        void qc.invalidateQueries({ queryKey: qk.links(id) });
+        void qc.invalidateQueries({ queryKey: qk.item(id) });
+        void qc.invalidateQueries({ queryKey: qk.links(otherId) });
+        void qc.invalidateQueries({ queryKey: qk.item(otherId) });
+        void qc.invalidateQueries({ queryKey: qk.itemLists });
+      }
     },
   });
 }

@@ -636,7 +636,7 @@ func TestTestCaseOperations(t *testing.T) {
 	wantCode(t, err, app.CodeValidation)
 }
 
-func TestDeleteItemClearsVariantLinks(t *testing.T) {
+func TestDeleteItemKeepsVariantLinks(t *testing.T) {
 	clock := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
 	e := newEnv(t, func(o *app.Options) { o.Now = func() time.Time { return clock } })
 	orig := e.problem(t, "")
@@ -652,12 +652,33 @@ func TestDeleteItemClearsVariantLinks(t *testing.T) {
 	if err := e.app.DeleteItem(e.ctx, orig.ID); err != nil {
 		t.Fatal(err)
 	}
-	// Losing the link is a content change for the variant.
-	if got := must(e.app.GetItem(e.ctx, v.ID)); got.VariantOf != nil || got.Revision != v.Revision+1 || !got.UpdatedAt.Equal(clock) {
+	// The variant keeps its variantOf, which now names an unavailable
+	// item; nothing about the variant changes.
+	got := must(e.app.GetItem(e.ctx, v.ID))
+	if got.VariantOf == nil || *got.VariantOf != orig.ID || got.Revision != v.Revision || !got.UpdatedAt.Equal(v.UpdatedAt) {
 		t.Errorf("variant after its original was deleted: variantOf %v, revision %d -> %d, updatedAt %v",
 			got.VariantOf, v.Revision, got.Revision, got.UpdatedAt)
 	}
+	if o := got.VariantOrigin; o == nil || o.Available || *o.Title != orig.Title || *o.Type != domain.TypeProblem || o.Status != nil {
+		t.Errorf("origin of the variant: %+v", o)
+	}
+	if page := must(e.app.ListItems(e.ctx, app.ItemQuery{VariantOf: orig.ID})); page.Total != 1 {
+		t.Errorf("variants of the deleted original: %+v", page)
+	}
 	wantCode(t, e.app.DeleteItem(e.ctx, orig.ID), app.CodeNotFound)
+	// The variant can still be saved with its variantOf, and it can be
+	// cleared, but an unavailable item cannot be named anew.
+	must(e.app.UpdateItem(e.ctx, v.ID, input(t, `{"title":"Variant 2","variantOf":"`+orig.ID+`"}`)))
+	must(e.app.UpdateItem(e.ctx, v.ID, input(t, `{"variantOf":null}`)))
+	_, err := e.app.UpdateItem(e.ctx, v.ID, input(t, `{"variantOf":"`+orig.ID+`"}`))
+	wantCode(t, err, app.CodeValidation)
+	// Bulk deletion keeps them too.
+	v2 := must(e.app.CreateItem(e.ctx, input(t, `{"type":"problem","title":"Variant of V","variantOf":"`+v.ID+`"}`)))
+	must(e.app.BulkItems(e.ctx, app.BulkInput{IDs: []string{v.ID}, Action: "delete"}))
+	if got := must(e.app.GetItem(e.ctx, v2.ID)); got.VariantOf == nil || got.VariantOrigin == nil ||
+		got.VariantOrigin.Available || *got.VariantOrigin.Title != "Variant 2" || got.Revision != 1 {
+		t.Errorf("variant after a bulk delete of its original: %+v", got.VariantOrigin)
+	}
 }
 
 func TestItemJSONShape(t *testing.T) {

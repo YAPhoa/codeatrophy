@@ -146,6 +146,8 @@ export interface Limits {
    * under a higher limit still load.
    */
   maxNotesChars: number;
+  /** How many items one item can be linked to, unavailable ones included. */
+  maxLinksPerItem: number;
 }
 
 export interface Stats {
@@ -228,6 +230,8 @@ export interface ItemSummary {
   collectionIds: string[];
   variantOf: string | null;
   variantCount: number;
+  /** How many items this one is linked to, dead links included. */
+  linkCount: number;
   testCaseCount: number;
   /** How many solutions are saved for the item; `0` for readings. */
   solutionCount: number;
@@ -243,6 +247,30 @@ export interface Item extends ItemSummary {
   rawInput: string | null;
   source: ItemSource;
   problem: ProblemSpec | null;
+  /** What `variantOf` points at, alive or not; `null` exactly when `variantOf` is. */
+  variantOrigin: LinkedItem | null;
+}
+
+/**
+ * Another item as a link shows it. A dead one (`available: false`) is no
+ * longer in the library: `title` and `type` are the last known ones, or
+ * `null` when it was never here (it came with an import), and `status` and
+ * `difficulty` are `null`.
+ */
+export interface LinkedItem {
+  id: string;
+  available: boolean;
+  title: string | null;
+  type: ItemType | null;
+  status: ItemStatus | null;
+  difficulty: Difficulty | null;
+  /** When the link was made; `null` in a `variantOrigin`. */
+  linkedAt: string | null;
+}
+
+/** `GET /items/{id}/links`: live links first, then dead ones; oldest first within each. */
+export interface ItemLinks {
+  links: LinkedItem[];
 }
 
 export interface TestCaseInput {

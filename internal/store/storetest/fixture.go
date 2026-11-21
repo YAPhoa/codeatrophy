@@ -20,8 +20,9 @@ var FixtureSecrets = func() *secrets.Box { b, _ := secrets.NewBox(bytes.Repeat([
 // Populate fills db with a library that uses every table: an AI provider
 // with an encrypted key chosen as the default, edited and deleted built-in
 // presets plus one of the user's, items with tags, collections (nested,
-// with positions), a variant link, test cases, solutions, and submissions
-// with results, and text a backend could mangle.
+// with positions), a variant link, links between items (to a deleted item
+// too), test cases, solutions, and submissions with results, and text a
+// backend could mangle.
 func Populate(t *testing.T, db store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -107,6 +108,20 @@ func Populate(t *testing.T, db store.Store) {
 			"cpp":    {Prefix: "#include <bits/stdc++.h>\n", Suffix: ""},
 		}
 		if err := tx.InsertItem(&fn); err != nil {
+			return err
+		}
+		// Links, one of them to an item that is then deleted (which leaves
+		// a record of it) and one to an id that never existed here.
+		gone := Item("gone", "Deleted reading", domain.TypeReading)
+		if err := tx.InsertItem(&gone); err != nil {
+			return err
+		}
+		for i, other := range []string{"s1", "gone", "never", "variant"} {
+			if _, err := tx.LinkItems("origin", other, now.Add(time.Duration(i)*time.Minute)); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.DeleteItem("gone", now.Add(time.Hour)); err != nil {
 			return err
 		}
 		// A child created before its parent, then moved under it.
@@ -245,10 +260,25 @@ func SameDump(t *testing.T, what string, want, got map[string][]string) {
 
 // ClearNewerData removes what Populate stores that older schema versions
 // cannot hold, for tests that take its database back to one: the last runs
-// of solutions (version 11), AI jobs and drafts (version 12).
+// of solutions (version 11), AI jobs and drafts (version 12), test case
+// generators (version 13), and links and the record of a deleted item
+// (version 14; the item is created again, which removes its record).
 func ClearNewerData(t *testing.T, db store.Store) {
 	t.Helper()
 	Write(t, db, func(tx store.Tx) error {
+		links, err := tx.ItemLinks("origin")
+		if err != nil {
+			return err
+		}
+		for _, l := range links {
+			if _, err := tx.UnlinkItems("origin", l.ID); err != nil {
+				return err
+			}
+		}
+		gone := Item("gone", "Deleted reading", domain.TypeReading)
+		if err := tx.InsertItem(&gone); err != nil {
+			return err
+		}
 		for _, id := range []string{"job0", "job1"} {
 			if _, err := tx.DeleteAIJob(id); err != nil {
 				return err

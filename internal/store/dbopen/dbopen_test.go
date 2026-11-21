@@ -160,6 +160,7 @@ func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
 	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
 		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "0011_solution_last_run.sql") ||
 		!strings.Contains(logs, "0012_ai_jobs.sql") || !strings.Contains(logs, "0013_test_case_generator.sql") ||
+		!strings.Contains(logs, "0014_item_links.sql") ||
 		!strings.Contains(logs, "imported the SQLite database") {
 		t.Errorf("logs:\n%s", logs)
 	}

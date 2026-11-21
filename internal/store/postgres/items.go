@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -82,6 +83,13 @@ func (t *tx) GetItem(id string) (domain.Item, error) {
 	sums := []*domain.ItemSummary{&r.item.ItemSummary}
 	if err := t.hydrate(sums); err != nil {
 		return domain.Item{}, err
+	}
+	if v := r.item.VariantOf; v != nil {
+		origin, err := t.linkedItem(*v)
+		if err != nil {
+			return domain.Item{}, err
+		}
+		r.item.VariantOrigin = &origin
 	}
 	if r.item.Problem != nil {
 		sols, err := t.ListSolutions(id)
@@ -179,6 +187,9 @@ func (t *tx) InsertItem(it *domain.Item) error {
 	if err := t.writeTags(it.ID, it.Tags); err != nil {
 		return err
 	}
+	if _, err := t.exec(`DELETE FROM deleted_items WHERE id = $1`, it.ID); err != nil {
+		return err
+	}
 	return t.index(seq, it.Title, it.Summary, it.Body, it.Tags)
 }
 
@@ -228,7 +239,7 @@ func (t *tx) index(seq int64, title, summary, body string, tags []string) error 
 	return err
 }
 
-func (t *tx) DeleteItem(id string) (bool, error) {
+func (t *tx) DeleteItem(id string, at time.Time) (bool, error) {
 	var seq int64
 	err := t.queryRow(`SELECT seq FROM items WHERE id = $1`, id).Scan(&seq)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -237,7 +248,10 @@ func (t *tx) DeleteItem(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if _, err := t.exec(`UPDATE items SET variant_of = NULL WHERE variant_of = $1`, id); err != nil {
+	if _, err := t.exec(`INSERT INTO deleted_items (id, title, type, deleted_at)
+		SELECT id, title, type, $1 FROM items WHERE id = $2
+		ON CONFLICT (id) DO UPDATE SET title = excluded.title, type = excluded.type, deleted_at = excluded.deleted_at`,
+		toUnix(at), id); err != nil {
 		return false, err
 	}
 	// The search index row goes with the item.
@@ -292,7 +306,7 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 		ids = append(ids, it.ID)
 		it.Tags = []string{}
 		it.CollectionIDs = []string{}
-		it.VariantCount, it.TestCaseCount, it.SolutionCount, it.LastVerdict = 0, 0, 0, nil
+		it.VariantCount, it.LinkCount, it.TestCaseCount, it.SolutionCount, it.LastVerdict = 0, 0, 0, 0, nil
 	}
 	if err := t.eachRow(`SELECT item_id, tag FROM item_tags WHERE item_id = ANY($1) ORDER BY tag`, []any{ids},
 		func(r *sql.Rows) error {
@@ -323,6 +337,9 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 	}{
 		{`SELECT variant_of, COUNT(*) FROM items WHERE variant_of = ANY($1) GROUP BY variant_of`,
 			func(s *domain.ItemSummary, n int) { s.VariantCount = n }},
+		{`SELECT id, COUNT(*) FROM (SELECT item_a AS id FROM item_links WHERE item_a = ANY($1)
+			UNION ALL SELECT item_b FROM item_links WHERE item_b = ANY($1)) l GROUP BY id`,
+			func(s *domain.ItemSummary, n int) { s.LinkCount = n }},
 		{`SELECT item_id, COUNT(*) FROM test_cases WHERE item_id = ANY($1) GROUP BY item_id`,
 			func(s *domain.ItemSummary, n int) { s.TestCaseCount = n }},
 		{`SELECT item_id, COUNT(*) FROM solutions WHERE item_id = ANY($1) GROUP BY item_id`,

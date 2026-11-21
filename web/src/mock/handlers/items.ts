@@ -242,6 +242,8 @@ function parseFields(db: MockDb, raw: Record<string, unknown>, v: Validator, sel
   if (raw.variantOf !== undefined) {
     const id = raw.variantOf;
     if (id === null) out.variantOf = null;
+    // Keeping the current value is fine even once it names a deleted item; a new one must exist.
+    else if (typeof id === 'string' && self && id === self.variantOf) out.variantOf = id;
     else if (typeof id !== 'string' || !db.items.has(id)) v.add('variantOf', 'must be the id of an existing item');
     else if (self && id === self.id) v.add('variantOf', 'cannot refer to the item itself');
     else out.variantOf = id;
@@ -726,6 +728,28 @@ function bulk(db: MockDb, req: Req) {
   return ok({ affected: items.length });
 }
 
+/**
+ * Link another item to this one. The link goes both ways, and making it again
+ * changes nothing; neither item's revision moves.
+ */
+function addLink(db: MockDb, req: Req) {
+  const item = db.getItem(req.params.id!);
+  const raw = objectBody(req);
+  const otherId = raw.itemId;
+  if (typeof otherId !== 'string' || !db.items.has(otherId)) throw invalid('itemId', 'must be the id of an existing item');
+  if (otherId === item.id) throw invalid('itemId', 'cannot refer to the item itself');
+  if (db.addLink(item.id, otherId) === 'full') throw invalid('itemId', `an item can have at most ${LIMITS.maxLinksPerItem} links`);
+  return ok({ links: db.linksOf(item.id) });
+}
+
+/** Remove a link; one to an item that is gone can be removed too. */
+function removeLink(db: MockDb, req: Req) {
+  const id = db.getItem(req.params.id!).id;
+  const otherId = req.params.otherId!;
+  db.links = db.links.filter((l) => !((l.a === id && l.b === otherId) || (l.a === otherId && l.b === id)));
+  return noContent();
+}
+
 function stats(db: MockDb) {
   const submits = db.submissions.filter((s) => s.mode === 'submit');
   const out: Stats = {
@@ -769,6 +793,9 @@ export function itemRoutes(db: MockDb): [string, string, Handler][] {
     ['GET', '/items/:id', (req) => ok(db.full(db.getItem(req.params.id!)))],
     ['PATCH', '/items/:id', (req) => patchItem(db, req)],
     ['POST', '/items/:id/edits', (req) => editItemText(db, req)],
+    ['GET', '/items/:id/links', (req) => ok({ links: db.linksOf(db.getItem(req.params.id!).id) })],
+    ['POST', '/items/:id/links', (req) => addLink(db, req)],
+    ['DELETE', '/items/:id/links/:otherId', (req) => removeLink(db, req)],
     [
       'DELETE',
       '/items/:id',

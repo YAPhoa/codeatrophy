@@ -70,7 +70,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness. include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
+		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness, with its links (the items linked to it; available: false for one that has been deleted) and, for a variant, item.variantOrigin (the item it was derived from, which may be unavailable too). include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
 		object(props{
 			"id":      str("Item id"),
 			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
@@ -86,7 +86,11 @@ func (t *tools) register(s *mcp.Server) {
 			if err != nil {
 				return nil, err
 			}
-			out := map[string]any{"item": it}
+			links, err := a.ItemLinks(ctx, in.ID)
+			if err != nil {
+				return nil, err
+			}
+			out := map[string]any{"item": it, "links": links.Links}
 			if slices.Contains(in.Include, "testCases") && it.Type == domain.TypeProblem {
 				tcs, err := a.ListTestCases(ctx, in.ID)
 				if err != nil {
@@ -206,7 +210,7 @@ func (t *tools) register(s *mcp.Server) {
 			return a.EditItemText(ctx, id.ID, in)
 		})
 
-	t.add(s, "delete_item", "Delete item", "Delete an item with its test cases and submissions.",
+	t.add(s, "delete_item", "Delete item", "Delete an item with its test cases and submissions. Links to it and the variantOf of its variants are kept, and then name an unavailable item.",
 		object(props{"id": str("Item id")}, "id"), destructive,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in idArg
@@ -234,6 +238,37 @@ func (t *tools) register(s *mcp.Server) {
 				return nil, err
 			}
 			return a.BulkItems(ctx, in)
+		})
+
+	// Linking.
+	linking := object(props{
+		"itemId":   str("Item id"),
+		"otherIds": arrayOf(str("Item id"), "The other items"),
+	}, "itemId", "otherIds")
+	t.add(s, "link_items", "Link items",
+		"Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most 50 links. Not a content change: the revision stays. Returns the item's links.",
+		linking, idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				ItemID   string   `json:"itemId"`
+				OtherIDs []string `json:"otherIds"`
+			}
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			return a.LinkItems(ctx, in.ItemID, in.OtherIDs)
+		})
+
+	t.add(s, "unlink_items", "Unlink items",
+		"Remove the links between an item and other items, including links to items that have been deleted (available: false). An id that is not linked is ignored. Returns the item's links.",
+		linking, idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				ItemID   string   `json:"itemId"`
+				OtherIDs []string `json:"otherIds"`
+			}
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			return a.UnlinkItems(ctx, in.ItemID, in.OtherIDs)
 		})
 
 	// Organising.

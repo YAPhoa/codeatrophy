@@ -90,7 +90,7 @@ expires; open sessions are unaffected. A request body may be at most
 | --- | --- |
 | `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the test case limits (below). A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
-| `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
+| `get_item` | One item in full, including a problem's `interface` and `harness`, with its `links` and, for a variant, `item.variantOrigin` (see [Links](#links)). `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
 | `get_submission` | A submission with per-case results |
@@ -121,8 +121,24 @@ read-only over MCP. `limits` are the bounds of test cases, as in
 | `create_item` | Create a problem or reading; may include test cases, collections, tags and `variantOf` in the same call. A solution-only problem sets `problem.interface: "function"`, with `starterCode` (the stubs) and `harness` (`{ <language>: { prefix, suffix } }`) |
 | `update_item` | Partial update of any item field (merge semantics; `problem.starterCode` and `problem.harness` replace all entries). Setting `problem.interface` to `program` on a problem with a harness requires `harness: {}` in the same call |
 | `edit_item_text` | Exact-match text replacements inside `body` or `notes`, for small changes to long text |
-| `delete_item` | Delete an item with its test cases, solutions and submissions |
+| `delete_item` | Delete an item with its test cases, solutions and submissions. Links to it and its variants' `variantOf` are kept, naming an unavailable item |
 | `bulk_update_items` | One action on many items: tag, untag, set status, favorite, add to or remove from a collection, delete |
+
+### Links
+
+| Tool | Purpose |
+| --- | --- |
+| `link_items` | Link an item (`itemId`) to closely related items (`otherIds`). Links go both ways, have no label and are not content (the revision stays); a pair already linked is left as it is. Every other id must name an existing item other than this one, or nothing is linked and the error names each bad one as `otherIds.<index>`. An item has at most 50 links. Returns `{ "links": [LinkedItem] }` |
+| `unlink_items` | Remove the links between an item and `otherIds`, also to items that have been deleted; an id that is not linked is ignored. Returns the links that remain |
+
+A link stays when either item is deleted. `get_item` returns the item's
+links as `links`, each a `LinkedItem` as in `GET /items/{id}/links`
+(`docs/api.md`): available items first, each group oldest link first. One
+whose item no longer exists has `available: false`, with the title and type
+it had when it was deleted (`null` when this library never had it, as after
+an import), and comes alive again if an item with its id is created (by an
+import, say). A variant's `item.variantOrigin` describes its origin the same
+way.
 
 ### Organising
 
@@ -202,8 +218,9 @@ and runners are written.
 | `draft_item` | `text`, `type?`, `style?` | Turn a rough or incomplete snippet into a complete item and save it, choosing a problem's interface |
 | `write_test_cases` | `itemId`, `count?` | Write a reference solution and a verified test set for a problem. `count` defaults to the user's `generatedTestCases` preference |
 | `create_variant` | `itemId`, `mode?`, `instruction?`, `style?` | Derive a related new item and save it linked to the original |
+| `link_related` | `itemId` | Search the library for the few problems and readings closely related to the item, suggest them, and link the ones the user agrees to with `link_items` |
 
-The prompts that ask for test cases (all three, for a problem) follow the
+The prompts that ask for test cases (the first three, for a problem) follow the
 user's test case preferences: they ask for `generatedTestCases` cases
 (`write_test_cases` takes `count` instead when given) and, when
 `largeTestCase` is on, for `largeTestCaseCount` more as generators, each
@@ -211,8 +228,10 @@ aimed at a different way a solution of the wrong complexity fails at scale.
 Each ends by fetching the item again with `get_item` and re-reading it end
 to end before reporting.
 
-The prompts carry the same authoring conventions the app's built-in AI
-features use, so items come out consistent whichever route created them. The
+The prompts that write items (the first three) carry the same authoring
+conventions the app's built-in AI features use, so items come out
+consistent whichever route created them; `link_related` writes no content
+and carries only the item, with its current links. The
 conventions are also sent as the server's `instructions` during
 initialisation and are readable as the resource
 `codeatrophy://authoring-guide`.

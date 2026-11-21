@@ -38,6 +38,8 @@ func Run(t *testing.T, open Opener) {
 		{"TitleOrder", testTitleOrder},
 		{"CollectionsMembershipAndComputedFields", testCollectionsMembershipAndComputedFields},
 		{"ManyIDs", testManyIDs},
+		{"Links", testLinks},
+		{"LinksOutliveTheirItems", testLinksOutliveTheirItems},
 		{"Collections", testCollections},
 		{"TestCases", testTestCases},
 		{"TagsStatsSettings", testTagsStatsSettings},
@@ -262,7 +264,7 @@ func testItemRoundTrip(t *testing.T, db store.Store) {
 		t.Errorf("all %v, existing %v", all, exist)
 	}
 	if err := db.Write(context.Background(), func(tx store.Tx) error {
-		if ok, err := tx.DeleteItem("zz"); ok || err != nil {
+		if ok, err := tx.DeleteItem("zz", now); ok || err != nil {
 			return fmt.Errorf("deleting a missing item: %v %v", ok, err)
 		}
 		return nil
@@ -352,7 +354,7 @@ func testSearchAndFilters(t *testing.T, db store.Store) {
 	if got := ids(t, db, store.ItemFilter{Query: "distributed"}); got != "" {
 		t.Errorf("stale tags in the index: %q", got)
 	}
-	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("c"); return err })
+	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("c", now); return err })
 	if got := ids(t, db, store.ItemFilter{Query: "paxos"}); got != "" {
 		t.Errorf("deleted item still found: %q", got)
 	}
@@ -520,17 +522,32 @@ func testCollectionsMembershipAndComputedFields(t *testing.T, db store.Store) {
 	if got := ids(t, db, store.ItemFilter{VariantOf: "a"}); got != "v" {
 		t.Errorf("variants: %q", got)
 	}
-	// Deleting an item clears variantOf on its variants and cascades.
+	if v := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("v") }); v.VariantOrigin == nil ||
+		!v.VariantOrigin.Available || v.VariantOrigin.ID != "a" || *v.VariantOrigin.Title != "A" ||
+		*v.VariantOrigin.Status != domain.StatusTodo || v.VariantOrigin.LinkedAt != nil {
+		t.Errorf("variant origin: %+v", v.VariantOrigin)
+	}
+	if a.VariantOrigin != nil {
+		t.Errorf("an item that is no variant has an origin: %+v", a.VariantOrigin)
+	}
+	// Deleting an item keeps variantOf on its variants, and cascades.
 	Write(t, db, func(tx store.Tx) error {
-		ok, err := tx.DeleteItem("a")
+		ok, err := tx.DeleteItem("a", now)
 		if !ok || err != nil {
 			return fmt.Errorf("delete: %v %v", ok, err)
 		}
 		return nil
 	})
 	v := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("v") })
-	if v.VariantOf != nil {
-		t.Error("variantOf should be cleared")
+	if v.VariantOf == nil || *v.VariantOf != "a" || v.Revision != 1 {
+		t.Errorf("variantOf %v, revision %d after deleting the origin", v.VariantOf, v.Revision)
+	}
+	if o := v.VariantOrigin; o == nil || o.Available || o.ID != "a" || o.Title == nil || *o.Title != "A" ||
+		o.Type == nil || *o.Type != domain.TypeProblem || o.Status != nil || o.Difficulty != nil {
+		t.Errorf("deleted variant origin: %+v", o)
+	}
+	if got := ids(t, db, store.ItemFilter{VariantOf: "a"}); got != "v" {
+		t.Errorf("variants of a deleted item: %q", got)
 	}
 	if n := Read(t, db, func(tx store.Tx) (domain.Stats, error) { return tx.Stats() }).Submissions.Total; n != 0 {
 		t.Errorf("submissions not deleted with the item: %d", n)
@@ -573,6 +590,9 @@ func testManyIDs(t *testing.T, db store.Store) {
 				Source: "x", CreatedAt: now, UpdatedAt: now}); err != nil {
 				return err
 			}
+			if _, err := tx.LinkItems(id, id+"v", now); err != nil {
+				return err
+			}
 			acc := domain.VerdictAccepted
 			if err := tx.InsertSubmission(&domain.Submission{ID: id + "sub", ItemID: id, Mode: domain.ModeSubmit,
 				Language: "python", Source: "x", Status: domain.SubmissionCompleted, Verdict: &acc, CreatedAt: now}); err != nil {
@@ -603,15 +623,205 @@ func testManyIDs(t *testing.T, db store.Store) {
 	}
 	for _, s := range list {
 		extras := s.ID == "i000" || s.ID == "i500"
-		want := 0
+		want, links := 0, 0
 		if extras {
 			want = 1
 		}
-		if strings.Join(s.Tags, ",") != "bulk" || strings.Join(s.CollectionIDs, ",") != "c" || s.VariantCount != want ||
-			s.TestCaseCount != want || s.SolutionCount != want || (s.LastVerdict != nil) != extras {
-			t.Errorf("%s: tags %v, collections %v, %d variants, %d cases, %d solutions, verdict %v", s.ID, s.Tags,
-				s.CollectionIDs, s.VariantCount, s.TestCaseCount, s.SolutionCount, s.LastVerdict)
+		if extras || s.ID == "i000v" || s.ID == "i500v" {
+			links = 1
 		}
+		if strings.Join(s.Tags, ",") != "bulk" || strings.Join(s.CollectionIDs, ",") != "c" || s.VariantCount != want ||
+			s.TestCaseCount != want || s.SolutionCount != want || (s.LastVerdict != nil) != extras || s.LinkCount != links {
+			t.Errorf("%s: tags %v, collections %v, %d variants, %d cases, %d solutions, verdict %v, %d links", s.ID, s.Tags,
+				s.CollectionIDs, s.VariantCount, s.TestCaseCount, s.SolutionCount, s.LastVerdict, s.LinkCount)
+		}
+	}
+}
+
+// linkIDs lists an item's links as "id" for an available item and
+// "id!" for an unavailable one, in order.
+func linkIDs(t *testing.T, db store.Store, id string) string {
+	t.Helper()
+	var out []string
+	for _, l := range Read(t, db, func(tx store.Tx) ([]domain.LinkedItem, error) { return tx.ItemLinks(id) }) {
+		if l.Available {
+			out = append(out, l.ID)
+		} else {
+			out = append(out, l.ID+"!")
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// linkTo returns the link from one item to another.
+func linkTo(t *testing.T, db store.Store, from, to string) domain.LinkedItem {
+	t.Helper()
+	for _, l := range Read(t, db, func(tx store.Tx) ([]domain.LinkedItem, error) { return tx.ItemLinks(from) }) {
+		if l.ID == to {
+			return l
+		}
+	}
+	t.Fatalf("%s is not linked to %s", from, to)
+	return domain.LinkedItem{}
+}
+
+// Links are unordered pairs: either end lists the other, a pair is stored
+// once whichever way round it is linked, and the list is in link order.
+func testLinks(t *testing.T, db store.Store) {
+	hard := domain.DifficultyHard
+	Write(t, db, func(tx store.Tx) error {
+		for _, it := range []domain.Item{Item("m", "M", domain.TypeProblem), Item("b", "B", domain.TypeReading),
+			Item("z", "Z", domain.TypeProblem), Item("a", "A", domain.TypeProblem)} {
+			if it.ID == "z" {
+				it.Difficulty, it.Status = &hard, domain.StatusDone
+			}
+			if err := tx.InsertItem(&it); err != nil {
+				return err
+			}
+		}
+		for i, pair := range [][2]string{{"m", "z"}, {"b", "m"}, {"m", "a"}, {"z", "m"}, {"a", "m"}} {
+			added, err := tx.LinkItems(pair[0], pair[1], now.Add(time.Duration(i)*time.Minute))
+			if err != nil {
+				return err
+			}
+			if want := i < 3; added != want {
+				return fmt.Errorf("link %v: added %v", pair, added)
+			}
+		}
+		// Linked in the same second: insertion order decides.
+		if _, err := tx.LinkItems("z", "b", now.Add(time.Hour)); err != nil {
+			return err
+		}
+		_, err := tx.LinkItems("z", "a", now.Add(time.Hour))
+		return err
+	})
+	if got := linkIDs(t, db, "m"); got != "z,b,a" {
+		t.Errorf("links of m: %q", got)
+	}
+	if got := linkIDs(t, db, "z"); got != "m,b,a" {
+		t.Errorf("links of z: %q", got)
+	}
+	links := Read(t, db, func(tx store.Tx) ([]domain.LinkedItem, error) { return tx.ItemLinks("m") })
+	z := links[0]
+	if z.ID != "z" || !z.Available || *z.Title != "Z" || *z.Type != domain.TypeProblem || *z.Status != domain.StatusDone ||
+		*z.Difficulty != hard || z.LinkedAt == nil || !z.LinkedAt.Equal(now) {
+		t.Errorf("linked item: %+v", z)
+	}
+	if b := links[1]; b.Difficulty != nil || *b.Type != domain.TypeReading || !b.LinkedAt.Equal(now.Add(time.Minute)) {
+		t.Errorf("linked reading: %+v", b)
+	}
+	counts := map[string]int{}
+	for _, s := range Read(t, db, func(tx store.Tx) ([]domain.ItemSummary, error) {
+		l, _, err := tx.ListItems(store.ItemFilter{})
+		return l, err
+	}) {
+		counts[s.ID] = s.LinkCount
+	}
+	if fmt.Sprint(counts) != "map[a:2 b:2 m:3 z:3]" {
+		t.Errorf("link counts: %v", counts)
+	}
+	if got := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("m") }); got.LinkCount != 3 {
+		t.Errorf("GetItem link count: %d", got.LinkCount)
+	}
+	Write(t, db, func(tx store.Tx) error {
+		for i, pair := range [][2]string{{"z", "m"}, {"m", "z"}, {"m", "nobody"}} {
+			removed, err := tx.UnlinkItems(pair[0], pair[1])
+			if err != nil {
+				return err
+			}
+			if removed != (i == 0) {
+				return fmt.Errorf("unlink %v: removed %v", pair, removed)
+			}
+		}
+		return nil
+	})
+	if got := linkIDs(t, db, "m"); got != "b,a" {
+		t.Errorf("links of m after unlinking z: %q", got)
+	}
+	if got := linkIDs(t, db, "z"); got != "b,a" {
+		t.Errorf("links of z after unlinking m: %q", got)
+	}
+	if got := linkIDs(t, db, "nobody"); got != "" {
+		t.Errorf("links of an unknown item: %q", got)
+	}
+	if err := db.Write(context.Background(), func(tx store.Tx) error { _, err := tx.LinkItems("m", "m", now); return err }); err == nil {
+		t.Error("an item was linked to itself")
+	}
+}
+
+// Deleting an item keeps its links and a record of it, so the other side
+// lists it as unavailable with its title and type; creating an item with
+// its id again brings the links back to life. A link to an id that never
+// existed has neither title nor type.
+func testLinksOutliveTheirItems(t *testing.T, db store.Store) {
+	later := now.Add(time.Hour)
+	Write(t, db, func(tx store.Tx) error {
+		for _, it := range []domain.Item{Item("a", "A", domain.TypeProblem), Item("b", "Bee", domain.TypeReading),
+			Item("c", "C", domain.TypeProblem)} {
+			if err := tx.InsertItem(&it); err != nil {
+				return err
+			}
+		}
+		for _, pair := range [][2]string{{"a", "b"}, {"a", "c"}, {"a", "never"}, {"b", "c"}} {
+			if _, err := tx.LinkItems(pair[0], pair[1], now); err != nil {
+				return err
+			}
+		}
+		_, err := tx.DeleteItem("b", later)
+		return err
+	})
+	if got := linkIDs(t, db, "a"); got != "c,b!,never!" {
+		t.Errorf("links of a after deleting b: %q", got)
+	}
+	if got := linkIDs(t, db, "b"); got != "a,c" {
+		t.Errorf("links of the deleted b: %q", got)
+	}
+	links := Read(t, db, func(tx store.Tx) ([]domain.LinkedItem, error) { return tx.ItemLinks("a") })
+	if b := links[1]; b.Available || b.Title == nil || *b.Title != "Bee" || b.Type == nil || *b.Type != domain.TypeReading ||
+		b.Status != nil || b.Difficulty != nil || b.LinkedAt == nil || !b.LinkedAt.Equal(now) {
+		t.Errorf("deleted linked item: %+v", b)
+	}
+	if n := links[2]; n.Available || n.Title != nil || n.Type != nil || n.Status != nil {
+		t.Errorf("never existing linked item: %+v", n)
+	}
+	if a := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem("a") }); a.LinkCount != 3 || a.Revision != 1 {
+		t.Errorf("a: %d links, revision %d", a.LinkCount, a.Revision)
+	}
+	// A record of a deleted item is kept with what it was when deleted.
+	Write(t, db, func(tx store.Tx) error {
+		it := Item("b", "Bee again", domain.TypeProblem)
+		if err := tx.InsertItem(&it); err != nil {
+			return err
+		}
+		_, err := tx.DeleteItem("b", later)
+		return err
+	})
+	if b := linkTo(t, db, "a", "b"); *b.Title != "Bee again" || *b.Type != domain.TypeProblem {
+		t.Errorf("record after deleting b again: %+v", b)
+	}
+	// Re-creating it revives the links.
+	Write(t, db, func(tx store.Tx) error {
+		it := Item("b", "Back", domain.TypeReading)
+		return tx.InsertItem(&it)
+	})
+	if got := linkIDs(t, db, "a"); got != "b,c,never!" {
+		t.Errorf("links of a after re-creating b: %q", got)
+	}
+	if b := linkTo(t, db, "a", "b"); !b.Available || *b.Title != "Back" || b.Status == nil {
+		t.Errorf("revived linked item: %+v", b)
+	}
+	// Deleting both ends keeps the link; either end coming back sees it.
+	Write(t, db, func(tx store.Tx) error {
+		for _, id := range []string{"a", "c"} {
+			if _, err := tx.DeleteItem(id, later); err != nil {
+				return err
+			}
+		}
+		it := Item("c", "C", domain.TypeProblem)
+		return tx.InsertItem(&it)
+	})
+	if got := linkIDs(t, db, "c"); got != "b,a!" {
+		t.Errorf("links of c, re-created after deleting a and c: %q", got)
 	}
 }
 
@@ -1073,7 +1283,7 @@ func testTagsOutliveTheirItems(t *testing.T, db store.Store) {
 		if err := tx.UpdateItem(&a); err != nil {
 			return err
 		}
-		_, err = tx.DeleteItem("b")
+		_, err = tx.DeleteItem("b", now)
 		return err
 	})
 	if got := list(); got != "dp=1,graph=0" {
@@ -1584,7 +1794,7 @@ func testSolutionConstraints(t *testing.T, db store.Store) {
 	badRun.LastRun = &domain.SolutionRun{Passed: 1, Total: 2, TimeMs: &negative, RanAt: now}
 	reject("a negative time", badRun)
 	Write(t, db, func(tx store.Tx) error { return tx.DeleteSolution("s1") })
-	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("i1"); return err })
+	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("i1", now); return err })
 	if sols := Read(t, db, func(tx store.Tx) ([]domain.ItemSolution, error) { return tx.ListSolutions("i1") }); len(sols) != 0 {
 		t.Errorf("solutions outlived their item: %d", len(sols))
 	}
