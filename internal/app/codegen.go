@@ -55,18 +55,6 @@ type CodeResponse struct {
 	Usage Usage            `json:"usage"`
 }
 
-// GenerateCode asks the model for the starter code of a problem in the
-// given languages, and for a function problem the harness too, then runs
-// each runner the way the draft check does. Only languages that were asked
-// for come back. Nothing is saved; the problem need not be saved either.
-func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, error) {
-	t, err := a.prepareCode(ctx, in)
-	if err != nil {
-		return CodeResponse{}, err
-	}
-	return t.run(ctx)
-}
-
 // prepareCode validates a code request; the generation is left to the
 // task's run.
 func (a *App) prepareCode(ctx context.Context, in CodeInput) (task[CodeResponse], error) {

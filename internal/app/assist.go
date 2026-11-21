@@ -152,15 +152,6 @@ func checkInstruction(o domain.Opt[string]) (string, error) {
 	return s, nil
 }
 
-// Draft turns rough input into a complete item draft. Nothing is saved.
-func (a *App) Draft(ctx context.Context, in DraftInput) (DraftResponse, error) {
-	t, err := a.prepareDraft(ctx, in)
-	if err != nil {
-		return DraftResponse{}, err
-	}
-	return t.run(ctx)
-}
-
 // prepareDraft validates a draft request and resolves its style and
 // provider; the generation itself is left to the task's run.
 func (a *App) prepareDraft(ctx context.Context, in DraftInput) (task[DraftResponse], error) {
@@ -438,15 +429,6 @@ type VariantInput struct {
 	LargeTestCases int                `json:"largeTestCases"`
 }
 
-// Variant drafts a new item derived from an existing one. Nothing is saved.
-func (a *App) Variant(ctx context.Context, itemID string, in VariantInput) (DraftResponse, error) {
-	t, err := a.prepareVariant(ctx, itemID, in)
-	if err != nil {
-		return DraftResponse{}, err
-	}
-	return t.run(ctx)
-}
-
 // prepareVariant validates a variant request and reads its original; the
 // generation is left to the task's run.
 func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput) (task[DraftResponse], error) {
@@ -616,18 +598,6 @@ type GenerateTestCasesResponse struct {
 	// LargeCases has one report per large test case asked for.
 	LargeCases []*LargeCaseReport `json:"largeCases"`
 	Cases      []GeneratedCase    `json:"cases"`
-}
-
-// GenerateTestCases asks the model for a reference solution and inputs, then
-// runs the solution to compute the expected outputs when an engine is
-// available. Nothing is saved. Style presets and the custom system prompt
-// do not apply; a custom test case prompt does.
-func (a *App) GenerateTestCases(ctx context.Context, itemID string, in GenerateTestCasesInput) (GenerateTestCasesResponse, error) {
-	t, err := a.prepareTestCases(ctx, itemID, in)
-	if err != nil {
-		return GenerateTestCasesResponse{}, err
-	}
-	return t.run(ctx)
 }
 
 // prepareTestCases validates a test generation request and reads the
