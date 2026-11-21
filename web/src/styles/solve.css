@@ -313,8 +313,7 @@ a.result-saved:hover {
 }
 
 @container (max-width: 700px) {
-  .editor-save .btn-label,
-  .editor-toolbar .editor-saved {
+  .editor-save .btn-label {
     display: none;
   }
 }

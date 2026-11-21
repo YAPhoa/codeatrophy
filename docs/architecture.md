@@ -62,6 +62,12 @@ same change made through the other.
   per-test-case result list and an overall verdict. For a function problem
   it keeps the harness it ran in and how many lines that harness put before
   the submitted code.
+- **Working copy** — the code the user is writing on a problem, one per
+  problem and language, kept on the server so that it follows them across
+  browsers. Each write replaces it whole in one upsert (last write wins).
+  It is personal work in progress, not content: writing it leaves
+  `revision` and `updatedAt` alone, it goes with its item, and it is
+  neither in bundles nor reachable over MCP.
 
 Organisation is deliberately three independent axes: *collections* for curated,
 ordered structure (a study plan, a topic tree), *tags* for cross-cutting

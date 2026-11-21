@@ -253,10 +253,11 @@ type Tx interface {
 	ExistingItemIDs(ids []string) (map[string]bool, error)
 	InsertItem(it *domain.Item) error
 	UpdateItem(it *domain.Item) error
-	// DeleteItem removes an item with its test cases, submissions and
-	// memberships, and keeps a record of it (its id, title and type, and
-	// the time given) for the links and variants that still name it. Its
-	// links and its variants' variantOf are kept.
+	// DeleteItem removes an item with its test cases, solutions,
+	// submissions, working copies and memberships, and keeps a record of it
+	// (its id, title and type, and the time given) for the links and
+	// variants that still name it. Its links and its variants' variantOf
+	// are kept.
 	DeleteItem(id string, at time.Time) (bool, error)
 	// SetItemCollections makes the item a member of exactly these
 	// collections; new memberships are appended at the end.
@@ -331,6 +332,19 @@ type Tx interface {
 	DeleteSolutions(itemID string) error
 	// ClearReference unsets isReference on every solution of the item.
 	ClearReference(itemID string) error
+
+	// Working copies: one per problem and language, deleted with the item.
+	// ListWorkingCopies returns an item's working copies, the most recently
+	// written first.
+	ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error)
+	// PutWorkingCopy creates or replaces the working copy of w.ItemID in
+	// w.Language, in one statement that writes the whole row. It returns
+	// ErrNotFound, writing nothing, when no problem with that id exists (a
+	// missing item or a reading).
+	PutWorkingCopy(w *domain.WorkingCopy) error
+	// DeleteWorkingCopy removes the working copy of an item in a language,
+	// reporting whether there was one.
+	DeleteWorkingCopy(itemID, language string) (bool, error)
 
 	// Style presets, default first, then by name.
 	ListStylePresets() ([]domain.StylePreset, error)

@@ -104,6 +104,9 @@ func (s *Server) routes() {
 	s.handle("POST /items/{id}/solutions", s.createSolution)
 	s.handle("PATCH /solutions/{id}", s.updateSolution)
 	s.handle("DELETE /solutions/{id}", s.deleteSolution)
+	s.handle("GET /items/{id}/workspace", s.listWorkingCopies)
+	s.handle("PUT /items/{id}/workspace/{language}", s.putWorkingCopy)
+	s.handle("DELETE /items/{id}/workspace/{language}", s.deleteWorkingCopy)
 	s.handle("DELETE /testcases/{id}", s.deleteTestCase)
 
 	s.handle("GET /collections", s.listCollections)
@@ -1350,6 +1353,36 @@ func (s *Server) updateSolution(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) deleteSolution(w http.ResponseWriter, r *http.Request) error {
 	if err := s.app.DeleteSolution(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listWorkingCopies(w http.ResponseWriter, r *http.Request) error {
+	l, err := s.app.ListWorkingCopies(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, l)
+	return nil
+}
+
+func (s *Server) putWorkingCopy(w http.ResponseWriter, r *http.Request) error {
+	var in domain.WorkingCopyInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	wc, err := s.app.PutWorkingCopy(r.Context(), r.PathValue("id"), r.PathValue("language"), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, wc)
+	return nil
+}
+
+func (s *Server) deleteWorkingCopy(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteWorkingCopy(r.Context(), r.PathValue("id"), r.PathValue("language")); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

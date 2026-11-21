@@ -1292,6 +1292,121 @@ describe('solutions', () => {
   });
 });
 
+describe('working copies', () => {
+  const id = seedIds.items.twoSum;
+
+  it('start empty, and a write creates or replaces one per language, newest first', async () => {
+    expect(await api.workspace.list(id)).toEqual({ items: [] });
+    const py = await api.workspace.put(id, 'python', 'print(1)\r\n');
+    expect(py).toEqual({ language: 'python', source: 'print(1)\n', updatedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/) as unknown });
+    await api.workspace.put(id, 'cpp', 'int main() {}');
+    expect((await api.workspace.list(id)).items.map((w) => w.language)).toEqual(['cpp', 'python']);
+    // Written again within the same second, Python is still the newest.
+    await api.workspace.put(id, 'python', '');
+    const { items } = await api.workspace.list(id);
+    expect(items.map((w) => [w.language, w.source])).toEqual([
+      ['python', ''],
+      ['cpp', 'int main() {}'],
+    ]);
+  });
+
+  it('change neither the item revision nor its updatedAt', async () => {
+    const before = await api.items.get(id);
+    await api.workspace.put(id, 'python', 'x = 1');
+    await api.workspace.remove(id, 'python');
+    const after = await api.items.get(id);
+    expect([after.revision, after.updatedAt]).toEqual([before.revision, before.updatedAt]);
+  });
+
+  it('are deleted one language at a time, also when there was none', async () => {
+    await api.workspace.put(id, 'python', 'x = 1');
+    await api.workspace.put(id, 'go', 'package main');
+    await expect(api.workspace.remove(id, 'python')).resolves.toBeUndefined();
+    await expect(api.workspace.remove(id, 'python')).resolves.toBeUndefined();
+    await expect(api.workspace.remove(id, 'rust')).resolves.toBeUndefined();
+    expect((await api.workspace.list(id)).items.map((w) => w.language)).toEqual(['go']);
+  });
+
+  it('take any canonical language, judged or not, and validate the source', async () => {
+    await expect(api.workspace.put(id, 'kotlin', 'fun main() {}')).resolves.toMatchObject({ language: 'kotlin' });
+    for (const call of [api.workspace.put(id, 'brainfuck', '+'), api.workspace.put(id, 'Python', 'x'), api.workspace.remove(id, 'cobol')]) {
+      const err = await failure(call);
+      expect([err.status, err.fields]).toEqual([422, { language: 'unknown language' }]);
+    }
+    const missing = await failure(api.workspace.put(id, 'python', undefined as unknown as string));
+    expect([missing.status, missing.fields]).toEqual([422, { source: 'is required' }]);
+    const huge = await failure(api.workspace.put(id, 'python', 'x'.repeat(LIMITS.maxSourceBytes + 1)));
+    expect([huge.status, Object.keys(huge.fields)]).toEqual([422, ['source']]);
+    await expect(api.workspace.put(id, 'python', 'x'.repeat(LIMITS.maxSourceBytes))).resolves.toMatchObject({ language: 'python' });
+  });
+
+  it('are 404 for an item that does not exist and 422 for a reading', async () => {
+    const nobody = '00000000-0000-4000-8000-000000000000';
+    for (const call of [api.workspace.list(nobody), api.workspace.put(nobody, 'python', 'x'), api.workspace.remove(nobody, 'python')]) {
+      expect((await failure(call)).status).toBe(404);
+    }
+    const reading = seedIds.items.consistentHashing;
+    for (const call of [api.workspace.list(reading), api.workspace.put(reading, 'python', 'x'), api.workspace.remove(reading, 'python')]) {
+      expect((await failure(call)).status).toBe(422);
+    }
+  });
+
+  it('go with their item, alone and in bulk', async () => {
+    const other = seedIds.items.coinChange;
+    await api.workspace.put(id, 'python', 'x = 1');
+    await api.workspace.put(other, 'python', 'y = 2');
+    await api.items.remove(id);
+    await api.items.bulk({ ids: [other], action: 'delete' });
+    expect(server.db.workingCopies).toEqual([]);
+  });
+
+  it('are never exported', async () => {
+    await api.workspace.put(id, 'python', 'WORK IN PROGRESS');
+    const { blob } = await api.bundle.export({ scope: 'all', includeSolutions: true, includeHiddenTests: true });
+    const entries = await readZip(new Uint8Array(await blob.arrayBuffer()));
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) expect(new TextDecoder().decode(e.data)).not.toContain('WORK IN PROGRESS');
+  });
+
+  it('fail to be written under workspace-fail, until switched back', async () => {
+    start(optionsFromFlags(['workspace-fail', 'instant']));
+    const err = await failure(api.workspace.put(id, 'python', 'x'));
+    expect(err.status).toBe(500);
+    expect((await failure(api.workspace.remove(id, 'python'))).status).toBe(500);
+    // Reads still work, and validation still comes first.
+    expect((await api.workspace.list(id)).items).toEqual([]);
+    expect((await failure(api.workspace.put(id, 'cobol', 'x'))).status).toBe(422);
+    server.db.workspaceWritesFail = false;
+    await api.workspace.put(id, 'python', 'x');
+    expect((await api.workspace.list(id)).items).toHaveLength(1);
+  });
+
+  it('are kept across a reload of the page, in their order, for the items the seed has', async () => {
+    await api.workspace.put(id, 'python', 'a');
+    await api.workspace.put(id, 'cpp', 'b');
+    const created = await api.items.create({ type: 'problem', title: 'Made since' });
+    await api.workspace.put(created.id, 'python', 'c');
+    const changes = vi.fn();
+    server.db.onWorkingCopiesChange = changes;
+    await api.workspace.put(id, 'go', 'd');
+    await api.workspace.remove(id, 'go');
+    await api.workspace.remove(id, 'go');
+    // The second delete found none: nothing changed.
+    expect(changes).toHaveBeenCalledTimes(2);
+    const kept = server.snapshot();
+    start();
+    server.restore(kept);
+    expect((await api.workspace.list(id)).items.map((w) => w.language)).toEqual(['cpp', 'python']);
+    await api.workspace.put(id, 'python', 'again');
+    expect((await api.workspace.list(id)).items.map((w) => w.language)).toEqual(['python', 'cpp']);
+    expect(server.db.workingCopies.some((w) => w.itemId === created.id)).toBe(false);
+    // What an older mock kept has none.
+    start();
+    server.restore({ drafts: [], jobs: [] });
+    expect((await api.workspace.list(id)).items).toEqual([]);
+  });
+});
+
 describe('collections and tags', () => {
   it('lists roots first and counts direct members', async () => {
     const { items } = await api.collections.list();

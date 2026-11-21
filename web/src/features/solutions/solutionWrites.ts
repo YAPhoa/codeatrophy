@@ -6,14 +6,15 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, isApiError } from '../../api/client';
-import { qk } from '../../api/queries';
+import { qk, workspaceQuery } from '../../api/queries';
 import type { Item, Limits, Solution, SolutionPatch, SolutionRun, SubmissionSummary } from '../../api/types';
-import { loadCode, rememberLanguage, saveCode } from '../../lib/codeStore';
+import { readLegacy, readUnsaved, rememberLanguage, unsavedWins } from '../../lib/codeStore';
 import { formatBytes, formatMemoryKb, formatRunTime } from '../../lib/format';
 import { byteLength, charCount } from '../../lib/itemForm';
 import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
 import { useConfirm } from '../../ui/Dialog';
 import { useToast } from '../../ui/Toast';
+import { workspaceSaver } from '../solve/workingCopies';
 
 /**
  * Refresh what a solution write can change: the list itself, the item (its
@@ -219,14 +220,23 @@ export function defaultSolutionName(language: string, existing: readonly Solutio
 /**
  * Returns a function that puts a solution's code into the solve editor for
  * its language and goes there. Work in progress in that language is only
- * replaced after the user agrees.
+ * replaced after the user agrees. The code becomes that language's working
+ * copy, saved as an edit in the editor is.
  */
 export function useOpenInEditor(item: Item): (code: { language: string; source: string }) => Promise<void> {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
   const toast = useToast();
   return async ({ language, source }) => {
-    const current = loadCode(item.id, language);
+    // What the editor would open with: an edit not saved yet that still wins, else the server's copy, else code an older version kept here.
+    const saver = workspaceSaver(qc, item.id);
+    const copies = await qc.fetchQuery(workspaceQuery(item.id)).catch(() => null);
+    // The saved code goes in based on the copy just read; unknown when it could not be read.
+    if (copies) saver.seed(copies.items);
+    const copy = copies?.items.find((w) => w.language === language);
+    const edit = readUnsaved(item.id)[language];
+    const current = edit && (!copies || unsavedWins(edit, copy)) ? edit.source : (copy?.source ?? readLegacy(item.id)[language] ?? null);
     const starter = item.problem?.starterCode[language] ?? '';
     const hasWork = current !== null && current.trim() !== '' && current !== source && current !== starter;
     if (hasWork) {
@@ -238,7 +248,8 @@ export function useOpenInEditor(item: Item): (code: { language: string; source: 
       });
       if (!ok) return;
     }
-    saveCode(item.id, language, source);
+    saver.edit(language, source);
+    void saver.send(language);
     rememberLanguage(item.id, language);
     toast.info(`Solution loaded into the ${languageName(language)} editor`);
     navigate(`/items/${item.id}`);

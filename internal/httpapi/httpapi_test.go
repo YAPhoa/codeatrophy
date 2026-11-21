@@ -1061,6 +1061,66 @@ func TestSolutionsEndpoints(t *testing.T) {
 	c.expect("GET", api+"/items/"+reading+"/solutions", "", 422)
 }
 
+func TestWorkingCopyEndpoints(t *testing.T) {
+	c := newServer(t)
+	it := c.expect("POST", api+"/items", `{"type":"problem","title":"P"}`, 201).json(t)
+	id := it["id"].(string)
+	ws := api + "/items/" + id + "/workspace"
+	if r := c.expect("GET", ws, "", 200); strings.TrimSpace(string(r.body)) != `{"items":[]}` {
+		t.Errorf("no working copies: %s", r.body)
+	}
+	py := c.expect("PUT", ws+"/python", `{"source":"x = 1\r\n"}`, 200).json(t)
+	if len(py) != 3 || py["language"] != "python" || py["source"] != "x = 1\n" || py["updatedAt"] == nil {
+		t.Errorf("put: %v", py)
+	}
+	c.expect("PUT", ws+"/cpp", `{"source":""}`, 200)
+	c.expect("PUT", ws+"/python", `{"source":"x = 2"}`, 200)
+	list := c.expect("GET", ws, "", 200).json(t)["items"].([]any)
+	if len(list) != 2 || list[0].(map[string]any)["language"] != "python" || list[0].(map[string]any)["source"] != "x = 2" ||
+		list[1].(map[string]any)["source"] != "" {
+		t.Errorf("list: %v", list)
+	}
+	if got := c.expect("GET", api+"/items/"+id, "", 200).json(t); got["revision"] != it["revision"] || got["updatedAt"] != it["updatedAt"] {
+		t.Errorf("the item changed: revision %v, updatedAt %v", got["revision"], got["updatedAt"])
+	}
+
+	c.expectField("PUT", ws+"/python", `{}`, "source")
+	c.expectField("PUT", ws+"/python", `{"source":null}`, "source")
+	c.expectField("PUT", ws+"/python", `{"source":"`+strings.Repeat("x", 64<<10+1)+`"}`, "source")
+	c.expectField("PUT", ws+"/python", `{"source":3}`, "source")
+	c.expectField("PUT", ws+"/cobol", `{"source":"x"}`, "language")
+	c.expectField("DELETE", ws+"/cobol", "", "language")
+	c.expect("PUT", ws+"/python", `{"source":`, 400)
+
+	c.expect("DELETE", ws+"/python", "", 204)
+	c.expect("DELETE", ws+"/python", "", 204)
+	if list := c.expect("GET", ws, "", 200).json(t)["items"].([]any); len(list) != 1 {
+		t.Errorf("after deleting python: %v", list)
+	}
+
+	reading := c.expect("POST", api+"/items", `{"type":"reading","title":"R"}`, 201).json(t)["id"].(string)
+	missing := api + "/items/00000000-0000-4000-8000-000000000000/workspace"
+	for _, base := range []string{api + "/items/" + reading + "/workspace", missing} {
+		status := 422
+		if base == missing {
+			status = 404
+		}
+		c.expect("GET", base, "", status)
+		c.expect("PUT", base+"/python", `{"source":"x"}`, status)
+		c.expect("DELETE", base+"/python", "", status)
+	}
+
+	for path, allow := range map[string]string{ws: "GET", ws + "/python": "PUT, DELETE"} {
+		r := c.expect("POST", path, `{}`, 405)
+		if r.header.Get("Allow") != allow || r.errorCode(t) != "bad_request" {
+			t.Errorf("POST %s: Allow %q, %s", path, r.header.Get("Allow"), r.body)
+		}
+	}
+
+	c.expect("DELETE", api+"/items/"+id, "", 204)
+	c.expect("GET", ws, "", 404)
+}
+
 // A solution's lastRun is null until it runs, then carries the run's figures.
 func TestSolutionLastRun(t *testing.T) {
 	c := newServer(t)

@@ -11,7 +11,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { api } from './client';
-import type { AiJob, AiLogFilters, DraftSummary, Item, ItemLinks, ItemListParams, ItemType, ItemStatus, ItemSummary, LinkedItem, Limits, Page, Preferences, PreferencesUpdate } from './types';
+import type { AiJob, AiLogFilters, DraftSummary, Item, ItemLinks, ItemListParams, ItemType, ItemStatus, ItemSummary, LinkedItem, Limits, List, Page, Preferences, PreferencesUpdate, WorkingCopy } from './types';
 
 export const PAGE_SIZE = 50;
 
@@ -39,6 +39,8 @@ export const qk = {
   links: (id: string) => ['items', 'links', id] as const,
   testCases: (itemId: string) => ['testcases', itemId] as const,
   solutions: (itemId: string) => ['solutions', itemId] as const,
+  /** A problem's working copies. Outside `items`, so refreshing the library never refetches them under an open editor. */
+  workspace: (itemId: string) => ['workspace', itemId] as const,
   preferences: ['settings', 'preferences'] as const,
   submissions: (itemId: string) => ['submissions', 'list', itemId] as const,
   submission: (id: string) => ['submissions', 'detail', id] as const,
@@ -132,14 +134,55 @@ export function useItem(id: string | undefined) {
 
 /**
  * Load what an item's page opens with, ahead of opening it (the pointer
- * rests on its row): the item, and a problem's test cases. A copy younger
+ * rests on its row): the item, and a problem's test cases and working
+ * copies. A copy younger
  * than this is kept, so resting on the same row again asks for nothing.
  */
 const PREFETCH_FRESH_MS = 30_000;
 
 export function prefetchItem(qc: QueryClient, id: string, type: ItemType): void {
   void qc.prefetchQuery({ ...itemQuery(id), staleTime: PREFETCH_FRESH_MS });
-  if (type === 'problem') void qc.prefetchQuery({ ...testCasesQuery(id), staleTime: PREFETCH_FRESH_MS });
+  if (type === 'problem') {
+    void qc.prefetchQuery({ ...testCasesQuery(id), staleTime: PREFETCH_FRESH_MS });
+    void qc.prefetchQuery({ ...workspaceQuery(id), staleTime: PREFETCH_FRESH_MS });
+  }
+}
+
+/**
+ * How a problem's working copies are loaded: shared by `useWorkspace` and
+ * `prefetchItem`. The editor reads them once, as it opens, and keeps this
+ * copy up to date with its own saves (`setWorkingCopy`); it never refetches
+ * them under an open editor.
+ */
+export function workspaceQuery(itemId: string) {
+  return queryOptions({
+    queryKey: qk.workspace(itemId),
+    queryFn: ({ signal }) => api.workspace.list(itemId, signal),
+    staleTime: PREFETCH_FRESH_MS,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
+export function useWorkspace(itemId: string, enabled = true) {
+  return useQuery({ ...workspaceQuery(itemId), enabled });
+}
+
+/**
+ * Record a save of the editor in the cached working copies: `copy` written,
+ * or a language's copy `removed`. A read under way may have been answered
+ * before the save, so it is made again rather than let it put back what the
+ * save replaced.
+ */
+export function setWorkingCopy(qc: QueryClient, itemId: string, change: { copy: WorkingCopy } | { removed: string }): void {
+  const key = qk.workspace(itemId);
+  qc.setQueryData<List<WorkingCopy>>(key, (prev) => {
+    if (!prev) return prev;
+    const language = 'copy' in change ? change.copy.language : change.removed;
+    const others = prev.items.filter((w) => w.language !== language);
+    return { items: 'copy' in change ? [change.copy, ...others] : others };
+  });
+  if (qc.getQueryState(key)?.fetchStatus === 'fetching') void qc.refetchQueries({ queryKey: key });
 }
 
 /** How a problem's test cases are loaded: shared by `useTestCases` and `prefetchItem`. */

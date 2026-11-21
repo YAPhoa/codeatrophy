@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
-import { AlertTriangle, BookmarkPlus, ChevronDown, ChevronUp, ExternalLink, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Play, RotateCcw, Send, ServerOff } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, BookmarkPlus, ChevronDown, ChevronUp, CloudOff, ExternalLink, Loader2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Play, RotateCcw, Send, ServerOff } from 'lucide-react';
 import { api } from '../../api/client';
 import { useMeta, useSolutions, useTestCases } from '../../api/queries';
-import type { Item, SubmissionSummary } from '../../api/types';
+import type { Item, SubmissionSummary, WorkingCopy } from '../../api/types';
 import { useShellLayout } from '../../app/shellLayout';
-import { clearCode, initialCode, loadCustomInput, pickLanguage, rememberLanguage, saveCode, saveCustomInput } from '../../lib/codeStore';
+import { StatusSwap } from '../../ui/Animated';
+import { clearLegacy, clearUnsaved, codeFor, loadCustomInput, openingLanguage, openWorkspace, readLegacy, readUnsaved, rememberedLanguage, rememberLanguage, saveCustomInput, sendOrder } from '../../lib/codeStore';
 import { errorLine } from '../../lib/errors';
 import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, plural, verdictTone } from '../../lib/format';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
@@ -34,6 +36,12 @@ import { HistoryList } from './HistoryList';
 import { ResultPanel } from './ResultPanel';
 import { useReveal } from './useReveal';
 import { useSubmissionRunner } from './useSubmissionRunner';
+import { workspaceSaver } from './workingCopies';
+
+/** Edits are kept in this browser this long after typing stops (ms)… */
+const KEEP_LOCALLY_AFTER_MS = 300;
+/** …and sent to the server this long after (ms). Leaving the page, the problem or the language sends at once. */
+const SAVE_AFTER_MS = 1000;
 
 /** The statement's widest (`.statement`, 820px) plus its pane's padding and a scrollbar: the divider stops there. */
 const STATEMENT_PANE_MAX = 880;
@@ -72,7 +80,7 @@ const FOCUS = {
  * and test cases, results and custom input live in a drawer underneath that
  * stays a slim bar until it is needed. Each pane can be minimised.
  */
-export function SolveView({ item }: { item: Item }) {
+export function SolveView({ item, workingCopies }: { item: Item; workingCopies: readonly WorkingCopy[] }) {
   const meta = useMeta().data;
   const judge = meta?.judge;
   const judgeOn = judge?.enabled ?? false;
@@ -108,8 +116,17 @@ export function SolveView({ item }: { item: Item }) {
   }, [canRun, runnable, solutionOnly, hasRunner, runners, starter]);
   const versionOf = (id: string) => judge?.languages.find((l) => l.id === id)?.version;
 
-  const [language, setLanguageState] = useState<string | null>(() => pickLanguage(item.id, languages, starter));
-  const [code, setCode] = useState(() => (language ? initialCode(item.id, language, starter) : ''));
+  // The code comes from the working copies on the server, read as the page
+  // opened, and from the edits this browser has not had confirmed yet.
+  const qc = useQueryClient();
+  const saver = useMemo(() => workspaceSaver(qc, item.id), [qc, item.id]);
+  const [opened] = useState(() => openWorkspace(workingCopies, readUnsaved(item.id), readLegacy(item.id), rememberedLanguage(item.id)));
+  /** The code of each language that has some of its own, for this visit. */
+  const sources = useRef<Record<string, string>>({ ...opened.sources });
+  const [language, setLanguageState] = useState<string | null>(() => openingLanguage(item.id, languages, opened.recent, starter));
+  const [code, setCode] = useState(() => (language ? codeFor(opened.sources, starter, language) : ''));
+  const failing = useSyncExternalStore(saver.subscribe, () => saver.failing);
+  const saveError = failing ? saver.error : null;
   const [leftTab, setLeftTab] = useUrlChoice('tab', LEFT_TABS, 'description');
   const [drawerTab, setDrawerTab] = useUrlChoice('panel', DRAWER_TABS, 'tests');
   const [panes, setPanes] = useState(readPanes);
@@ -126,29 +143,90 @@ export function SolveView({ item }: { item: Item }) {
   const [narrowPane, setNarrowPane] = useUrlChoice('pane', NARROW_PANES, 'problem');
   const runner = useSubmissionRunner(item.id);
 
+  // ---- Saving the code ----
+
+  /** What the editor holds. */
+  const latest = useRef({ language, code });
+  /** The code last put into the editor from outside or handed to the saver: what differs from it is an edit. */
+  const recorded = useRef({ language, code });
+  /** Hand an edit, if there is one, to the saver, which keeps it in this browser until the server has it. */
+  const record = useCallback(() => {
+    const { language: l, code: c } = latest.current;
+    if (!l || (recorded.current.language === l && recorded.current.code === c)) return;
+    saver.edit(l, c);
+    sources.current[l] = c;
+    recorded.current = { language: l, code: c };
+  }, [saver]);
+  /** Put code into the editor that is not an edit: opening, switching language, a reset. */
+  const load = (l: string | null, c: string) => {
+    latest.current = { language: l, code: c };
+    recorded.current = { language: l, code: c };
+    setLanguageState(l);
+    setCode(c);
+  };
+
+  // As the problem opens: what the server does not have yet is sent, the
+  // language it opens with last, and the unsaved edits that lost are
+  // forgotten. Code an older version kept only in this browser goes up
+  // once, where the server has none, and is removed either way.
+  useEffect(() => {
+    saver.seed(workingCopies);
+    for (const l of opened.drop) if (!saver.unsent(l)) clearUnsaved(item.id, l);
+    for (const [l, source] of Object.entries(opened.send)) saver.edit(l, source);
+    for (const l of Object.keys(readLegacy(item.id))) clearLegacy(item.id, l);
+    void saver.sendAll(sendOrder(opened.send, latest.current.language));
+    // Once per opening: what changes later is the editor's own doing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saver]);
+
   // The judge's language list can arrive or change after the first render.
   useEffect(() => {
     if (language && languages.includes(language)) return;
-    const next = pickLanguage(item.id, languages, starter);
-    setLanguageState(next);
-    setCode(next ? initialCode(item.id, next, starter) : '');
-  }, [languages, language, item.id, starter]);
+    record();
+    const next = openingLanguage(item.id, languages, opened.recent, starter);
+    load(next, next ? codeFor(sources.current, starter, next) : '');
+  }, [languages, language, item.id, starter, opened, record]);
 
-  // Keep work in progress per item and language.
-  const latest = useRef({ language, code });
+  // Kept here a moment after typing stops, and sent a moment later, with
+  // anything an earlier attempt could not save.
   useEffect(() => {
     latest.current = { language, code };
     if (!language) return;
-    const t = window.setTimeout(() => saveCode(item.id, language, code), 300);
-    return () => window.clearTimeout(t);
-  }, [item.id, language, code]);
-  useEffect(
-    () => () => {
-      const { language: l, code: c } = latest.current;
-      if (l) saveCode(item.id, l, c);
-    },
-    [item.id],
-  );
+    const keep = window.setTimeout(record, KEEP_LOCALLY_AFTER_MS);
+    const send = window.setTimeout(() => {
+      record();
+      void saver.sendAll();
+    }, SAVE_AFTER_MS);
+    return () => {
+      window.clearTimeout(keep);
+      window.clearTimeout(send);
+    };
+  }, [language, code, record, saver]);
+
+  // Sent at once when the page goes away or the tab is hidden, as a request
+  // that outlives the page, and on leaving the problem. Tried again when the
+  // browser is back online.
+  useEffect(() => {
+    const flush = () => {
+      record();
+      const l = latest.current.language;
+      if (l) void saver.send(l, { keepalive: true });
+    };
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    const retry = () => void saver.sendAll();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('online', retry);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('online', retry);
+      record();
+      void saver.sendAll();
+    };
+  }, [record, saver]);
 
   // And the custom input, per item, within a size that storage can spare.
   const latestInput = useRef(customInput);
@@ -225,11 +303,12 @@ export function SolveView({ item }: { item: Item }) {
     remember({ statement: false, drawer });
   };
 
+  /** Switch language: the code so far is sent, and the other language opens on its own code, else its starter. */
   const setLanguage = (next: string) => {
-    if (language) saveCode(item.id, language, code);
+    record();
+    if (language) void saver.send(language);
     rememberLanguage(item.id, next);
-    setLanguageState(next);
-    setCode(initialCode(item.id, next, starter));
+    load(next, codeFor(sources.current, starter, next));
   };
 
   const resetCode = async () => {
@@ -243,8 +322,10 @@ export function SolveView({ item }: { item: Item }) {
       danger: true,
     });
     if (!ok) return;
-    clearCode(item.id, language);
-    setCode(target);
+    saver.reset(language, target);
+    delete sources.current[language];
+    load(language, target);
+    void saver.send(language);
   };
 
   const checkSource = (): boolean => {
@@ -365,10 +446,12 @@ export function SolveView({ item }: { item: Item }) {
     const s = runner.submission;
     if (!s) return;
     const previous = { language, code };
-    if (languages.includes(s.language)) {
-      if (language) saveCode(item.id, language, code);
+    // Saved like an edit: the submission's code is the language's code from now on.
+    if (languages.includes(s.language) && s.language !== language) {
+      record();
+      if (language) void saver.send(language);
       rememberLanguage(item.id, s.language);
-      setLanguageState(s.language);
+      load(s.language, codeFor(sources.current, starter, s.language));
     }
     setCode(s.source);
     toast.success('Loaded the code from that submission', {
@@ -485,7 +568,9 @@ export function SolveView({ item }: { item: Item }) {
         <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => void resetCode()} title="Replace your code with the starter code">
           Reset
         </Button>
-        <span className="muted editor-saved">Kept in this browser</span>
+        <span className="editor-save-status" title={failing ? `Kept in this browser until it is saved: ${errorLine(saveError)}` : undefined}>
+          <StatusSwap icon={failing ? <CloudOff size={13} /> : null} text={failing ? 'Not saved' : ''} />
+        </span>
         <span className="spacer" />
         <Button size="sm" variant="ghost" icon={<BookmarkPlus size={14} />} onClick={saveEditorCode} aria-label="Save as solution" title="Keep this code as one of the problem's saved solutions" className="editor-save">
           Save as solution
@@ -617,7 +702,7 @@ export function SolveView({ item }: { item: Item }) {
       <div>
         <h2>Running code is not available here</h2>
         <p>
-          This server has no judge engine configured, so code cannot be run or submitted. You can still read the problem, keep notes and write a solution; the editor saves your code in this browser.
+          This server has no judge engine configured, so code cannot be run or submitted. You can still read the problem, keep notes and write a solution; the editor keeps your code.
         </p>
         <Link to="/settings/judge">Judge status</Link>
       </div>

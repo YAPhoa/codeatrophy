@@ -55,3 +55,19 @@ export function remove(key: string): void {
     // Nothing to do.
   }
 }
+
+/** The keys under `prefix` (without the app's own prefix), in no particular order. */
+export function keysStartingWith(prefix: string): string[] {
+  try {
+    const s = store();
+    if (!s) return [];
+    const keys: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const key = s.key(i);
+      if (key?.startsWith(PREFIX + prefix)) keys.push(key.slice(PREFIX.length));
+    }
+    return keys;
+  } catch {
+    return [];
+  }
+}

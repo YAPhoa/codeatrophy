@@ -73,6 +73,8 @@ import type {
   TextEditsRequest,
   VariantRequest,
   VerifyResult,
+  WorkingCopy,
+  WorkingCopyInput,
 } from './types';
 
 export const API_BASE = '/api/v1';
@@ -293,6 +295,17 @@ export const api = {
       request<Solution>('POST', `/items/${enc(itemId)}/solutions`, { body }),
     update: (id: string, body: SolutionPatch) => request<Solution>('PATCH', `/solutions/${enc(id)}`, { body }),
     remove: (id: string) => request<void>('DELETE', `/solutions/${enc(id)}`),
+  },
+
+  /** The code being written on a problem, one working copy per language. */
+  workspace: {
+    /** Most recently updated first. */
+    list: (itemId: string, signal?: AbortSignal) => request<List<WorkingCopy>>('GET', `/items/${enc(itemId)}/workspace`, { signal }),
+    /** Creates or replaces that language's working copy. */
+    put: (itemId: string, language: string, source: string, opts: { keepalive?: boolean } = {}) =>
+      request<WorkingCopy>('PUT', `/items/${enc(itemId)}/workspace/${enc(language)}`, { body: { source } satisfies WorkingCopyInput, keepalive: opts.keepalive }),
+    /** Also succeeds when there was none. */
+    remove: (itemId: string, language: string) => request<void>('DELETE', `/items/${enc(itemId)}/workspace/${enc(language)}`),
   },
 
   collections: {

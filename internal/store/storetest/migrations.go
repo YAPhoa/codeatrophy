@@ -67,6 +67,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0013Generator", testGeneratorMigration},
 		{"0014Links", testLinksMigration},
 		{"0015BuiltinPresets", testBuiltinPresetsMigration},
+		{"0016WorkingCopies", testWorkingCopiesMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -421,7 +422,7 @@ func testBuiltinPresetsMigration(t *testing.T, h MigrationHarness) {
 	// The fixture keeps the default untouched, edits "Contest style",
 	// deletes "Study notes" and adds a preset of the user's.
 	t.Run("Library", func(t *testing.T) {
-		want, db := h.rerun(t, 15, func(db MigrationDB) { Populate(t, db) }, asSeeded, allButText)
+		want, db := h.rerun(t, 15, func(db MigrationDB) { Populate(t, db); ClearWorkingCopies(t, db) }, asSeeded, allButText)
 		SameDump(t, "after migration 15", want, allButText(t, db))
 		texts(t, db, map[string]string{"Interview practice": builtin["Interview practice"],
 			"Contest style": "My own contest rules.", "Mine": "Short."})
@@ -456,6 +457,34 @@ func testBuiltinPresetsMigration(t *testing.T, h MigrationHarness) {
 		SameDump(t, "after migration 15", want, allButText(t, db))
 		texts(t, db, map[string]string{"Interview practice": builtin["Interview practice"],
 			"Contest style": builtin["Contest style"], "My notes": seeded["Study notes"]})
+	})
+}
+
+// Migration 16 adds working copies: a database at version 15 keeps every
+// row, and afterwards a working copy can be written and goes with its item.
+func testWorkingCopiesMigration(t *testing.T, h MigrationHarness) {
+	want, db := h.rerun(t, 16, func(db MigrationDB) {
+		Populate(t, db)
+		ClearWorkingCopies(t, db)
+	}, func(db MigrationDB) {
+		if err := h.Exec(db, `SELECT COUNT(*) FROM working_copies`); err == nil {
+			t.Error("version 15 has a working_copies table")
+		}
+	}, Dump)
+	SameDump(t, "after migration 16", want, Dump(t, db))
+	Write(t, db, func(tx store.Tx) error {
+		return tx.PutWorkingCopy(&domain.WorkingCopy{ItemID: "origin", Language: "go", Source: "package main", UpdatedAt: now})
+	})
+	if ws := Read(t, db, func(tx store.Tx) ([]domain.WorkingCopy, error) { return tx.ListWorkingCopies("origin") }); len(ws) != 1 ||
+		ws[0].Source != "package main" {
+		t.Errorf("after migrating: %+v", ws)
+	}
+	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteItem("origin", now); return err })
+	if n := len(columnValues(t, db, "working_copies", "item_id")); n != 0 {
+		t.Errorf("%d working copies remain after deleting their item", n)
+	}
+	h.rejects(t, db, map[string]string{
+		"a working copy of no item": `INSERT INTO working_copies (item_id, language, source, updated_at, write_seq) VALUES ('nobody', 'go', '', 0, 1)`,
 	})
 }
 

@@ -2,10 +2,11 @@
 // the UI without a backend (`npm run dev:mock`) and for tests.
 //
 // State lives in memory: reloading the page starts over from the seed, except
-// for the drafts and AI jobs, which the tab keeps in sessionStorage.
+// for the drafts, the AI jobs and the working copies, which the tab keeps in
+// sessionStorage.
 
 import { setTransport } from '../api/client';
-import type { MockOptions } from './db';
+import type { MockOptions, StoredWorkingCopy } from './db';
 import { MockDb } from './db';
 import { aiRoutes } from './handlers/ai';
 import { bundleRoutes } from './handlers/bundles';
@@ -17,6 +18,7 @@ import { solutionRoutes } from './handlers/solutions';
 import { styleRoutes } from './handlers/styles';
 import { submissionRoutes } from './handlers/submissions';
 import { testCaseRoutes } from './handlers/testcases';
+import { workspaceRoutes } from './handlers/workspace';
 import type { Handler, Reply, Req } from './http';
 import { JobRunner, jobRoutes, type StoredJob } from './jobs';
 import { badRequest, forbidden, forbiddenHost, HttpError, methodNotAllowed, notFound } from './http';
@@ -51,7 +53,7 @@ export interface MockServer {
    * queued ones wait again.
    */
   restart(): void;
-  /** What a reload of the page keeps: the drafts and the jobs. */
+  /** What a reload of the page keeps: the drafts, the jobs and the working copies. */
   snapshot(): KeptState;
   /** Take back what `snapshot` kept, on a server that has just been created. */
   restore(state: KeptState): void;
@@ -61,6 +63,8 @@ export interface MockServer {
 export interface KeptState {
   drafts: StoredDraft[];
   jobs: StoredJob[];
+  /** Absent in what an older mock kept. */
+  workingCopies?: StoredWorkingCopy[];
 }
 
 const API_PREFIX = '/api/v1';
@@ -117,6 +121,7 @@ export function createMockServer(options: MockOptions = {}): MockServer {
   const routes = [
     ...itemRoutes(db),
     ...testCaseRoutes(db),
+    ...workspaceRoutes(db),
     ...solutionRoutes(db),
     ...organiseRoutes(db),
     ...submissionRoutes(db),
@@ -211,10 +216,14 @@ export function createMockServer(options: MockOptions = {}): MockServer {
     jobs,
     drafts,
     restart: () => jobs.restart(),
-    snapshot: () => structuredClone({ drafts: drafts.drafts, jobs: jobs.jobs }),
+    snapshot: () => structuredClone({ drafts: drafts.drafts, jobs: jobs.jobs, workingCopies: db.workingCopies }),
     restore(state: KeptState) {
       drafts.restore(state.drafts);
       jobs.restore(state.jobs);
+      // Only those of items the seed has: a reload brings back the seed, not what was created since.
+      db.workingCopies = (state.workingCopies ?? []).filter((w) => db.items.get(w.itemId)?.type === 'problem');
+      // Numbered afresh in the order they were written, so later writes still come after them.
+      for (const w of [...db.workingCopies].sort((a, b) => a.seq - b.seq)) w.seq = db.nextSeq();
     },
     externalEdit(itemId: string) {
       const item = db.getItem(itemId);
@@ -238,12 +247,13 @@ const FLAGS = [
   'empty',
   'no-styles',
   'show-tests',
+  'workspace-fail',
   'fast',
   'slow',
   'instant',
 ] as const;
 const STORAGE_KEY = 'codeatrophy:mock';
-/** Where the tab keeps the drafts and jobs across reloads. */
+/** Where the tab keeps the drafts, jobs and working copies across reloads. */
 const KEPT_KEY = 'codeatrophy:mock:kept';
 
 /** Translate scenario flags (from `?mock=`) into server options. */
@@ -261,6 +271,7 @@ export function optionsFromFlags(flags: readonly string[]): MockOptions {
     aiSource: has('ai-env') ? 'environment' : 'settings',
     forbidden: has('forbidden') ? 'host' : has('forbidden-writes') ? 'origin' : false,
     hideTestCases: !has('show-tests'),
+    workspaceWritesFail: has('workspace-fail'),
   };
 }
 
@@ -293,26 +304,28 @@ export function installMock(): void {
   if (unknown.length > 0) console.warn(`[mock] unknown scenario flag(s): ${unknown.join(', ')}. Known: ${FLAGS.join(', ')}`);
 
   const server = createMockServer(optionsFromFlags(flags));
-  // Drafts and AI jobs outlive a reload, as they outlive a page on the server.
-  // The rest of the state starts over from the seed.
+  // Drafts, AI jobs and working copies outlive a reload, as they outlive a
+  // page on the server. The rest of the state starts over from the seed.
   try {
     const kept = window.sessionStorage.getItem(KEPT_KEY);
     if (kept) server.restore(JSON.parse(kept) as KeptState);
   } catch {
     // Unreadable or unavailable: start without them.
   }
-  server.jobs.onChange = () => {
+  const keep = () => {
     try {
       window.sessionStorage.setItem(KEPT_KEY, JSON.stringify(server.snapshot()));
     } catch {
       // Too large for the tab's storage, or none: kept until the next reload only.
     }
   };
+  server.jobs.onChange = keep;
+  server.db.onWorkingCopiesChange = keep;
   setTransport(server.fetch);
   window.__codeatrophyMock = server;
   console.info(
     `[mock] Using the in-memory API mock (${flags.length > 0 ? `flags: ${flags.join(', ')}` : 'default scenario'}). ` +
-      'State resets on reload, but for drafts and AI jobs. Scenarios: ?mock=' +
+      'State resets on reload, but for drafts, AI jobs and working copies. Scenarios: ?mock=' +
       [...FLAGS, 'slow-<path>'].join(','),
   );
 }

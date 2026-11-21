@@ -21,8 +21,8 @@ var FixtureSecrets = func() *secrets.Box { b, _ := secrets.NewBox(bytes.Repeat([
 // with an encrypted key chosen as the default, edited and deleted built-in
 // presets plus one of the user's, items with tags, collections (nested,
 // with positions), a variant link, links between items (to a deleted item
-// too), test cases, solutions, and submissions with results, and text a
-// backend could mangle.
+// too), test cases, solutions, working copies, and submissions with
+// results, and text a backend could mangle.
 func Populate(t *testing.T, db store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -168,6 +168,13 @@ func Populate(t *testing.T, db store.Store) {
 				return err
 			}
 		}
+		// Working copies: one with arbitrary text, one emptied.
+		for i, w := range []domain.WorkingCopy{{ItemID: "origin", Language: "python", Source: x, UpdatedAt: now},
+			{ItemID: "origin", Language: "cpp", Source: "", UpdatedAt: now.Add(time.Minute)}} {
+			if err := tx.PutWorkingCopy(&w); err != nil {
+				return fmt.Errorf("working copy %d: %w", i, err)
+			}
+		}
 		acc, wa := domain.VerdictAccepted, domain.VerdictWrongAnswer
 		for i, v := range []*domain.Verdict{&wa, &acc} {
 			ms, kb := 10*i, 1024*i
@@ -261,10 +268,12 @@ func SameDump(t *testing.T, what string, want, got map[string][]string) {
 // ClearNewerData removes what Populate stores that older schema versions
 // cannot hold, for tests that take its database back to one: the last runs
 // of solutions (version 11), AI jobs and drafts (version 12), test case
-// generators (version 13), and links and the record of a deleted item
-// (version 14; the item is created again, which removes its record).
+// generators (version 13), links and the record of a deleted item
+// (version 14; the item is created again, which removes its record), and
+// working copies (version 16).
 func ClearNewerData(t *testing.T, db store.Store) {
 	t.Helper()
+	ClearWorkingCopies(t, db)
 	Write(t, db, func(tx store.Tx) error {
 		links, err := tx.ItemLinks("origin")
 		if err != nil {
@@ -309,6 +318,24 @@ func ClearNewerData(t *testing.T, db store.Store) {
 				if err := tx.UpdateTestCase(&c); err != nil {
 					return err
 				}
+			}
+		}
+		return nil
+	})
+}
+
+// ClearWorkingCopies removes the working copies Populate stores, which
+// schema versions before 16 cannot hold.
+func ClearWorkingCopies(t *testing.T, db store.Store) {
+	t.Helper()
+	Write(t, db, func(tx store.Tx) error {
+		ws, err := tx.ListWorkingCopies("origin")
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			if _, err := tx.DeleteWorkingCopy(w.ItemID, w.Language); err != nil {
+				return err
 			}
 		}
 		return nil

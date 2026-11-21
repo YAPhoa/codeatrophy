@@ -304,8 +304,8 @@ ignored for the comparison — and preserved by an overwrite.
 Strategies for `changed` items:
 
 - `skip` — keep the local item.
-- `overwrite` — replace content with the bundle's. Personal state and
-  submissions are kept. Test cases are replaced, except that local hidden
+- `overwrite` — replace content with the bundle's. Personal state,
+  submissions and working copies are kept. Test cases are replaced, except that local hidden
   cases survive when the bundle has samples only. Solutions are replaced by
   the bundle's, except that local solutions survive when the bundle was
   exported without solutions.

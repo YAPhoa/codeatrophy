@@ -104,6 +104,7 @@ var DownMigrations = map[int]string{
 		CREATE INDEX items_updated_at ON items (updated_at);
 		CREATE INDEX items_created_at ON items (created_at);
 		PRAGMA foreign_keys = ON;`,
+	16: `DROP TABLE working_copies;`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

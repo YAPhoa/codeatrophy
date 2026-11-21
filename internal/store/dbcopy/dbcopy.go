@@ -177,6 +177,7 @@ func Summary(counts []store.TableCount) string {
 		"collection_items":   {"collection entry", "collection entries"},
 		"test_cases":         {"test case", "test cases"},
 		"solutions":          {"solution", "solutions"},
+		"working_copies":     {"working copy", "working copies"},
 		"submissions":        {"submission", "submissions"},
 		"submission_results": {"submission result", "submission results"},
 	}

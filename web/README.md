@@ -46,9 +46,10 @@ delays — seeded with a believable library. Keep it faithful to the contract
 when the contract changes; its own tests are in `src/mock/mock.test.ts`.
 
 State lives in memory: **reloading the page resets it** to the seed, except
-for the drafts and AI jobs, which the tab keeps in `sessionStorage` as the
-server keeps them across page loads. A job that was running when the page
-reloaded starts its generation over.
+for the drafts, the AI jobs and the working copies of the seed's problems,
+which the tab keeps in `sessionStorage` as the server keeps them across page
+loads. A job that was running when the page reloaded starts its generation
+over.
 
 The mock server forwards nothing to a backend: a request that bypasses the
 mock's client, such as a plain `fetch('/api/…')` from a script, gets
@@ -71,6 +72,7 @@ browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
 | `forbidden` | Every request, reads included, answers `403 forbidden`: the server does not recognise the host it is addressed by, so the app cannot even start |
 | `forbidden-writes` | Only state-changing requests answer `403 forbidden`, as when a reverse proxy hides the page's origin |
 | `show-tests` | The "Hide test cases by default" preference starts switched off |
+| `workspace-fail` | Writes of working copies answer `500`, as when the server cannot be reached; `__codeatrophyMock.db.workspaceWritesFail = false` in the console lets them through again |
 | `empty` | Start with an empty library and no style presets |
 | `no-styles` | Seed library, but no style presets |
 | `fast` / `instant` | Short / no artificial delays |
@@ -168,6 +170,7 @@ third-party origin.
 | `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; a bundle exported and imported back; a server that refuses requests |
 | `jobs` | AI jobs and drafts: leaving a running job, the AI jobs in the sidebar's footer, on the rail and behind a narrow window's menu, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
 | `capture` | The capture text stays in view on the way to a new draft |
+| `workspace` | The solve editor's working copies: a reload that shows the saved code from its first frame, switching language, Reset, a past submission's code, code older versions kept in the browser, a save that fails |
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
@@ -257,7 +260,7 @@ A few conventions worth knowing:
   problem the runner is shown as collapsed rows above and below that code
   (block widgets, `src/ui/editorRunner.ts`) that expand to it read-only; it is
   never part of the editor's text, so line numbers, selection, copying, undo,
-  saved drafts and submissions cover the solver's code alone. Code put into
+  working copies and submissions cover the solver's code alone. Code put into
   the editor from outside (opening the problem, changing language, reset,
   loading a submission) opens with its
   [marked regions](../docs/api.md#folded-regions) folded; typing never folds.
@@ -310,9 +313,27 @@ A few conventions worth knowing:
   footer (`features/jobs`) lists every running job and the finished ones no
   open screen has collected, each row a link to where its job is looked at,
   and polls only while a job runs or its list is open.
-- **Work in progress is kept locally.** Solution code is stored per item and
-  language in `localStorage`, and the custom input per item (up to 64 KB);
-  so is the capture text typed before a draft exists. The
+- **The code being written lives on the server.** The solve editor keeps one
+  working copy per problem and language (`docs/api.md`, "Working copies"):
+  the page waits for them, so the editor appears once with the right code,
+  in the language of the newest copy. An edit is sent a second after typing
+  stops, and at once on switching language, leaving the problem or the page
+  (`features/solve/workingCopies.ts`, `src/lib/workspaceSaver.ts`): one
+  request at a time per language, the latest edit next. Until the server
+  confirms it, the edit is also kept in `localStorage`
+  (`unsaved:<item>:<language>`: its source and the `updatedAt` of the
+  server copy it was based on). One still there when the problem opens wins
+  and is sent while the server copy is still that one; a copy written since,
+  from another device or tab, wins over it. Only the server's times are
+  compared, never the browser's clock. While saving fails
+  the toolbar says "Not saved", and the edit is tried again on the next one
+  and when the browser is back online. Code that older versions kept only
+  in the browser (`code:<item>:<language>`) is uploaded once where the
+  server has no copy, then removed (`src/lib/codeStore.ts`).
+- **Some work in progress is kept locally.** The language last chosen, on a
+  problem and anywhere (for a problem with no working copy yet), and the
+  custom input per item (up to 64 KB) are stored in `localStorage`; so is
+  the capture text typed before a draft exists. The
   model names loaded for a provider, by Refresh models
   or a connection test, are remembered there too, per kind and base URL
   (`features/settings/modelCache.ts`): the Model field of the provider form

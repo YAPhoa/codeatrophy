@@ -2993,12 +2993,15 @@ fieldset.stack legend {
   max-width: 190px;
 }
 
-.editor-saved {
-  min-width: 0;
-  overflow: hidden;
+/* Shown only while saving the code fails; it stays in view in a narrow editor too. */
+.editor-save-status {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
   font-size: var(--text-sm);
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .editor-host {

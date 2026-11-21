@@ -28,6 +28,7 @@ import type {
   Submission,
   TestCase,
   Verdict,
+  WorkingCopy,
 } from '../api/types';
 import { conflict, notFound } from './http';
 import { uuid } from './util';
@@ -63,6 +64,12 @@ export interface MockOptions {
   forbidden?: false | 'host' | 'origin';
   /** The `hideTestCases` preference at start. Default `true`, as on a new instance. */
   hideTestCases?: boolean;
+  /**
+   * Writes of working copies (`PUT` and `DELETE /items/{id}/workspace/…`)
+   * fail with a `500`, as when the server cannot be reached. Default `false`;
+   * `MockDb.workspaceWritesFail` switches it while the mock runs.
+   */
+  workspaceWritesFail?: boolean;
 }
 
 /**
@@ -99,6 +106,12 @@ export interface StoredLink {
   a: string;
   b: string;
   createdAt: string;
+  seq: number;
+}
+
+export interface StoredWorkingCopy extends WorkingCopy {
+  itemId: string;
+  /** Monotonic counter that breaks ties between equal update times. */
   seq: number;
 }
 
@@ -315,6 +328,12 @@ export class MockDb {
   submissions: Submission[] = [];
   /** Oldest first. A link outlives the items it joins. */
   links: StoredLink[] = [];
+  /** One per problem and language; in no particular order. */
+  workingCopies: StoredWorkingCopy[] = [];
+  /** Whether working copy writes fail (see `MockOptions.workspaceWritesFail`). */
+  workspaceWritesFail: boolean;
+  /** Called whenever the working copies change, so a page can keep them across a reload. */
+  onWorkingCopiesChange: (() => void) | null = null;
   /** The last title and type of each deleted item, for the links and variants that still point at it. */
   readonly deleted = new Map<string, { title: string; type: ItemType }>();
   /**
@@ -358,7 +377,9 @@ export class MockDb {
       aiSource: options.aiSource ?? 'settings',
       forbidden: options.forbidden ?? false,
       hideTestCases: options.hideTestCases ?? true,
+      workspaceWritesFail: options.workspaceWritesFail ?? false,
     };
+    this.workspaceWritesFail = this.options.workspaceWritesFail;
     this.preferences = { ...structuredClone(DEFAULT_PREFERENCES), hideTestCases: this.options.hideTestCases };
     if (this.options.aiSource === 'environment') {
       // The operator configured the provider through environment variables.
@@ -743,6 +764,10 @@ export class MockDb {
     this.testCases = this.testCases.filter((c) => c.itemId !== id);
     this.solutions = this.solutions.filter((s) => s.itemId !== id);
     this.submissions = this.submissions.filter((s) => s.itemId !== id);
+    if (this.workingCopies.some((w) => w.itemId === id)) {
+      this.workingCopies = this.workingCopies.filter((w) => w.itemId !== id);
+      this.onWorkingCopiesChange?.();
+    }
     for (const c of this.collections) c.itemIds = c.itemIds.filter((x) => x !== id);
   }
 

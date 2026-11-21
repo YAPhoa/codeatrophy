@@ -615,7 +615,8 @@ Returns `Item`.
 
 ### `DELETE /items/{id}`
 
-Deletes the item, its test cases, its solutions and its submissions. Its
+Deletes the item, its test cases, its solutions, its submissions and its
+[working copies](#working-copies). Its
 [links](#links) and the `variantOf` of items that were variants of it are
 kept, and the server keeps the item's id, title and type, so that those
 can still show what they name: the other items list it as unavailable, and
@@ -931,6 +932,39 @@ language or source, or which solution is the reference, changes
 `PATCH /items/{id}`. Other solution changes leave `revision` alone. Changing a
 reference solution does not reset `verified` on test cases; run
 `testcases/verify` again to re-check them.
+
+## Working copies
+
+The code the user is writing on a problem, kept on the server so that it
+follows them across browsers and devices: one working copy per problem and
+language, so switching to another language and back finds the earlier code
+again. A working copy is not a solution and not a submission. It is personal
+work in progress: never exported in bundles, not shown over MCP, and
+writing it changes neither the item's `revision` nor its `updatedAt`. It is
+deleted with its item, and kept when an import overwrites the problem (a
+bundle item of another type never replaces it: it is imported as a copy).
+
+`WorkingCopy`:
+
+```json
+{ "language": "python", "source": "def two_sum(nums, target):\n    ...", "updatedAt": "2026-11-22T09:30:00Z" }
+```
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `GET /items/{id}/workspace` | `{ "items": [WorkingCopy] }`, most recently written first (in the order the writes happened, also within one second of `updatedAt`), so the first names the language last written in. Empty when there are none. Not paginated |
+| `PUT /items/{id}/workspace/{language}` | Body `{ "source": "..." }`. Creates or replaces that language's working copy and returns it. `200` either way |
+| `DELETE /items/{id}/workspace/{language}` | `204`, also when there was none: the client goes back to the starter code |
+
+`{language}` is any canonical language id, whether or not the judge
+currently offers it; another value is `422`. `source` is required and may
+be empty (the user cleared the editor), at most `limits.maxSourceBytes`
+(`422` beyond that); line endings are normalised as in every text field.
+Each write is atomic: a working copy is always the whole of one write,
+never a mix of two. Writes are last-write-wins: two tabs on the same
+problem overwrite each other, and `updatedAt` tells a client which copy is
+newer. All of these are `404` for an item that does not exist and `422`
+for a reading.
 
 ## Collections
 

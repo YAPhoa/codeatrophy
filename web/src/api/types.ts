@@ -474,6 +474,24 @@ export interface SolutionInput {
 
 export type SolutionPatch = Partial<Omit<SolutionInput, 'submissionId'>>;
 
+// ---- Working copies -----------------------------------------------------------
+
+/**
+ * The code being written on a problem in one language, kept on the server.
+ * Personal work in progress: not a solution, never exported, and writing it
+ * changes neither the item's revision nor its `updatedAt`.
+ */
+export interface WorkingCopy {
+  language: string;
+  source: string;
+  updatedAt: string;
+}
+
+/** `PUT /items/{id}/workspace/{language}`. `source` may be empty. */
+export interface WorkingCopyInput {
+  source: string;
+}
+
 // ---- Collections and tags -------------------------------------------------
 
 export interface Collection {

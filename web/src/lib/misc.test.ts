@@ -4,7 +4,7 @@ import type { ErrorCode } from '../api/types';
 import { withFakeLocalStorage } from '../test/fakeStorage';
 import type { StylePreset } from '../api/types';
 import { headingSlugs, slugify } from '../ui/markdownPlugins';
-import { MAX_STORED_INPUT_BYTES, clearCode, initialCode, loadCode, loadCustomInput, pickLanguage, rememberLanguage, saveCode, saveCustomInput } from './codeStore';
+import { MAX_STORED_INPUT_BYTES, clearLegacy, clearUnsaved, codeFor, loadCustomInput, openingLanguage, openWorkspace, pickLanguage, readLegacy, readUnsaved, rememberedLanguage, rememberLanguage, saveCustomInput, sendOrder, writeUnsaved } from './codeStore';
 import { describeError, errorLine, sentence } from './errors';
 import { languageLabel, sortLanguages } from './languages';
 import { mcpConnection, mcpUrl } from './mcp';
@@ -13,24 +13,49 @@ import { resolveStyleChoice } from './styleChoice';
 describe('codeStore', () => {
   withFakeLocalStorage();
 
-  it('keeps code per item and language', () => {
-    saveCode('i1', 'python', 'print(1)');
-    saveCode('i1', 'go', 'package main');
-    saveCode('i2', 'python', 'print(2)');
-    expect(loadCode('i1', 'python')).toBe('print(1)');
-    expect(loadCode('i1', 'go')).toBe('package main');
-    expect(loadCode('i2', 'python')).toBe('print(2)');
-    clearCode('i1', 'python');
-    expect(loadCode('i1', 'python')).toBeNull();
-    expect(loadCode('i1', 'go')).toBe('package main');
+  it('keeps unsaved edits per item and language, with the time of the server copy they are based on', () => {
+    writeUnsaved('i1', 'python', 'print(1)', '2026-11-22T09:30:00Z');
+    writeUnsaved('i1', 'go', '', null);
+    writeUnsaved('i1', 'cpp', 'x', undefined);
+    writeUnsaved('i10', 'python', 'print(10)', null);
+    expect(readUnsaved('i1')).toEqual({ python: { source: 'print(1)', base: '2026-11-22T09:30:00Z' }, go: { source: '', base: null }, cpp: { source: 'x' } });
+    expect(globalThis.localStorage.getItem('codeatrophy:unsaved:i1:python')).toBe('{"source":"print(1)","base":"2026-11-22T09:30:00Z"}');
+    expect(globalThis.localStorage.getItem('codeatrophy:unsaved:i1:cpp')).toBe('{"source":"x"}');
+    clearUnsaved('i1', 'python');
+    clearUnsaved('i1', 'cpp');
+    expect(readUnsaved('i1')).toEqual({ go: { source: '', base: null } });
+    expect(readUnsaved('i10')).toEqual({ python: { source: 'print(10)', base: null } });
   });
 
-  it('prefers saved work over starter code, and keeps deliberately emptied code', () => {
+  it('ignores unsaved entries of another shape', () => {
+    globalThis.localStorage.setItem('codeatrophy:unsaved:i1:python', 'print(1)');
+    globalThis.localStorage.setItem('codeatrophy:unsaved:i1:go', '{"base":null}');
+    globalThis.localStorage.setItem('codeatrophy:unsaved:i1:cpp', '{"source":"x","base":7}');
+    expect(readUnsaved('i1')).toEqual({ cpp: { source: 'x' } });
+  });
+
+  it('reads and clears the code older versions kept, per item', () => {
+    globalThis.localStorage.setItem('codeatrophy:code:i1:python', 'old');
+    globalThis.localStorage.setItem('codeatrophy:code:i1:cpp', '');
+    globalThis.localStorage.setItem('codeatrophy:code:i2:python', 'other');
+    expect(readLegacy('i1')).toEqual({ python: 'old', cpp: '' });
+    clearLegacy('i1', 'python');
+    clearLegacy('i1', 'cpp');
+    expect(readLegacy('i1')).toEqual({});
+    expect(readLegacy('i2')).toEqual({ python: 'other' });
+  });
+
+  it('shows a language its own code, else its starter, and keeps deliberately emptied code', () => {
     const starter = { python: '# starter' };
-    expect(initialCode('i1', 'python', starter)).toBe('# starter');
-    expect(initialCode('i1', 'rust', starter)).toBe('');
-    saveCode('i1', 'python', '');
-    expect(initialCode('i1', 'python', starter)).toBe('');
+    expect(codeFor({}, starter, 'python')).toBe('# starter');
+    expect(codeFor({}, starter, 'rust')).toBe('');
+    expect(codeFor({ python: '' }, starter, 'python')).toBe('');
+  });
+
+  it('remembers the language last chosen on an item', () => {
+    expect(rememberedLanguage('i1')).toBeNull();
+    rememberLanguage('i1', 'go');
+    expect(rememberedLanguage('i1')).toBe('go');
   });
 
   it('picks the item language, then the last used, then one with starter code, then the first offered', () => {
@@ -50,6 +75,21 @@ describe('codeStore', () => {
     expect(pickLanguage('i1', [], {})).toBeNull();
   });
 
+  it('opens with the newest working copy if the judge offers it, else as pickLanguage chooses', () => {
+    rememberLanguage('i1', 'go');
+    expect(openingLanguage('i1', ['python', 'go', 'cpp'], ['cpp', 'python'], {})).toBe('cpp');
+    // The newest is not offered: not the next newest, but the usual choice.
+    expect(openingLanguage('i1', ['python', 'go'], ['cpp', 'python'], {})).toBe('go');
+    expect(openingLanguage('i1', ['python', 'go'], [], {})).toBe('go');
+    expect(openingLanguage('i1', [], ['cpp'], {})).toBeNull();
+  });
+
+  it('sends the language the editor opens with last', () => {
+    expect(sendOrder({ python: 'a', cpp: 'b', go: 'c' }, 'cpp')).toEqual(['go', 'python', 'cpp']);
+    expect(sendOrder({ python: 'a', go: 'c' }, 'cpp')).toEqual(['go', 'python']);
+    expect(sendOrder({}, null)).toEqual([]);
+  });
+
   it('keeps the custom input per item, unless it is empty or too large', () => {
     expect(loadCustomInput('i1')).toBe('');
     saveCustomInput('i1', '3\n1 2 3\n');
@@ -61,6 +101,62 @@ describe('codeStore', () => {
     expect(loadCustomInput('i1')).toBe('');
     saveCustomInput('i2', '');
     expect(globalThis.localStorage.length).toBe(0);
+  });
+});
+
+const copy = (language: string, source: string) => ({ language, source, updatedAt: '2026-11-22T09:30:00Z' });
+
+describe('openWorkspace', () => {
+  const THEN = '2026-11-22T09:30:00Z';
+  const LATER = '2026-11-22T10:30:00Z';
+  /** An unsaved edit based on the copy written at `base`. */
+  const edit = (source: string, base?: string | null) => (base === undefined ? { source } : { source, base });
+  const at = (language: string, source: string, updatedAt: string) => ({ language, source, updatedAt });
+
+  it('opens on the server copies, in their order, with nothing to send', () => {
+    const opened = openWorkspace([copy('cpp', 'b'), copy('python', 'a')], {}, {});
+    expect(opened).toEqual({ sources: { cpp: 'b', python: 'a' }, recent: ['cpp', 'python'], send: {}, drop: [] });
+  });
+
+  it('drops an unsaved edit the server already holds as it is', () => {
+    // As after a last save sent while the page went away: it arrived, but the page could not hear so.
+    const opened = openWorkspace([at('python', 'mine', LATER)], { python: edit('mine', THEN) }, {});
+    expect(opened).toEqual({ sources: { python: 'mine' }, recent: ['python'], send: {}, drop: ['python'] });
+  });
+
+  it('lets an unsaved edit win, as the newest, and sends it, while the server copy is the one it was based on', () => {
+    const opened = openWorkspace([at('cpp', 'b', THEN), at('python', 'a', THEN)], { python: edit('mine', THEN) }, {});
+    expect(opened).toEqual({ sources: { cpp: 'b', python: 'mine' }, recent: ['python', 'cpp'], send: { python: 'mine' }, drop: [] });
+    // Based on no copy, and there is still none; emptied on purpose.
+    expect(openWorkspace([], { go: edit('', null) }, {})).toEqual({ sources: { go: '' }, recent: ['go'], send: { go: '' }, drop: [] });
+  });
+
+  it('lets the server copy win when it was written after the copy an unsaved edit was based on, and drops the edit', () => {
+    // Written since, from another device.
+    const opened = openWorkspace([at('python', 'desktop', LATER)], { python: edit('laptop', THEN) }, {});
+    expect(opened).toEqual({ sources: { python: 'desktop' }, recent: ['python'], send: {}, drop: ['python'] });
+    // Written where there was none.
+    expect(openWorkspace([at('python', 'desktop', LATER)], { python: edit('laptop', null) }, {}).drop).toEqual(['python']);
+    // Deleted since: a reset elsewhere.
+    expect(openWorkspace([], { python: edit('laptop', THEN) }, {})).toEqual({ sources: {}, recent: [], send: {}, drop: ['python'] });
+  });
+
+  it('lets an unsaved edit win when what it was based on is not known', () => {
+    expect(openWorkspace([at('python', 'server', LATER)], { python: edit('mine') }, {}).send).toEqual({ python: 'mine' });
+  });
+
+  it('ranks several unsaved edits that win with the language last chosen here first', () => {
+    const unsaved = { python: edit('p', null), cpp: edit('c', null), go: edit('g', null), rust: edit('r', THEN) };
+    expect(openWorkspace([copy('java', 'j')], unsaved, {}, 'go').recent).toEqual(['go', 'cpp', 'python', 'java']);
+    expect(openWorkspace([], { python: edit('p', null), cpp: edit('c', null) }, {}, null).recent).toEqual(['cpp', 'python']);
+  });
+
+  it('uploads code an older version kept only where the server has none and nothing is unsaved', () => {
+    const opened = openWorkspace([copy('python', 'server')], { go: edit('unsaved', null) }, { python: 'old', go: 'old', cpp: 'old' });
+    expect(opened.sources).toEqual({ python: 'server', go: 'unsaved', cpp: 'old' });
+    expect(opened.send).toEqual({ go: 'unsaved', cpp: 'old' });
+    // It has no time, so it is not ranked.
+    expect(opened.recent).toEqual(['go', 'python']);
   });
 });
 
