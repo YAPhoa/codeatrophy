@@ -175,7 +175,7 @@ to show.
     "maxSolutionNameChars": 100,
     "maxSolutionNotesChars": 5000,
     "maxNotesChars": 4000,
-    "maxLinksPerItem": 50
+    "maxLinksPerItem": 30
   }
 }
 ```
@@ -635,7 +635,7 @@ unavailable (a client can show it as a dead link) until an item with that
 id exists again. An [import](#import-and-export) can also bring a link to
 an item this library never had. Linking and unlinking are not content
 changes: neither `revision` nor `updatedAt` moves. An item has at most
-`limits.maxLinksPerItem` (50) links, unavailable ones included.
+`limits.maxLinksPerItem` (30) links, unavailable ones included.
 
 `LinkedItem` — the other item of a link:
 

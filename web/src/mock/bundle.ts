@@ -263,15 +263,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const text = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The most ids `related` holds, a rule of the format; the library's own limit is lower. */
+const MAX_RELATED = 50;
+
 /**
  * An item's `related` ids: invalid ones and its own id are left out, and
- * those past the limit dropped with a warning.
+ * those past the format's limit dropped with a warning.
  */
 function readRelated(value: unknown, self: string, path: string, warnings: string[]): { related?: string[] } {
   if (!Array.isArray(value)) return {};
   const ids = [...new Set(value.filter((v): v is string => typeof v === 'string' && ID.test(v) && v !== self))].sort();
-  if (ids.length > LIMITS.maxLinksPerItem) warnings.push(`${path}: more than ${LIMITS.maxLinksPerItem} related items; the rest are ignored`);
-  const kept = ids.slice(0, LIMITS.maxLinksPerItem);
+  if (ids.length > MAX_RELATED) warnings.push(`${path}: more than ${MAX_RELATED} related items; the rest are ignored`);
+  const kept = ids.slice(0, MAX_RELATED);
   return kept.length > 0 ? { related: kept } : {};
 }
 

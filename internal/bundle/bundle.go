@@ -23,6 +23,11 @@ const (
 	FormatVersion = 2
 )
 
+// MaxRelated is the most ids an item's related field holds, a rule of the
+// format. A library may allow an item fewer links (domain.MaxLinksPerItem);
+// an import leaves out the links over that limit with a warning.
+const MaxRelated = 50
+
 // Format versions.
 const (
 	// Version1 carries problems that are complete programs.

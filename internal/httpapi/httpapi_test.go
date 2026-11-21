@@ -512,7 +512,7 @@ func TestMetaStatsAndSettings(t *testing.T) {
 	}
 	for k, want := range map[string]float64{"maxGeneratedTestCases": 30, "maxSummaryChars": 5000, "maxTextBytes": 1048576,
 		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
-		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxNotesChars": 4000, "maxLinksPerItem": 50, "maxImportCollections": 10000,
+		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxNotesChars": 4000, "maxLinksPerItem": 30, "maxImportCollections": 10000,
 		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60,
 		"minAiTimeoutSeconds": 10, "maxAiTimeoutSeconds": 300, "maxSourceBytes": 1024, "maxRequestBytes": 33554432} {
 		if lim[k] != want {

@@ -417,10 +417,11 @@ describe('links between items', () => {
     await api.items.links.remove(capTheorem, twoSum);
   });
 
-  it('allows at most 50 links an item', async () => {
+  it('allows at most maxLinksPerItem links an item', async () => {
+    const max = LIMITS.maxLinksPerItem;
     const ids = (await api.items.list({ limit: 200 })).items.map((i) => i.id).filter((id) => id !== twoSum);
-    for (let i = ids.length; i < 50; i++) ids.push((await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
-    for (const id of ids.slice(0, 50)) await api.items.links.add(twoSum, id);
+    for (let i = ids.length; i < max; i++) ids.push((await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
+    for (const id of ids.slice(0, max)) await api.items.links.add(twoSum, id);
     const extra = (await api.items.create({ type: 'reading', title: 'One too many' })).id;
     expect(await failure(api.items.links.add(twoSum, extra))).toMatchObject({ status: 422, code: 'validation_failed' });
     expect((await failure(api.items.links.add(extra, twoSum))).status).toBe(422);
@@ -3954,7 +3955,7 @@ describe('export and import', () => {
 
   it('leaves out, with a warning, a bundle link that would pass the limit', async () => {
     const { twoSum } = seedIds.items;
-    for (let i = 0; i < 50; i++) await api.items.links.add(twoSum, (await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
+    for (let i = 0; i < LIMITS.maxLinksPerItem; i++) await api.items.links.add(twoSum, (await api.items.create({ type: 'reading', title: `Filler ${i}` })).id);
     const bytes = buildBundleZip({ name: 'Too many', items: [{ ...(await bundled(seedIds.items.lis)), related: [twoSum] }] });
     const result = await api.bundle.import(zipFile(bytes), 'skip');
     expect(result.warnings).toHaveLength(1);

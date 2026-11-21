@@ -504,11 +504,11 @@ func (r *reader) readItem(id, dir string) (Item, bool) {
 			related[v] = true
 		}
 	}
-	if len(related) > domain.MaxLinksPerItem {
-		r.warn("%s/item.json: more than %d related items; the rest are ignored", dir, domain.MaxLinksPerItem)
+	if len(related) > MaxRelated {
+		r.warn("%s/item.json: more than %d related items; the rest are ignored", dir, MaxRelated)
 	}
 	for _, rel := range slices.Sorted(maps.Keys(related)) {
-		if len(it.Related) == domain.MaxLinksPerItem {
+		if len(it.Related) == MaxRelated {
 			break
 		}
 		it.Related = append(it.Related, rel)

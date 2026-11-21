@@ -128,7 +128,7 @@ read-only over MCP. `limits` are the bounds of test cases, as in
 
 | Tool | Purpose |
 | --- | --- |
-| `link_items` | Link an item (`itemId`) to closely related items (`otherIds`). Links go both ways, have no label and are not content (the revision stays); a pair already linked is left as it is. Every other id must name an existing item other than this one, or nothing is linked and the error names each bad one as `otherIds.<index>`. An item has at most 50 links. Returns `{ "links": [LinkedItem] }` |
+| `link_items` | Link an item (`itemId`) to closely related items (`otherIds`). Links go both ways, have no label and are not content (the revision stays); a pair already linked is left as it is. Every other id must name an existing item other than this one, or nothing is linked and the error names each bad one as `otherIds.<index>`. An item has at most 30 links. Returns `{ "links": [LinkedItem] }` |
 | `unlink_items` | Remove the links between an item and `otherIds`, also to items that have been deleted; an id that is not linked is ignored. Returns the links that remain |
 
 A link stays when either item is deleted. `get_item` returns the item's

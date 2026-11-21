@@ -327,8 +327,9 @@ An import only adds links; it never removes a local one. A link to an item
 duplicated in the same import points at the new copy, as `variantOf` does,
 and a link to an item in neither the bundle nor the library is kept as a
 link to an unavailable item, which comes alive if that item is imported
-later. A link that would give an item more than 50 links is left out with
-a warning.
+later. A link that would give an item more links than the library allows
+(30 in this version of Codeatrophy, fewer than `related` can hold) is left
+out with a warning.
 
 An `overwrite` increases the local item's revision only when its content
 other than test cases changes; replacing only test cases moves its

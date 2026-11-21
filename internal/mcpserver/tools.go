@@ -246,7 +246,7 @@ func (t *tools) register(s *mcp.Server) {
 		"otherIds": arrayOf(str("Item id"), "The other items"),
 	}, "itemId", "otherIds")
 	t.add(s, "link_items", "Link items",
-		"Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most 50 links. Not a content change: the revision stays. Returns the item's links.",
+		"Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most 30 links. Not a content change: the revision stays. Returns the item's links.",
 		linking, idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID   string   `json:"itemId"`

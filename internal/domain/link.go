@@ -4,7 +4,7 @@ import "time"
 
 // MaxLinksPerItem bounds the links an item has, counting links to items
 // that no longer exist.
-const MaxLinksPerItem = 50
+const MaxLinksPerItem = 30
 
 // LinkedItem is an item as seen from another one: the other end of a link,
 // or a variant's origin. Links and variantOf are kept when the item they

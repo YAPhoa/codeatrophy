@@ -223,7 +223,7 @@ func TestLinkLimit(t *testing.T) {
 	// Already linked ids do not count again.
 	must(e.app.LinkItems(e.ctx, hub.ID, []string{ids[0], ids[domain.MaxLinksPerItem-1]}))
 	ae = wantCode(t, must2(e.app.LinkItem(e.ctx, other.ID, hub.ID)), app.CodeValidation)
-	if !strings.Contains(fmt.Sprint(ae.Fields["itemId"]), "already has 50 links") {
+	if !strings.Contains(fmt.Sprint(ae.Fields["itemId"]), fmt.Sprintf("already has %d links", domain.MaxLinksPerItem)) {
 		t.Errorf("the other side over the limit: %v", ae.Fields)
 	}
 	// A link to a deleted item counts.
