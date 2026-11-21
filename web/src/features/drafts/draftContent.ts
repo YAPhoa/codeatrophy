@@ -2,7 +2,7 @@
 // review form and what is shown with it, the choices the draft was started
 // with, and how a generation's result becomes a form.
 
-import type { AppliedStyle, Draft, DraftCheck, DraftResponse, GenerationUsage, InterfaceHint, ItemType, VariantMode } from '../../api/types';
+import type { AppliedStyle, Draft, DraftCheck, DraftResponse, GenerationUsage, InterfaceHint, ItemType, ProblemInterface, VariantMode } from '../../api/types';
 import { checkedState, formFromDraft, upgradeForm, type CheckedDraft, type ItemFormState } from '../../lib/itemForm';
 import type { ProviderChoice } from '../../lib/providerChoice';
 import type { StyleChoice } from '../../lib/styleChoice';
@@ -18,6 +18,8 @@ export interface CaptureInput {
 export interface VariantInput {
   mode: VariantMode;
   instruction: string;
+  /** What the solver writes in the new problem; unset keeps the original's interface. */
+  interfaceHint?: ProblemInterface;
 }
 
 export interface DraftContent extends CheckedDraft {

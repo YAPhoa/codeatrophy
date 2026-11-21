@@ -1306,6 +1306,20 @@ test('variants: a problem lists them in a tab of their own, with the offer of an
   await panel.getByRole('link', { name: /^Harder/ }).click();
   await expect(page).toHaveURL(/\/variant\?mode=harder/);
   await expect(page.getByRole('radio', { name: /^Harder/ })).toBeChecked();
+
+  // What the solver writes starts as the original's choice, and can be switched.
+  const writes = page.getByRole('radiogroup', { name: 'What you write' });
+  await expect(writes.getByRole('radio', { name: 'Full program' })).toBeChecked();
+  await writes.getByText('Solution only').click();
+  await page.getByRole('button', { name: 'Draft another problem' }).click();
+  await expect(page.getByRole('heading', { name: 'Review the variant' })).toBeVisible();
+  await expect(page.getByRole('radiogroup', { name: 'What you write' }).getByRole('radio', { name: 'Solution only' })).toBeChecked();
+
+  // Back at the options, the choice holds, and a variant written by hand starts with it.
+  await page.getByRole('button', { name: 'Back to options' }).click();
+  await expect(writes.getByRole('radio', { name: 'Solution only' })).toBeChecked();
+  await page.getByRole('button', { name: 'Write one by hand' }).click();
+  await expect(page.getByRole('radiogroup', { name: 'What you write' }).getByRole('radio', { name: 'Solution only' })).toBeChecked();
 });
 
 test('organise: selected items are filed into a new collection', async ({ page }) => {

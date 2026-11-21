@@ -4,13 +4,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PenLine, Sparkles, Trash2 } from 'lucide-react';
 import { api, jobError } from '../../api/client';
 import { invalidateJobs, qk, useItem, useLargeTestCaseCount, useMeta, usePreferences, useStyles } from '../../api/queries';
-import type { Item, VariantRequest } from '../../api/types';
+import type { Item, ProblemInterface, VariantRequest } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { relativeTime } from '../../lib/format';
 import { emptyForm, type ItemFormState } from '../../lib/itemForm';
 import { Button, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
-import { TextAreaField } from '../../ui/Field';
+import { Segmented, TextAreaField } from '../../ui/Field';
 import { Callout, EmptyState, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { emptyContent, type DraftContent, type VariantInput } from '../drafts/draftContent';
 import { DraftReview } from '../drafts/DraftReview';
@@ -25,13 +25,23 @@ const STEPS = ['Choose', 'Review', 'Save'] as const;
 /** The original's tags and collections are a sensible starting point for the new item. */
 export const inheritedFrom = (original: Item | null): Partial<ItemFormState> => (original ? { tags: original.tags, collectionIds: original.collectionIds } : {});
 
-/** A variant written by hand starts with the original's interface, as a drafted one does. */
-function handForm(original: Item): ItemFormState {
-  return { ...emptyForm(original.type), ...inheritedFrom(original), difficulty: original.difficulty, interface: original.problem?.interface ?? 'program' };
+/** What the solver writes in the variant: the choice made, or else the original's interface. */
+const variantInterface = (original: Item, choice: VariantInput): ProblemInterface => choice.interfaceHint ?? original.problem?.interface ?? 'program';
+
+/** A variant written by hand starts with the chosen interface, as a drafted one does. */
+function handForm(original: Item, choice: VariantInput): ItemFormState {
+  return { ...emptyForm(original.type), ...inheritedFrom(original), difficulty: original.difficulty, interface: variantInterface(original, choice) };
 }
 
-function variantRequest(choice: VariantInput, styleId: StyleChoice, largeTestCases: number, provider: { providerId?: string | null }): VariantRequest {
-  return { mode: choice.mode, instruction: choice.instruction.trim() || null, styleId, largeTestCases, ...provider };
+function variantRequest(original: Item, choice: VariantInput, styleId: StyleChoice, largeTestCases: number, provider: { providerId?: string | null }): VariantRequest {
+  return {
+    mode: choice.mode,
+    instruction: choice.instruction.trim() || null,
+    styleId,
+    ...(original.type === 'problem' ? { interfaceHint: variantInterface(original, choice) } : {}),
+    largeTestCases,
+    ...provider,
+  };
 }
 
 export default function VariantPage() {
@@ -79,6 +89,24 @@ interface ChooseProps {
   onWriteByHand: () => void;
   onDiscard?: () => void;
   footer?: ReactNode;
+}
+
+/** Whether the solver writes a function or a whole program; the original's choice is the default. */
+function InterfacePicker({ original, choice, onChoice, disabled }: { original: Item; choice: VariantInput; onChoice: (change: Partial<VariantInput>) => void; disabled: boolean }) {
+  const own = original.problem?.interface ?? 'program';
+  const options = [
+    { value: 'function' as const, label: 'Solution only', title: 'You write a function or class; a hidden runner does the rest' },
+    { value: 'program' as const, label: 'Full program', title: 'You write the whole program, input and output included' },
+  ];
+  return (
+    <Segmented
+      size="sm"
+      label="What you write"
+      value={variantInterface(original, choice)}
+      onChange={(v) => onChoice({ interfaceHint: v })}
+      options={options.map((o) => ({ ...o, title: o.value === own ? `${o.title} (as the original)` : o.title, disabled }))}
+    />
+  );
 }
 
 /** What kind of variant to draft, with anything specific to ask for. */
@@ -142,10 +170,11 @@ function Choose(props: ChooseProps) {
         fieldClassName="capture-instruction"
       />
 
-      {aiEnabled && (
+      {(aiEnabled || isProblem) && (
         <div className="variant-options">
-          {stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={props.onStyleChange} disabled={busy} />}
-          <ModelPicker settings={provider.settings} value={provider.value} onChange={props.onProviderChange} disabled={busy} />
+          {isProblem && <InterfacePicker original={original} choice={props.choice} onChoice={props.onChoice} disabled={busy} />}
+          {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={props.onStyleChange} disabled={busy} />}
+          {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={props.onProviderChange} disabled={busy} />}
         </div>
       )}
 
@@ -218,8 +247,8 @@ function NewVariant({ original }: { original: Item }) {
       const created = await api.drafts.create({
         kind: 'variant',
         variantOf: original.id,
-        content: { ...content(generate ? null : handForm(original)) },
-        ...(generate ? { generate: variantRequest(choice, resolveStyleChoice(styleChoice, styles), largeTestCases, provider.request) } : {}),
+        content: { ...content(generate ? null : handForm(original, choice)) },
+        ...(generate ? { generate: variantRequest(original, choice, resolveStyleChoice(styleChoice, styles), largeTestCases, provider.request) } : {}),
       });
       qc.setQueryData(qk.draft(created.id), created);
       void invalidateJobs(qc);
@@ -271,7 +300,7 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
   const form = content.form;
   const backToOptions = searchParams.get('step') === 'input' && original !== null;
   const requested = draft.request && !('text' in draft.request) ? draft.request : null;
-  const choice: VariantInput = content.variant ?? { mode: requested?.mode ?? 'similar', instruction: requested?.instruction ?? '' };
+  const choice: VariantInput = content.variant ?? { mode: requested?.mode ?? 'similar', instruction: requested?.instruction ?? '', interfaceHint: requested?.interfaceHint };
   useDocumentTitle(original ? `Variant of ${original.title}` : 'Variant');
 
   const seq = draft.generationSeq;
@@ -350,7 +379,7 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
   const generate = async () => {
     setAskError(null);
     try {
-      await sd.generate(variantRequest(choice, resolveStyleChoice(content.styleChoice, styles), largeTestCases, provider.request));
+      await sd.generate(variantRequest(original, choice, resolveStyleChoice(content.styleChoice, styles), largeTestCases, provider.request));
     } catch (e) {
       setAskError(e);
     }
@@ -370,7 +399,7 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
       error={askError ?? failed}
       onGenerate={() => void generate()}
       onWriteByHand={() => {
-        sd.update((c) => ({ ...c, form: handForm(original), assumptions: [], aiDrafted: false, appliedStyle: null, check: null, checked: undefined, usage: null }));
+        sd.update((c) => ({ ...c, form: handForm(original, choice), assumptions: [], aiDrafted: false, appliedStyle: null, check: null, checked: undefined, usage: null }));
         if (backToOptions) setSearchParams({}, { replace: true });
       }}
       onDiscard={form ? undefined : () => void discard()}
