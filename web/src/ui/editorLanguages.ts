@@ -5,7 +5,7 @@
  */
 
 import { completeAnyWord, type CompletionContext, type CompletionSource } from '@codemirror/autocomplete';
-import { type Language, type StreamParser, StreamLanguage } from '@codemirror/language';
+import { type Language, LanguageSupport, type StreamParser, StreamLanguage } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
 import { libraryCompletion } from './editorLibrary';
 import type { LibraryTable } from './libraries/table';
@@ -60,7 +60,11 @@ export async function loadLanguage(id: string | null | undefined): Promise<Exten
     case 'python':
       return withLibrary(
         id,
-        import('@codemirror/lang-python').then((m) => [m.python(), m.pythonLanguage]),
+        Promise.all([import('@codemirror/lang-python'), import('./pythonTypes')]).then(([m, { pythonTypeTags }]) => {
+          // The language with its annotations' names tagged as types, and the rest of its support.
+          const language = m.pythonLanguage.configure({ props: [pythonTypeTags] });
+          return [new LanguageSupport(language, m.python().support), language];
+        }),
         import('./libraries/python'),
       );
     case 'c':
