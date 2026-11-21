@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
-import { Link, NavLink, useLocation, useParams, useSearchParams } from 'react-router';
+import { Link, NavLink, useLocation, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
@@ -35,6 +35,7 @@ import { useJobs } from '../features/jobs/JobsContext';
 import { JobsPopover } from '../features/jobs/JobsPopover';
 import { MOD } from '../lib/hotkeys';
 import { useIntent } from '../lib/intent';
+import { VIEW_PATHS, libraryRouteAt } from '../lib/libraryPaths';
 import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { setThemePreference, useThemePreference, type ThemePreference } from '../lib/theme';
@@ -282,7 +283,6 @@ const THEME_ICON: Record<ThemePreference, ReactNode> = {
 
 export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const newHref = useNewItemHref();
   const { collectionId } = useParams();
   const stats = useStats();
@@ -317,10 +317,8 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       return next;
     });
 
-  const onLibrary = location.pathname === '/';
-  const type = searchParams.get('type');
-  const fav = searchParams.get('favorite') === 'true';
-  const uncollected = searchParams.get('uncollected') === 'true';
+  // The library's views are paths; a collection is highlighted in the tree.
+  const view = libraryRouteAt(location.pathname)?.view;
   const s = stats.data;
 
   const judgeState = !meta.judge.enabled ? 'off' : meta.judge.healthy ? 'ok' : 'down';
@@ -359,10 +357,10 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <Search size={16} />
         </button>
         <nav className="rail-nav" aria-label="Sections">
-          <RailEntry to="/" icon={<Library size={16} />} label="All items" active={onLibrary && !type && !fav && !uncollected} />
-          <RailEntry to="/?type=problem" icon={<Code2 size={16} />} label="Problems" active={onLibrary && type === 'problem' && !fav && !uncollected} />
-          <RailEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" active={onLibrary && type === 'reading' && !fav && !uncollected} />
-          <RailEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" active={onLibrary && fav} />
+          <RailEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" active={view === 'all'} />
+          <RailEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" active={view === 'problem'} />
+          <RailEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" active={view === 'reading'} />
+          <RailEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" active={view === 'favorite'} />
           <RailEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />
           <span className="rail-sep" aria-hidden="true" />
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} preload={TagsPage.preload} />
@@ -412,16 +410,16 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       <nav className="sidebar-scroll">
         <ul className="nav-group">
           <li>
-            <NavEntry to="/" icon={<Library size={16} />} label="All items" count={s?.items.total} active={onLibrary && !type && !fav && !uncollected} />
+            <NavEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" count={s?.items.total} active={view === 'all'} />
           </li>
           <li>
-            <NavEntry to="/?type=problem" icon={<Code2 size={16} />} label="Problems" count={s?.items.byType.problem} active={onLibrary && type === 'problem' && !fav && !uncollected} />
+            <NavEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" count={s?.items.byType.problem} active={view === 'problem'} />
           </li>
           <li>
-            <NavEntry to="/?type=reading" icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={onLibrary && type === 'reading' && !fav && !uncollected} />
+            <NavEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={view === 'reading'} />
           </li>
           <li>
-            <NavEntry to="/?favorite=true" icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={onLibrary && fav} />
+            <NavEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={view === 'favorite'} />
           </li>
           <li>
             <NavEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />

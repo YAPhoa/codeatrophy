@@ -3,8 +3,9 @@ import { newItemHref } from './newItem';
 
 describe('newItemHref', () => {
   it('presets the type the library is filtered to', () => {
-    expect(newItemHref('/', '?type=problem')).toBe('/new?type=problem');
-    expect(newItemHref('/', '?type=reading&status=todo&q=graphs')).toBe('/new?type=reading');
+    expect(newItemHref('/problems', '')).toBe('/new?type=problem');
+    expect(newItemHref('/readings', '?status=todo&q=graphs')).toBe('/new?type=reading');
+    expect(newItemHref('/favorites', '?type=reading')).toBe('/new?type=reading');
   });
 
   it('presets the collection being viewed, with its type filter', () => {
@@ -14,8 +15,9 @@ describe('newItemHref', () => {
 
   it('presets nothing from an unfiltered library or an unknown type', () => {
     expect(newItemHref('/', '')).toBe('/new');
-    expect(newItemHref('/', '?favorite=true')).toBe('/new');
-    expect(newItemHref('/', '?type=video')).toBe('/new');
+    expect(newItemHref('/favorites', '')).toBe('/new');
+    expect(newItemHref('/', '?type=problem')).toBe('/new');
+    expect(newItemHref('/favorites', '?type=video')).toBe('/new');
   });
 
   it('ignores the query string of pages that are not the library', () => {

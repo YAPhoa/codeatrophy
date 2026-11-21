@@ -272,7 +272,7 @@ test.describe('reduced motion', () => {
   });
 
   test('the notes panel opens and closes at once', async ({ page }) => {
-    await open(page, '/?type=reading');
+    await open(page, '/readings');
     await page.getByRole('link', { name: 'Untrusted Markdown: What a Renderer Must Not Do' }).click();
     const notesButton = page.getByRole('button', { name: 'Notes', exact: true });
     // The seed's reading has no notes, so the panel starts closed.

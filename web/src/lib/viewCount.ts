@@ -1,23 +1,18 @@
-import { typeInBar, type LibraryFilters } from './filters';
+import type { LibraryFilters } from './filters';
+import type { LibraryRoute } from './libraryPaths';
 
 // The count beside a library view's title. While the list keeps an earlier
 // page on screen (it dims it and waits for the next), that page's total may
 // belong to another view, and the title has already changed.
 
 /**
- * What a library view is, as its title and scope name it: the collection
- * (with or without nested ones), Favorites, Uncollected, Problems or
- * Readings. The search and the filter bar narrow a view; they are not part
- * of it.
+ * What a library view is, as its title and scope name it: its path (All
+ * items, Problems, Readings, Favorites, a collection) and, in a collection,
+ * whether it takes in the nested ones. The search and the filter bar narrow
+ * a view; they are not part of it.
  */
-export function libraryView(f: LibraryFilters, collectionId: string | null): string {
-  return JSON.stringify([
-    collectionId,
-    collectionId != null && f.recursive,
-    f.favorite,
-    collectionId == null && f.uncollected,
-    typeInBar(f, collectionId) ? null : f.type,
-  ]);
+export function libraryView(route: LibraryRoute, f: LibraryFilters): string {
+  return JSON.stringify([route.view, route.collectionId, route.collectionId != null && f.recursive]);
 }
 
 export interface TitleCountState {

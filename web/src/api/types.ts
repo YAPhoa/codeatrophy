@@ -158,7 +158,7 @@ export interface Stats {
     byDifficulty: Record<Difficulty | 'none', number>;
     /** What the Favorites view lists: `GET /items?favorite=true`. */
     favorites: number;
-    /** What the Uncollected view lists: `GET /items?uncollected=true`. */
+    /** Items in no collection: `GET /items?uncollected=true`. */
     uncollected: number;
   };
   collections: number;

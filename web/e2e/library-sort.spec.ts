@@ -28,7 +28,7 @@ async function shownFirst(page: Page, expected: string[]) {
 }
 
 test('sort: chosen in a view, it is there again on return and after a reload, and each view has its own', async ({ page }) => {
-  await open(page, '/?type=problem');
+  await open(page, '/problems');
   const byTitle = await firstTitles(page, 'type=problem&sort=title');
   const byUpdate = await firstTitles(page, 'type=problem');
   expect(byTitle).not.toEqual(byUpdate);
@@ -79,7 +79,7 @@ test('sort: chosen in a view, it is there again on return and after a reload, an
 });
 
 test('sort: Favorites narrowed to a type in the filter bar keeps Favorites\' sort', async ({ page }) => {
-  await open(page, '/?favorite=true');
+  await open(page, '/favorites');
   await column(page, 'title').click();
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('search', { name: 'Filter items' }).getByRole('button', { name: /^Type/ }).click();
@@ -88,14 +88,14 @@ test('sort: Favorites narrowed to a type in the filter bar keeps Favorites\' sor
   await expect(page).toHaveURL(/type=problem/);
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
   // From a link with no sort in it, and not Problems' order.
-  await page.goto('/?favorite=true&type=problem');
+  await page.goto('/favorites?type=problem');
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
   await shownFirst(page, await firstTitles(page, 'favorite=true&type=problem&sort=title'));
   expect(Object.keys((await stored(page)) ?? {})).toEqual(['view:favorite']);
 });
 
 test('sort: each collection keeps its own, and its manual order is not the library\'s title sort', async ({ page }) => {
-  await open(page, '/?type=problem');
+  await open(page, '/problems');
   await column(page, 'title').click();
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
 
@@ -138,7 +138,7 @@ test('sort: the third click on a column goes back to the default, which stays af
 });
 
 test('sort: a search started on a sort just clicked sorts by relevance too, and clearing it brings the sort back', async ({ page }) => {
-  await open(page, '/?type=problem');
+  await open(page, '/problems');
   await column(page, 'title').click();
   await expect(page).toHaveURL(/sort=title/);
   const search = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
@@ -155,7 +155,7 @@ test('sort: a search started on a sort just clicked sorts by relevance too, and 
   await shownFirst(page, await firstTitles(page, 'type=problem&sort=title'));
 
   // A sort the URL names that is not the remembered one, as in a shared link, stays through a search.
-  await page.goto('/?type=problem&sort=difficulty');
+  await page.goto('/problems?sort=difficulty');
   await search.fill('graph');
   await expect(page).toHaveURL(/q=graph/);
   await expect(page).toHaveURL(/sort=difficulty/);
@@ -215,4 +215,57 @@ test('sort: one last used more than 30 days ago is forgotten, as is the old shar
   // The visit starts its 30 days again.
   const at = (await stored(page))![`collection:${WEEKLY}`]!.at;
   expect(Date.now() - at).toBeLessThan(DAY);
+});
+
+/** The query string on screen, without the mock's own flag. */
+function params(page: Page): Record<string, string> {
+  const url = new URL(page.url());
+  url.searchParams.delete('mock');
+  return Object.fromEntries(url.searchParams);
+}
+
+test('sort: a search typed or cleared just before another view is opened stays in its own view', async ({ page }) => {
+  await open(page, '/problems');
+  await column(page, 'title').click();
+  await nav(page).getByRole('link', { name: /^Readings/ }).click();
+  await column(page, 'difficulty').click();
+  await expect(column(page, 'difficulty')).toHaveAttribute('aria-pressed', 'true');
+  await nav(page).getByRole('link', { name: /^Problems/ }).click();
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+  const search = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
+
+  // Typed, and Readings opened before the search reaches the URL.
+  await search.fill('graph');
+  await nav(page).getByRole('link', { name: /^Readings/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Readings/);
+  // Past the moment the search would have been written.
+  await page.waitForTimeout(500);
+  expect(new URL(page.url()).pathname).toBe('/readings');
+  expect(params(page)).toEqual({});
+  await expect(search).toHaveValue('');
+  await expect(column(page, 'difficulty')).toHaveAttribute('aria-pressed', 'true');
+
+  // A search in Problems, sorted there by updated and filtered, then cleared just before leaving.
+  await nav(page).getByRole('link', { name: /^Problems/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Problems/);
+  // Nothing typed in Problems before comes back with it.
+  await expect(search).toHaveValue('');
+  await search.fill('sum');
+  await expect(page).toHaveURL(/q=sum/);
+  await column(page, 'updated').click();
+  await expect(page).toHaveURL(/sort=updated/);
+  await page.getByRole('search', { name: 'Filter items' }).getByRole('button', { name: /^Status/ }).click();
+  await page.getByRole('dialog', { name: 'Status' }).getByText('Done').click();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/status=done/);
+  await search.fill('');
+  await nav(page).getByRole('link', { name: /^Readings/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Readings/);
+  await page.waitForTimeout(500);
+  expect(new URL(page.url()).pathname).toBe('/readings');
+  expect(params(page)).toEqual({});
+  await expect(column(page, 'difficulty')).toHaveAttribute('aria-pressed', 'true');
+  // Problems' own sort is still title.
+  await nav(page).getByRole('link', { name: /^Problems/ }).click();
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
 });

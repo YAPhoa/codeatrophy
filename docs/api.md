@@ -260,9 +260,10 @@ to show.
 ```
 
 All enum keys are always present, with `0` when empty.
-`items.favorites` and `items.uncollected` are the counts the library's
-Favorites and Uncollected views show: each equals the `total` of `GET /items`
-with only `favorite=true`, or only `uncollected=true`, as the filter.
+`items.favorites` is the count the library's Favorites view shows, and
+`items.uncollected` the number of items in no collection: each equals the
+`total` of `GET /items` with only `favorite=true`, or only
+`uncollected=true`, as the filter.
 `submissions.total` counts `submit`-mode submissions only, and
 `submissions.accepted` those of them whose verdict is `accepted`. Runs are
 not counted: a `run` whose sample cases all pass adds to neither. `tags`

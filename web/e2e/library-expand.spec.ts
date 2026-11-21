@@ -494,7 +494,7 @@ test('library head: a list of readings has no verdict column, and its title colu
   const mixed = await mainWidth();
 
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Readings/ }).click();
-  await expect(page).toHaveURL(/type=reading/);
+  await expect(page).toHaveURL(/\/readings/);
   await expect(names).toHaveText(['Title', 'Difficulty', 'Updated']);
   const rows = page.locator('.item-list .item-row');
   await expect(rows.first().getByLabel('Reading', { exact: true })).toBeVisible();

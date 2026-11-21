@@ -90,10 +90,19 @@ describe('the remembered library sort', () => {
     expect(Object.keys(stored(storage) as object)).toEqual(['collection:c']);
   });
 
-  it('drops a scope it no longer uses, such as the one the library\'s views once shared', () => {
+  it('drops a scope it no longer uses: the one the library\'s views once shared, Uncollected\'s', () => {
     const now = Date.now();
-    storage.setItem(KEY, JSON.stringify({ library: { sort: 'title', order: null, at: now }, 'view:': { sort: 'title', order: null, at: now }, 'view:reading': { sort: 'title', order: 'desc', at: now } }));
+    storage.setItem(
+      KEY,
+      JSON.stringify({
+        library: { sort: 'title', order: null, at: now },
+        'view:uncollected': { sort: 'title', order: null, at: now },
+        'view:': { sort: 'title', order: null, at: now },
+        'view:reading': { sort: 'title', order: 'desc', at: now },
+      }),
+    );
     expect(readRememberedSort('library')).toBeNull();
+    expect(readRememberedSort('view:uncollected')).toBeNull();
     touchRememberedSort('view:problem');
     expect(stored(storage)).toEqual({ 'view:reading': { sort: 'title', order: 'desc', at: now } });
   });

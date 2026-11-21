@@ -270,6 +270,11 @@ A few conventions worth knowing:
   unless the runner's prefix has it or an import could not follow the prefix
   (`src/ui/editorLibrary.ts`); editors of code that runs after a prefix pass
   it as `runsAfter`.
+- **The library's views are paths:** `/` (All items), `/problems`,
+  `/readings`, `/favorites` and `/collections/:id` (`src/lib/libraryPaths.ts`).
+  The query string only narrows a view: search, the filter bar (whose type
+  is a parameter in Favorites and a collection), sort and page. The old
+  `/?type=…` and `/?favorite=true` addresses lead to the paths.
 - **Preferences live on the server** (`/settings/preferences`), so they follow
   the user between browsers; only the theme, the reading text size and the
   reader's text width (`src/lib/textWidth.ts`, also switched from the reader's

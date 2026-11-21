@@ -16,7 +16,21 @@ import {
 } from './app/screens';
 import { NotFoundPage, RouteError } from './app/NotFoundPage';
 import { LibraryPage } from './features/library/LibraryPage';
+import { legacyLibraryPath } from './lib/libraryPaths';
 import { movedIntoSettings, type SettingsSlug } from './features/settings/pages';
+
+/**
+ * Every view of the library, by its path. An address from before the views
+ * had paths (`/?type=problem`, `/?favorite=true`, `/?uncollected=true`)
+ * leads to the path, in place of itself so that Back does not return to it.
+ * One element for all of them, so moving between views keeps the page.
+ */
+function Library() {
+  const location = useLocation();
+  const moved = location.pathname === '/' ? legacyLibraryPath(location.search) : null;
+  if (moved) return <Navigate to={moved + location.hash} replace />;
+  return <LibraryPage />;
+}
 
 /** A page that moved into Settings: its old address leads there, query string included. */
 function MovedIntoSettings({ slug }: { slug: SettingsSlug }) {
@@ -26,8 +40,11 @@ function MovedIntoSettings({ slug }: { slug: SettingsSlug }) {
 
 export const routes = createRoutesFromElements(
   <Route element={<Shell />} errorElement={<RouteError />}>
-    <Route index element={<LibraryPage />} />
-    <Route path="collections/:collectionId" element={<LibraryPage />} />
+    <Route index element={<Library />} />
+    <Route path="problems" element={<Library />} />
+    <Route path="readings" element={<Library />} />
+    <Route path="favorites" element={<Library />} />
+    <Route path="collections/:collectionId" element={<Library />} />
     <Route path="new" element={<CapturePage />} />
     <Route path="drafts" element={<DraftsPage />} />
     <Route path="drafts/:id" element={<DraftPage />} />

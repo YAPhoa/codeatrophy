@@ -24,6 +24,8 @@ interface FilterBarProps {
   onChange: (next: LibraryFilters) => void;
   tags: readonly Tag[];
   collectionId: string | null;
+  /** Which view of the library this is (its path); a search typed in one view is not carried into another. */
+  view: string;
   searchRef: RefObject<HTMLInputElement | null>;
   /** Extra view-specific controls, placed after the standard filters. */
   children?: ReactNode;
@@ -61,26 +63,41 @@ function FilterButton({ label, count, children }: { label: string; count: number
  * sidebar, but in a collection and in Favorites here; Favorites in the
  * sidebar; the list's head sorts it.
  */
-export function FilterBar({ filters, onChange, tags, collectionId, searchRef, children, className }: FilterBarProps) {
-  // The search text is debounced into the URL so typing does not fire a request per keystroke.
-  const [text, setText] = useState(filters.q);
+export function FilterBar({ filters, onChange, tags, collectionId, view, searchRef, children, className }: FilterBarProps) {
+  // The search text is debounced into the URL so typing does not fire a
+  // request per keystroke. It belongs to the view it was typed in: another
+  // view shows its own search, and a write still pending is dropped, so it
+  // cannot land in the next view's URL.
+  const [typed, setTyped] = useState({ view, text: filters.q });
+  let text = typed.text;
+  if (typed.view !== view) {
+    text = filters.q;
+    setTyped({ view, text });
+  }
+  const setText = (next: string) => setTyped({ view, text: next });
   const lastPushed = useRef(filters.q);
   useEffect(() => {
-    if (filters.q !== lastPushed.current) {
-      lastPushed.current = filters.q;
-      setText(filters.q);
-    }
-  }, [filters.q]);
+    if (filters.q === lastPushed.current) return;
+    lastPushed.current = filters.q;
+    setTyped({ view, text: filters.q });
+  }, [filters.q, view]);
+  // What is set when the write happens, not when typing began, is what it keeps.
+  const latest = useRef({ filters, onChange });
+  useEffect(() => {
+    latest.current = { filters, onChange };
+  });
   useEffect(() => {
     if (text === lastPushed.current) return;
+    // Each view has its own path: a navigation already under way, not yet
+    // on screen to cancel this, leaves it unwritten too.
+    const path = window.location.pathname;
     const t = window.setTimeout(() => {
+      if (window.location.pathname !== path) return;
       lastPushed.current = text;
-      onChange({ ...filters, q: text });
+      latest.current.onChange({ ...latest.current.filters, q: text });
     }, 220);
     return () => window.clearTimeout(t);
-    // Only the text should restart the timer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  }, [text, view]);
 
   // Eager, so a menu opens on its counts; each dimension's counts ignore its own filter.
   const facets = useItemFacets(useMemo(() => toListParams(filters, collectionId), [filters, collectionId])).data;

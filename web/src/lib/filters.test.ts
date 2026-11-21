@@ -1,23 +1,51 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortApplies, sortChange, sortDirections, sortScope, toListParams, toggleIn, typeInBar, viewNoun, withRememberedSort, type LibraryFilters } from './filters';
+import { libraryRouteAt } from './libraryPaths';
 
-const parse = (qs: string) => parseFilters(new URLSearchParams(qs));
+/**
+ * The filters of a query string, in the view it names the way the library's
+ * addresses did before its views had paths (`favorite=true` Favorites,
+ * `type=` Problems or Readings), so the cases below can say a view in one
+ * string. `parseFilters` itself takes the view from the path.
+ */
+const parse = (qs: string) => {
+  const sp = new URLSearchParams(qs);
+  const type = sp.get('type');
+  return parseFilters(sp, sp.get('favorite') === 'true' ? 'favorite' : type === 'problem' || type === 'reading' ? type : 'all');
+};
 
 describe('parseFilters / filtersToSearch', () => {
   it('round-trips a full filter set through the URL', () => {
-    const qs = 'q=two+sum&type=problem&status=todo&status=done&difficulty=easy&difficulty=none&tag=dp&tag=graph&favorite=true&sort=title&order=desc';
-    const f = parse(qs);
+    const qs = 'q=two+sum&type=problem&status=todo&status=done&difficulty=easy&difficulty=none&tag=dp&tag=graph&sort=title&order=desc';
+    const f = parseFilters(new URLSearchParams(qs), 'favorite');
     expect(f).toMatchObject({ q: 'two sum', type: 'problem', status: ['todo', 'done'], difficulty: ['easy', 'none'], tags: ['dp', 'graph'], favorite: true, sort: 'title', order: 'desc' });
-    expect(filtersToSearch(f).toString()).toBe(qs);
+    expect(filtersToSearch(f, null).toString()).toBe(qs);
+    expect(filtersToSearch(parseFilters(new URLSearchParams(qs), 'collection'), 'c1').toString()).toBe(qs);
+  });
+
+  it('takes the view from the path: the type of Problems and Readings, and Favorites', () => {
+    const at = (view: Parameters<typeof parseFilters>[1], qs = '') => parseFilters(new URLSearchParams(qs), view);
+    expect(at('problem')).toMatchObject({ type: 'problem', favorite: false });
+    expect(at('reading')).toMatchObject({ type: 'reading', favorite: false });
+    expect(at('favorite')).toMatchObject({ type: null, favorite: true });
+    expect(at('all')).toMatchObject({ type: null, favorite: false });
+    // A type in the query string is the filter bar's, in Favorites and a collection only; `favorite` never counts.
+    expect(at('favorite', 'type=reading').type).toBe('reading');
+    expect(at('collection', 'type=reading').type).toBe('reading');
+    expect(at('problem', 'type=reading&favorite=true')).toMatchObject({ type: 'problem', favorite: false });
+    expect(at('all', 'type=problem&favorite=true')).toMatchObject({ type: null, favorite: false });
+    // The view's own is not written back into the URL.
+    expect(filtersToSearch(at('problem', 'status=done'), null).toString()).toBe('status=done');
+    expect(filtersToSearch(at('favorite'), null).toString()).toBe('');
   });
 
   it('drops unknown values instead of passing them to the API', () => {
-    const f = parse('type=video&status=todo&status=bogus&difficulty=extreme&sort=random&order=sideways&favorite=yes');
+    const f = parseFilters(new URLSearchParams('type=video&status=todo&status=bogus&difficulty=extreme&sort=random&order=sideways&favorite=yes'), 'collection');
     expect(f).toEqual({ ...EMPTY_FILTERS, status: ['todo'] });
   });
 
   it('serialises the empty state to an empty query string', () => {
-    expect(filtersToSearch(EMPTY_FILTERS).toString()).toBe('');
+    expect(filtersToSearch(EMPTY_FILTERS, null).toString()).toBe('');
   });
 
   it('normalises and de-duplicates tags', () => {
@@ -65,11 +93,6 @@ describe('toListParams', () => {
     expect(toListParams(parse('sort=title&order=desc'), null).order).toBe('desc');
   });
 
-  it('ignores "uncollected" inside a collection view', () => {
-    expect(toListParams(parse('uncollected=true'), 'c1')).toEqual({ sort: 'position', collectionId: 'c1' });
-    expect(toListParams(parse('uncollected=true'), null)).toEqual({ sort: 'updated', uncollected: true });
-  });
-
   it('passes multi-value filters through', () => {
     expect(toListParams(parse('status=todo&status=done&tag=a&tag=b&difficulty=none&favorite=true&type=reading'), null)).toEqual({
       sort: 'updated',
@@ -101,13 +124,13 @@ describe('helpers', () => {
   });
 
   it('leaves the sidebar view out of the filter bar', () => {
-    const f = parse('q=a&type=problem&status=todo&difficulty=easy&tag=x&uncollected=true&sort=title');
+    const f = parse('q=a&type=problem&status=todo&difficulty=easy&tag=x&sort=title');
     expect(barFilterCount(f, null)).toBe(4);
-    expect(barFilterCount(parse('type=reading&uncollected=true'), null)).toBe(0);
+    expect(barFilterCount(parse('type=reading'), null)).toBe(0);
     expect(barFilterCount(parse('favorite=true'), null)).toBe(0);
     const cleared = clearBarFilters(f, null);
     expect(barFilterCount(cleared, null)).toBe(0);
-    expect(cleared).toMatchObject({ type: 'problem', uncollected: true, sort: 'title' });
+    expect(cleared).toMatchObject({ type: 'problem', sort: 'title' });
   });
 
   it('counts and clears the type as a bar filter in Favorites', () => {
@@ -202,7 +225,6 @@ describe('viewNoun', () => {
     expect(viewNoun(parse('type=reading'), null)).toBe('readings');
     expect(viewNoun(parse(''), null)).toBe('items');
     expect(viewNoun(parse('favorite=true'), null)).toBe('items');
-    expect(viewNoun(parse('uncollected=true&type=problem'), null)).toBe('items');
     expect(viewNoun(parse('type=reading'), 'c1')).toBe('items');
   });
 });
@@ -211,16 +233,10 @@ describe('the remembered sort', () => {
   const title = { sort: 'title', order: null } as const;
 
   it('is one for each of the sidebar\'s views and one per collection', () => {
-    const scope = (qs: string, collectionId: string | null = null) => sortScope(parse(qs), collectionId);
-    expect([scope(''), scope('type=problem'), scope('type=reading'), scope('favorite=true'), scope('uncollected=true')]).toEqual(['view:all', 'view:problem', 'view:reading', 'view:favorite', 'view:uncollected']);
-    expect(scope('', 'c1')).toBe('collection:c1');
-    expect(scope('', 'c2')).toBe('collection:c2');
-    // The search, the filter bar and its type (in Favorites, in a collection) narrow the view and keep its sort.
-    expect(scope('type=problem&q=x&status=done&tag=dp&sort=title')).toBe('view:problem');
-    expect(scope('favorite=true&type=problem')).toBe('view:favorite');
-    expect(scope('type=reading&recursive=true', 'c1')).toBe('collection:c1');
-    // As the title names the view.
-    expect(scope('uncollected=true&favorite=true&type=problem')).toBe('view:uncollected');
+    const scope = (path: string) => sortScope(libraryRouteAt(path)!);
+    expect(['/', '/problems', '/readings', '/favorites'].map(scope)).toEqual(['view:all', 'view:problem', 'view:reading', 'view:favorite']);
+    expect(scope('/collections/c1')).toBe('collection:c1');
+    expect(scope('/collections/c2')).toBe('collection:c2');
   });
 
   it('never applies relevance, and a collection\'s own order only there without its nested ones', () => {

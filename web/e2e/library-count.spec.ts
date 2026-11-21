@@ -94,7 +94,7 @@ test('library count: a view switch shows the new view\'s count with its title, a
 });
 
 test('library count: a search in the same view keeps the count until the narrower one, and rolls to it', async ({ page }) => {
-  await open(page, '/?type=reading', 'default');
+  await open(page, '/readings', 'default');
   const all = await total(page, 'type=reading');
   const found = await total(page, 'type=reading&q=distributed');
   expect(found).toBeLessThan(all);

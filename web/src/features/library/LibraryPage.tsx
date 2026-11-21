@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, GripVertical, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../../api/client';
@@ -13,6 +13,7 @@ import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
 import { exitDuration, prefersReducedMotion, useChangeCount, useLoadingShown } from '../../lib/motion';
 import { isBooting } from '../../lib/boot';
+import { libraryRouteAt, type LibraryRoute, type SidebarView } from '../../lib/libraryPaths';
 import { useNewItemHref } from '../../lib/newItem';
 import { parsePage, setPageSize, usePageSize, withPage } from '../../lib/paging';
 import { rememberSort, useRememberedSort } from '../../lib/sortStore';
@@ -32,6 +33,8 @@ import { ItemRow, detailsId } from './ItemRow';
 import { Pager } from './Pager';
 import { SortHeader, SortMenu } from './SortControls';
 
+const VIEW_TITLES: Record<SidebarView, string> = { all: 'Library', problem: 'Problems', reading: 'Readings', favorite: 'Favorites' };
+
 const nextStatus = (s: ItemStatus): ItemStatus => ITEM_STATUSES[(ITEM_STATUSES.indexOf(s) + 1) % ITEM_STATUSES.length] ?? 'todo';
 
 /**
@@ -44,11 +47,9 @@ const nextStatus = (s: ItemStatus): ItemStatus => ITEM_STATUSES[(ITEM_STATUSES.i
 function unfilteredTotal(f: LibraryFilters, collectionId: string | null, collection: Collection | null, stats: Stats | undefined): number | null {
   if (collectionId) return !collection || f.recursive || f.type || f.favorite ? null : collection.itemCount;
   if (!stats) return null;
-  const views = (f.type ? 1 : 0) + (f.favorite ? 1 : 0) + (f.uncollected ? 1 : 0);
-  if (views > 1) return null;
+  if (f.type && f.favorite) return null;
   if (f.type) return stats.items.byType[f.type];
   if (f.favorite) return stats.items.favorites;
-  if (f.uncollected) return stats.items.uncollected;
   return stats.items.total;
 }
 
@@ -109,7 +110,10 @@ function useSkeletonReveal(pending: boolean, skeletonShown: boolean): 'cross' | 
 
 /** The library: every item, or one collection, with search, filters, sorting and bulk actions. */
 export function LibraryPage() {
-  const { collectionId = null } = useParams();
+  // The view is the path; the query string narrows it.
+  const { pathname } = useLocation();
+  const route: LibraryRoute = libraryRouteAt(pathname) ?? { view: 'all', collectionId: null };
+  const collectionId = route.collectionId;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -123,15 +127,15 @@ export function LibraryPage() {
   const quickUpdate = useQuickUpdate();
 
   // The URL's filters, with the sort remembered for this view where the URL names none.
-  const urlFilters = useMemo(() => parseFilters(searchParams), [searchParams]);
-  const scope = sortScope(urlFilters, collectionId);
+  const urlFilters = useMemo(() => parseFilters(searchParams, route.view), [searchParams, route.view]);
+  const scope = sortScope(route);
   const remembered = useRememberedSort(scope);
   const filters = useMemo(() => withRememberedSort(urlFilters, collectionId, remembered), [urlFilters, collectionId, remembered]);
   const setFilters = useCallback(
     (next: LibraryFilters) => {
       const change = sortChange(filters, next, urlFilters, collectionId, remembered);
       if (change.remember !== undefined) rememberSort(scope, change.remember);
-      setSearchParams(filtersToSearch(change.url), { replace: true });
+      setSearchParams(filtersToSearch(change.url, collectionId), { replace: true });
     },
     [filters, urlFilters, collectionId, scope, remembered, setSearchParams],
   );
@@ -162,7 +166,7 @@ export function LibraryPage() {
 
   // The view the page on screen was loaded for: a page kept while the next
   // loads is the last one that loaded, maybe for another view.
-  const view = libraryView(filters, collectionId);
+  const view = libraryView(route, filters);
   const ownPage = query.isSuccess && !query.isPlaceholderData;
   const [loadedView, setLoadedView] = useState<string | null>(null);
   if (ownPage && loadedView !== view) setLoadedView(view);
@@ -450,19 +454,7 @@ export function LibraryPage() {
   const siblings = collection ? siblingsOf(collections, collection.id) : [];
   const siblingIndex = collection ? siblings.findIndex((c) => c.id === collection.id) : -1;
   // A collection's name is not known until the collections load; its view is not titled "Library" meanwhile.
-  const title = collection
-    ? collection.name
-    : collectionId
-      ? ''
-      : filters.uncollected
-      ? 'Uncollected'
-      : filters.favorite
-        ? 'Favorites'
-        : filters.type === 'problem'
-          ? 'Problems'
-          : filters.type === 'reading'
-            ? 'Readings'
-            : 'Library';
+  const title = collection ? collection.name : route.view === 'collection' ? '' : VIEW_TITLES[route.view];
   useDocumentTitle(title);
   // Readings have no verdicts, so a list of only readings has no column for them.
   const noVerdict = filters.type === 'reading';
@@ -532,7 +524,6 @@ export function LibraryPage() {
               {collection.description.trim() ? collection.description : '\u00a0'}
             </p>
           )}
-          {filters.uncollected && !collection && <p className="page-sub">Items that are not in any collection yet.</p>}
           {children.length > 0 && (
             <div className="subcollections">
               {children.map((c) => (
@@ -599,6 +590,7 @@ export function LibraryPage() {
               onChange={setFilters}
               tags={tags}
               collectionId={collectionId}
+              view={scope}
               searchRef={searchRef}
               className={cx(barSwapped && 'is-swapped-in')}
             >

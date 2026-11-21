@@ -1,8 +1,11 @@
 // The library's filter state lives in the URL so that views can be
 // bookmarked and the back button works. This module converts between the URL,
-// the in-memory filter object and the API's query parameters.
+// the in-memory filter object and the API's query parameters. The view
+// itself is the path (libraryPaths.ts); the filters carry what it fixes (the
+// type of Problems and Readings, Favorites) so the rules below read one object.
 
 import type { Difficulty, ItemListParams, ItemSort, ItemStatus, ItemType, SortOrder } from '../api/types';
+import type { LibraryRoute } from './libraryPaths';
 
 export interface LibraryFilters {
   q: string;
@@ -10,8 +13,8 @@ export interface LibraryFilters {
   status: ItemStatus[];
   difficulty: (Difficulty | 'none')[];
   tags: string[];
+  /** The Favorites view. */
   favorite: boolean;
-  uncollected: boolean;
   /** In a collection view: also show items of nested collections. */
   recursive: boolean;
   /** `null` means "the default for this view". */
@@ -26,7 +29,6 @@ export const EMPTY_FILTERS: LibraryFilters = {
   difficulty: [],
   tags: [],
   favorite: false,
-  uncollected: false,
   recursive: false,
   sort: null,
   order: null,
@@ -39,8 +41,14 @@ const SORTS: readonly string[] = ['updated', 'created', 'title', 'difficulty', '
 
 const uniq = <T,>(list: T[]): T[] => Array.from(new Set(list));
 
-export function parseFilters(sp: URLSearchParams): LibraryFilters {
-  const type = sp.get('type');
+/**
+ * The filters of the library view at `view`'s path. The path fixes the type
+ * of Problems and Readings and makes Favorites; the URL's `type` counts only
+ * where the filter bar picks it (Favorites, a collection), and a `favorite`
+ * in it never does.
+ */
+export function parseFilters(sp: URLSearchParams, view: LibraryRoute['view'] = 'all'): LibraryFilters {
+  const type = view === 'problem' || view === 'reading' ? view : view === 'favorite' || view === 'collection' ? sp.get('type') : null;
   const sort = sp.get('sort');
   const order = sp.get('order');
   return {
@@ -49,24 +57,25 @@ export function parseFilters(sp: URLSearchParams): LibraryFilters {
     status: uniq(sp.getAll('status').filter((s) => STATUSES.includes(s))) as ItemStatus[],
     difficulty: uniq(sp.getAll('difficulty').filter((d) => DIFFS.includes(d))) as (Difficulty | 'none')[],
     tags: uniq(sp.getAll('tag').map((t) => t.trim().toLowerCase()).filter(Boolean)),
-    favorite: sp.get('favorite') === 'true',
-    uncollected: sp.get('uncollected') === 'true',
+    favorite: view === 'favorite',
     recursive: sp.get('recursive') === 'true',
     sort: sort && SORTS.includes(sort) ? (sort as ItemSort) : null,
     order: order === 'asc' || order === 'desc' ? order : null,
   };
 }
 
-/** Serialise filters for the URL, leaving out everything that is at its default. */
-export function filtersToSearch(f: LibraryFilters): URLSearchParams {
+/**
+ * Serialise filters for the URL, leaving out everything that is at its
+ * default and what the path already says (the view, and the type where the
+ * filter bar does not pick it).
+ */
+export function filtersToSearch(f: LibraryFilters, collectionId: string | null): URLSearchParams {
   const sp = new URLSearchParams();
   if (f.q.trim()) sp.set('q', f.q.trim());
-  if (f.type) sp.set('type', f.type);
+  if (f.type && typeInBar(f, collectionId)) sp.set('type', f.type);
   for (const s of f.status) sp.append('status', s);
   for (const d of f.difficulty) sp.append('difficulty', d);
   for (const t of f.tags) sp.append('tag', t);
-  if (f.favorite) sp.set('favorite', 'true');
-  if (f.uncollected) sp.set('uncollected', 'true');
   if (f.recursive) sp.set('recursive', 'true');
   if (f.sort) sp.set('sort', f.sort);
   if (f.order) sp.set('order', f.order);
@@ -130,11 +139,11 @@ export function nextColumnSort(f: LibraryFilters, collectionId: string | null, c
 
 /**
  * What a library view lists, as its filter box names it: a Problems or
- * Readings view, or items anywhere else (all items, Favorites, Uncollected,
- * a collection), whatever the type filter says there.
+ * Readings view, or items anywhere else (all items, Favorites, a
+ * collection), whatever the type filter says there.
  */
 export function viewNoun(f: LibraryFilters, collectionId: string | null): 'problems' | 'readings' | 'items' {
-  if (collectionId || f.favorite || f.uncollected) return 'items';
+  if (collectionId || f.favorite) return 'items';
   return f.type === 'problem' ? 'problems' : f.type === 'reading' ? 'readings' : 'items';
 }
 
@@ -166,8 +175,6 @@ export function toListParams(f: LibraryFilters, collectionId: string | null): It
   if (collectionId) {
     params.collectionId = collectionId;
     if (f.recursive) params.recursive = true;
-  } else if (f.uncollected) {
-    params.uncollected = true;
   }
   return params;
 }
@@ -180,8 +187,7 @@ export function activeFilterCount(f: LibraryFilters): number {
     (f.status.length ? 1 : 0) +
     (f.difficulty.length ? 1 : 0) +
     (f.tags.length ? 1 : 0) +
-    (f.favorite ? 1 : 0) +
-    (f.uncollected ? 1 : 0)
+    (f.favorite ? 1 : 0)
   );
 }
 
@@ -194,8 +200,8 @@ export function typeInBar(f: LibraryFilters, collectionId: string | null): boole
 }
 
 /**
- * Filters set in the library's filter bar. Favorites and Uncollected are
- * views picked in the sidebar, and so is the type where the bar does not
+ * Filters set in the library's filter bar. Favorites is a view picked in
+ * the sidebar, and so is the type where the bar does not
  * offer it (typeInBar), so the bar neither counts nor clears them.
  */
 export function barFilterCount(f: LibraryFilters, collectionId: string | null): number {
@@ -238,17 +244,14 @@ export interface RememberedSort {
 }
 
 /**
- * Which remembered sort a view uses: one for each view the sidebar picks
- * (All items, Problems, Readings, Favorites, Uncollected, as its title names
- * it) and one for each collection, with or without its nested ones. A type
- * picked in the filter bar (in Favorites or a collection) narrows the view
- * and keeps its sort.
+ * Which remembered sort a view uses, from its path: one for each view of the
+ * sidebar (`view:all`, `view:problem`, `view:reading`, `view:favorite`) and
+ * one for each collection, with or without its nested ones. The query
+ * string, a type picked in the filter bar included, narrows the view and
+ * keeps its sort.
  */
-export function sortScope(f: LibraryFilters, collectionId: string | null): string {
-  if (collectionId) return `collection:${collectionId}`;
-  if (f.uncollected) return 'view:uncollected';
-  if (f.favorite) return 'view:favorite';
-  return f.type ? `view:${f.type}` : 'view:all';
+export function sortScope(route: LibraryRoute): string {
+  return route.collectionId ? `collection:${route.collectionId}` : `view:${route.view}`;
 }
 
 /** Whether a remembered sort can apply to a view: never relevance, and a collection's own order only in that collection without its nested ones. */

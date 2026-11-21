@@ -1,25 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { parseFilters } from './filters';
+import { libraryRouteAt } from './libraryPaths';
 import { libraryView, titleCount, type TitleCountState } from './viewCount';
 
-const view = (qs: string, collectionId: string | null = null) => libraryView(parseFilters(new URLSearchParams(qs)), collectionId);
+const view = (path: string, qs = '') => {
+  const route = libraryRouteAt(path)!;
+  return libraryView(route, parseFilters(new URLSearchParams(qs), route.view));
+};
 
 describe('libraryView', () => {
-  it('tells apart what the sidebar picks: the type, Favorites, Uncollected, a collection and its nested ones', () => {
-    const views = [view(''), view('type=problem'), view('type=reading'), view('favorite=true'), view('uncollected=true'), view('', 'c1'), view('', 'c2'), view('recursive=true', 'c1')];
+  it('tells apart what the sidebar picks, a collection and its nested ones', () => {
+    const views = [view('/'), view('/problems'), view('/readings'), view('/favorites'), view('/collections/c1'), view('/collections/c2'), view('/collections/c1', 'recursive=true')];
     expect(new Set(views).size).toBe(views.length);
   });
 
   it('leaves out the search, the filter bar and the sort', () => {
-    expect(view('type=problem&q=graph&status=done&difficulty=easy&tag=dp&sort=title&order=asc')).toBe(view('type=problem'));
+    expect(view('/problems', 'q=graph&status=done&difficulty=easy&tag=dp&sort=title&order=asc')).toBe(view('/problems'));
     // The type is in the bar in a collection and in Favorites.
-    expect(view('type=reading', 'c1')).toBe(view('', 'c1'));
-    expect(view('favorite=true&type=problem')).toBe(view('favorite=true'));
+    expect(view('/collections/c1', 'type=reading')).toBe(view('/collections/c1'));
+    expect(view('/favorites', 'type=problem')).toBe(view('/favorites'));
   });
 
   it('ignores what does not apply to the view', () => {
-    expect(view('recursive=true')).toBe(view(''));
-    expect(view('uncollected=true', 'c1')).toBe(view('', 'c1'));
+    expect(view('/', 'recursive=true')).toBe(view('/'));
+    expect(view('/problems', 'type=reading&favorite=true')).toBe(view('/problems'));
   });
 });
 

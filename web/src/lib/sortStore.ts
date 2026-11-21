@@ -9,8 +9,8 @@ import { readString, remove, writeJson } from './storage';
 // `at` is the last visit to the scope's view, in ms. An entry lasts 30 days
 // from it, so the sorts of collections no longer opened go on their own;
 // anything expired, unreadable or invalid is ignored, and dropped at the
-// next write. So is a scope no longer used, such as `library`, which the
-// sidebar's views once shared.
+// next write. So is a scope no longer used: `library`, which the sidebar's
+// views once shared, or `view:uncollected`, a view no longer there.
 
 const KEY = 'librarySort';
 export const SORT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -22,7 +22,7 @@ interface Entry extends RememberedSort {
 // Relevance is never remembered: it is a search's own order.
 const SORTS: readonly string[] = ['updated', 'created', 'title', 'difficulty', 'position'];
 
-const SCOPE = /^(view:(all|problem|reading|favorite|uncollected)|collection:.+)$/;
+const SCOPE = /^(view:(all|problem|reading|favorite)|collection:.+)$/;
 
 function alive(e: unknown, now: number): e is Entry {
   if (!e || typeof e !== 'object') return false;

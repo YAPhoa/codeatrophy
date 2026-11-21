@@ -24,7 +24,7 @@ const counts = (page: Page, name: string) =>
     .evaluateAll((rows) => Object.fromEntries(rows.map((r) => [r.querySelector('input')!.getAttribute('aria-label'), Number(r.querySelector('.facet-count')!.textContent)])));
 
 test('filters: the counts are what each value shows in this view, the menu\'s own filter aside', async ({ page }) => {
-  await open(page, '/?type=reading');
+  await open(page, '/readings');
   await openMenu(page, 'Status');
   await expect(menu(page, 'Status').locator('.facet-count .skel')).toHaveCount(0);
   const readings = await counts(page, 'Status');
@@ -173,7 +173,7 @@ test('filters: the Tags menu lists a few of the view’s tags, the most used fir
 
 test('filters: the Tags menu leaves out the tags no item of the view carries, but keeps a picked one', async ({ page }) => {
   // Only problems carry "array".
-  await open(page, '/?type=reading');
+  await open(page, '/readings');
   const tags = await openMenu(page, 'Tags');
   const names = () => tags.locator('.facet-row input').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')!));
   await expect(tags.locator('.facet-row').first()).toBeVisible();
@@ -182,7 +182,7 @@ test('filters: the Tags menu leaves out the tags no item of the view carries, bu
   await page.keyboard.press('Escape');
 
   // Picked, it shows, first, with nothing to count.
-  await open(page, '/?type=reading&tag=array');
+  await open(page, '/readings?tag=array');
   const picked = await openMenu(page, 'Tags');
   const first = picked.locator('.facet-row').first();
   await expect(first.getByRole('checkbox', { name: 'array', exact: true })).toBeChecked();
@@ -194,21 +194,20 @@ test('filters: a collection and Favorites have a Type menu that picks one type a
   await open(page, '/');
   await expect(bar(page).getByRole('button', { name: /^Status/ })).toBeVisible();
   await expect(bar(page).getByRole('button', { name: /^Type/ })).toHaveCount(0);
-  await open(page, '/?type=problem');
+  await open(page, '/problems');
   await expect(bar(page).getByRole('button', { name: /^Status/ })).toBeVisible();
   await expect(bar(page).getByRole('button', { name: /^Type/ })).toHaveCount(0);
 
   // Favorites: picking a type keeps the view, and clearing the bar removes it.
-  await open(page, '/?favorite=true');
+  await open(page, '/favorites');
   const favType = await openMenu(page, 'Type');
   await favType.getByRole('checkbox', { name: 'Reading' }).click();
-  await expect(page).toHaveURL(/[?&]type=reading/);
-  await expect(page).toHaveURL(/[?&]favorite=true/);
+  await expect(page).toHaveURL(/\/favorites\?(.*&)?type=reading/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Favorites/);
   await page.keyboard.press('Escape');
   await bar(page).getByRole('button', { name: 'Clear filters' }).click();
   await expect(page).not.toHaveURL(/type=/);
-  await expect(page).toHaveURL(/[?&]favorite=true/);
+  await expect(page).toHaveURL(/\/favorites/);
 
   // Weekly practice: problems and a reading.
   const id = '22222222-2222-4222-8222-000000000008';
@@ -271,10 +270,11 @@ test('filters: a collection and Favorites have a Type menu that picks one type a
   await expect(page.locator('.item-row')).toHaveCount(all.Problem + all.Reading);
 
   // Outside a collection, clearing the bar keeps the sidebar's type.
-  await open(page, '/?type=reading&status=done');
+  await open(page, '/readings?status=done');
   await bar(page).getByRole('button', { name: 'Clear filters' }).click();
   await expect(page).not.toHaveURL(/status=/);
-  await expect(page).toHaveURL(/type=reading/);
+  await expect(page).toHaveURL(/\/readings/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Readings/);
 });
 
 test('filters: a collection filtered to one type with nothing in it offers to clear the filters', async ({ page }) => {
