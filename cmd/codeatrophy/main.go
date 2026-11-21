@@ -181,7 +181,7 @@ func serve() error {
 	if cfg.MCP.Enabled {
 		mcpOrigins := append(append([]string{}, cfg.AllowedOrigins...), cfg.MCP.AllowedOrigins...)
 		mcpHandler = mcpserver.Handler(mcpserver.Options{
-			App: a, Logger: log, Token: cfg.MCP.Token, MaxSessions: cfg.MCP.MaxSessions,
+			App: a, Logger: log, Token: cfg.MCP.Token, MaxSessions: cfg.MCP.MaxSessions, PrettyJSON: cfg.MCP.PrettyJSON,
 			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})
 	}

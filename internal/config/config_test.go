@@ -228,3 +228,18 @@ func TestJudgeWorkersAndMCPToken(t *testing.T) {
 		}
 	}
 }
+
+// MCP tool results are compact JSON unless CODEATROPHY_MCP_PRETTY_JSON is
+// set.
+func TestMCPPrettyJSON(t *testing.T) {
+	if d, _ := LoadFrom(env(nil)); d.MCP.PrettyJSON {
+		t.Error("pretty JSON is on by default")
+	}
+	if c, err := LoadFrom(env(map[string]string{"CODEATROPHY_MCP_PRETTY_JSON": "true"})); err != nil || !c.MCP.PrettyJSON {
+		t.Errorf("parsed: %+v %v", c.MCP, err)
+	}
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_MCP_PRETTY_JSON": "indented"})); err == nil ||
+		!strings.Contains(err.Error(), "CODEATROPHY_MCP_PRETTY_JSON") {
+		t.Errorf("a bad value: %v", err)
+	}
+}

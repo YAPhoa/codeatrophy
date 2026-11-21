@@ -10,13 +10,26 @@ import (
 
 // Test data in tool results. A large test case's input runs to a megabyte,
 // and its expected output may too: returned whole, one such case would
-// fill an assistant's context. Every tool result therefore shows test data
-// larger than elideBytes by its size and its first bytes only. This is
-// presentation for MCP alone; the HTTP API returns the data in full.
+// fill an assistant's context. Tool results therefore show test data
+// larger than a limit by its size and its first bytes only. The limit is
+// elideBytes by default, fullElideBytes when the caller asks for full data,
+// and echoElideBytes in the results of the tools that write test cases,
+// which return data the caller has just sent. This is presentation for MCP
+// alone; the HTTP API returns the data in full.
 const (
-	elideBytes = 16 << 10
-	headBytes  = 200
+	elideBytes     = 2 << 10
+	fullElideBytes = 16 << 10
+	echoElideBytes = 512
+	headBytes      = 200
 )
+
+// elideLimit is the limit of a tool that offers full: true.
+func elideLimit(full bool) int {
+	if full {
+		return fullElideBytes
+	}
+	return elideBytes
+}
 
 // elidedFields are the fields that hold test data: a case's input and
 // expected output, and what a program printed on it (actualStdout in a
@@ -24,19 +37,19 @@ const (
 var elidedFields = map[string]bool{"stdin": true, "expectedStdout": true, "actualStdout": true, "stdout": true}
 
 // elide rewrites a JSON document so that each string field named in
-// elidedFields that is larger than elideBytes becomes null, followed by
+// elidedFields that is larger than limit bytes becomes null, followed by
 // <field>Bytes (its size) and <field>Head (its first headBytes bytes, cut
 // back to a UTF-8 boundary). Everything else, the order of fields
 // included, is kept. A document too small to hold such a string is
 // returned as it is.
-func elide(doc []byte) ([]byte, error) {
-	if len(doc) <= elideBytes {
+func elide(doc []byte, limit int) ([]byte, error) {
+	if len(doc) <= limit {
 		return doc, nil
 	}
 	dec := json.NewDecoder(bytes.NewReader(doc))
 	dec.UseNumber()
 	var out bytes.Buffer
-	if err := elideValue(dec, &out); err != nil {
+	if err := elideValue(dec, &out, limit); err != nil {
 		return nil, err
 	}
 	if _, err := dec.Token(); err != io.EOF {
@@ -45,15 +58,15 @@ func elide(doc []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func elideValue(dec *json.Decoder, out *bytes.Buffer) error {
+func elideValue(dec *json.Decoder, out *bytes.Buffer, limit int) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return err
 	}
-	return writeToken(dec, out, tok)
+	return writeToken(dec, out, tok, limit)
 }
 
-func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token) error {
+func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token, limit int) error {
 	switch v := tok.(type) {
 	case json.Delim:
 		switch v {
@@ -74,7 +87,7 @@ func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token) error {
 				if err != nil {
 					return err
 				}
-				if s, ok := vt.(string); ok && elidedFields[key] && len(s) > elideBytes {
+				if s, ok := vt.(string); ok && elidedFields[key] && len(s) > limit {
 					out.WriteString("null,")
 					writeString(out, key+"Bytes")
 					fmt.Fprintf(out, ":%d,", len(s))
@@ -83,7 +96,7 @@ func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token) error {
 					writeString(out, head(s, headBytes))
 					continue
 				}
-				if err := writeToken(dec, out, vt); err != nil {
+				if err := writeToken(dec, out, vt, limit); err != nil {
 					return err
 				}
 			}
@@ -97,7 +110,7 @@ func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token) error {
 				if !first {
 					out.WriteByte(',')
 				}
-				if err := elideValue(dec, out); err != nil {
+				if err := elideValue(dec, out, limit); err != nil {
 					return err
 				}
 			}

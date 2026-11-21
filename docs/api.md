@@ -2513,7 +2513,7 @@ judge's languages in the user turn.
   text is never truncated. Saving `builtIn` unchanged removes the custom
   text instead, as `DELETE` does.
 - A custom text applies to draft and variant generations, `POST /ai/code`
-  and the MCP server's authoring guide (instructions, resource and prompts),
+  and the MCP server's authoring guide (`get_authoring_guide`, resource and prompts),
   from the next request on. Test generation has rules of its own and does
   not use the conventions; their editable part is the separate
   [test case prompt](#test-case-prompt). A saved text stays as it is when a

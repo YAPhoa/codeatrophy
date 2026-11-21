@@ -40,8 +40,13 @@ func nullableStr(desc string) map[string]any {
 	return map[string]any{"type": []any{"string", "null"}, "description": desc}
 }
 
+// enumStr is a string schema with the given values; desc may be empty.
 func enumStr(desc string, values ...string) map[string]any {
-	return map[string]any{"type": "string", "description": desc, "enum": values}
+	m := map[string]any{"type": "string", "enum": values}
+	if desc != "" {
+		m["description"] = desc
+	}
+	return m
 }
 
 func integer(desc string) map[string]any {
@@ -64,35 +69,41 @@ func languageEnum(desc string) map[string]any {
 	return enumStr(desc, ids...)
 }
 
-var expectedRevision = integer("The item revision you last read. If the item has changed since, the call fails with a conflict and nothing is written.")
+var expectedRevision = integer("The revision you last read; if the item has changed since, nothing is written (conflict)")
 
-func testCaseSchema() map[string]any {
+// testCaseSchema is a new test case, whose generator property genDesc
+// describes.
+func testCaseSchema(genDesc string) map[string]any {
 	return object(props{
 		"name":           maxLen(str("Short name, e.g. \"Example 1\"; for a large case, say what the input is"), domain.MaxTestCaseNameChars),
-		"stdin":          str("Exact standard input. Omit it when you give a generator for the server to run"),
-		"expectedStdout": str("Exact expected standard output. Required unless you give a generator; may be a placeholder when you will run verify_test_cases with updateExpected"),
+		"stdin":          str("Exact standard input; omit it for a generator"),
+		"expectedStdout": str("Exact expected output. Required unless you give a generator; may be a placeholder until verify_test_cases with updateExpected"),
 		"isSample":       boolean("Shown with the statement and used by run (default false)"),
 		"origin":         enumStr("How the case came to exist (default manual; use ai for cases you wrote)", "manual", "ai", "import"),
 		"verified":       boolean("Whether the expected output was produced by running a reference solution"),
-		"generator":      generatorSchema(),
+		"generator":      generatorSchema(genDesc),
 	})
 }
 
-// generatorDesc says what a generator is and what the server does with it.
-const generatorDesc = "For a large test case, instead of stdin: a complete, deterministic program (fixed seed, no clock) " +
-	"in a language the judge offers, that reads nothing and prints the stdin of one test case, at most " +
-	"limits.maxLargeInputBytes (get_overview). The server runs it and stores what it printed as stdin, with the " +
-	"generator; a generator that fails, or prints an input another case has, is an error on this field and nothing " +
-	"is stored. Then call verify_test_cases with updateExpected: true for the expected output. When creating a case " +
-	"with both stdin and a generator, both are stored as given and nothing runs: the server does not check that the " +
-	"input came from the generator"
+// generatorDesc says what a generator is and what the server does with it,
+// once, on add_test_cases; the other tools that take one point to it.
+const generatorDesc = "For a large case, instead of stdin: a deterministic program (fixed seed, no clock) in a judge " +
+	"language that reads nothing and prints the case's stdin, at most limits.maxLargeInputBytes. The server runs it " +
+	"before storing anything and stores its output as stdin, with the generator; if it fails or prints another case's " +
+	"input, the error is on this field and nothing is stored. Then verify_test_cases with updateExpected: true. " +
+	"Given with stdin, both are stored as given and nothing runs"
 
-func generatorSchema() map[string]any {
+// itemGeneratorDesc describes the generator of a test case create_item adds.
+const itemGeneratorDesc = "For a large case, instead of stdin: a generator, as in add_test_cases"
+
+func generatorSchema(desc string) map[string]any {
 	g := object(props{
 		"language": languageEnum("Language id"),
 		"source":   str("The program: it reads nothing and prints one test input"),
 	}, "language", "source")
-	g["description"] = generatorDesc
+	if desc != "" {
+		g["description"] = desc
+	}
 	return g
 }
 
@@ -104,17 +115,17 @@ func solutionSchema() map[string]any {
 }
 
 // solutionSource describes the source of a solution or a run.
-const solutionSource = "For a program problem, a complete program reading stdin and writing stdout; for a function " +
-	"problem, only the solution part (what fills in the stub), which runs inside the language's harness"
+const solutionSource = "A complete program (stdin to stdout); for a function problem, only the solution part " +
+	"(what fills in the stub), run in the harness"
 
 func harnessSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
-		"description": "Function problems: runner code keyed by language id; replaces all harness entries. The program " +
-			"that runs is prefix, the solution and suffix, each on a new line. Must be {} for a program problem",
+		"description": "Function problems: runner code by language id, replacing all entries; the program run is " +
+			"prefix, solution, suffix, each on a new line. {} for a program problem",
 		"additionalProperties": object(props{
-			"prefix": str("Code before the solution: imports and helper types (Python: start with `from __future__ import annotations`)"),
-			"suffix": str("Code after the solution: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON"),
+			"prefix": str("Before the solution: imports and helper types (Python: start with `from __future__ import annotations`)"),
+			"suffix": str("After the solution: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON"),
 		}, "prefix", "suffix"),
 	}
 }
@@ -125,7 +136,7 @@ func itemFieldProps(lim domain.Limits) props {
 	return props{
 		"title":      maxLen(str(fmt.Sprintf("1-%d characters", domain.MaxTitleChars)), domain.MaxTitleChars),
 		"summary":    maxLen(str("One sentence"), domain.MaxSummaryChars),
-		"body":       str("Markdown body following the authoring conventions"),
+		"body":       str("Markdown body, in the format of get_authoring_guide"),
 		"difficulty": map[string]any{"type": []any{"string", "null"}, "enum": []any{"easy", "medium", "hard", nil}},
 		"tags": maxItems(arrayOf(maxLen(str("Lower-case tag"), domain.MaxTagChars),
 			fmt.Sprintf("Replaces all tags (at most %d, 1-%d characters each)", domain.MaxTags, domain.MaxTagChars)), domain.MaxTags),
@@ -165,7 +176,7 @@ func itemQueryProps() props {
 		"favorite":     boolean("Filter by favorite flag"),
 		"sort":         enumStr("Sort order (default updated)", "updated", "created", "title", "difficulty", "position", "relevance"),
 		"order":        enumStr("Direction", "asc", "desc"),
-		"limit":        integer("Page size, 1-200 (default 50)"),
+		"limit":        integer(fmt.Sprintf("Page size, 1-200 (default %d)", searchLimit)),
 		"offset":       integer("Offset for pagination"),
 	}
 }

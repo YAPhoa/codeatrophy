@@ -27,6 +27,7 @@ Clients that only speak stdio can bridge with
 | `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` (the scheme name in any case) |
 | `CODEATROPHY_MCP_ALLOWED_ORIGINS` | unset | Extra `Origin` values to accept, comma-separated |
 | `CODEATROPHY_MCP_MAX_SESSIONS` | `100` | Most sessions open at once |
+| `CODEATROPHY_MCP_PRETTY_JSON` | `false` | Set `true` to indent the JSON of tool results, for reading them yourself; compact JSON costs a model fewer tokens |
 
 The endpoint applies the same two checks as the HTTP API (see "Host and
 origin checks" in `docs/api.md`), the Host check first:
@@ -55,17 +56,34 @@ expires; open sessions are unaffected. A request body may be at most
 
 ## Conventions
 
+- The server's `instructions` in the initialize result are a short brief,
+  the same for every session: what the library is, to call
+  `get_authoring_guide` before writing item content, and a few rules for
+  using the tools. The authoring guide itself, which follows the user's
+  settings, is the `get_authoring_guide` tool and the resource
+  `codeatrophy://authoring-guide`.
 - Tools return JSON in the same shapes as the HTTP API (`docs/api.md`), as
-  both structured content and text.
-- **Large test data is elided** in every tool result: a `stdin`,
+  both structured content and text, compact unless
+  `CODEATROPHY_MCP_PRETTY_JSON` is set. The one exception is
+  `get_authoring_guide`, which returns the guide as Markdown text alone.
+- **Large test data is elided** in tool results: a `stdin`,
   `expectedStdout`, `actualStdout` (verify_test_cases) or `stdout` (the
-  results of `run_code` and `get_submission`) string larger than 16 KiB is
-  returned as `null`, followed by `<field>Bytes` (its size in bytes) and
+  results of `run_code` and `get_submission`) string larger than the limit
+  is returned as `null`, followed by `<field>Bytes` (its size in bytes) and
   `<field>Head` (its first 200 bytes, cut back so as not to split a UTF-8
-  character). Smaller values are returned as they are. This is
-  presentation over MCP only: the data is stored, run and returned by the
-  HTTP API in full. To see a large case's input, read its `generator`.
+  character). Smaller values are returned as they are. The limit is 2 KiB;
+  16 KiB when the call passes `full: true`, which `list_test_cases`,
+  `get_submission`, `verify_test_cases` and `run_code` take; and 512 bytes
+  in the results of `add_test_cases` and `update_test_case`, which return
+  data the caller has just sent. This is presentation over MCP only: the
+  data is stored, run and returned by the HTTP API in full. To see a large
+  case's input, read its `generator`.
 - Listing tools return summaries, not bodies; fetch one item to read it.
+  `search_items` returns 20 summaries unless `limit` asks for another number
+  (the HTTP API's default is 50). `create_item`, `update_item` and
+  `edit_item_text` return the item's summary, with its new `revision`, not
+  the whole item. A `verify_test_cases` result leaves out `actualStdout`
+  for a case whose output matched, since it equals the expected output.
 - Every tool that changes an item's own content accepts `expectedRevision`:
   `update_item`, `edit_item_text`, `add_test_cases` when it sets the
   reference solution, and `save_solution` when it changes which solution is
@@ -108,11 +126,12 @@ expires; open sessions are unaffected. A request body may be at most
 | Tool | Purpose |
 | --- | --- |
 | `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the limits of items and test cases (below). A good first call |
-| `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
+| `get_authoring_guide` | The authoring guide as Markdown text (not JSON): the format of items and test cases, the custom system prompt if any, and a style preset, the default one unless `style` (a preset name or id) names another; an unknown `style` is a `not_found` error. The same text as the resource `codeatrophy://authoring-guide` for the default preset |
+| `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries, 20 unless `limit` says otherwise |
 | `get_item` | One item in full, including a problem's `interface` and `harness`, its `createdBy` and `lastUpdatedBy` (see [Conventions](#conventions)), with its `links` and, for a variant, `item.variantOrigin` (see [Links](#links)). `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
-| `list_test_cases` | Test cases of a problem |
+| `list_test_cases` | Test cases of a problem; `ids` returns only those cases (an id that is not one of the problem's is ignored); `full: true` raises the elision limit (see [Conventions](#conventions)) |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
-| `get_submission` | A submission with per-case results |
+| `get_submission` | A submission with per-case results; `full: true` raises the elision limit |
 | `list_style_presets` | The user's style presets and which is the default |
 
 `get_overview` also returns:
@@ -149,9 +168,9 @@ above `maxGeneratedTestCases`.
 
 | Tool | Purpose |
 | --- | --- |
-| `create_item` | Create a problem or reading; may include test cases, collections, tags and `variantOf` in the same call. A solution-only problem sets `problem.interface: "function"`, with `starterCode` (the stubs) and `harness` (`{ <language>: { prefix, suffix } }`) |
-| `update_item` | Partial update of any item field (merge semantics; `problem.starterCode` and `problem.harness` replace all entries). Setting `problem.interface` to `program` on a problem with a harness requires `harness: {}` in the same call |
-| `edit_item_text` | Exact-match text replacements inside `body` or `notes`, for small changes to long text |
+| `create_item` | Create a problem or reading; may include test cases, collections, tags and `variantOf` in the same call. A solution-only problem sets `problem.interface: "function"`, with `starterCode` (the stubs) and `harness` (`{ <language>: { prefix, suffix } }`). Returns the item's summary |
+| `update_item` | Partial update of any item field (merge semantics; `problem.starterCode` and `problem.harness` replace all entries). Setting `problem.interface` to `program` on a problem with a harness requires `harness: {}` in the same call. Returns the item's summary |
+| `edit_item_text` | Exact-match text replacements inside `body` or `notes`, for small changes to long text. Returns the item's summary |
 | `delete_item` | Delete an item with its test cases, solutions and submissions. Links to it and its variants' `variantOf` are kept, naming an unavailable item |
 | `bulk_update_items` | One action on many items: tag, untag, set status, favorite, add to or remove from a collection, delete |
 
@@ -188,13 +207,13 @@ way.
 
 | Tool | Purpose |
 | --- | --- |
-| `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only). A large case is given a `generator` instead of `stdin` (below); a case given both is stored as given |
-| `update_test_case` | Change one test case. A `generator` runs and replaces `stdin`; `generator: null` drops it and keeps `stdin`; a new `stdin` alone drops it too; `stdin` and a non-null `generator` together are refused |
+| `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only). A large case is given a `generator` instead of `stdin` (below); a case given both is stored as given. Returns the problem's test cases, elided above 512 bytes |
+| `update_test_case` | Change one test case. A `generator` runs and replaces `stdin`; `generator: null` drops it and keeps `stdin`; a new `stdin` alone drops it too; `stdin` and a non-null `generator` together are refused. Returns the case, elided above 512 bytes |
 | `delete_test_case` | Delete one test case |
-| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and leaves the cases alone. Either way the run becomes the solution's `lastRun`, unless the engine failed on a case. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
+| `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and leaves the cases alone. Either way the run becomes the solution's `lastRun`, unless the engine failed on a case. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected. A matching case's result has no `actualStdout`; `full: true` raises the elision limit |
 | `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only. When creating, `submissionId` of a completed `run_code` submission of the same language and source makes its figures the solution's `lastRun`; a new language or source clears `lastRun` |
 | `delete_solution` | Delete one saved solution; deleting the reference leaves the problem without one |
-| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). A run replaces the problem's earlier completed runs; only submits are kept. For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected |
+| `run_code` | Execute code for a problem — against sample cases, all cases, or custom stdin — and wait for the verdict (`timeoutSeconds`, default 120, at most 600; on timeout the submission is returned as it stands). A run replaces the problem's earlier completed runs; only submits are kept. For a function problem `source` is the solution part, run inside the language's harness; a language without one is rejected. `full: true` raises the elision limit |
 
 The execution tools need a judge engine and return `judge_unavailable`
 without one.
@@ -263,9 +282,8 @@ The prompts that write items (the first three) carry the same authoring
 conventions the app's built-in AI features use, so items come out
 consistent whichever route created them; `link_related` writes no content
 and carries only the item, with its current links. The
-conventions are also sent as the server's `instructions` during
-initialisation and are readable as the resource
-`codeatrophy://authoring-guide`.
+conventions are also returned by the `get_authoring_guide` tool and are
+readable as the resource `codeatrophy://authoring-guide`.
 
 ### Style presets
 
@@ -273,12 +291,12 @@ The user's style presets (see `docs/api.md`) are available read-only:
 
 - `list_style_presets` (tool) returns every preset with its instructions and
   which one is the default.
-- The default preset, if any, is included in the authoring guide — in the
-  resource and prompts on each request, and in `instructions` on each new
-  session — so it always reflects the current setting.
-- The `draft_item` and `create_variant` prompts take an optional `style`
-  argument, a preset name or id, to write in that preset instead of the
-  default.
+- The default preset, if any, is included in the authoring guide, in
+  `get_authoring_guide`, the resource and the prompts, on each request, so
+  it always reflects the current setting.
+- `get_authoring_guide` and the `draft_item` and `create_variant` prompts
+  take an optional `style` argument, a preset name or id, to write in that
+  preset instead of the default.
 
 There is deliberately no tool that creates or edits presets: they are standing
 instructions for a model, and may only be written by the instance's user in
@@ -292,8 +310,8 @@ When the user has written a custom system prompt in the app's settings (see
 "System prompt" in `docs/api.md`), the authoring guide carries it in place
 of the editable conventions, followed by the fixed rules the app depends on
 (among them that a `<details>` block, for answers and hints, is the only
-HTML that renders), in `instructions`, the resource and every prompt, `write_test_cases`
-included. No tool reads, creates or changes it. The custom test case
+HTML that renders), in `get_authoring_guide`, the resource and every prompt, `write_test_cases`
+included. No tool reads it on its own, creates or changes it. The custom test case
 prompt, which only the app's own test generation uses, appears in none of
 them.
 

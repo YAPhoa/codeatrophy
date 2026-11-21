@@ -766,7 +766,8 @@ Design points:
   solution to compute and verify expected outputs.
 - **Shared authoring guidance.** The conventions the built-in drafting prompts
   enforce (statement structure, stdin/stdout format, what makes a good test
-  set) are published to MCP clients as server instructions and prompts, so an
+  set) are published to MCP clients as the `get_authoring_guide` tool, a
+  resource and prompts, so an
   item written by a connected assistant looks like one drafted in the UI. The
   user's style presets are readable over MCP, and the default one is part of
   that guidance, but presets cannot be changed from there. A custom system
@@ -776,9 +777,9 @@ Design points:
 - **Built for incremental edits.** Tools return compact results, support
   partial updates and targeted text replacement inside long Markdown bodies,
   and carry the item `revision` so an assistant never silently overwrites a
-  concurrent human edit. Test data larger than 16 KiB in any tool result is
-  replaced by its size and first bytes (in the MCP adapter only), so one
-  large test case cannot fill the assistant's context.
+  concurrent human edit. Test data larger than 2 KiB in a tool result (16
+  KiB on request) is replaced by its size and first bytes (in the MCP
+  adapter only), so one large test case cannot fill the assistant's context.
 - **The user's preferences.** `get_overview` reports the user's test case
   preferences and the test case limits, and the prompts follow them (how
   many cases, whether to add large ones as generators); like style presets,

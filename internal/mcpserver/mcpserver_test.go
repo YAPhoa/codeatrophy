@@ -162,7 +162,7 @@ func TestToolsListAndAnnotations(t *testing.T) {
 	for _, tool := range res.Tools {
 		names[tool.Name] = tool
 	}
-	want := []string{"get_overview", "search_items", "get_item", "list_test_cases", "list_solutions", "get_submission", "list_style_presets",
+	want := []string{"get_overview", "get_authoring_guide", "search_items", "get_item", "list_test_cases", "list_solutions", "get_submission", "list_style_presets",
 		"create_item", "update_item", "edit_item_text", "delete_item", "bulk_update_items", "link_items", "unlink_items",
 		"create_collection", "update_collection", "delete_collection", "set_collection_items", "add_items_to_collection",
 		"remove_item_from_collection", "rename_tag", "delete_tag",
@@ -210,7 +210,7 @@ func TestToolsListAndAnnotations(t *testing.T) {
 		del = "destructive" // destructive, not idempotent
 	)
 	kinds := map[string]string{
-		"get_overview": ro, "search_items": ro, "get_item": ro, "list_test_cases": ro, "list_solutions": ro,
+		"get_overview": ro, "get_authoring_guide": ro, "search_items": ro, "get_item": ro, "list_test_cases": ro, "list_solutions": ro,
 		"get_submission": ro, "list_style_presets": ro,
 		"create_item": add, "update_item": idm, "edit_item_text": add, "delete_item": del, "bulk_update_items": del,
 		"link_items": idm, "unlink_items": idm,
@@ -272,8 +272,11 @@ func TestReadAndWriteTools(t *testing.T) {
 	}
 	up, isErr := call(t, s, "edit_item_text", map[string]any{"id": id, "field": "body", "expectedRevision": 1,
 		"edits": []map[string]any{{"oldText": "a and b", "newText": "two integers"}}})
-	if isErr || up["body"] != "Read two integers." || up["revision"] != float64(2) {
+	if isErr || up["revision"] != float64(2) {
 		t.Errorf("edit: %v", up)
+	}
+	if got, _ := f.app.GetItem(f.ctx, id); got.Body != "Read two integers." {
+		t.Errorf("edited body: %q", got.Body)
 	}
 	tcs, isErr := call(t, s, "add_test_cases", map[string]any{"itemId": id, "expectedRevision": 2,
 		"cases":             []map[string]any{{"stdin": "5 5", "expectedStdout": ""}},
@@ -330,8 +333,11 @@ func TestStylePresetsAndGuide(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := f.connect(t, "")
-	if !strings.Contains(s.InitializeResult().Instructions, "FIRST-STYLE-MARKER") {
-		t.Error("instructions should include the default preset")
+	if strings.Contains(s.InitializeResult().Instructions, "FIRST-STYLE-MARKER") {
+		t.Error("instructions should not carry the default preset")
+	}
+	if g, isErr := guideCall(t, s, nil); isErr || !strings.Contains(g, "FIRST-STYLE-MARKER") {
+		t.Error("get_authoring_guide should include the default preset")
 	}
 	list, _ := call(t, s, "list_style_presets", map[string]any{})
 	if items := list["items"].([]any); len(items) != 1 || items[0].(map[string]any)["isDefault"] != true {
@@ -353,6 +359,12 @@ func TestStylePresetsAndGuide(t *testing.T) {
 	}
 	if g := read(); !strings.Contains(g, "SECOND-STYLE-MARKER") || strings.Contains(g, "FIRST-STYLE-MARKER") {
 		t.Error("resource should reflect the current preset")
+	}
+	// The tool returns the resource's text for the default preset, but for
+	// the data blocks' random suffix.
+	nonce := regexp.MustCompile(`[0-9a-f]{24}`)
+	if g, _ := guideCall(t, s, map[string]any{}); nonce.ReplaceAllString(g, "") != nonce.ReplaceAllString(read(), "") {
+		t.Error("get_authoring_guide differs from the resource")
 	}
 	other, _ := f.app.CreateStylePreset(f.ctx, domain.StylePresetInput{Name: domain.Some("Terse"), Instructions: domain.Some("TERSE-MARKER")})
 	prompt := func(name string, args map[string]string) (string, error) {
@@ -386,11 +398,43 @@ func TestStylePresetsAndGuide(t *testing.T) {
 	if err != nil || strings.Contains(text, "MARKER") || !strings.Contains(text, "5 test cases") {
 		t.Errorf("write_test_cases must not carry style presets: %v", err)
 	}
-	// New sessions get the current default in their instructions.
-	s2 := f.connect(t, "")
-	if !strings.Contains(s2.InitializeResult().Instructions, "SECOND-STYLE-MARKER") {
-		t.Error("new session instructions should reflect the current preset")
+	// get_authoring_guide takes a style by name or id, and refuses an
+	// unknown one, pointing to list_style_presets.
+	for _, style := range []string{"terse", other.ID} {
+		if g, isErr := guideCall(t, s, map[string]any{"style": style}); isErr || !strings.Contains(g, "TERSE-MARKER") ||
+			strings.Contains(g, "SECOND-STYLE-MARKER") {
+			t.Errorf("get_authoring_guide style %s", style)
+		}
 	}
+	res, err := s.CallTool(f.ctx, &mcp.CallToolParams{Name: "get_authoring_guide", Arguments: map[string]any{"style": "nope"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e struct {
+		Error struct{ Code, Message string } `json:"error"`
+	}
+	if !res.IsError || json.Unmarshal([]byte(res.Content[0].(*mcp.TextContent).Text), &e) != nil ||
+		e.Error.Code != "not_found" || !strings.Contains(e.Error.Message, "list_style_presets") {
+		t.Errorf("an unknown style: %v", res.Content[0])
+	}
+}
+
+// guideCall calls get_authoring_guide, whose result is Markdown text alone:
+// one text content and no structured content.
+func guideCall(t *testing.T, s *mcp.ClientSession, args any) (string, bool) {
+	t.Helper()
+	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_authoring_guide", Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Content) != 1 || res.StructuredContent != nil {
+		t.Errorf("get_authoring_guide: %d contents, structured %v", len(res.Content), res.StructuredContent)
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if json.Valid([]byte(text)) {
+		t.Errorf("get_authoring_guide returned JSON: %.200s", text)
+	}
+	return text, res.IsError
 }
 
 func TestAccessControl(t *testing.T) {
@@ -624,9 +668,10 @@ func TestFunctionProblemTools(t *testing.T) {
 	}
 }
 
-// The custom system prompt reaches the authoring guide (instructions,
-// resource and prompts) in place of the editable conventions, but no tool
-// reads or sets it. The custom test case prompt reaches none of them.
+// The custom system prompt reaches the authoring guide (get_authoring_guide,
+// the resource and the prompts) in place of the editable conventions, but no
+// tool reads or sets it on its own. The custom test case prompt reaches none
+// of them.
 func TestSystemPromptInGuideOnly(t *testing.T) {
 	f := newFixture(t, "")
 	if _, err := f.app.SetSystemPrompt(f.ctx, app.SystemPromptInput{Custom: domain.Some("CUSTOM-CONVENTIONS-MARKER")}); err != nil {
@@ -644,7 +689,11 @@ func TestSystemPromptInGuideOnly(t *testing.T) {
 			t.Errorf("%s should carry the custom prompt and the fixed rules:\n%.400s", what, text)
 		}
 	}
-	check("instructions", s.InitializeResult().Instructions)
+	g, _ := guideCall(t, s, nil)
+	check("get_authoring_guide", g)
+	if in := s.InitializeResult().Instructions; strings.Contains(in, "CUSTOM-CONVENTIONS-MARKER") {
+		t.Error("instructions carry the custom prompt")
+	}
 	res, err := s.ReadResource(f.ctx, &mcp.ReadResourceParams{URI: mcpserver.GuideURI})
 	if err != nil {
 		t.Fatal(err)
@@ -818,10 +867,11 @@ func TestChangeSource(t *testing.T) {
 		t.Errorf("created: %v / %v", item["createdBy"], item["lastUpdatedBy"])
 	}
 	for i, model := range []any{7, "  ", nil} {
-		r, isErr := call(t, s, "update_item", map[string]any{"id": id, "title": fmt.Sprint("R", i), "model": model})
-		if isErr {
+		if r, isErr := call(t, s, "update_item", map[string]any{"id": id, "title": fmt.Sprint("R", i), "model": model}); isErr {
 			t.Fatalf("model %v: %v", model, r)
 		}
+		got, _ := call(t, s, "get_item", map[string]any{"id": id})
+		r := got["item"].(map[string]any)
 		if by := fmt.Sprint(r["lastUpdatedBy"]); by != fmt.Sprint(map[string]any{"via": "mcp", "client": "test", "model": nil}) {
 			t.Errorf("model %v: last updated by %s", model, by)
 		}

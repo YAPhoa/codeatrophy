@@ -95,6 +95,8 @@ type MCPConfig struct {
 	Token          string
 	AllowedOrigins []string
 	MaxSessions    int
+	// PrettyJSON indents the JSON of tool results (compact by default).
+	PrettyJSON bool
 }
 
 // Load reads the configuration from the environment.
@@ -289,6 +291,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		Token:          getenv("CODEATROPHY_MCP_TOKEN"),
 		AllowedOrigins: list("CODEATROPHY_MCP_ALLOWED_ORIGINS"),
 		MaxSessions:    getInt("CODEATROPHY_MCP_MAX_SESSIONS", 100),
+		PrettyJSON:     getBool("CODEATROPHY_MCP_PRETTY_JSON", false),
 	}
 	return c, errors.Join(errs...)
 }

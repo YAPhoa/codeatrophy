@@ -15,9 +15,31 @@ import (
 
 type tools struct {
 	app *app.App
+	// pretty indents the JSON of results.
+	pretty bool
 }
 
+// toolFunc returns the value of a tool's result, which is sent as JSON with
+// test data elided above elideBytes, unless it is a limited or a textResult.
 type toolFunc func(ctx context.Context, args json.RawMessage) (any, error)
+
+// limited is a tool result whose test data is elided above limit bytes
+// instead of elideBytes.
+type limited struct {
+	v     any
+	limit int
+}
+
+// textResult is a tool result sent as plain text only, for a model to read
+// as it is: no JSON and no structured content.
+type textResult string
+
+// searchLimit is search_items's default page size, smaller than the HTTP
+// API's, since every summary is paid for in a model's context.
+const searchLimit = 20
+
+// fullDesc describes the full argument of the tools that offer it.
+const fullDesc = "Return test data up to 16 KiB whole instead of shortening it above 2 KiB"
 
 func ptr(b bool) *bool { return &b }
 
@@ -41,9 +63,15 @@ func (t *tools) add(s *mcp.Server, name, title, desc string, schema map[string]a
 			ctx = app.WithChangeSource(ctx, domain.ViaMCP, clientName(req), modelArg(raw))
 			v, err := fn(ctx, raw)
 			if err != nil {
-				return toolError(err), nil
+				return toolError(err, t.pretty), nil
 			}
-			return result(v), nil
+			switch r := v.(type) {
+			case textResult:
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(r)}}}, nil
+			case limited:
+				return result(r.v, r.limit, t.pretty), nil
+			}
+			return result(v, elideBytes, t.pretty), nil
 		})
 }
 
@@ -73,13 +101,43 @@ func modelArg(raw json.RawMessage) string {
 // changes an item's content.
 func tracked(schema map[string]any) map[string]any {
 	// No maxLength: a long value is cut by the server, never refused.
-	schema["properties"].(map[string]any)["model"] = str(
-		"The model making this change, e.g. claude-opus-5-5; optional, for tracking.")
+	schema["properties"].(map[string]any)["model"] = str("Your model id, for tracking")
 	return schema
 }
 
 type idArg struct {
 	ID string `json:"id"`
+}
+
+// matchedResult is a verification result whose output matched: it leaves
+// out actualStdout, which equals the expected output the caller has. The
+// outer field hides the embedded one when encoding.
+type matchedResult struct {
+	app.VerifyResult
+	ActualStdout *string `json:"actualStdout,omitempty"`
+}
+
+// verifyView is a verification as a tool returns it: actualStdout only on
+// the results that did not match.
+func verifyView(res app.VerifyResponse) map[string]any {
+	out := make([]any, len(res.Results))
+	for i, r := range res.Results {
+		if r.Matches {
+			out[i] = matchedResult{VerifyResult: r}
+		} else {
+			out[i] = r
+		}
+	}
+	return map[string]any{"results": out}
+}
+
+// summary is the result of the tools that write an item: its summary, as
+// search_items lists it, without the body the caller has just sent.
+func summary(it domain.Item, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	return it.ItemSummary, nil
 }
 
 func (t *tools) register(s *mcp.Server) {
@@ -88,23 +146,45 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Reading.
 	t.add(s, "get_overview", "Library overview",
-		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge engine offers, the user's test case preferences (preferences: generatedTestCases, largeTestCase, largeTestCaseCount, hideTestCases; read-only) and the bounds items and test cases keep to (limits: of test cases and code, and of an item's title, summary, tags, notes, links, solutions and collection names). A good first call.",
+		"Library statistics, collections, tags with item counts, the judge's languages, the user's test case preferences (read-only) and the limits items and test cases keep to. A good first call.",
 		object(props{}), readOnly, func(ctx context.Context, _ json.RawMessage) (any, error) {
 			return a.Overview(ctx)
 		})
 
+	t.add(s, "get_authoring_guide", "Authoring guide",
+		"The authoring guide, as Markdown text rather than JSON: the format of items and test cases and the user's writing style. Call it once per session before writing item content.",
+		object(props{
+			"style": str("Name or id of a style preset to write in (default: the user's default preset; see list_style_presets)"),
+		}), readOnly, func(ctx context.Context, raw json.RawMessage) (any, error) {
+			var in struct {
+				Style string `json:"style"`
+			}
+			if err := decodeArgs(raw, &in); err != nil {
+				return nil, err
+			}
+			preset, err := stylePreset(ctx, a, in.Style)
+			if err != nil {
+				return nil, &app.Error{Code: app.CodeNotFound, Message: err.Error()}
+			}
+			return textResult(guide(ctx, a, preset)), nil
+		})
+
 	t.add(s, "search_items", "Search items",
-		"Filter and full-text search the library; same filters as GET /items. Returns item summaries (no bodies) and the total count.",
+		"Filter and full-text search the library (the filters of GET /items). Returns item summaries, without bodies, and the total count.",
 		object(itemQueryProps()), readOnly, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var q app.ItemQuery
 			if err := decodeArgs(raw, &q); err != nil {
 				return nil, err
 			}
+			if q.Limit == nil {
+				l := searchLimit
+				q.Limit = &l
+			}
 			return a.ListItems(ctx, q)
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body, revision, createdBy and lastUpdatedBy (who created it and who made its last content change: via http, mcp or import, with the client and model reported, or null when unknown) and, for a problem, its interface (program or function) and harness, with its links (the items linked to it; available: false for one that has been deleted) and, for a variant, item.variantOrigin (the item it was derived from, which may be unavailable too). include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
+		"One item in full, with its links; available: false marks a deleted item, in links and in variantOrigin. include adds optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept).",
 		object(props{
 			"id":      str("Item id"),
 			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
@@ -151,15 +231,28 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "list_test_cases", "List test cases", "The test cases of a problem, in order.",
-		object(props{"itemId": str("Problem id")}, "itemId"), readOnly,
+		object(props{
+			"itemId": str("Problem id"),
+			"ids":    arrayOf(str("Test case id"), "Only these test cases; an id that is not one of the problem's is ignored"),
+			"full":   boolean(fullDesc),
+		}, "itemId"), readOnly,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
-				ItemID string `json:"itemId"`
+				ItemID string   `json:"itemId"`
+				IDs    []string `json:"ids"`
+				Full   bool     `json:"full"`
 			}
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.ListTestCases(ctx, in.ItemID)
+			tcs, err := a.ListTestCases(ctx, in.ItemID)
+			if err != nil {
+				return nil, err
+			}
+			if in.IDs != nil {
+				tcs.Items = slices.DeleteFunc(tcs.Items, func(tc domain.TestCase) bool { return !slices.Contains(in.IDs, tc.ID) })
+			}
+			return limited{tcs, elideLimit(in.Full)}, nil
 		})
 
 	t.add(s, "list_solutions", "List solutions",
@@ -176,17 +269,24 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_submission", "Get submission", "A submission with its per-case results.",
-		object(props{"id": str("Submission id")}, "id"), readOnly,
+		object(props{"id": str("Submission id"), "full": boolean(fullDesc)}, "id"), readOnly,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
-			var in idArg
+			var in struct {
+				ID   string `json:"id"`
+				Full bool   `json:"full"`
+			}
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.GetSubmission(ctx, in.ID)
+			sub, err := a.GetSubmission(ctx, in.ID)
+			if err != nil {
+				return nil, err
+			}
+			return limited{sub, elideLimit(in.Full)}, nil
 		})
 
 	t.add(s, "list_style_presets", "List style presets",
-		"The user's style presets (standing writing instructions) and which one is the default. Read-only: presets can only be changed in the app's settings.",
+		"The user's style presets (standing writing instructions) and which one is the default. Read-only: only the user changes them, in the app's settings.",
 		object(props{}), readOnly, func(ctx context.Context, _ json.RawMessage) (any, error) {
 			return a.ListStylePresets(ctx)
 		})
@@ -194,22 +294,22 @@ func (t *tools) register(s *mcp.Server) {
 	// Writing items.
 	createProps := itemFieldProps(lim)
 	createProps["type"] = enumStr("Item type", "problem", "reading")
-	createProps["testCases"] = arrayOf(testCaseSchema(), "Test cases to create with the item (problems only)")
+	createProps["testCases"] = arrayOf(testCaseSchema(itemGeneratorDesc), "Test cases to create with the item (problems only)")
 	t.add(s, "create_item", "Create item",
-		"Create a problem or reading. May include tags, collectionIds, variantOf and test cases in the same call. A solution-only problem sets problem.interface to function, with starterCode (the stubs) and a harness entry per language. Returns the item with its revision.",
+		"Create a problem or reading, in the format get_authoring_guide gives. May include tags, collectionIds, variantOf and test cases in the same call. A solution-only problem sets problem.interface to function, with starterCode (the stubs) and a harness entry per language. Returns the item's summary, with its revision.",
 		tracked(object(createProps, "type", "title")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in domain.ItemInput
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.CreateItem(ctx, in)
+			return summary(a.CreateItem(ctx, in))
 		})
 
 	updateProps := itemFieldProps(lim)
 	updateProps["id"] = str("Item id")
 	updateProps["expectedRevision"] = expectedRevision
 	t.add(s, "update_item", "Update item",
-		"Partial update of an item (merge semantics: omitted fields are unchanged; arrays replace; null clears a nullable field; problem and source merge field by field; problem.starterCode and problem.harness replace all entries). Setting problem.interface to program on a problem with a harness needs harness: {} in the same call. Pass expectedRevision.",
+		"Partial update of an item, in the format get_authoring_guide gives (merge semantics: omitted fields are unchanged; arrays replace; null clears a nullable field; problem and source merge field by field; problem.starterCode and problem.harness replace all entries). Setting problem.interface to program on a problem with a harness needs harness: {} in the same call. Returns the item's summary.",
 		tracked(object(updateProps, "id")), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var id idArg
 			var in domain.ItemInput
@@ -219,11 +319,11 @@ func (t *tools) register(s *mcp.Server) {
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.UpdateItem(ctx, id.ID, in)
+			return summary(a.UpdateItem(ctx, id.ID, in))
 		})
 
 	t.add(s, "edit_item_text", "Edit item text",
-		"Exact-match text replacements inside body or notes, for small changes to long text. Each oldText must occur exactly once at the point it is applied; otherwise nothing is written.",
+		"Exact-match text replacements inside body or notes, for small changes to long text. Each oldText must occur exactly once when its edit is applied; otherwise nothing is written. Returns the item's summary.",
 		tracked(object(props{
 			"id":    str("Item id"),
 			"field": enumStr("Which text to edit", "body", "notes"),
@@ -241,7 +341,7 @@ func (t *tools) register(s *mcp.Server) {
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.EditItemText(ctx, id.ID, in)
+			return summary(a.EditItemText(ctx, id.ID, in))
 		})
 
 	t.add(s, "delete_item", "Delete item", "Delete an item with its test cases and submissions. Links to it and the variantOf of its variants are kept, and then name an unavailable item.",
@@ -282,7 +382,7 @@ func (t *tools) register(s *mcp.Server) {
 		}, "itemId", "otherIds")
 	}
 	t.add(s, "link_items", "Link items",
-		fmt.Sprintf("Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most %d links (limits.maxLinksPerItem). Not a content change: the revision stays. Returns the item's links.", lim.MaxLinksPerItem),
+		fmt.Sprintf("Link an item to closely related items, such as a problem and the reading that explains its technique. Links go both ways, have no label and are not content (the revision stays); linking a linked pair does nothing. If an id names no item, nothing is linked and the error names each bad one (otherIds.<index>). An item has at most %d links (limits.maxLinksPerItem). Returns the item's links.", lim.MaxLinksPerItem),
 		linking(lim.MaxLinksPerItem, fmt.Sprintf("The other items, at most %d", lim.MaxLinksPerItem)), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID   string   `json:"itemId"`
@@ -295,7 +395,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "unlink_items", "Unlink items",
-		"Remove the links between an item and other items, including links to items that have been deleted (available: false). An id that is not linked is ignored. Returns the item's links.",
+		"Remove the links between an item and other items, also to deleted items (available: false). An id that is not linked is ignored. Returns the item's links.",
 		linking(domain.MaxLinksPerItemCeiling, fmt.Sprintf("The other items, at most %d", domain.MaxLinksPerItemCeiling)), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID   string   `json:"itemId"`
@@ -431,10 +531,10 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Test cases and execution.
 	t.add(s, "add_test_cases", "Add test cases",
-		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Test-case changes do not change the item revision. A large case is given as a generator instead of stdin: the server runs it, before storing anything, and the case's stdin is what it printed. A case given both stdin and a generator is stored as given without running anything; the server does not check that the input came from the generator. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
+		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Give a large case as a generator instead of stdin. Returns the problem's test cases, with test data over 512 bytes shortened.",
 		tracked(object(props{
 			"itemId":            str("Problem id"),
-			"cases":             arrayOf(testCaseSchema(), "Test cases to add"),
+			"cases":             arrayOf(testCaseSchema(generatorDesc), "Test cases to add"),
 			"replace":           boolean("Replace the existing test cases; sample cases are kept"),
 			"referenceSolution": map[string]any{"anyOf": []any{solutionSchema(), map[string]any{"type": "null"}}},
 			"expectedRevision":  expectedRevision,
@@ -446,11 +546,15 @@ func (t *tools) register(s *mcp.Server) {
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.BulkTestCases(ctx, in.ItemID, in.BulkTestCasesInput)
+			tcs, err := a.BulkTestCases(ctx, in.ItemID, in.BulkTestCasesInput)
+			if err != nil {
+				return nil, err
+			}
+			return limited{tcs, echoElideBytes}, nil
 		})
 
 	t.add(s, "update_test_case", "Update test case",
-		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it. A generator runs and what it prints replaces stdin; generator: null drops the generator and keeps stdin; setting stdin without a generator drops the generator too. Giving stdin and a non-null generator together is refused here.",
+		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it; setting stdin without a generator drops the generator. Returns the case, with test data over 512 bytes shortened.",
 		tracked(object(props{
 			"id":             str("Test case id"),
 			"name":           maxLen(str("Name"), domain.MaxTestCaseNameChars),
@@ -458,7 +562,8 @@ func (t *tools) register(s *mcp.Server) {
 			"expectedStdout": str("Expected output"),
 			"isSample":       boolean("Sample flag"),
 			"verified":       boolean("Verified flag"),
-			"generator":      map[string]any{"anyOf": []any{generatorSchema(), map[string]any{"type": "null"}}, "description": generatorDesc + ". null drops the generator and keeps stdin"},
+			"generator": map[string]any{"anyOf": []any{generatorSchema(""), map[string]any{"type": "null"}},
+				"description": "A generator as in add_test_cases: it runs and its output replaces stdin. null drops the generator and keeps stdin; stdin with a non-null generator is refused"},
 		}, "id")), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ID string `json:"id"`
@@ -467,7 +572,11 @@ func (t *tools) register(s *mcp.Server) {
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.UpdateTestCase(ctx, in.ID, in.TestCaseInput)
+			tc, err := a.UpdateTestCase(ctx, in.ID, in.TestCaseInput)
+			if err != nil {
+				return nil, err
+			}
+			return limited{tc, echoElideBytes}, nil
 		})
 
 	t.add(s, "delete_test_case", "Delete test case", "Delete one test case.",
@@ -484,25 +593,31 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "verify_test_cases", "Verify test cases",
-		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and leaves the cases alone. Either way the run becomes the solution's lastRun, unless the engine failed on a case. For a function problem the solution runs inside its language's harness, and a language without one is rejected. Needs a judge engine.",
+		"Run a saved solution on every test case. With the reference solution (the default), each case is marked verified or not by whether its output matches, and with updateExpected: true mismatching cases take the actual output as expected. Another solutionId only checks that solution and leaves the cases alone. Either way the run becomes the solution's lastRun, unless the engine failed on a case. A function problem runs in the language's harness (a language without one is rejected). Matching results leave out actualStdout. Needs a judge engine.",
 		tracked(object(props{
 			"itemId":         str("Problem id"),
 			"solutionId":     str("Solution to run; omit for the reference solution"),
 			"updateExpected": boolean("Replace expected outputs with the actual output (reference solution only)"),
+			"full":           boolean(fullDesc),
 		}, "itemId")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID         string `json:"itemId"`
 				UpdateExpected bool   `json:"updateExpected"`
 				SolutionID     string `json:"solutionId"`
+				Full           bool   `json:"full"`
 			}
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			return a.VerifyTestCases(ctx, in.ItemID, in.UpdateExpected, in.SolutionID)
+			res, err := a.VerifyTestCases(ctx, in.ItemID, in.UpdateExpected, in.SolutionID)
+			if err != nil {
+				return nil, err
+			}
+			return limited{verifyView(res), elideLimit(in.Full)}, nil
 		})
 
 	t.add(s, "save_solution", "Save solution",
-		"Create a saved solution on a problem (give itemId), or change one (give its id; omitted fields are kept). isReference: true makes it the reference solution used to compute and verify expected outputs, clearing the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then. A solution reports its last run on the test cases as lastRun; changing its language or source clears it. When creating one from code you ran with run_code, pass that submission's id as submissionId to keep its figures as lastRun.",
+		"Create a saved solution on a problem (give itemId), or change one (give id; omitted fields are kept). isReference: true makes it the reference solution, which computes and verifies expected outputs, and clears the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then. lastRun is its last run on the test cases; a new language or source clears it.",
 		tracked(object(props{
 			"itemId":           str("Problem id, to create a solution"),
 			"id":               str("Solution id, to change an existing solution"),
@@ -512,7 +627,7 @@ func (t *tools) register(s *mcp.Server) {
 			"notes":            maxLen(str("Markdown notes, e.g. complexity"), domain.MaxSolutionNotesChars),
 			"isReference":      boolean("Make this the reference solution"),
 			"expectedRevision": expectedRevision,
-			"submissionId":     str("When creating: a completed submission of this problem with the same language and source, whose figures become lastRun; ignored otherwise"),
+			"submissionId":     str("When creating: a completed run_code submission of this problem with the same language and source, whose figures become lastRun; ignored otherwise"),
 		})), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID string `json:"itemId"`
@@ -548,19 +663,21 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "run_code", "Run code",
-		"Execute code for a problem and wait for the verdict: mode run (sample cases, or custom stdin) or submit (all cases). For a function problem give only the solution part: it runs inside the language's harness, line numbers in errors refer to it (<runner prefix> and <runner suffix> mark lines inside the runner), and lineOffset is how many lines the harness put before it. Only submits are kept as history: a run replaces the problem's earlier completed runs. Needs a judge engine.",
+		"Execute code for a problem and wait for the verdict. For a function problem give only the solution part: it runs inside the language's harness, line numbers in errors refer to it (<runner prefix> and <runner suffix> mark lines in the runner) and lineOffset is how many lines the harness puts before it. Only submits are kept: a run replaces the problem's earlier completed runs. Needs a judge engine.",
 		object(props{
 			"itemId":         str("Problem id"),
 			"language":       languageEnum("Language id; for a function problem, one with a harness"),
 			"source":         str(solutionSource),
-			"mode":           enumStr("run (default) or submit", "run", "submit"),
+			"mode":           enumStr("run (default): the sample cases, or stdin; submit: all cases", "run", "submit"),
 			"stdin":          nullableStr("Custom input for a run; omit to use the sample cases"),
 			"timeoutSeconds": integer("How long to wait for the verdict (default 120, max 600)"),
+			"full":           boolean(fullDesc),
 		}, "itemId", "language", "source"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID string `json:"itemId"`
 				app.SubmissionInput
-				TimeoutSeconds int `json:"timeoutSeconds"`
+				TimeoutSeconds int  `json:"timeoutSeconds"`
+				Full           bool `json:"full"`
 			}
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
@@ -579,6 +696,6 @@ func (t *tools) register(s *mcp.Server) {
 			if err != nil && wctx.Err() == nil {
 				return nil, err
 			}
-			return done, nil
+			return limited{done, elideLimit(in.Full)}, nil
 		})
 }

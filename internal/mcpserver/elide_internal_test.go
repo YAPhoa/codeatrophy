@@ -14,7 +14,7 @@ func TestElide(t *testing.T) {
 		"z": 1.5e300, "stdin": big, "results": []any{map[string]any{"stdout": big, "stderr": big, "n": json.Number("12345678901234567890")}},
 		"expectedStdout": exact, "name": big, "actualStdout": nil, "flag": true,
 	})
-	out, err := elide(doc)
+	out, err := elide(doc, elideBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,13 +39,13 @@ func TestElide(t *testing.T) {
 	if !strings.Contains(string(out), `"n":12345678901234567890`) || !strings.Contains(string(out), `"z":1.5e+300`) {
 		t.Errorf("numbers: %.200s", out)
 	}
-	ordered, _ := elide([]byte(`{"b":1,"stdin":"` + big + `","a":[true,null,"x"]}`))
+	ordered, _ := elide([]byte(`{"b":1,"stdin":"`+big+`","a":[true,null,"x"]}`), elideBytes)
 	if !strings.HasPrefix(string(ordered), `{"b":1,"stdin":null,"stdinBytes":`) || !strings.HasSuffix(string(ordered), `,"a":[true,null,"x"]}`) {
 		t.Errorf("order: %.80s ... %s", ordered, ordered[len(ordered)-40:])
 	}
 	// A small document is returned as it is.
 	small := []byte(`{"stdin": "1 2"}`)
-	if out, _ := elide(small); string(out) != string(small) {
+	if out, _ := elide(small, elideBytes); string(out) != string(small) {
 		t.Errorf("small: %s", out)
 	}
 }
