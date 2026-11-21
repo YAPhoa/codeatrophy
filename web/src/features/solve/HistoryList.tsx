@@ -23,9 +23,10 @@ export function HistoryList({ itemId, activeId, timeLimitMs, onOpen, onSaveSolut
   if (list.isError) return <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />;
   if (list.data.items.length === 0) {
     return (
-      <EmptyState compact icon={<History size={20} />} title="No submissions yet">
-        Each submission is kept here with its code.
-      </EmptyState>
+      // Centred in the pane, where nothing else is.
+      <div className="history-empty">
+        <EmptyState compact icon={<History size={20} />} title="No submissions yet" />
+      </div>
     );
   }
   return (

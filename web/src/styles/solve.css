@@ -232,6 +232,15 @@ a.result-saved:hover {
 
 /* ---- History: keep the code of an entry ---- */
 
+/* No submissions yet: in the middle of the pane, a little above centre. */
+.history-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding-bottom: 8vh;
+}
+
 .history-entry,
 .history-head {
   display: flex;
