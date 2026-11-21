@@ -151,7 +151,7 @@ function LinkSearch({ item, linked }: { item: Item; linked: readonly LinkedItem[
   return (
     <div ref={wrapRef} className="related-search">
       <input
-        className="input input-sm"
+        className="input"
         type="search"
         name="link-item"
         value={text}

@@ -2758,9 +2758,17 @@ fieldset.stack legend {
   gap: var(--space-2);
 }
 
+/* The size of a top-level heading in the text above it: a problem
+   statement's `.md h1`, or a reading's `.md-longform h1`. */
 .related-title {
-  font-size: var(--text-md);
+  font-size: calc(15px * var(--reading-scale) * 1.3);
   font-weight: 600;
+  line-height: 1.3;
+}
+
+.reader-article .related-title {
+  font-size: calc(17px * var(--reading-scale) * 1.45);
+  letter-spacing: -0.01em;
 }
 
 /* The whole title opens and closes the section. */
@@ -3380,9 +3388,10 @@ button.case-chip:hover {
   min-height: 0;
 }
 
+/* Sized like a problem's title in its bar, so both kinds of item read alike. */
 .reader-bar-title {
-  color: var(--text-2);
-  font-weight: 500;
+  font-size: var(--text-lg);
+  font-weight: 600;
   min-width: 0;
 }
 
