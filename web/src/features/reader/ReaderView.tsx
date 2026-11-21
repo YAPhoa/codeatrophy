@@ -205,11 +205,11 @@ export function ReaderView({ item }: { item: Item }) {
           {item.title}
         </span>
         <span className="spacer" />
-        <StatusControl item={item} size="sm" />
-        <FavoriteButton item={item} size="sm" labelled />
+        <StatusControl item={item} />
+        <FavoriteButton item={item} labelled />
         <span className="itembar-wide">
           <CollectionPicker
-            size="sm"
+           
             collections={collections}
             selected={item.collectionIds}
             onToggle={actions.toggleCollection}
@@ -218,7 +218,7 @@ export function ReaderView({ item }: { item: Item }) {
         </span>
         {hasOutline && !docked && <OutlineButton headings={headings} active={active} onChoose={choose} />}
         <MenuButton
-          size="sm"
+         
           variant="ghost"
           label={`Text width: ${widthLabel}`}
           menuLabel="Text width"
@@ -226,10 +226,10 @@ export function ReaderView({ item }: { item: Item }) {
           icon={<MoveHorizontal size={16} />}
           items={[{ heading: 'Text width' }, ...TEXT_WIDTHS.map((w) => ({ label: w.label, selected: w.value === textWidth, onSelect: () => chooseWidth(w.value) }))]}
         />
-        <Button size="sm" icon={<NotebookPen size={14} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
+        <Button icon={<NotebookPen size={16} />} aria-pressed={notesOpen} className={cx(notesOpen && 'is-active')} onClick={() => setNotesOpen(!notesOpen)}>
           Notes
         </Button>
-        <MenuButton size="sm" variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
+        <MenuButton variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
       </header>
 
       <div className="reader-body">
@@ -378,7 +378,6 @@ function OutlineButton({ headings, active, onChoose }: OutlineProps) {
     <>
       <IconButton
         ref={anchorRef}
-        size="sm"
         label="On this page"
         icon={<TableOfContents size={16} />}
         aria-haspopup="dialog"

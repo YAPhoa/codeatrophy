@@ -65,18 +65,18 @@ export function ItemBar({ item }: { item: Item }) {
         </NavLink>
       </nav>
       <span className="spacer" />
-      <StatusControl item={item} size="sm" />
-      <FavoriteButton item={item} size="sm" labelled />
+      <StatusControl item={item} />
+      <FavoriteButton item={item} labelled />
       <span className="itembar-wide">
         <CollectionPicker
-          size="sm"
+         
           collections={collections}
           selected={item.collectionIds}
           onToggle={actions.toggleCollection}
           onCreate={() => collectionActions.create(null, (c) => actions.toggleCollection(c.id, true))}
         />
       </span>
-      <MenuButton size="sm" variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
+      <MenuButton variant="ghost" label="More actions" align="end" icon={<MoreHorizontal size={16} />} items={actions.menu} />
     </header>
   );
 }
