@@ -21,4 +21,7 @@ export const pythonTypeTags = styleTags({
   [under('VariableName')]: t.typeName,
   [under('PropertyName')]: t.typeName,
   'ParamList/VariableName': parameterName,
+  // The grammar files `from` with def and class; in an import or `raise … from` it is not a declaration.
+  'ImportStatement/from': t.moduleKeyword,
+  'RaiseStatement/from YieldExpression/from': t.controlKeyword,
 });

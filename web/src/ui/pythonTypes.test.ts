@@ -60,3 +60,15 @@ it('a parameter is marked where it is declared, not where it is used', () => {
   expect(words.filter(([, c]) => c === 'param').map(([w]) => w)).toEqual(['self', 'word', 'k']);
   expect(words.filter(([w]) => w === 'word').map(([, c]) => c)).toEqual(['param', 'var', 'var']);
 });
+
+it('`from` in an import is a module keyword, not a declaring one like def and class', () => {
+  const kw = tagHighlighter([
+    { tag: t.moduleKeyword, class: 'module' },
+    { tag: t.controlKeyword, class: 'control' },
+    { tag: t.definitionKeyword, class: 'define' },
+  ]);
+  const src = 'from functools import cache\nclass A:\n    def f(self):\n        raise E from None\n';
+  const out: string[] = [];
+  highlightTree(language.parser.parse(src), kw, (from, to, cls) => out.push(`${src.slice(from, to)}:${cls}`));
+  expect(out).toEqual(['from:module', 'import:module', 'class:define', 'def:define', 'raise:control', 'from:control']);
+});

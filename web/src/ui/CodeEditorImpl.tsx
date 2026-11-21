@@ -166,7 +166,9 @@ const theme = EditorView.theme({
 });
 
 const highlight = HighlightStyle.define([
-  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword, t.definitionKeyword], color: 'var(--syn-keyword)' },
+  // Declaring keywords (def, class, const) apart from those that steer or import (if, return, from), as VS Code does.
+  { tag: [t.keyword, t.definitionKeyword, t.modifier], color: 'var(--syn-keyword)' },
+  { tag: [t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: 'var(--syn-control)' },
   { tag: [t.string, t.special(t.string), t.character, t.regexp], color: 'var(--syn-string)' },
   { tag: [t.number, t.bool, t.null, t.atom], color: 'var(--syn-number)' },
   { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: 'var(--syn-comment)', fontStyle: 'italic' },

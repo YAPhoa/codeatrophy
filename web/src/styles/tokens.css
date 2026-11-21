@@ -146,6 +146,7 @@
   --overlay: rgb(24 26 32 / 42%);
 
   --syn-keyword: #7d3fc4;
+  --syn-control: #b0247f;
   --syn-string: #0b6b4c;
   --syn-number: #a24e00;
   --syn-comment: #5f646c;
@@ -216,6 +217,7 @@
   --overlay: rgb(0 0 0 / 58%);
 
   --syn-keyword: #c3a6ff;
+  --syn-control: #ee8ad2;
   --syn-string: #7fdcb2;
   --syn-number: #f0a56a;
   --syn-comment: #8e949e;
