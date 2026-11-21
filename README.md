@@ -123,7 +123,7 @@ prompts.
 ## Storage
 
 The Compose stack keeps the library in PostgreSQL, in its own `db` service
-(`postgres:18`, volume `codeatrophy-db`), reachable only from the app and
+(`postgres:18.7-alpine`, volume `codeatrophy-db`), reachable only from the app and
 never published to the host. The `codeatrophy-data` volume is still needed:
 it holds `secret.key`, which encrypts stored API keys.
 
@@ -146,6 +146,11 @@ is quick for a personal library of thousands of items.
    a SQLite database it also writes a copy next to it, named after the
    version it was at (`codeatrophy.db.backup-v5-<time>`), and keeps the
    three newest; PostgreSQL gets no automatic backup.
+
+**Judge0's database on PostgreSQL 18.** Judge0's database moved to a new
+volume, `judge0-db-18`, and starts empty (it holds nothing the app needs).
+The old `judge0-db` volume is no longer used; remove it with
+`docker volume rm codeatrophy_judge0-db`.
 
 **Migrating by hand.** With `CODEATROPHY_DB_AUTO_MIGRATE=off` the server
 never changes the schema: on a database behind its version (or without a
@@ -318,7 +323,8 @@ which an older Codeatrophy refuses to import; upgrade it first.
 - **The judge runs untrusted code.** Judge0's sandbox (isolate) requires its
   worker container to run `privileged`. The Judge0 containers sit on an
   internal network without internet access, and submissions run without
-  network. Treat the host accordingly.
+  network. Treat the host accordingly. Judge0 keeps no copy of what it ran:
+  the app deletes each submission there once it has read the result.
 - **cgroup v2 hosts.** Judge0 1.13's sandbox can only use control groups on
   cgroup v1, which most current distributions no longer provide. Codeatrophy
   therefore asks Judge0 for per-process limits by default

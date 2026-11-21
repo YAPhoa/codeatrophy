@@ -115,6 +115,8 @@ func serve() error {
 		engine, err = judge0.New(judge0.Config{
 			URL:               cfg.Judge.Judge0URL,
 			AuthToken:         cfg.Judge.Judge0AuthToken,
+			AuthzToken:        cfg.Judge.Judge0AuthzToken,
+			Logger:            log,
 			UseCgroups:        cfg.Judge.Judge0Cgroups,
 			MemoryAllowanceKb: cfg.Judge.Judge0MemoryAllowanceKb,
 			Timeout:           cfg.Judge.Judge0Timeout,

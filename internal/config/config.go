@@ -62,6 +62,7 @@ type JudgeConfig struct {
 
 	Judge0URL               string
 	Judge0AuthToken         string
+	Judge0AuthzToken        string
 	Judge0Cgroups           bool
 	Judge0MemoryAllowanceKb map[string]int
 	Judge0Timeout           time.Duration
@@ -234,13 +235,14 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 
 	c.Judge = JudgeConfig{
-		Engine:          strings.ToLower(get("CODEATROPHY_JUDGE_ENGINE", "none")),
-		Workers:         getInt("CODEATROPHY_JUDGE_WORKERS", 2),
-		Concurrency:     getInt("CODEATROPHY_JUDGE_CONCURRENCY", 4),
-		Judge0URL:       get("CODEATROPHY_JUDGE0_URL", "http://judge0-server:2358"),
-		Judge0AuthToken: getenv("CODEATROPHY_JUDGE0_AUTH_TOKEN"),
-		Judge0Cgroups:   getBool("CODEATROPHY_JUDGE0_CGROUPS", false),
-		Judge0Timeout:   getDur("CODEATROPHY_JUDGE0_TIMEOUT", 5*time.Minute),
+		Engine:           strings.ToLower(get("CODEATROPHY_JUDGE_ENGINE", "none")),
+		Workers:          getInt("CODEATROPHY_JUDGE_WORKERS", 2),
+		Concurrency:      getInt("CODEATROPHY_JUDGE_CONCURRENCY", 4),
+		Judge0URL:        get("CODEATROPHY_JUDGE0_URL", "http://judge0-server:2358"),
+		Judge0AuthToken:  getenv("CODEATROPHY_JUDGE0_AUTH_TOKEN"),
+		Judge0AuthzToken: strings.TrimSpace(getenv("CODEATROPHY_JUDGE0_AUTHZ_TOKEN")),
+		Judge0Cgroups:    getBool("CODEATROPHY_JUDGE0_CGROUPS", false),
+		Judge0Timeout:    getDur("CODEATROPHY_JUDGE0_TIMEOUT", 5*time.Minute),
 	}
 	if c.Judge.Engine != "none" && c.Judge.Engine != "judge0" {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_JUDGE_ENGINE: must be none or judge0"))

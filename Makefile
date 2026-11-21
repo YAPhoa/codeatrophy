@@ -16,7 +16,7 @@ GO_IMAGE   := golang:$(GO_VERSION)-bookworm
 NODE_IMAGE := node:$(NODE_VERSION)-alpine
 # PostgreSQL server of test-postgres; keep it at the major version of the
 # db service in compose.yaml.
-PG_IMAGE   ?= postgres:18.7
+PG_IMAGE   ?= postgres:18.7-alpine
 DOCKER_USER := --user $(shell id -u):$(shell id -g)
 CGO         ?= 0
 

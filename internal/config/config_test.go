@@ -42,13 +42,14 @@ func TestParsing(t *testing.T) {
 		"CODEATROPHY_MCP_ALLOWED_ORIGINS":      "https://a.example/, https://b.example",
 		"CODEATROPHY_AI_PROVIDER":              "none",
 		"CODEATROPHY_AI_WORKERS":               "3",
+		"CODEATROPHY_JUDGE0_AUTHZ_TOKEN":       "authz",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Judge.Engine != "judge0" || !c.Judge.Judge0Cgroups || c.Judge.Judge0MemoryAllowanceKb["go"] != 262144 ||
 		len(c.MCP.AllowedOrigins) != 2 || c.MCP.AllowedOrigins[0] != "https://a.example" || c.AI.Provider != "" ||
-		c.AI.Workers != 3 {
+		c.AI.Workers != 3 || c.Judge.Judge0AuthzToken != "authz" {
 		t.Errorf("parsed: %+v", c)
 	}
 	for k, v := range map[string]string{

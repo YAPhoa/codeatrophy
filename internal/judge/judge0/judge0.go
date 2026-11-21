@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"path"
@@ -48,6 +49,12 @@ type Config struct {
 	URL string
 	// AuthToken is sent as X-Auth-Token when non-empty.
 	AuthToken string
+	// AuthzToken is Judge0's authorization token (AUTHZ_TOKEN), sent as
+	// X-Auth-User to delete each submission once its result is read. Empty
+	// means submissions are left in Judge0.
+	AuthzToken string
+	// Logger receives failures to delete submissions; nil discards them.
+	Logger *slog.Logger
 	// UseCgroups asks Judge0 for cgroup-based time and memory accounting.
 	// This only works on hosts that provide cgroup v1.
 	UseCgroups bool
@@ -96,6 +103,10 @@ var jvmFallbackFloorKb = map[string]int{"java": 6291456, "kotlin": 3145728}
 type Engine struct {
 	cfg    Config
 	client *http.Client
+	log    *slog.Logger
+
+	clean     cleaner
+	cleanOnce sync.Once
 
 	mu    sync.Mutex
 	cat   *catalog
@@ -119,6 +130,9 @@ type catalog struct {
 	maxWall   float64
 	maxCPU    float64
 	maxBatch  int
+	// deleteAllowed is false when the server reports that deleting
+	// submissions is disabled (ENABLE_SUBMISSION_DELETE).
+	deleteAllowed bool
 }
 
 var (
@@ -151,7 +165,12 @@ func New(cfg Config) (*Engine, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Engine{cfg: cfg, client: client}, nil
+	log := cfg.Logger
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Engine{cfg: cfg, client: client, log: log,
+		clean: cleaner{queue: make(chan cleanupJob, cleanupQueue), backoff: defaultBackoff}}, nil
 }
 
 // Name implements judge.Engine.
@@ -219,7 +238,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		return nil, err
 	}
 	c := &catalog{ids: map[string]int{}, binDirs: map[string]string{}, runCmds: map[string]string{},
-		maxWall: 20, maxCPU: 15, maxBatch: 20, extractKb: defaultExtractKb}
+		maxWall: 20, maxCPU: 15, maxBatch: 20, extractKb: defaultExtractKb, deleteAllowed: true}
 	names := map[string]string{}
 	for _, l := range list {
 		if multiFileRe.MatchString(l.Name) {
@@ -251,6 +270,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		MaxMaxFileSize         int     `json:"max_max_file_size"`
 		MaxExtractSize         int     `json:"max_extract_size"`
 		EnableBatched          *bool   `json:"enable_batched_submissions"`
+		EnableDelete           *bool   `json:"enable_submission_delete"`
 	}
 	if err := e.do(ctx, http.MethodGet, "/config_info", nil, &conf); err == nil {
 		c.maxMemKb = int(conf.MaxMemoryLimit)
@@ -267,6 +287,13 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		}
 		if conf.EnableBatched != nil && !*conf.EnableBatched {
 			c.maxBatch = 0
+		}
+		if conf.EnableDelete != nil && !*conf.EnableDelete {
+			c.deleteAllowed = false
+			if e.cfg.AuthzToken != "" && !e.clean.offWarned.Swap(true) {
+				e.log.Warn("judge0: the server does not allow deleting submissions (ENABLE_SUBMISSION_DELETE); " +
+					"every run stays in Judge0's database")
+			}
 		}
 	}
 
@@ -535,13 +562,16 @@ func (e *Engine) Execute(ctx context.Context, req judge.ExecRequest) (judge.Exec
 	delay := 100 * time.Millisecond
 	for {
 		if err := sleep(ctx, delay); err != nil {
+			e.forget(created.Token) // deleted once it finishes
 			return judge.ExecResult{}, err
 		}
 		var res submissionResponse
 		if err := e.do(ctx, http.MethodGet, p, nil, &res); err != nil {
+			e.forget(created.Token)
 			return judge.ExecResult{}, err
 		}
 		if res.Status.ID > 2 {
+			e.forget(created.Token)
 			return e.convert(req, res), nil
 		}
 		delay = min(delay*2, e.cfg.PollInterval)
@@ -606,22 +636,37 @@ func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.Exec
 		return failRest(err)
 	}
 	if len(created) != len(reqs) {
+		for _, cr := range created {
+			tok, _ := cr["token"].(string)
+			e.forget(tok)
+		}
 		return failRest(fmt.Errorf("judge0: batch returned %d tokens for %d submissions", len(created), len(reqs)))
 	}
 	tokens := make([]string, len(created))
 	for i, cr := range created {
-		tok, _ := cr["token"].(string)
-		if tok == "" {
-			b, _ := json.Marshal(cr)
-			return failRest(fmt.Errorf("judge0: batch submission rejected: %s", truncate(string(b), 300)))
+		tokens[i], _ = cr["token"].(string)
+	}
+	// abandon gives up on the runs not reported yet: they are deleted once
+	// they finish.
+	abandon := func(err error) bool {
+		for i := range reqs {
+			if !reported[i] {
+				e.forget(tokens[i])
+			}
 		}
-		tokens[i] = tok
+		return failRest(err)
+	}
+	for _, cr := range created {
+		if tok, _ := cr["token"].(string); tok == "" {
+			b, _ := json.Marshal(cr)
+			return abandon(fmt.Errorf("judge0: batch submission rejected: %s", truncate(string(b), 300)))
+		}
 	}
 	pending := len(reqs)
 	delay := 100 * time.Millisecond
 	for pending > 0 {
 		if err := sleep(ctx, delay); err != nil {
-			return failRest(err)
+			return abandon(err)
 		}
 		var want []string
 		var idx []int
@@ -636,16 +681,17 @@ func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.Exec
 		}
 		if err := e.do(ctx, http.MethodGet, "/submissions/batch?base64_encoded=true&tokens="+strings.Join(want, ",")+
 			"&fields="+resultFields, nil, &got); err != nil {
-			return failRest(err)
+			return abandon(err)
 		}
 		if len(got.Submissions) != len(want) {
-			return failRest(errors.New("judge0: batch status returned an unexpected number of submissions"))
+			return abandon(errors.New("judge0: batch status returned an unexpected number of submissions"))
 		}
 		for j, s := range got.Submissions {
 			if s.Status.ID > 2 {
 				i := idx[j]
 				reported[i] = true
 				pending--
+				e.forget(tokens[i])
 				onDone(i, e.convert(reqs[i], s), nil)
 			}
 		}
@@ -776,16 +822,12 @@ func (e *Engine) do(ctx context.Context, method, p string, in, out any) error {
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, e.cfg.URL+p, body)
+	req, err := e.newRequest(ctx, method, p, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if e.cfg.AuthToken != "" {
-		req.Header.Set("X-Auth-Token", e.cfg.AuthToken)
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -807,6 +849,23 @@ func (e *Engine) do(ctx context.Context, method, p string, in, out any) error {
 		return fmt.Errorf("judge0: decoding response: %w", err)
 	}
 	return nil
+}
+
+// newRequest builds a request to the server with the authentication header.
+func (e *Engine) newRequest(ctx context.Context, method, p string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, e.cfg.URL+p, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if e.cfg.AuthToken != "" {
+		req.Header.Set("X-Auth-Token", e.cfg.AuthToken)
+	}
+	return req, nil
+}
+
+func httpStatusError(code int, body []byte) error {
+	return fmt.Errorf("HTTP %d: %s", code, truncate(strings.TrimSpace(string(body)), 300))
 }
 
 func truncate(s string, n int) string {

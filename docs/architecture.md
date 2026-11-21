@@ -321,6 +321,27 @@ line only when it is provably the wrapper's (the exit code is 128 + that
 signal and the line names the exact run command) and reports the signal in
 the result's message instead, so the program's own stderr is kept intact.
 
+Judge0 stores every submission it runs (source, input, expected and actual
+output) in its own database and never removes one, while the app keeps its
+own record and reads each result exactly once. The adapter therefore
+deletes each submission in Judge0 (`DELETE /submissions/{token}`) once it
+has read the result, single or batched. Judge0 allows that only with
+`ENABLE_SUBMISSION_DELETE=true` and its authorization token (`AUTHZ_TOKEN`,
+sent as `X-Auth-User`); with `AUTHZ_TOKEN` unset it refuses every delete. The
+Compose stack enables deleting and gives both sides the same token, with a
+default as for its passwords (`CODEATROPHY_JUDGE0_AUTHZ_TOKEN`); a server
+run without a token leaves submissions in Judge0, and one whose Judge0
+reports deletes disabled sends none. Deleting is best effort and off the
+result path: tokens go into a bounded queue that one background goroutine
+works through, so a failure never fails or delays a submission; it is
+logged (the first as a warning) and the submission stays in Judge0. Judge0
+refuses to delete a submission still queued or running, so a run the
+adapter stopped waiting for (cancelled, timed out, a failed poll) is queued
+as well and retried with backoff for about nine minutes until it has
+finished. Left behind are only runs whose creation the adapter never saw
+answered (no token), runs that never finish within those retries, tokens
+dropped from a full queue, and whatever was queued when the server stopped.
+
 Problems are judged on a stdin/stdout basis. That is the model every sandbox
 supports natively and it keeps problems language-agnostic.
 

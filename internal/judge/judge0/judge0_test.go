@@ -44,6 +44,15 @@ type fakeJudge0 struct {
 	batchCreates int
 	batchPolls   int
 	singles      int
+	// unfinished, when set, keeps a submission processing while it
+	// returns true; Judge0 refuses to delete it meanwhile.
+	unfinished func(tok string) bool
+	// deleteStatus, when set, answers a delete with that status.
+	deleteStatus func(tok string) int
+	// deleted lists the tokens deleted, in order; deleteHeaders the
+	// headers of each delete request.
+	deleted       []string
+	deleteHeaders []http.Header
 }
 
 func b64s(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -128,6 +137,28 @@ func (f *fakeJudge0) serve(w http.ResponseWriter, r *http.Request) {
 			subs = append(subs, f.poll(tok))
 		}
 		writeJSON(map[string]any{"submissions": subs})
+	case strings.HasPrefix(r.URL.Path, "/submissions/") && r.Method == http.MethodDelete:
+		tok := strings.TrimPrefix(r.URL.Path, "/submissions/")
+		f.mu.Lock()
+		f.deleteHeaders = append(f.deleteHeaders, r.Header.Clone())
+		_, known := f.bodies[tok]
+		f.mu.Unlock()
+		switch {
+		case f.deleteStatus != nil && f.deleteStatus(tok) != 0:
+			w.WriteHeader(f.deleteStatus(tok))
+			writeJSON(map[string]any{"error": "refused"})
+		case !known:
+			w.WriteHeader(http.StatusNotFound)
+		case f.unfinished != nil && f.unfinished(tok):
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(map[string]any{"error": "submission cannot be deleted because its status is 2 (Processing)"})
+		default:
+			f.mu.Lock()
+			f.deleted = append(f.deleted, tok)
+			delete(f.bodies, tok)
+			f.mu.Unlock()
+			writeJSON(map[string]any{"token": tok})
+		}
 	case strings.HasPrefix(r.URL.Path, "/submissions/"):
 		if r.URL.Query().Get("base64_encoded") != "true" {
 			f.t.Error("results must be requested base64-encoded")
@@ -154,7 +185,7 @@ func (f *fakeJudge0) poll(tok string) map[string]any {
 	first := f.polls[tok] == 1
 	body := f.bodies[tok]
 	f.mu.Unlock()
-	if first {
+	if first || f.unfinished != nil && f.unfinished(tok) {
 		return map[string]any{"token": tok, "status": map[string]any{"id": 2, "description": "Processing"}}
 	}
 	res := f.result(body)
