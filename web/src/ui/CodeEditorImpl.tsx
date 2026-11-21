@@ -31,6 +31,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
+import { parameterName } from './pythonTypes';
 import { usePreferences } from '../api/queries';
 import { cx } from './Button';
 import { documentWords, loadLanguage } from './editorLanguages';
@@ -171,6 +172,8 @@ const highlight = HighlightStyle.define([
   { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: 'var(--syn-comment)', fontStyle: 'italic' },
   { tag: [t.function(t.variableName), t.function(t.propertyName), t.macroName], color: 'var(--syn-fn)' },
   { tag: [t.typeName, t.className, t.namespace, t.standard(t.typeName)], color: 'var(--syn-type)' },
+  // A parameter where it is declared (Python's, see pythonTypes.ts); its uses stay plain.
+  { tag: parameterName, color: 'var(--syn-var)' },
   { tag: [t.meta, t.annotation, t.processingInstruction, t.self], color: 'var(--syn-meta)' },
   { tag: [t.heading], color: 'var(--text)', fontWeight: '600' },
   { tag: [t.strong], fontWeight: '600' },

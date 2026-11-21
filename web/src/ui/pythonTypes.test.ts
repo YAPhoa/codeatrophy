@@ -4,10 +4,11 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { loadLanguage } from './editorLanguages';
 import { highlightTree, tagHighlighter, tags as t } from '@lezer/highlight';
-import { pythonTypeTags } from './pythonTypes';
+import { parameterName, pythonTypeTags } from './pythonTypes';
 
 const language = pythonLanguage.configure({ props: [pythonTypeTags] });
 const highlighter = tagHighlighter([
+  { tag: parameterName, class: 'param' },
   { tag: t.typeName, class: 'type' },
   { tag: t.className, class: 'type' },
   { tag: t.variableName, class: 'var' },
@@ -52,4 +53,10 @@ it('the editor loads Python with its annotations tagged as types', async () => {
     if (cls === 'type') words.push(doc.slice(from, to));
   });
   expect(words).toEqual(['list', 'int', 'int']);
+});
+
+it('a parameter is marked where it is declared, not where it is used', () => {
+  const words = classes('class Trie:\n    def search(self, word: str, k=None) -> bool:\n        word = word + "x"\n        return k\n');
+  expect(words.filter(([, c]) => c === 'param').map(([w]) => w)).toEqual(['self', 'word', 'k']);
+  expect(words.filter(([w]) => w === 'word').map(([, c]) => c)).toEqual(['param', 'var', 'var']);
 });

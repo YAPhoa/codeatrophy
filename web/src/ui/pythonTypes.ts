@@ -1,4 +1,7 @@
-import { styleTags, tags as t } from '@lezer/highlight';
+import { Tag, styleTags, tags as t } from '@lezer/highlight';
+
+/** A parameter's name where the parameter is declared, in a `def` or `lambda` line. */
+export const parameterName = Tag.define(t.variableName);
 
 /** How deep inside an annotation a name is still coloured, as in `dict[str, list[Optional[Node]]]`. */
 const DEPTH = 6;
@@ -10,9 +13,12 @@ const under = (name: string): string =>
  * The names in a Python annotation (`nums: list[int]`, `-> Optional[Node]`,
  * `x: tree.Node`) tagged as types. Lezer's Python grammar marks an
  * annotation (`TypeDef`) but tags the names in it as plain variables, so
- * without this only a class's own name takes the type colour.
+ * without this only a class's own name takes the type colour. The names
+ * declared in a parameter list are tagged as parameters, so the signature
+ * shows them apart (their uses in the body stay plain variables).
  */
 export const pythonTypeTags = styleTags({
   [under('VariableName')]: t.typeName,
   [under('PropertyName')]: t.typeName,
+  'ParamList/VariableName': parameterName,
 });
