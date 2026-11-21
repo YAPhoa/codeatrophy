@@ -16,7 +16,8 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
-		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.MaxLinksPerItem != 30 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
+		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.MaxLinksPerItem != 30 ||
+		c.MaxGeneratedTestCases != 30 || c.MaxLargeTestCases != 5 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
 		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" || c.AI.Workers != 2 {
 		t.Errorf("defaults: %+v", c)
 	}
@@ -79,6 +80,31 @@ func TestLinkLimit(t *testing.T) {
 		_, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_LINKS_PER_ITEM": v}))
 		if err == nil || !strings.Contains(err.Error(), "CODEATROPHY_MAX_LINKS_PER_ITEM") {
 			t.Errorf("a link limit of %q should be rejected naming the variable: %v", v, err)
+		}
+	}
+}
+
+func TestGenerationLimits(t *testing.T) {
+	for name, c := range map[string]struct {
+		good, bad []string
+		got       func(Config) int
+	}{
+		"CODEATROPHY_MAX_GENERATED_TEST_CASES": {[]string{"1", "12", "100"}, []string{"0", "101", "-3", "many", "30.5"},
+			func(c Config) int { return c.MaxGeneratedTestCases }},
+		"CODEATROPHY_MAX_LARGE_TEST_CASES": {[]string{"1", "7", "20"}, []string{"0", "21", "-1", "x", "2.5"},
+			func(c Config) int { return c.MaxLargeTestCases }},
+	} {
+		for _, v := range c.good {
+			cfg, err := LoadFrom(env(map[string]string{name: v}))
+			if err != nil || fmt.Sprint(c.got(cfg)) != v {
+				t.Errorf("%s=%s: %d %v", name, v, c.got(cfg), err)
+			}
+		}
+		for _, v := range c.bad {
+			_, err := LoadFrom(env(map[string]string{name: v}))
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%q should be rejected naming the variable: %v", name, v, err)
+			}
 		}
 	}
 }

@@ -25,9 +25,12 @@ const SHAKEN_WHOLE = '.taginput, .editor-frame, .body-editor';
 
 const shakeEnds = new WeakMap<HTMLElement, number>();
 
+/** How long one shake lasts, in ms; nil under reduced motion. */
+export const shakeDuration = (): number => exitDuration('--duration-micro') * 4;
+
 /** Plays `.is-shaking` (ui.css) from the start, even when the last shake has not ended. */
-function shake(el: HTMLElement): void {
-  const ms = exitDuration('--duration-micro') * 4;
+export function shake(el: HTMLElement): void {
+  const ms = shakeDuration();
   if (ms === 0) return;
   el.classList.remove('is-shaking');
   void el.offsetWidth;

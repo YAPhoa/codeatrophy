@@ -974,11 +974,21 @@ func TestLinkTools(t *testing.T) {
 // maxLength and maxItems, and link_items states the configured link limit.
 func TestLimitsInOverviewAndSchemas(t *testing.T) {
 	f := newFixtureLimits(t, "", false, domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 16,
-		MaxNotesChars: 123, MaxLinksPerItem: 7})
+		MaxNotesChars: 123, MaxLinksPerItem: 7, MaxGeneratedTestCases: 9, MaxLargeTestCases: 2})
 	s := f.connect(t, "")
 	ov, isErr := call(t, s, "get_overview", map[string]any{})
 	lim, _ := ov["limits"].(map[string]any)
-	for k, want := range map[string]float64{"maxNotesChars": 123, "maxLinksPerItem": 7,
+	if p, _ := ov["preferences"].(map[string]any); p["largeTestCaseCount"] != float64(2) || p["generatedTestCases"] != float64(8) {
+		t.Errorf("preferences within the limits: %v", p)
+	}
+	it, _ := call(t, s, "create_item", map[string]any{"type": "problem", "title": "P"})
+	for count, want := range map[string]string{"9": "and 9 test cases", "10": "and 8 test cases"} {
+		res, err := s.GetPrompt(f.ctx, &mcp.GetPromptParams{Name: "write_test_cases", Arguments: map[string]string{"itemId": it["id"].(string), "count": count}})
+		if err != nil || !strings.Contains(res.Messages[0].Content.(*mcp.TextContent).Text, want) {
+			t.Errorf("write_test_cases with count %s: want %q (%v)", count, want, err)
+		}
+	}
+	for k, want := range map[string]float64{"maxNotesChars": 123, "maxLinksPerItem": 7, "maxGeneratedTestCases": 9, "maxLargeTestCases": 2,
 		"maxTitleChars": domain.MaxTitleChars, "maxSummaryChars": domain.MaxSummaryChars, "maxTags": domain.MaxTags,
 		"maxTagChars": domain.MaxTagChars, "maxSolutionNameChars": domain.MaxSolutionNameChars,
 		"maxSolutionNotesChars": domain.MaxSolutionNotesChars, "maxCollectionNameChars": domain.MaxCollectionNameChars,

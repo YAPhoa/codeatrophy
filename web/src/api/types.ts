@@ -606,6 +606,13 @@ export interface DraftRequest {
   styleId?: string | null;
   /** Also build that many large test cases, 0 to `limits.maxLargeTestCases`. Ignored for a reading. */
   largeTestCases?: number;
+  /**
+   * How many ordinary test cases the draft has at least, 0 to `limits.maxGeneratedTestCases`:
+   * hidden ones fill up to this after the samples of its examples, and none is ever removed,
+   * on a revision either. Omitted or 0 → the samples only. Large test cases come on top.
+   * Ignored for a reading.
+   */
+  testCaseCount?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
 }
@@ -700,6 +707,8 @@ export interface VariantRequest {
   /** Omitted → the variant keeps the original's interface. */
   interfaceHint?: ProblemInterface;
   largeTestCases?: number;
+  /** As in `DraftRequest`. */
+  testCaseCount?: number;
   /** The provider to use instead of the default; it must be `ready`. Omitted or `null` → the default. */
   providerId?: string | null;
 }

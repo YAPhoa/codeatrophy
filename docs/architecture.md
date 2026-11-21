@@ -400,15 +400,18 @@ The two features built on it are provider independent:
   algorithmic problem whose heart is one routine, `program` when input and
   output are part of the task; the user may decide instead), writes the
   stubs and harnesses of a function problem, and writes a reference
-  solution. The server then runs that solution on the draft's own examples
-  — through the harness, with the judge's real toolchains — and reports per
-  example whether it printed the stated output, so a wrong example or a
-  runner that does not compile shows during review. This *draft check* runs
-  code for something that is not saved, never fails the draft (no engine, an
-  unreachable one, a compile error or a timeout are reported in it), runs at
-  most 10 cases and stops after 50 seconds or when the job is
-  cancelled, and corrects nothing. For a function problem it then proves
-  every harness, not only the reference solution's: each language's starter
+  solution. A request may also give a test case count, and then the model
+  adds hidden test cases after the examples, chosen by the same test-design
+  guidance as test-case generation. The server then runs that solution on
+  the draft's test cases — through the harness, with the judge's real
+  toolchains — and reports per case whether it printed the stated output,
+  so a wrong example or a runner that does not compile shows during review.
+  This *draft check* runs code for something that is not saved, never fails
+  the draft (no engine, an unreachable one, a compile error or a timeout are
+  reported in it), runs every case (a draft has at most
+  `CODEATROPHY_MAX_GENERATED_TEST_CASES`, 30 by default, besides large
+  ones) and stops after 50 seconds or when the job is cancelled, and
+  corrects nothing. For a function problem it then proves every harness, not only the reference solution's: each language's starter
   code, which is written to compile and run with a placeholder result, runs
   unchanged on the first example in the time the reference solution left
   (the languages in parallel), and any answer counts as a working runner.
@@ -449,7 +452,7 @@ The two features built on it are provider independent:
   are independent and run in parallel, each its generator and then the
   reference solution, so several take about as long as one; one that fails
   never affects the others. In a draft this runs after the other cases and
-  before the runners, inside the check's time bound and outside its 10-case
+  before the runners, inside the check's time bound and outside its case
   cap. Each case keeps its generator, which is stored with it when the
   case is saved: a stored generator marks a case as large. A client can
   also give a test case a generator instead of its stdin, which is how an

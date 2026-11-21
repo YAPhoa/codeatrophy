@@ -122,7 +122,7 @@ func TestLargeCaseRulesAndSchema(t *testing.T) {
 	}
 
 	for _, n := range []int{1, 3} {
-		for name, s := range map[string]map[string]any{"draft": DraftSchema(n), "testcases": TestCasesSchema("python", false, n)} {
+		for name, s := range map[string]map[string]any{"draft": DraftSchema(n, 0), "testcases": TestCasesSchema("python", false, n)} {
 			props := s["properties"].(map[string]any)
 			lc, ok := props["largeCases"].(map[string]any)
 			if !ok || lc["type"] != "array" || !slices.Contains(s["required"].([]string), "largeCases") {
@@ -136,10 +136,67 @@ func TestLargeCaseRulesAndSchema(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := DraftSchema(0)["properties"].(map[string]any)["largeCases"]; ok {
+	if _, ok := DraftSchema(0, 0)["properties"].(map[string]any)["largeCases"]; ok {
 		t.Error("the draft schema asks for large cases unasked")
 	}
 	if _, ok := TestCasesSchema("python", true, 0)["properties"].(map[string]any)["largeCases"]; ok {
 		t.Error("the test-case schema asks for large cases unasked")
+	}
+}
+
+// A draft or variant asks for a number of test cases only when given one:
+// then for that many in all, the samples first, chosen by the test-design
+// guidance of test-case generation (or the custom test case prompt that
+// replaces it).
+func TestDraftTestCaseCount(t *testing.T) {
+	prompts := func(n int, custom string) map[string]string {
+		draft, _ := DraftPrompt{Text: "x", TestCases: n, TestCaseGuidance: custom, Large: LargeCases{Count: 1, MaxBytes: 100}}.Build()
+		variant, _ := VariantPrompt{Original: "{}", Mode: "similar", TestCases: n, TestCaseGuidance: custom, Large: LargeCases{Count: 1, MaxBytes: 100}}.Build()
+		return map[string]string{"draft": draft, "variant": variant}
+	}
+	const custom = "# My tests\n\nAlways include a case with n = 1."
+	for name, p := range prompts(0, custom) {
+		for _, gone := range []string{"## Test design", "holds at least", "hidden", "My tests", "Cover: the examples"} {
+			if strings.Contains(p, gone) {
+				t.Errorf("%s without a count carries %q", name, gone)
+			}
+		}
+	}
+	for name, p := range prompts(8, "") {
+		count := `- For a problem, "testCases" holds at least 8 test cases: the sample cases first, then
+  hidden cases (isSample: false) until there are 8 test cases. If the examples already give
+  8 test cases or more, keep them all as samples and add no hidden case. When revising an earlier
+  draft, keep every one of its test cases unless the instruction asks to change them, and add
+  hidden cases only until there are 8 test cases.`
+		at := func(s string) int {
+			i := strings.Index(p, s)
+			if i < 0 {
+				t.Errorf("%s lacks %q", name, s)
+			}
+			return i
+		}
+		if !(at(problemRules) < at(count) && at(count) < at(`"largeCases"`) && at(`"largeCases"`) < at("\n## Test design\n") &&
+			at("\n## Test design\n") < at(EditableTestCaseRules)) || !strings.HasSuffix(p, EditableTestCaseRules+"\n"+jsonOnly) {
+			t.Errorf("%s: the count after the problem rules, the guidance last:\n%s", name, p)
+		}
+	}
+	for name, p := range prompts(1, "") {
+		if !strings.Contains(p, `"testCases" holds at least 1 test case:`) || !strings.Contains(p, "until there are 1 test case. If the examples already give\n  1 test case or more") {
+			t.Errorf("%s, one case:\n%s", name, p)
+		}
+	}
+	for name, p := range prompts(8, custom) {
+		if !strings.Contains(p, "\n\n"+custom+"\n\n"+jsonOnly) || strings.Contains(p, "Cover: the examples") ||
+			strings.Contains(p, "# Fixed rules\n\nThese rules are how the app works, and they always apply. Where the\ntext above") {
+			t.Errorf("%s: the custom text replaces the built-in guidance:\n%s", name, p)
+		}
+	}
+
+	desc := func(n int) any {
+		return DraftSchema(0, n)["properties"].(map[string]any)["testCases"].(map[string]any)["description"]
+	}
+	if desc(0) != "Sample test cases (empty for readings)" || desc(8) != "At least 8 test cases: the sample cases, then hidden ones (empty for readings)" ||
+		desc(1) != "At least 1 test case: the sample cases, then hidden ones (empty for readings)" {
+		t.Errorf("schema descriptions: %v / %v / %v", desc(0), desc(8), desc(1))
 	}
 }

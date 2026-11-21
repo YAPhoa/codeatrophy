@@ -98,6 +98,7 @@ func promptSlots() []slot {
 		{name: "draft/style", build: with(draft, func(p *DraftPrompt, a string) { p.Style = style(a) })},
 		{name: "draft/style name", build: with(draft, func(p *DraftPrompt, a string) { p.Style = &Style{Name: a, Instructions: "i"} })},
 		{name: "draft/conventions", trusted: true, build: with(draft, func(p *DraftPrompt, a string) { p.Conventions, p.Style = a, style("i") })},
+		{name: "draft/testCaseGuidance", trusted: true, build: with(draft, func(p *DraftPrompt, a string) { p.TestCaseGuidance, p.TestCases = a, 8 })},
 
 		{name: "variant/original", build: with(variant, func(p *VariantPrompt, a string) { p.Original = a })},
 		{name: "variant/instruction", build: with(variant, func(p *VariantPrompt, a string) { p.Instruction = a })},
@@ -105,6 +106,7 @@ func promptSlots() []slot {
 		{name: "variant/style", build: with(variant, func(p *VariantPrompt, a string) { p.Style = style(a) })},
 		{name: "variant/mode", mapped: true, build: with(variant, func(p *VariantPrompt, a string) { p.Mode = a })},
 		{name: "variant/conventions", trusted: true, build: with(variant, func(p *VariantPrompt, a string) { p.Conventions, p.Style = a, style("i") })},
+		{name: "variant/testCaseGuidance", trusted: true, build: with(variant, func(p *VariantPrompt, a string) { p.TestCaseGuidance, p.TestCases = a, 8 })},
 
 		{name: "testcases/problem", build: with(tc, func(p *TestCasesPrompt, a string) { p.Problem = a })},
 		{name: "testcases/existingSolution", build: with(tc, func(p *TestCasesPrompt, a string) { p.ExistingSolution = a })},

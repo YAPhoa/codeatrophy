@@ -98,6 +98,57 @@ const problemRules = `- For a problem, include sample test cases matching the ex
 - starterCode and harness are lists of {language, ...} entries.
 `
 
+// testCountRule asks a draft or variant for at least n ordinary test
+// cases: the samples, then hidden ones up to n. A revision keeps the earlier
+// draft's cases. It is "" for n <= 0, which asks for the samples only.
+func testCountRule(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(`- For a problem, "testCases" holds at least %[1]s: the sample cases first, then
+  hidden cases (isSample: false) until there are %[1]s. If the examples already give
+  %[1]s or more, keep them all as samples and add no hidden case. When revising an earlier
+  draft, keep every one of its test cases unless the instruction asks to change them, and add
+  hidden cases only until there are %[1]s. Each hidden case has an input no other case has and
+  a correct expected output; the reference solution is run on every case. Choose the hidden
+  cases by the test-design guidance below.
+`, testCases(n))
+}
+
+func testCases(n int) string {
+	if n == 1 {
+		return "1 test case"
+	}
+	return fmt.Sprintf("%d test cases", n)
+}
+
+// caseGuidance is the custom test case prompt a draft or variant carries:
+// custom when it asks for n > 0 test cases, else "".
+func caseGuidance(n int, custom string) string {
+	if n <= 0 {
+		return ""
+	}
+	return custom
+}
+
+// testDesignSection carries the test-design guidance of test-case
+// generation (see testDesignGuidance) into a draft or variant that asks for
+// n > 0 test cases, or is "".
+func testDesignSection(n int, custom string) string {
+	if n <= 0 {
+		return ""
+	}
+	return `
+## Test design
+
+The guidance below is written for a separate request that adds test cases to a saved problem. Here
+it applies to the hidden test cases and the reference solution: leave out what the draft has no
+field for (such as a rationale), and write the reference solution in a language the rules above
+allow.
+
+` + testDesignGuidance(custom)
+}
+
 // LargeCases asks a generation for generators of large test cases.
 type LargeCases struct {
 	Count    int // how many; 0 asks for none
@@ -167,6 +218,13 @@ type DraftPrompt struct {
 	Toolchains    []Toolchain
 	// Large asks for generators of large test cases as well.
 	Large LargeCases
+	// TestCases asks for that many ordinary test cases in all, the sample
+	// cases first and then hidden ones; 0 asks for the sample cases only.
+	TestCases int
+	// TestCaseGuidance is the user's custom test case prompt, which the
+	// hidden test cases follow instead of the built-in test-design guidance,
+	// or "". It applies only with TestCases > 0.
+	TestCaseGuidance string
 }
 
 // largeSection is the large-case rules, or "".
@@ -179,7 +237,7 @@ func largeSection(l LargeCases) string {
 
 // draftRules are the rules of a draft's system prompt that follow the
 // conventions and the style preset. They are fixed.
-func draftRules(l LargeCases) string {
+func draftRules(l LargeCases, n int, guidance string) string {
 	return `
 ## Drafting rules
 
@@ -189,21 +247,23 @@ func draftRules(l LargeCases) string {
 - Starter code languages: those the user's text or instruction names; if they name none, those the
   style preset names; if neither does, python and cpp. Use exactly that set.
 ` + assumptionRules + `
-` + problemRules + largeSection(l) + `
+` + problemRules + testCountRule(n) + largeSection(l) + testDesignSection(n, guidance) + `
 ` + jsonOnly
 }
 
 // DraftRules returns the fixed rules that end a draft's system prompt, as
-// sent when no large test cases are asked for (asking for them adds rules).
-func DraftRules() string { return strings.TrimPrefix(draftRules(LargeCases{}), "\n") }
+// sent when neither large test cases nor a number of test cases are asked
+// for (asking for them adds rules).
+func DraftRules() string { return strings.TrimPrefix(draftRules(LargeCases{}, 0, ""), "\n") }
 
 // Build returns the system and user prompts.
 func (p DraftPrompt) Build() (system, user string) {
 	judge := toolchainText(p.Toolchains)
-	env := NewEnvelope(append(p.Style.texts(), p.Text, p.Instruction, p.PreviousDraft, judge, p.Conventions)...)
+	guidance := caseGuidance(p.TestCases, p.TestCaseGuidance)
+	env := NewEnvelope(append(p.Style.texts(), p.Text, p.Instruction, p.PreviousDraft, judge, p.Conventions, guidance)...)
 	system = "You turn rough, partial or half-remembered descriptions of coding problems and technical " +
 		"topics into complete, well-structured items for a personal study library.\n\n" +
-		env.Rules() + "\n" + ConventionsText(p.Conventions) + StyleSection(env, p.Style) + draftRules(p.Large)
+		env.Rules() + "\n" + ConventionsText(p.Conventions) + StyleSection(env, p.Style) + draftRules(p.Large, p.TestCases, guidance)
 
 	var b strings.Builder
 	switch p.TypeHint {
@@ -247,13 +307,15 @@ type VariantPrompt struct {
 	Instruction   string
 	PreviousDraft string // JSON, or ""
 	Toolchains    []Toolchain
-	// Large is as for DraftPrompt.
-	Large LargeCases
+	// Large, TestCases and TestCaseGuidance are as for DraftPrompt.
+	Large            LargeCases
+	TestCases        int
+	TestCaseGuidance string
 }
 
 // variantRules are the rules of a variant's system prompt that follow the
 // conventions and the style preset. They are fixed.
-func variantRules(l LargeCases) string {
+func variantRules(l LargeCases, n int, guidance string) string {
 	return `
 ## Variant rules
 
@@ -266,19 +328,20 @@ func variantRules(l LargeCases) string {
 - Never copy the original's tests: sample test cases are for the NEW problem.
 - Starter code languages: those the instruction names; if it names none, those the original has; if
   it has none, those the style preset names; if neither does, python and cpp.
-` + problemRules + largeSection(l) + `
+` + problemRules + testCountRule(n) + largeSection(l) + testDesignSection(n, guidance) + `
 ` + jsonOnly
 }
 
 // VariantRules is as DraftRules, for a variant.
-func VariantRules() string { return strings.TrimPrefix(variantRules(LargeCases{}), "\n") }
+func VariantRules() string { return strings.TrimPrefix(variantRules(LargeCases{}, 0, ""), "\n") }
 
 // Build returns the system and user prompts.
 func (p VariantPrompt) Build() (system, user string) {
 	judge := toolchainText(p.Toolchains)
-	env := NewEnvelope(append(p.Style.texts(), p.Original, p.Instruction, p.PreviousDraft, judge, p.Conventions)...)
+	guidance := caseGuidance(p.TestCases, p.TestCaseGuidance)
+	env := NewEnvelope(append(p.Style.texts(), p.Original, p.Instruction, p.PreviousDraft, judge, p.Conventions, guidance)...)
 	system = "You derive new items from existing ones for a personal study library.\n\n" +
-		env.Rules() + "\n" + ConventionsText(p.Conventions) + StyleSection(env, p.Style) + variantRules(p.Large)
+		env.Rules() + "\n" + ConventionsText(p.Conventions) + StyleSection(env, p.Style) + variantRules(p.Large, p.TestCases, guidance)
 
 	mode := p.Mode
 	desc, ok := VariantModes[mode]

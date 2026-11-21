@@ -10,6 +10,7 @@ import { checkedState, draftFromForm, revisionProblem, type CreateExtras, type I
 import { useConfirm } from '../../ui/Dialog';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { useDraftCheck } from '../capture/draftChecks';
+import { revisionTestCaseCount } from '../capture/requests';
 import { useProviderChoice } from '../capture/ModelPicker';
 import { ReviewScreen } from '../capture/ReviewScreen';
 import { resolveStyleChoice, type StyleChoice } from '../capture/StylePicker';
@@ -24,6 +25,8 @@ export interface RevisionAsk {
   previousDraft: ItemDraft;
   styleId: StyleChoice;
   largeTestCases: number;
+  /** Ordinary test cases to ask for; the page sends it for a problem only. */
+  testCaseCount: number;
   provider: { providerId?: string | null };
 }
 
@@ -68,7 +71,10 @@ export function DraftReview(props: DraftReviewProps) {
   const styles = stylesQuery.data ?? [];
   const collectionActions = useCollectionActions();
   const largeCount = useLargeTestCaseCount();
-  const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
+  const preferences = usePreferences();
+  const largeTestCases = preferences.largeTestCase ? largeCount : 0;
+  // What the draft was asked for keeps being asked for.
+  const testCaseCount = revisionTestCaseCount(draft.request?.testCaseCount, content.testCaseCount, preferences.generatedTestCases, meta.data?.limits.maxGeneratedTestCases ?? 30);
 
   // A revision that could not start; one that started and failed is the draft's own error.
   const [askError, setAskError] = useState<unknown>(null);
@@ -115,7 +121,7 @@ export function DraftReview(props: DraftReviewProps) {
     verify.cancel();
     setAsking(true);
     try {
-      await sd.generate(props.revision({ form, instruction, previousDraft, styleId: styleChoice, largeTestCases, provider: provider.request }));
+      await sd.generate(props.revision({ form, instruction, previousDraft, styleId: styleChoice, largeTestCases, testCaseCount, provider: provider.request }));
     } catch (e) {
       setAskError(e);
     } finally {

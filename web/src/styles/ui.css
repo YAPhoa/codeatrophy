@@ -1900,6 +1900,11 @@ button.chip:hover {
   margin: 0;
 }
 
+/* A number out of range stays marked while it is typed: the focus ring takes the error colour. */
+.stepper-input[aria-invalid='true']:focus-visible {
+  outline-color: var(--danger);
+}
+
 .stepper-unit {
   margin-right: var(--space-0-5);
   font-size: var(--text-sm);

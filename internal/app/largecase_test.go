@@ -645,21 +645,101 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-// The draft check's 10-case cap does not starve the large cases.
+// The large cases come after as many other cases as a draft can have, and
+// the check's case cap does not apply to them.
 func TestLargeCasesAfterManyCases(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
 	e.engine.Handler = generatorHandler
 	d := largeDraft(gen("gen 20000"), gen("gen 30000"))
 	var cases []map[string]any
-	for i := range 12 {
-		cases = append(cases, map[string]any{"name": "c" + strconv.Itoa(i), "stdin": strconv.Itoa(i), "expectedStdout": strconv.Itoa(i), "isSample": true})
+	for i := range domain.DefaultMaxGeneratedTestCases + 2 {
+		cases = append(cases, map[string]any{"name": "c" + strconv.Itoa(i), "stdin": strconv.Itoa(i), "expectedStdout": strconv.Itoa(i), "isSample": i < 3})
 	}
 	d["testCases"] = cases
-	res := must(draftWith(t, e, `{"text":"x","largeTestCases":2}`, d))
-	c := res.Check
-	if c.LargeCases[0].Status != "added" || *c.LargeCases[0].Index != 12 || *c.LargeCases[1].Index != 13 || c.Total != 14 ||
-		c.Passed != 12 || !strings.Contains(*c.Error, "only the first 10") {
-		t.Errorf("check: %+v %+v %v", c, c.LargeCases, *c.Error)
+	res := must(draftWith(t, e, `{"text":"x","largeTestCases":2,"testCaseCount":30}`, d))
+	c, n := res.Check, domain.DefaultMaxGeneratedTestCases
+	if c.LargeCases[0].Status != "added" || *c.LargeCases[0].Index != n || *c.LargeCases[1].Index != n+1 || c.Total != n+2 ||
+		c.Passed != n+2 || c.Error != nil {
+		t.Errorf("check: %+v %+v %v", c, c.LargeCases, c.Error)
+	}
+}
+
+// The operator's generation limits bound every request and preference that
+// counts test cases, with the usual messages; a preference saved under a
+// higher limit reads as the limit, and the defaults never exceed it.
+func TestConfiguredGenerationLimits(t *testing.T) {
+	e := newEnv(t, func(o *app.Options) { o.Limits.MaxGeneratedTestCases = 6; o.Limits.MaxLargeTestCases = 2 })
+	e.enableAI(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	m := must(e.app.Meta(e.ctx)).Limits
+	ov := must(e.app.Overview(e.ctx))
+	if m.MaxGeneratedTestCases != 6 || m.MaxLargeTestCases != 2 || ov.Limits.MaxGeneratedTestCases != 6 || ov.Limits.MaxLargeTestCases != 2 {
+		t.Errorf("published limits: %+v %+v", m, ov.Limits)
+	}
+	// The defaults (8 and 3) are above the limits.
+	if p := must(e.app.GetPreferences(e.ctx)); p["generatedTestCases"] != 6 || p["largeTestCaseCount"] != 2 {
+		t.Errorf("defaults: %v", p)
+	}
+	if p := ov.Preferences; p.GeneratedTestCases != 6 || p.LargeTestCaseCount != 2 {
+		t.Errorf("overview preferences: %+v", p)
+	}
+
+	field := func(err error, name, want string) {
+		t.Helper()
+		if wantField(t, err, name); app.AsError(err).Fields[name] != want {
+			t.Errorf("%s: %v", name, app.AsError(err).Fields)
+		}
+	}
+	_, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","testCaseCount":7}`))
+	field(err, "testCaseCount", "must be between 0 and 6")
+	_, err = e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","largeTestCases":3}`))
+	field(err, "largeTestCases", "must be between 0 and 2")
+	_, err = e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"testCaseCount":7}`))
+	field(err, "testCaseCount", "must be between 0 and 6")
+	_, err = e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"largeTestCases":3}`))
+	field(err, "largeTestCases", "must be between 0 and 2")
+	_, err = e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":7}`))
+	field(err, "count", "must be between 1 and 6")
+	_, err = e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"largeTestCases":3}`))
+	field(err, "largeTestCases", "must be between 0 and 2")
+	_, err = e.app.UpdatePreferences(e.ctx, json.RawMessage(`{"generatedTestCases":7}`))
+	field(err, "generatedTestCases", "must be between 1 and 6")
+	_, err = e.app.UpdatePreferences(e.ctx, json.RawMessage(`{"largeTestCaseCount":3}`))
+	field(err, "largeTestCaseCount", "must be between 1 and 2")
+
+	// At the limits everything is accepted; without a count, test-case
+	// generation asks for the default within the limit.
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","testCaseCount":6,"largeTestCases":2}`)))
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return casesAnswer("7 7", "14"), nil }
+	must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{}`)))
+	if u := e.ai.Last().User; !strings.Contains(u, "propose exactly 6 test cases") {
+		t.Errorf("default count: %s", u)
+	}
+
+	// Saved under higher limits, then read under these.
+	if err := e.db.Write(e.ctx, func(tx store.Tx) error {
+		return tx.SetSetting("preferences", `{"generatedTestCases":25,"largeTestCaseCount":5}`)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := must(e.app.GetPreferences(e.ctx)); p["generatedTestCases"] != 6 || p["largeTestCaseCount"] != 2 {
+		t.Errorf("clamped: %v", p)
+	}
+	if p := must(e.app.TestCasePreferences(e.ctx)); p.GeneratedTestCases != 6 || p.LargeTestCaseCount != 2 {
+		t.Errorf("clamped for MCP: %+v", p)
+	}
+	if p := must(e.app.UpdatePreferences(e.ctx, json.RawMessage(`{"hideTestCases":false}`))); p["generatedTestCases"] != 6 {
+		t.Errorf("clamped after another write: %v", p)
+	}
+	// Values below a limit are not touched, and an invalid one still falls back to the default.
+	if err := e.db.Write(e.ctx, func(tx store.Tx) error {
+		return tx.SetSetting("preferences", `{"generatedTestCases":4,"largeTestCaseCount":0}`)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := must(e.app.GetPreferences(e.ctx)); p["generatedTestCases"] != 4 || p["largeTestCaseCount"] != 2 {
+		t.Errorf("below the limit: %v", p)
 	}
 }

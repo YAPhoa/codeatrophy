@@ -1,7 +1,7 @@
 // The AI generations. Each runs as a job (../jobs.ts); none writes to the library.
 
 import type { AiCodeResponse, AiTestCasesResponse, AppliedStyle, CodeCheck, HarnessCode, CodeSample, DraftCheck, DraftResponse, GenerationUsage, InterfaceHint, ItemDraft, ProblemInterface, StylePreset, VariantMode } from '../../api/types';
-import { applyStyle, breakRunner, checkDraft, checkRunners, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface } from '../ai';
+import { applyStyle, breakRunner, checkDraft, checkRunners, draftFromText, MISMATCH_MARKER, proposeTestCases, REPEAT_ALL_MARKER, REPEAT_MARKER, reviseDraft, RUNNER_MARKER, variantOfItem, withInterface, withTestCaseCount } from '../ai';
 import { writeCode } from '../code';
 import type { MockDb, StoredAiProvider } from '../db';
 import { atMostChars, byteLength, charCount, LIMITS, normaliseText } from '../db';
@@ -42,6 +42,16 @@ function parseLargeTestCases(raw: Record<string, unknown>, v: Validator): number
   const value = raw.largeTestCases ?? 0;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > LIMITS.maxLargeTestCases) {
     v.add('largeTestCases', `must be between 0 and ${LIMITS.maxLargeTestCases}`);
+    return 0;
+  }
+  return value;
+}
+
+/** How many ordinary test cases a draft is to have; default `0`, the samples only. */
+function parseTestCaseCount(raw: Record<string, unknown>, v: Validator): number {
+  const value = raw.testCaseCount ?? 0;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > LIMITS.maxGeneratedTestCases) {
+    v.add('testCaseCount', `must be between 0 and ${LIMITS.maxGeneratedTestCases}`);
     return 0;
   }
   return value;
@@ -193,8 +203,8 @@ function addLargeCases(db: MockDb, draft: ItemDraft, check: DraftCheck, count: n
 }
 
 /** The result of a draft or variant generation: the draft in the chosen style, with its reference solution and runners checked. */
-function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: number, ...texts: (string | null)[]): DraftResponse {
-  const styled = applyStyle(result, style);
+function drafted(db: MockDb, result: ItemDraft, style: StylePreset | null, call: Call, large: number, count: number, ...texts: (string | null)[]): DraftResponse {
+  const styled = applyStyle(withTestCaseCount(result, count), style);
   // After the style, which decides the languages that are left to break and to check.
   const draft = asks(RUNNER_MARKER, ...texts) ? breakRunner(styled) : styled;
   const check = checkDraft(db, draft, asks(MISMATCH_MARKER, ...texts));
@@ -224,6 +234,7 @@ export function prepareDraft(db: MockDb, raw: Record<string, unknown>): Prepared
   const instruction = parseInstruction(raw, v);
   const previousDraft = parsePreviousDraft(raw, v);
   const large = parseLargeTestCases(raw, v);
+  const count = parseTestCaseCount(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
@@ -237,7 +248,7 @@ export function prepareDraft(db: MockDb, raw: Record<string, unknown>): Prepared
       const call: Call = { provider: providerAtRun(db, named), operation: 'draft', itemId: null, title: null, schema: 'item_draft', content: said(text as string, instruction, previousDraft, style) };
       failIfAsked(db, call, text as string, instruction);
       const result = draftFromText(text as string, typeHint as 'auto' | 'problem' | 'reading', instruction, previousDraft, interfaceHint as InterfaceHint);
-      return drafted(db, result, style, call, large, text as string, instruction);
+      return drafted(db, result, style, call, large, count, text as string, instruction);
     },
   };
 }
@@ -255,6 +266,7 @@ export function prepareVariant(db: MockDb, itemId: string, raw: Record<string, u
     v.add('interfaceHint', 'must be program or function');
   } else if (interfaceHint !== null && item.type === 'reading') v.add('interfaceHint', 'does not apply to a reading');
   const large = parseLargeTestCases(raw, v);
+  const count = parseTestCaseCount(raw, v);
   const named = parseProvider(db, raw, v);
   v.check();
   const style = resolveStyle(db, raw);
@@ -275,7 +287,7 @@ export function prepareVariant(db: MockDb, itemId: string, raw: Record<string, u
         previousDraft != null && instruction ? reviseDraft(previousDraft, instruction) : variantOfItem(db, original, mode, instruction);
       // A variant keeps the original's interface unless the request asks for the other one.
       const shaped = interfaceHint === null ? result : withInterface(result, interfaceHint as ProblemInterface);
-      return drafted(db, shaped, style, call, large, instruction);
+      return drafted(db, shaped, style, call, large, count, instruction);
     },
   };
 }

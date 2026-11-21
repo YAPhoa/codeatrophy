@@ -1,9 +1,10 @@
-import { useId, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton, cx } from './Button';
 import { InfoTip } from './InfoTip';
 import { Select, type SelectProps } from './Select';
-import { useSlidingIndicator } from '../lib/motion';
+import { shake, shakeDuration } from '../lib/focusInvalid';
+import { parseDuration, token, useSlidingIndicator } from '../lib/motion';
 
 interface FieldProps {
   label: string;
@@ -227,6 +228,17 @@ export function parseWholeNumber(text: string, min: number, max: number): number
   return n >= min && n <= max ? n : null;
 }
 
+/**
+ * What a stepper's typed text becomes when the field is left: the value it
+ * settles on, and whether the text was out of range and brought to a bound.
+ * An empty field, or one that is not a number, goes back to `value`.
+ */
+export function settleTyped(text: string, value: number, min: number, max: number): { value: number; clamped: boolean } {
+  const typed = Number(text);
+  if (text.trim() === '' || Number.isNaN(typed)) return { value, clamped: false };
+  return { value: Math.min(max, Math.max(min, Math.round(typed))), clamped: typed < min || typed > max };
+}
+
 interface NumberStepperProps {
   value: number;
   onChange: (value: number) => void;
@@ -238,18 +250,26 @@ interface NumberStepperProps {
   /** Shown after the number, e.g. "px". */
   unit?: string;
   disabled?: boolean;
+  /** `sm` for a row of compact controls. */
+  size?: 'sm' | 'md';
   id?: string;
   'aria-describedby'?: string;
 }
 
 /**
  * A whole number with a step button on either side. A typed value in range
- * is passed on as it is typed; anything else waits until the field is left,
- * and is then brought into range or dropped.
+ * is passed on as it is typed; anything else is marked invalid and waits
+ * until the field is left, and is then brought into range or dropped. One
+ * brought to a bound shakes, still marked, so the change is noticed.
  */
-export function NumberStepper({ value, onChange, min, max, decreaseLabel, increaseLabel, unit, disabled, id, 'aria-describedby': describedBy }: NumberStepperProps) {
+export function NumberStepper({ value, onChange, min, max, decreaseLabel, increaseLabel, unit, disabled, size = 'md', id, 'aria-describedby': describedBy }: NumberStepperProps) {
   // What is being typed, while it differs from the value.
   const [draft, setDraft] = useState<string | null>(null);
+  // Still marked invalid after a typed value was brought into range, while it shakes.
+  const [flagged, setFlagged] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const flagTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(flagTimer.current), []);
   const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
   const commit = (next: number) => {
     setDraft(null);
@@ -258,10 +278,11 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
 
   return (
     <div className="stepper">
-      <IconButton label={decreaseLabel} icon={<Minus size={14} aria-hidden="true" />} disabled={disabled || value <= min} onClick={() => commit(clamp(value - 1))} />
+      <IconButton label={decreaseLabel} size={size} icon={<Minus size={14} aria-hidden="true" />} disabled={disabled || value <= min} onClick={() => commit(clamp(value - 1))} />
       <input
+        ref={inputRef}
         id={id}
-        className="input stepper-input"
+        className={size === 'sm' ? 'input input-sm stepper-input' : 'input stepper-input'}
         type="number"
         inputMode="numeric"
         autoComplete="off"
@@ -271,7 +292,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
         value={draft ?? String(value)}
         disabled={disabled}
         aria-describedby={describedBy}
-        aria-invalid={draft != null && parseWholeNumber(draft, min, max) == null ? true : undefined}
+        aria-invalid={flagged || (draft != null && parseWholeNumber(draft, min, max) == null) ? true : undefined}
         onChange={(e) => {
           const text = e.target.value;
           const typed = parseWholeNumber(text, min, max);
@@ -280,8 +301,15 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
         }}
         onBlur={() => {
           if (draft == null) return;
-          const typed = Number(draft);
-          commit(draft.trim() === '' || Number.isNaN(typed) ? value : clamp(typed));
+          const settled = settleTyped(draft, value, min, max);
+          commit(settled.value);
+          if (settled.clamped && inputRef.current) {
+            shake(inputRef.current);
+            // The mark stays as long as a shake would last, under reduced motion too.
+            setFlagged(true);
+            window.clearTimeout(flagTimer.current);
+            flagTimer.current = window.setTimeout(() => setFlagged(false), shakeDuration() || parseDuration(token('--duration-micro')) * 4);
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
@@ -292,7 +320,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
           {unit}
         </span>
       )}
-      <IconButton label={increaseLabel} icon={<Plus size={14} aria-hidden="true" />} disabled={disabled || value >= max} onClick={() => commit(clamp(value + 1))} />
+      <IconButton label={increaseLabel} size={size} icon={<Plus size={14} aria-hidden="true" />} disabled={disabled || value >= max} onClick={() => commit(clamp(value + 1))} />
     </div>
   );
 }

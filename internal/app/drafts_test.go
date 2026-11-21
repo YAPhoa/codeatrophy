@@ -85,6 +85,32 @@ func TestDraftGenerationArrivesWithoutAClient(t *testing.T) {
 	}
 }
 
+// A generation's request is kept on the draft as sent, test case count
+// included, and a revision may ask for one too.
+func TestDraftKeepsTheTestCaseCount(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	d, _ := e.newDraft(t, `{"kind":"capture","generate":{"text":"two sum","testCaseCount":8}}`)
+	var req map[string]any
+	if json.Unmarshal(d.Request, &req) != nil || req["testCaseCount"] != float64(8) {
+		t.Errorf("request: %s", d.Request)
+	}
+	e.waitDraft(t, d.ID)
+	if !strings.Contains(e.ai.Last().System, "holds at least 8 test cases:") {
+		t.Errorf("the generation did not ask for 8:\n%s", e.ai.Last().System)
+	}
+	revised := must(e.app.GenerateDraft(e.ctx, d.ID, json.RawMessage(
+		`{"text":"two sum","testCaseCount":12,"instruction":"harder","previousDraft":{"title":"Two Sum"}}`)))
+	if json.Unmarshal(revised.Request, &req) != nil || req["testCaseCount"] != float64(12) {
+		t.Errorf("revision request: %s", revised.Request)
+	}
+	e.waitDraft(t, d.ID)
+	if s := e.ai.Last(); !strings.Contains(s.System, "holds at least 12 test cases:") || !strings.Contains(s.User, "This is a revision") {
+		t.Errorf("revision:\n%s\n%s", s.System, s.User)
+	}
+}
+
 // Autosaves name the revision they were based on; a stale one is refused
 // with the current revision.
 func TestDraftRevisions(t *testing.T) {

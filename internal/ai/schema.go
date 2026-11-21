@@ -78,8 +78,9 @@ func largeCasesSchema(n int) map[string]any {
 }
 
 // DraftSchema is the output schema for drafts and variants; with large > 0
-// it also asks for that many generators of large test cases.
-func DraftSchema(large int) map[string]any {
+// it also asks for that many generators of large test cases, and with
+// cases > 0 its test cases say how many to give (see DraftPrompt.TestCases).
+func DraftSchema(large, cases int) map[string]any {
 	starter := obj(map[string]any{
 		"language": enum("Language id", languageIDs()...),
 		"source":   str("Program problem: starter code that reads the input. Function problem: the stub the solver fills in"),
@@ -116,13 +117,20 @@ func DraftSchema(large int) map[string]any {
 		"difficulty":  nullable(enum("Difficulty", "easy", "medium", "hard")),
 		"tags":        array(str(""), "1-6 lower-case topic tags"),
 		"problem":     nullable(problem),
-		"testCases":   array(testCase, "Sample test cases (empty for readings)"),
+		"testCases":   array(testCase, testCasesDesc(cases)),
 		"assumptions": array(str(""), "What the user should check: inferred or invented content, most important first"),
 	}
 	if large > 0 {
 		props["largeCases"] = largeCasesSchema(large)
 	}
 	return obj(props)
+}
+
+func testCasesDesc(n int) string {
+	if n <= 0 {
+		return "Sample test cases (empty for readings)"
+	}
+	return "At least " + testCases(n) + ": the sample cases, then hidden ones (empty for readings)"
 }
 
 // ModelLargeCase is a generator of a large test case a model wrote.

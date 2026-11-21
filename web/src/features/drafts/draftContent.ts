@@ -39,6 +39,8 @@ export interface DraftContent extends CheckedDraft {
   styleChoice?: StyleChoice;
   /** `undefined` until the user picks one: the default provider. */
   providerChoice?: ProviderChoice;
+  /** How many test cases to ask for; `undefined` until the user picks a number: the preference. */
+  testCaseCount?: number;
   input?: CaptureInput;
   variant?: VariantInput;
   /** What the first generated form is filed under: the collection the capture was started from. */

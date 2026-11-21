@@ -46,8 +46,8 @@ func TestTestCasePromptSetAndReset(t *testing.T) {
 }
 
 // The custom test case prompt replaces the editable test-case rules in test
-// generation, and the fixed rules always follow; drafts and variants are
-// unaffected.
+// generation, and the fixed rules always follow; drafts and variants carry
+// it only when they ask for a number of test cases.
 func TestTestCasePromptReachesGeneration(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)
@@ -72,6 +72,17 @@ func TestTestCasePromptReachesGeneration(t *testing.T) {
 	for _, op := range []string{"draft", "variant"} {
 		if strings.Contains(after[op], "CUSTOM-TEST-DESIGN") || after[op] == "" {
 			t.Errorf("%s carries the test case prompt", op)
+		}
+	}
+	// A draft or variant that asks for a number of test cases chooses its
+	// hidden ones by it, in place of the built-in guidance.
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","testCaseCount":8}`)))
+	draftSys := e.ai.Last().System
+	must(e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"testCaseCount":8}`)))
+	for op, s := range map[string]string{"draft": draftSys, "variant": e.ai.Last().System} {
+		if !strings.Contains(s, "CUSTOM-TEST-DESIGN\n\nRespond with") || strings.Contains(s, "Cover: the examples") || strings.Contains(s, fixedRules) {
+			t.Errorf("%s with a count and a custom prompt:\n%s", op, s)
 		}
 	}
 

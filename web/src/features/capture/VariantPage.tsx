@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PenLine, Sparkles, Trash2 } from 'lucide-react';
 import { api, jobError } from '../../api/client';
 import { invalidateJobs, qk, useItem, useLargeTestCaseCount, useMeta, usePreferences, useStyles } from '../../api/queries';
-import type { Item, ProblemInterface, VariantRequest } from '../../api/types';
+import type { Item } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { relativeTime } from '../../lib/format';
 import { emptyForm, type ItemFormState } from '../../lib/itemForm';
@@ -17,7 +17,9 @@ import { DraftReview } from '../drafts/DraftReview';
 import type { ServerDraft } from '../drafts/useServerDraft';
 import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
+import { variantInterface, variantRequest } from './requests';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
+import { TestCountPicker, useTestCaseCount } from './TestCountPicker';
 import { VARIANT_MODES, isVariantMode } from './variantModes';
 
 const STEPS = ['Choose', 'Review', 'Save'] as const;
@@ -25,23 +27,10 @@ const STEPS = ['Choose', 'Review', 'Save'] as const;
 /** The original's tags and collections are a sensible starting point for the new item. */
 export const inheritedFrom = (original: Item | null): Partial<ItemFormState> => (original ? { tags: original.tags, collectionIds: original.collectionIds } : {});
 
-/** What the solver writes in the variant: the choice made, or else the original's interface. */
-const variantInterface = (original: Item, choice: VariantInput): ProblemInterface => choice.interfaceHint ?? original.problem?.interface ?? 'program';
 
 /** A variant written by hand starts with the chosen interface, as a drafted one does. */
 function handForm(original: Item, choice: VariantInput): ItemFormState {
   return { ...emptyForm(original.type), ...inheritedFrom(original), difficulty: original.difficulty, interface: variantInterface(original, choice) };
-}
-
-function variantRequest(original: Item, choice: VariantInput, styleId: StyleChoice, largeTestCases: number, provider: { providerId?: string | null }): VariantRequest {
-  return {
-    mode: choice.mode,
-    instruction: choice.instruction.trim() || null,
-    styleId,
-    ...(original.type === 'problem' ? { interfaceHint: variantInterface(original, choice) } : {}),
-    largeTestCases,
-    ...provider,
-  };
 }
 
 export default function VariantPage() {
@@ -82,6 +71,8 @@ interface ChooseProps {
   onStyleChange: (choice: StyleChoice) => void;
   providerChoice: ProviderChoice;
   onProviderChange: (id: string) => void;
+  testCaseCount: number | undefined;
+  onTestCaseCountChange: (count: number) => void;
   running: { startedAt: number | null; onCancel: () => void } | null;
   starting: boolean;
   error: unknown;
@@ -120,6 +111,7 @@ function Choose(props: ChooseProps) {
   const styles = stylesQuery.data ?? [];
   const styleChoice = resolveStyleChoice(props.styleChoice, styles);
   const provider = useProviderChoice(props.providerChoice, props.error);
+  const testCases = useTestCaseCount(props.testCaseCount);
   const busy = props.running !== null || props.starting;
 
   return (
@@ -175,6 +167,7 @@ function Choose(props: ChooseProps) {
           {isProblem && <InterfacePicker original={original} choice={props.choice} onChoice={props.onChoice} disabled={busy} />}
           {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={props.onStyleChange} disabled={busy} />}
           {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={props.onProviderChange} disabled={busy} />}
+          {aiEnabled && isProblem && <TestCountPicker value={testCases.count} max={testCases.max} onChange={props.onTestCaseCountChange} disabled={busy} />}
         </div>
       )}
 
@@ -223,6 +216,8 @@ function NewVariant({ original }: { original: Item }) {
   const [choice, setChoice] = useState<VariantInput>({ mode: isProblem && isVariantMode(requested) ? requested : 'similar', instruction: '' });
   const [styleChoice, setStyleChoice] = useState<StyleChoice | undefined>(undefined);
   const [providerChoice, setProviderChoice] = useState<ProviderChoice>(undefined);
+  const [testCaseChoice, setTestCaseChoice] = useState<number | undefined>(undefined);
+  const testCaseCount = useTestCaseCount(testCaseChoice).count;
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const styles = useStyles().data ?? [];
@@ -238,7 +233,7 @@ function NewVariant({ original }: { original: Item }) {
     if (isProblem && isVariantMode(requested)) setChoice((c) => (c.mode !== requested ? { ...c, mode: requested } : c));
   }, [requested, isProblem]);
 
-  const content = (form: ItemFormState | null): DraftContent => ({ ...emptyContent(), form, variant: choice, styleChoice, providerChoice });
+  const content = (form: ItemFormState | null): DraftContent => ({ ...emptyContent(), form, variant: choice, styleChoice, providerChoice, testCaseCount: testCaseChoice });
 
   const start = async (generate: boolean) => {
     setStarting(true);
@@ -248,7 +243,7 @@ function NewVariant({ original }: { original: Item }) {
         kind: 'variant',
         variantOf: original.id,
         content: { ...content(generate ? null : handForm(original, choice)) },
-        ...(generate ? { generate: variantRequest(original, choice, resolveStyleChoice(styleChoice, styles), largeTestCases, provider.request) } : {}),
+        ...(generate ? { generate: variantRequest(original, choice, resolveStyleChoice(styleChoice, styles), largeTestCases, testCaseCount, provider.request) } : {}),
       });
       qc.setQueryData(qk.draft(created.id), created);
       void invalidateJobs(qc);
@@ -268,6 +263,8 @@ function NewVariant({ original }: { original: Item }) {
       onStyleChange={setStyleChoice}
       providerChoice={providerChoice}
       onProviderChange={setProviderChoice}
+      testCaseCount={testCaseChoice}
+      onTestCaseCountChange={setTestCaseChoice}
       running={null}
       starting={starting}
       error={error}
@@ -300,6 +297,8 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
   const form = content.form;
   const backToOptions = searchParams.get('step') === 'input' && original !== null;
   const requested = draft.request && !('text' in draft.request) ? draft.request : null;
+  const testCaseChoice = content.testCaseCount ?? (requested?.testCaseCount || undefined);
+  const testCaseCount = useTestCaseCount(testCaseChoice).count;
   const choice: VariantInput = content.variant ?? { mode: requested?.mode ?? 'similar', instruction: requested?.instruction ?? '', interfaceHint: requested?.interfaceHint };
   useDocumentTitle(original ? `Variant of ${original.title}` : 'Variant');
 
@@ -346,7 +345,7 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
             previousDraft: ask.previousDraft,
             styleId: ask.styleId,
             // The form's own choice of interface is the one a revision keeps.
-            ...(ask.form.type === 'problem' ? { interfaceHint: ask.form.interface } : {}),
+            ...(ask.form.type === 'problem' ? { interfaceHint: ask.form.interface, testCaseCount: ask.testCaseCount } : {}),
             largeTestCases: ask.largeTestCases,
             ...ask.provider,
           })}
@@ -379,7 +378,7 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
   const generate = async () => {
     setAskError(null);
     try {
-      await sd.generate(variantRequest(original, choice, resolveStyleChoice(content.styleChoice, styles), largeTestCases, provider.request));
+      await sd.generate(variantRequest(original, choice, resolveStyleChoice(content.styleChoice, styles), largeTestCases, testCaseCount, provider.request));
     } catch (e) {
       setAskError(e);
     }
@@ -394,6 +393,8 @@ export function VariantDraft({ sd, content, original }: { sd: ServerDraft; conte
       onStyleChange={(s) => sd.update((c) => ({ ...c, styleChoice: s }))}
       providerChoice={content.providerChoice}
       onProviderChange={(id) => sd.update((c) => ({ ...c, providerChoice: id }))}
+      testCaseCount={testCaseChoice}
+      onTestCaseCountChange={(n) => sd.update((c) => ({ ...c, testCaseCount: n }))}
       running={running}
       starting={false}
       error={askError ?? failed}

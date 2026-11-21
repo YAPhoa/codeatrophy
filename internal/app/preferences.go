@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,13 +36,30 @@ type prefDef struct {
 	min     int   // prefInt: inclusive bounds when allowed is empty
 	max     int   //
 	allowed []int // prefInt: the only accepted values, if set
+	// limit, if set, gives max from the instance's limits instead. A stored
+	// value above it (saved under a higher limit) reads as the limit, and
+	// the default never exceeds it.
+	limit func(domain.Limits) int
+}
+
+// bounds returns d with max resolved against the instance's limits.
+func (d prefDef) bounds(l domain.Limits) prefDef {
+	if d.limit != nil {
+		d.max = d.limit(l)
+		if n, ok := d.def.(int); ok {
+			d.def = min(n, d.max)
+		}
+	}
+	return d
 }
 
 var preferenceSchema = []prefDef{
 	{path: "hideTestCases", kind: prefBool, def: true},
-	{path: "generatedTestCases", kind: prefInt, def: DefaultGeneratedCases, min: 1, max: MaxGeneratedCases},
+	{path: "generatedTestCases", kind: prefInt, def: DefaultGeneratedCases, min: 1,
+		limit: func(l domain.Limits) int { return l.MaxGeneratedTestCases }},
 	{path: "largeTestCase", kind: prefBool, def: false},
-	{path: "largeTestCaseCount", kind: prefInt, def: DefaultLargeTestCases, min: 1, max: MaxLargeTestCases},
+	{path: "largeTestCaseCount", kind: prefInt, def: DefaultLargeTestCases, min: 1,
+		limit: func(l domain.Limits) int { return l.MaxLargeTestCases }},
 	{path: "editor.autocomplete", kind: prefBool, def: true},
 	{path: "editor.closeBrackets", kind: prefBool, def: true},
 	{path: "editor.matchBrackets", kind: prefBool, def: true},
@@ -55,10 +73,10 @@ const keyPreferences = "preferences"
 // Preferences is the nested preferences document.
 type Preferences map[string]any
 
-func prefByPath(path string) (prefDef, bool) {
+func prefByPath(path string, l domain.Limits) (prefDef, bool) {
 	for _, d := range preferenceSchema {
 		if d.path == path {
-			return d, true
+			return d.bounds(l), true
 		}
 	}
 	return prefDef{}, false
@@ -105,14 +123,23 @@ func validatePref(d prefDef, v any) (any, string) {
 
 // render builds the nested document from defaults overlaid with stored
 // values. Stored values no longer in the schema, or no longer valid, are
-// ignored.
-func renderPreferences(stored map[string]any) Preferences {
+// ignored, except that one above a limit from the instance's limits (saved
+// under a higher limit) reads as the limit.
+func renderPreferences(stored map[string]any, l domain.Limits) Preferences {
 	out := Preferences{}
 	for _, d := range preferenceSchema {
+		d = d.bounds(l)
 		v := d.def
 		if s, ok := stored[d.path]; ok {
-			if nv, msg := validatePref(d, normalizeStored(s)); msg == "" {
+			wide := d
+			if d.limit != nil {
+				wide.max = math.MaxInt
+			}
+			if nv, msg := validatePref(wide, normalizeStored(s)); msg == "" {
 				v = nv
+				if n, ok := nv.(int); ok && d.limit != nil {
+					v = min(n, d.max)
+				}
 			}
 		}
 		parts := strings.Split(d.path, ".")
@@ -162,7 +189,7 @@ func (a *App) GetPreferences(ctx context.Context) (Preferences, error) {
 	var out Preferences
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		stored, err := a.storedPreferences(tx)
-		out = renderPreferences(stored)
+		out = renderPreferences(stored, a.limits)
 		return err
 	})
 	return out, err
@@ -190,7 +217,7 @@ func (a *App) UpdatePreferences(ctx context.Context, raw json.RawMessage) (Prefe
 			if prefix != "" {
 				path = prefix + "." + k
 			}
-			if d, ok := prefByPath(path); ok {
+			if d, ok := prefByPath(path, a.limits); ok {
 				nv, msg := validatePref(d, v)
 				if msg != "" {
 					fe.Add(path, msg)
@@ -231,7 +258,7 @@ func (a *App) UpdatePreferences(ctx context.Context, raw json.RawMessage) (Prefe
 		if err := tx.SetSetting(keyPreferences, string(b)); err != nil {
 			return err
 		}
-		out = renderPreferences(stored)
+		out = renderPreferences(stored, a.limits)
 		return nil
 	})
 	return out, err

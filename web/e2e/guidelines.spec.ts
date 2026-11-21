@@ -472,12 +472,13 @@ test('undo: a test case removed from a draft can be put back where it was', asyn
   await expect(page.getByRole('heading', { level: 2, name: 'Test cases' })).toBeVisible();
 
   const inputs = page.locator('section[aria-labelledby="cases-heading"]').getByLabel('Input (stdin)');
-  await expect(inputs).toHaveCount(2);
+  // As many as the "Test cases to generate" preference asks for.
+  await expect(inputs).toHaveCount(8);
   const first = await inputs.first().inputValue();
   await page.getByRole('button', { name: 'Remove case 1' }).click();
-  await expect(inputs).toHaveCount(1);
+  await expect(inputs).toHaveCount(7);
   await page.getByRole('region', { name: 'Notifications' }).getByRole('button', { name: 'Undo' }).click();
-  await expect(inputs).toHaveCount(2);
+  await expect(inputs).toHaveCount(8);
   await expect(inputs.first()).toHaveValue(first);
 });
 

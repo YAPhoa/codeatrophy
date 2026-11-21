@@ -44,6 +44,10 @@ type Config struct {
 	MaxSourceBytes  int
 	MaxNotesChars   int
 	MaxLinksPerItem int
+	// MaxGeneratedTestCases and MaxLargeTestCases bound AI generations
+	// (domain.Limits).
+	MaxGeneratedTestCases int
+	MaxLargeTestCases     int
 
 	Judge JudgeConfig
 	AI    AIConfig
@@ -162,6 +166,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		MaxSourceBytes:  getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
 		MaxNotesChars:   getInt("CODEATROPHY_MAX_NOTES_CHARS", domain.DefaultMaxNotesChars),
 		MaxLinksPerItem: getInt("CODEATROPHY_MAX_LINKS_PER_ITEM", domain.DefaultMaxLinksPerItem),
+
+		MaxGeneratedTestCases: getInt("CODEATROPHY_MAX_GENERATED_TEST_CASES", domain.DefaultMaxGeneratedTestCases),
+		MaxLargeTestCases:     getInt("CODEATROPHY_MAX_LARGE_TEST_CASES", domain.DefaultMaxLargeTestCases),
 	}
 	c.DBPath = get("CODEATROPHY_DB_PATH", filepath.Join(c.DataDir, "codeatrophy.db"))
 	// The URL may hold a password: it is never repeated in a message.
@@ -218,6 +225,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	if c.MaxLinksPerItem < 1 || c.MaxLinksPerItem > domain.MaxLinksPerItemCeiling {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_LINKS_PER_ITEM: must be between 1 and %d", domain.MaxLinksPerItemCeiling))
+	}
+	if c.MaxGeneratedTestCases < 1 || c.MaxGeneratedTestCases > domain.MaxGeneratedTestCasesCeiling {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_GENERATED_TEST_CASES: must be between 1 and %d", domain.MaxGeneratedTestCasesCeiling))
+	}
+	if c.MaxLargeTestCases < 1 || c.MaxLargeTestCases > domain.MaxLargeTestCasesCeiling {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_LARGE_TEST_CASES: must be between 1 and %d", domain.MaxLargeTestCasesCeiling))
 	}
 
 	c.Judge = JudgeConfig{

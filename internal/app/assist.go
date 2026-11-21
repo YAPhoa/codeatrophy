@@ -20,10 +20,12 @@ import (
 	"codeatrophy/internal/judge"
 )
 
-// Input bounds for AI requests.
+// Input bounds for AI requests. The most test cases one generation writes
+// is the instance's Limits.MaxGeneratedTestCases; DefaultGeneratedCases is
+// how many a client asks for unless the user prefers otherwise (never more
+// than that bound).
 const (
 	MaxDraftTextChars     = 50000
-	MaxGeneratedCases     = 30
 	DefaultGeneratedCases = 8
 )
 
@@ -132,6 +134,27 @@ type DraftInput struct {
 	ProviderID domain.Opt[string] `json:"providerId"`
 	// LargeTestCases asks for that many large test cases as well.
 	LargeTestCases int `json:"largeTestCases"`
+	// TestCaseCount asks for that many ordinary test cases in all: the
+	// sample cases, then hidden ones. 0 asks for the sample cases only.
+	TestCaseCount int `json:"testCaseCount"`
+}
+
+// validateCaseCount checks the number of test cases a draft or variant
+// request asks for.
+func (a *App) validateCaseCount(n int) string {
+	if n < 0 || n > a.limits.MaxGeneratedTestCases {
+		return fmt.Sprintf("must be between 0 and %d", a.limits.MaxGeneratedTestCases)
+	}
+	return ""
+}
+
+// caseGuidance returns the custom test case prompt when a draft or variant
+// asks for n > 0 test cases, which then follow it, else "".
+func (a *App) caseGuidance(ctx context.Context, n int) (string, error) {
+	if n <= 0 {
+		return "", nil
+	}
+	return a.testCaseGuidance(ctx)
 }
 
 func styleOf(p *domain.StylePreset) (*ai.Style, *domain.StyleRef) {
@@ -188,8 +211,11 @@ func (a *App) prepareDraft(ctx context.Context, in DraftInput) (task[DraftRespon
 	if msg != "" {
 		fe.Add("previousDraft", msg)
 	}
-	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+	if msg := a.validateLargeCount(in.LargeTestCases); msg != "" {
 		fe.Add("largeTestCases", msg)
+	}
+	if msg := a.validateCaseCount(in.TestCaseCount); msg != "" {
+		fe.Add("testCaseCount", msg)
 	}
 	if err := errValidation(fe); err != nil {
 		return T{}, err
@@ -202,25 +228,29 @@ func (a *App) prepareDraft(ctx context.Context, in DraftInput) (task[DraftRespon
 	if err != nil {
 		return T{}, err
 	}
-	large := in.LargeTestCases
+	large, count := in.LargeTestCases, in.TestCaseCount
 	if hint == "reading" {
-		large = 0
+		large, count = 0, 0
 	}
 	run := func(ctx context.Context) (DraftResponse, error) {
 		conventions, err := a.Conventions(ctx)
 		if err != nil {
 			return DraftResponse{}, err
 		}
+		guidance, err := a.caseGuidance(ctx, count)
+		if err != nil {
+			return DraftResponse{}, err
+		}
 		style, ref := styleOf(preset)
 		system, user := ai.DraftPrompt{Conventions: conventions, Style: style, Text: text, TypeHint: hint, InterfaceHint: iface, Instruction: instruction,
-			PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
+			PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large), TestCases: count, TestCaseGuidance: guidance}.Build()
 		var draft ItemDraft
 		var gens []*ai.ModelLargeCase
 		subject := &logSubject{}
 		usage, err := a.generate(ctx, "draft", provider, subject, ai.GenerateRequest{
 			System:     system,
 			User:       user,
-			Schema:     ai.DraftSchema(large),
+			Schema:     ai.DraftSchema(large, count),
 			SchemaName: "item_draft",
 		}, func(raw json.RawMessage) (err error) {
 			if draft, gens, err = a.parseDraft(raw, hint, iface); err == nil {
@@ -231,7 +261,7 @@ func (a *App) prepareDraft(ctx context.Context, in DraftInput) (task[DraftRespon
 		if err != nil {
 			return DraftResponse{}, err
 		}
-		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
+		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, a.draftCheckBounds(), large, gens), Usage: usage}, nil
 	}
 	// A draft is about the text until it has a title of its own.
 	return T{title: jobTitle(text), run: run, retitle: func(r DraftResponse) string { return r.Draft.Title }}, nil
@@ -366,7 +396,7 @@ func (a *App) decodeDraft(raw json.RawMessage, hint, iface string) (ItemDraft, a
 		d.Problem = p
 		seen := map[string]bool{}
 		for _, tc := range m.TestCases {
-			if len(d.TestCases) >= MaxGeneratedCases {
+			if len(d.TestCases) >= a.limits.MaxGeneratedTestCases {
 				break
 			}
 			if len(tc.Stdin) > domain.MaxTestCaseBytes || len(tc.ExpectedStdout) > domain.MaxTestCaseBytes {
@@ -427,6 +457,8 @@ type VariantInput struct {
 	StyleID        domain.Opt[string] `json:"styleId"`
 	ProviderID     domain.Opt[string] `json:"providerId"`
 	LargeTestCases int                `json:"largeTestCases"`
+	// TestCaseCount is as for DraftInput.
+	TestCaseCount int `json:"testCaseCount"`
 }
 
 // prepareVariant validates a variant request and reads its original; the
@@ -448,8 +480,11 @@ func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput
 	if msg != "" {
 		return T{}, errField("previousDraft", msg)
 	}
-	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+	if msg := a.validateLargeCount(in.LargeTestCases); msg != "" {
 		return T{}, errField("largeTestCases", msg)
+	}
+	if msg := a.validateCaseCount(in.TestCaseCount); msg != "" {
+		return T{}, errField("testCaseCount", msg)
 	}
 	it, err := a.GetItem(ctx, itemID)
 	if err != nil {
@@ -519,9 +554,9 @@ func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput
 		orig["sampleTestCases"] = samples
 	}
 	origJSON, _ := json.MarshalIndent(orig, "", "  ")
-	large := in.LargeTestCases
+	large, count := in.LargeTestCases, in.TestCaseCount
 	if it.Type != domain.TypeProblem {
-		large = 0
+		large, count = 0, 0
 	}
 	forced := iface
 	if forced == "" {
@@ -532,15 +567,20 @@ func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput
 		if err != nil {
 			return DraftResponse{}, err
 		}
+		guidance, err := a.caseGuidance(ctx, count)
+		if err != nil {
+			return DraftResponse{}, err
+		}
 		style, ref := styleOf(preset)
 		system, user := ai.VariantPrompt{Conventions: conventions, Style: style, Original: string(origJSON), Mode: mode, Interface: iface,
-			Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large)}.Build()
+			Instruction: instruction, PreviousDraft: prev, Toolchains: a.toolchains(ctx), Large: largeAsk(large),
+			TestCases: count, TestCaseGuidance: guidance}.Build()
 		var draft ItemDraft
 		var gens []*ai.ModelLargeCase
 		usage, err := a.generate(ctx, "variant", provider, &logSubject{ItemID: &it.ID, Title: &it.Title}, ai.GenerateRequest{
 			System:     system,
 			User:       user,
-			Schema:     ai.DraftSchema(large),
+			Schema:     ai.DraftSchema(large, count),
 			SchemaName: "item_draft",
 		}, func(raw json.RawMessage) (err error) {
 			draft, gens, err = a.parseDraft(raw, string(it.Type), forced)
@@ -549,7 +589,7 @@ func (a *App) prepareVariant(ctx context.Context, itemID string, in VariantInput
 		if err != nil {
 			return DraftResponse{}, err
 		}
-		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, draftCheckBounds, large, gens), Usage: usage}, nil
+		return DraftResponse{Draft: draft, Style: ref, Check: a.checkDraft(ctx, &draft, a.draftCheckBounds(), large, gens), Usage: usage}, nil
 	}
 	return T{itemID: &it.ID, title: it.Title, run: run}, nil
 }
@@ -604,14 +644,14 @@ type GenerateTestCasesResponse struct {
 // problem; the generation is left to the task's run.
 func (a *App) prepareTestCases(ctx context.Context, itemID string, in GenerateTestCasesInput) (task[GenerateTestCasesResponse], error) {
 	type T = task[GenerateTestCasesResponse]
-	count := DefaultGeneratedCases
+	count := min(DefaultGeneratedCases, a.limits.MaxGeneratedTestCases)
 	if in.Count.HasValue() {
 		count = in.Count.Val
 	}
-	if count < 1 || count > MaxGeneratedCases {
-		return T{}, errField("count", fmt.Sprintf("must be between 1 and %d", MaxGeneratedCases))
+	if count < 1 || count > a.limits.MaxGeneratedTestCases {
+		return T{}, errField("count", fmt.Sprintf("must be between 1 and %d", a.limits.MaxGeneratedTestCases))
 	}
-	if msg := validateLargeCount(in.LargeTestCases); msg != "" {
+	if msg := a.validateLargeCount(in.LargeTestCases); msg != "" {
 		return T{}, errField("largeTestCases", msg)
 	}
 	lang := in.Language
@@ -893,13 +933,20 @@ func validationText(err error) string {
 	return ae.Message
 }
 
-// Bounds on the draft check. A draft carries its sample cases only, but a
-// model can return up to MaxGeneratedCases of them. The check runs in the
+// draftCheckBounds are the bounds on the draft check. A draft carries at
+// most Limits.MaxGeneratedTestCases test cases (besides large ones), whether
+// only samples or, with a test case count, hidden ones too, and the check
+// runs them all. The check runs in the
 // draft's AI job after the generation, with no request deadline over it:
 // its own time bound keeps a slow or stuck judge engine from holding the
 // job, and a worker of the job queue, for long. Cancelling the job stops it
 // sooner.
-var draftCheckBounds = checkBounds{maxCases: 10, timeout: 50 * time.Second}
+func (a *App) draftCheckBounds() checkBounds {
+	return checkBounds{maxCases: a.limits.MaxGeneratedTestCases, timeout: draftCheckTimeout}
+}
+
+// draftCheckTimeout is the draft check's time bound.
+const draftCheckTimeout = 50 * time.Second
 
 // checkBounds bound a check: how many test cases it runs (0: all) and for
 // how long.
@@ -919,7 +966,7 @@ type checkBounds struct {
 //
 // With large > 0, that many large test cases are built from gens after
 // the other cases and before the runners, in the same time bound; the
-// 10-case cap does not apply to them. Each one added is appended to the
+// case cap does not apply to them. Each one added is appended to the
 // draft's test cases, in the model's order, and counts in passed and total.
 func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large int, gens []*ai.ModelLargeCase) *DraftCheck {
 	if d.Type != domain.TypeProblem || d.Problem == nil {

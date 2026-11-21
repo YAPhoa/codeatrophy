@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -422,5 +423,114 @@ func TestGenerateTestCasesFailures(t *testing.T) {
 			cs[0].ExpectedStdout != "14" || cs[0].PredictionMatched != nil {
 			t.Errorf("%s: cases %+v", name, cs)
 		}
+	}
+}
+
+// testCasesDesc is the description of the test cases in a request's schema.
+func testCasesDesc(req ai.GenerateRequest) any {
+	return req.Schema["properties"].(map[string]any)["testCases"].(map[string]any)["description"]
+}
+
+// A draft or variant asks for testCaseCount at least testCaseCount test cases when given
+// one; without it, or with 0, the request is as it always was. A reading
+// ignores it.
+func TestDraftAndVariantTestCaseCount(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	reading := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R","body":"b"}`)))
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+	const asked = `"testCases" holds at least 8 test cases:`
+	stable := func(req ai.GenerateRequest) string {
+		nonce := regexp.MustCompile(`suffix ([0-9a-f]{24}) is unique`).FindStringSubmatch(req.System)[1]
+		return strings.ReplaceAll(req.System+req.User, nonce, "NONCE")
+	}
+	type gen func(js string) (ai.GenerateRequest, error)
+	draft := func(js string) (ai.GenerateRequest, error) {
+		_, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"`+js+`}`))
+		return e.ai.Last(), err
+	}
+	variant := func(js string) (ai.GenerateRequest, error) {
+		_, err := e.app.Variant(e.ctx, it.ID, decodeInto[app.VariantInput](t, `{"mode":"harder"`+js+`}`))
+		return e.ai.Last(), err
+	}
+	for name, run := range map[string]gen{"draft": draft, "variant": variant} {
+		plain := must(run(""))
+		zero := must(run(`,"testCaseCount":0`))
+		if stable(plain) != stable(zero) || strings.Contains(plain.System, "holds at least") || strings.Contains(plain.System, "## Test design") ||
+			testCasesDesc(plain) != "Sample test cases (empty for readings)" {
+			t.Errorf("%s: 0 is no count:\n%s", name, zero.System)
+		}
+		eight := must(run(`,"testCaseCount":8`))
+		if !strings.Contains(eight.System, asked) || !strings.Contains(eight.System, ai.EditableTestCaseRules) ||
+			testCasesDesc(eight) != "At least 8 test cases: the sample cases, then hidden ones (empty for readings)" {
+			t.Errorf("%s with 8:\n%s", name, eight.System)
+		}
+		if req := must(run(`,"testCaseCount":30`)); !strings.Contains(req.System, `holds at least 30 test cases:`) {
+			t.Errorf("%s: the upper bound", name)
+		}
+		for _, bad := range []string{`,"testCaseCount":31`, `,"testCaseCount":-1`} {
+			_, err := run(bad)
+			if wantField(t, err, "testCaseCount"); app.AsError(err).Fields["testCaseCount"] != "must be between 0 and 30" {
+				t.Errorf("%s %s: %v", name, bad, app.AsError(err).Fields)
+			}
+		}
+	}
+	// Not an integer: refused when the request is decoded, as a job's is.
+	for _, bad := range []string{`"8"`, `2.5`, `true`} {
+		_, _, err := e.app.CreateDraft(e.ctx, decodeInto[app.NewDraftInput](t, `{"kind":"capture","generate":{"text":"x","testCaseCount":`+bad+`}}`))
+		if wantField(t, err, "testCaseCount"); app.AsError(err).Fields["testCaseCount"] != "must be an integer" {
+			t.Errorf("%s: %v", bad, app.AsError(err).Fields)
+		}
+	}
+
+	// A reading ignores it, but it is still checked.
+	r := draftJSON()
+	r["type"] = "reading"
+	e.ai.Respond = func(ai.GenerateRequest) (any, error) { return r, nil }
+	must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","typeHint":"reading","testCaseCount":8}`)))
+	if req := e.ai.Last(); strings.Contains(req.System, "holds at least") || testCasesDesc(req) != "Sample test cases (empty for readings)" {
+		t.Errorf("a reading draft asked for test cases:\n%s", req.System)
+	}
+	must(e.app.Variant(e.ctx, reading.ID, decodeInto[app.VariantInput](t, `{"testCaseCount":8}`)))
+	if strings.Contains(e.ai.Last().System, "holds at least") {
+		t.Error("a reading's variant asked for test cases")
+	}
+	_, err := e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x","typeHint":"reading","testCaseCount":31}`))
+	wantField(t, err, "testCaseCount")
+}
+
+// The draft check runs every test case a draft can have, as many as the
+// instance allows, hidden ones included, and marks those that pass
+// verified; it corrects none.
+func TestDraftCheckCoversEveryCase(t *testing.T) {
+	const n = 40
+	e := newEnv(t, func(o *app.Options) { o.Limits.MaxGeneratedTestCases = n })
+	e.enableAI(t)
+	e.engine.Handler = harnessHandler
+	d := draftJSON()
+	d["problem"].(map[string]any)["referenceSolution"] = map[string]string{"language": "python", "source": "sum"}
+	var cases []map[string]any
+	for i := range n + 5 {
+		want := strconv.Itoa(i)
+		if i == n-1 {
+			want = "wrong"
+		}
+		cases = append(cases, map[string]any{"name": "c" + strconv.Itoa(i), "stdin": strconv.Itoa(i), "expectedStdout": want, "isSample": i < 2})
+	}
+	d["testCases"] = cases
+	res := must(draftWith(t, e, `{"text":"x","testCaseCount":40}`, d))
+	c := res.Check
+	if !c.Attempted || c.Total != n || c.Passed != n-1 || c.Error == nil ||
+		!strings.Contains(*c.Error, `"c39"`) || len(res.Draft.TestCases) != n {
+		t.Fatalf("check: %+v %v", c, c.Error)
+	}
+	for i, tc := range res.Draft.TestCases {
+		if tc.Verified != (i < n-1) || tc.IsSample != (i < 2) {
+			t.Errorf("case %d: %+v", i, tc)
+		}
+	}
+	if last := res.Draft.TestCases[n-1]; last.ExpectedStdout != "wrong" {
+		t.Errorf("the check corrected an expected output: %+v", last)
 	}
 }

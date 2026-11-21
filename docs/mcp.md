@@ -113,7 +113,7 @@ expires; open sessions are unaffected. A request body may be at most
     "maxTestDataBytes": 8388608, "maxLargeInputBytes": 1048576, "maxTestCasesPerItem": 1000, "maxSourceBytes": 65536,
     "timeLimitMs": { "min": 100, "max": 30000 }, "memoryLimitKb": { "min": 16384, "max": 2097152 },
     "maxTitleChars": 200, "maxSummaryChars": 5000, "maxTags": 30, "maxTagChars": 40,
-    "maxNotesChars": 4000, "maxLinksPerItem": 30,
+    "maxNotesChars": 4000, "maxLinksPerItem": 30, "maxGeneratedTestCases": 30, "maxLargeTestCases": 5,
     "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxCollectionNameChars": 200
   }
 }
@@ -127,7 +127,12 @@ fields an assistant writes, with the same names and values as in
 `GET /api/v1/meta` (`maxSourceBytes` also bounds a generator).
 `maxNotesChars` and `maxLinksPerItem` are set by the operator
 (`CODEATROPHY_MAX_NOTES_CHARS`, `CODEATROPHY_MAX_LINKS_PER_ITEM`); notes or
-links an item already has over them are kept.
+links an item already has over them are kept. So are
+`maxGeneratedTestCases` and `maxLargeTestCases`
+(`CODEATROPHY_MAX_GENERATED_TEST_CASES`, `CODEATROPHY_MAX_LARGE_TEST_CASES`),
+the most test cases and large test cases one generation asks for: the
+preferences never exceed them, and `write_test_cases` ignores a `count`
+above `maxGeneratedTestCases`.
 
 ### Writing items
 

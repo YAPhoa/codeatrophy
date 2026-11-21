@@ -100,6 +100,19 @@ func testCaseRules(custom string, l LargeCases) string {
 	return rules + largeSection(l) + "\n" + jsonOnly
 }
 
+// testDesignGuidance returns the test-design guidance a draft's or
+// variant's hidden test cases follow: the editable test-case rules, or the
+// custom test case prompt that replaces them (defanged; the caller passes it
+// to NewEnvelope). The fixed test-case rules are left out: they describe a
+// test-case generation's own answer, and a draft's rules and the
+// conventions say the same for a draft.
+func testDesignGuidance(custom string) string {
+	if custom = strings.TrimSpace(custom); custom != "" {
+		return Defang(custom) + "\n"
+	}
+	return EditableTestCaseRules
+}
+
 // FixedTestCaseRules returns the rules a custom test case prompt is always
 // followed by, as sent when no large test cases are asked for (asking for
 // them adds rules).

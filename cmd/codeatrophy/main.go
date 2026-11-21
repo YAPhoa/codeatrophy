@@ -157,6 +157,9 @@ func serve() error {
 			MaxSourceBytes:  cfg.MaxSourceBytes,
 			MaxNotesChars:   cfg.MaxNotesChars,
 			MaxLinksPerItem: cfg.MaxLinksPerItem,
+
+			MaxGeneratedTestCases: cfg.MaxGeneratedTestCases,
+			MaxLargeTestCases:     cfg.MaxLargeTestCases,
 		},
 		JudgeWorkers:     cfg.Judge.Workers,
 		JudgeConcurrency: cfg.Judge.Concurrency,

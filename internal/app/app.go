@@ -168,6 +168,12 @@ func New(opts Options) *App {
 	if a.limits.MaxLinksPerItem == 0 {
 		a.limits.MaxLinksPerItem = domain.DefaultMaxLinksPerItem
 	}
+	if a.limits.MaxGeneratedTestCases == 0 {
+		a.limits.MaxGeneratedTestCases = domain.DefaultMaxGeneratedTestCases
+	}
+	if a.limits.MaxLargeTestCases == 0 {
+		a.limits.MaxLargeTestCases = domain.DefaultMaxLargeTestCases
+	}
 	if a.limits.MaxImportBytes == 0 {
 		a.limits.MaxImportBytes = 50 << 20
 	}

@@ -213,7 +213,7 @@ func (a *App) checkCode(ctx context.Context, out *CodeResponse, samples []CodeSa
 	}
 	name := a.engine.Name()
 	c.Attempted, c.Engine = true, &name
-	ctx, cancel := context.WithTimeout(ctx, draftCheckBounds.timeout)
+	ctx, cancel := context.WithTimeout(ctx, draftCheckTimeout)
 	defer cancel()
 	d := &ItemDraft{Type: domain.TypeProblem, TestCases: []DraftTestCase{{Stdin: samples[0].Stdin}}, Problem: &DraftProblem{
 		Interface: domain.InterfaceFunction, TimeLimitMs: domain.DefaultTimeLimitMs, MemoryLimitKb: domain.DefaultMemoryLimitKb,

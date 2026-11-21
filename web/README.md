@@ -116,7 +116,10 @@ reads those two from the problem's title or statement: its starter code
 reads the first sample's lines into variables named as the statement's Input
 section names them, and its stubs take their signature from that sample.
 `MOCK:REPEAT` in the instruction of a test generation leaves two proposals
-out as repeats, `MOCK:REPEAT-ALL` all of them. A request with
+out as repeats, `MOCK:REPEAT-ALL` all of them. A draft or variant request
+with `testCaseCount: n` gets its ordinary test cases filled up to `n` with
+hidden ones; a draft or revision that already has `n` or more keeps them
+all. A request with
 `largeTestCases: n` gets `n` large test cases of about 300 KB on one line
 each, each a different input with a name of its own, the same every time; `MOCK:LARGE-FAIL` in the input text or instruction reports
 every one as failed (the generator crashed), `MOCK:LARGE-SKIP` as skipped, and

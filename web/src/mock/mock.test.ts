@@ -2738,6 +2738,74 @@ describe('large test cases', () => {
   });
 });
 
+describe('testCaseCount on a draft or variant', () => {
+  const ordinary = (r: DraftResponse) => r.draft.testCases.filter((c) => c.stdin.length < 100_000);
+
+  it('fills the ordinary cases up to the count with hidden ones, after the samples', async () => {
+    const plain = await aiDraft({ text: 'two sum', interfaceHint: 'program' });
+    const samples = plain.draft.testCases.length;
+    expect(samples).toBeGreaterThan(0);
+    expect(plain.draft.testCases.every((c) => c.isSample)).toBe(true);
+    expect((await aiDraft({ text: 'two sum', interfaceHint: 'program', testCaseCount: 0 })).draft.testCases).toHaveLength(samples);
+
+    const res = await aiDraft({ text: 'two sum', interfaceHint: 'program', testCaseCount: 8 });
+    const cases = res.draft.testCases;
+    expect(cases).toHaveLength(8);
+    expect(cases.map((c) => c.isSample)).toEqual([...Array<boolean>(samples).fill(true), ...Array<boolean>(8 - samples).fill(false)]);
+    expect(new Set(cases.map((c) => c.stdin)).size).toBe(8);
+    expect(res.check).toMatchObject({ passed: 8, total: 8 });
+
+    // The examples alone reach it: nothing is added, and no example dropped.
+    expect((await aiDraft({ text: 'two sum', interfaceHint: 'program', testCaseCount: 1 })).draft.testCases).toHaveLength(samples);
+    const most = await aiDraft({ text: 'two sum', interfaceHint: 'function', testCaseCount: LIMITS.maxGeneratedTestCases });
+    expect(most.draft.testCases).toHaveLength(LIMITS.maxGeneratedTestCases);
+    expect(most.draft.testCases.at(-1)!.stdin).toMatch(/^\[/);
+  });
+
+  it('counts the large cases apart, holds on a variant, and is ignored for a reading', async () => {
+    const res = await aiDraft({ text: 'two sum', interfaceHint: 'program', testCaseCount: 6, largeTestCases: 2 });
+    expect(res.draft.testCases).toHaveLength(8);
+    expect(ordinary(res)).toHaveLength(6);
+
+    const variant = await aiVariant(seedIds.items.twoSum, { mode: 'harder', testCaseCount: 7 });
+    expect(variant.draft.testCases).toHaveLength(7);
+    const reading = await aiDraft({ text: 'notes on consistent hashing', typeHint: 'reading', testCaseCount: 8 });
+    expect(reading.draft.testCases).toEqual([]);
+  });
+
+  it('never removes a case on a revision: it only fills up to the count', async () => {
+    const res = await aiDraft({ text: 'two sum', interfaceHint: 'program', testCaseCount: 6 });
+    const handAdded = { name: 'Mine', stdin: '2\n5 5\n10\n', expectedStdout: '0 1\n', isSample: false, verified: false, generator: null };
+    const previousDraft = { ...res.draft, testCases: [...res.draft.testCases, handAdded] };
+    // More than asked for already: all seven are kept, in their order.
+    const fewer = await aiDraft({ text: 'two sum', instruction: 'shorter', previousDraft, testCaseCount: 4 });
+    expect(fewer.draft.testCases.map((c) => c.stdin)).toEqual(previousDraft.testCases.map((c) => c.stdin));
+    // Fewer: filled up with new hidden cases after them.
+    const more = await aiDraft({ text: 'two sum', instruction: 'shorter', previousDraft, testCaseCount: 10 });
+    expect(more.draft.testCases).toHaveLength(10);
+    expect(more.draft.testCases.slice(0, 7).map((c) => c.stdin)).toEqual(previousDraft.testCases.map((c) => c.stdin));
+    expect(new Set(more.draft.testCases.map((c) => c.stdin)).size).toBe(10);
+    expect(more.draft.testCases.slice(7).every((c) => !c.isSample)).toBe(true);
+    // The same on a variant's revision.
+    const variant = await aiVariant(seedIds.items.twoSum, { mode: 'harder', testCaseCount: 3 });
+    const revisedVariant = await aiVariant(seedIds.items.twoSum, { mode: 'harder', instruction: 'shorter', previousDraft: { ...variant.draft, testCases: [...variant.draft.testCases, handAdded] }, testCaseCount: 3 });
+    expect(revisedVariant.draft.testCases).toHaveLength(variant.draft.testCases.length + 1);
+  });
+
+  it('is stored with the draft\'s request', async () => {
+    const draft = await api.drafts.create({ kind: 'capture', generate: { text: 'two sum', testCaseCount: 4 } });
+    expect(draft.request).toMatchObject({ testCaseCount: 4 });
+  });
+
+  it('rejects a count that is not a whole number within the bound', async () => {
+    const bound = { testCaseCount: `must be between 0 and ${LIMITS.maxGeneratedTestCases}` };
+    expect((await failure(aiDraft({ text: 'two sum', testCaseCount: -1 }))).fields).toEqual(bound);
+    expect((await failure(aiDraft({ text: 'two sum', testCaseCount: LIMITS.maxGeneratedTestCases + 1 }))).fields).toEqual(bound);
+    expect((await failure(aiVariant(seedIds.items.twoSum, { testCaseCount: 2.5 }))).fields).toEqual(bound);
+    expect((await failure(aiVariant(seedIds.items.twoSum, { testCaseCount: '3' as never }))).fields).toEqual(bound);
+  });
+});
+
 describe('AI activity log', () => {
   /** Every entry, newest first, through the cursors. */
   const all = async (filters: Parameters<typeof api.settings.log>[0] = {}) => {

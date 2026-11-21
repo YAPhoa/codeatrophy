@@ -362,7 +362,10 @@ func TestNotesLimit(t *testing.T) {
 // The overview's limits are /meta's, under the same names, and include the
 // configured ones.
 func TestOverviewLimitsMatchMeta(t *testing.T) {
-	e := newEnv(t, func(o *app.Options) { o.Limits.MaxNotesChars = 10; o.Limits.MaxLinksPerItem = 7 })
+	e := newEnv(t, func(o *app.Options) {
+		o.Limits.MaxNotesChars, o.Limits.MaxLinksPerItem = 10, 7
+		o.Limits.MaxGeneratedTestCases, o.Limits.MaxLargeTestCases = 50, 9
+	})
 	asMap := func(v any) map[string]any {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -377,7 +380,7 @@ func TestOverviewLimitsMatchMeta(t *testing.T) {
 	meta := asMap(must(e.app.Meta(e.ctx)).Limits)
 	ov := asMap(must(e.app.Overview(e.ctx)).Limits)
 	for _, k := range []string{"maxTestDataBytes", "maxLargeInputBytes", "maxTestCasesPerItem", "maxSourceBytes",
-		"timeLimitMs", "memoryLimitKb", "maxNotesChars", "maxLinksPerItem", "maxTitleChars", "maxSummaryChars",
+		"timeLimitMs", "memoryLimitKb", "maxNotesChars", "maxLinksPerItem", "maxGeneratedTestCases", "maxLargeTestCases", "maxTitleChars", "maxSummaryChars",
 		"maxTags", "maxTagChars", "maxSolutionNameChars", "maxSolutionNotesChars", "maxCollectionNameChars"} {
 		if _, ok := ov[k]; !ok {
 			t.Errorf("overview limits lack %s", k)
@@ -388,7 +391,8 @@ func TestOverviewLimitsMatchMeta(t *testing.T) {
 			t.Errorf("overview %s = %v, meta has %v", k, v, mv)
 		}
 	}
-	if ov["maxNotesChars"] != float64(10) || ov["maxLinksPerItem"] != float64(7) {
+	if ov["maxNotesChars"] != float64(10) || ov["maxLinksPerItem"] != float64(7) ||
+		ov["maxGeneratedTestCases"] != float64(50) || ov["maxLargeTestCases"] != float64(9) {
 		t.Errorf("configured limits: %v", ov)
 	}
 }

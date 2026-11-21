@@ -127,9 +127,9 @@ func (a *App) metaLimits() MetaLimits {
 		MaxDraftTextChars:          MaxDraftTextChars,
 		MaxInstructionChars:        domain.MaxGenerationInstructionChars,
 		MaxPreviousDraftBytes:      domain.MaxPreviousDraftBytes,
-		MaxGeneratedTestCases:      MaxGeneratedCases,
+		MaxGeneratedTestCases:      a.limits.MaxGeneratedTestCases,
 		MaxLargeInputBytes:         MaxLargeInputBytes,
-		MaxLargeTestCases:          MaxLargeTestCases,
+		MaxLargeTestCases:          a.limits.MaxLargeTestCases,
 		MaxStylePresets:            domain.MaxStylePresets,
 		MaxStyleNameChars:          domain.MaxStyleNameChars,
 		MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,
@@ -199,6 +199,8 @@ type OverviewLimits struct {
 	MaxTagChars            int   `json:"maxTagChars"`
 	MaxNotesChars          int   `json:"maxNotesChars"`
 	MaxLinksPerItem        int   `json:"maxLinksPerItem"`
+	MaxGeneratedTestCases  int   `json:"maxGeneratedTestCases"`
+	MaxLargeTestCases      int   `json:"maxLargeTestCases"`
 	MaxSolutionNameChars   int   `json:"maxSolutionNameChars"`
 	MaxSolutionNotesChars  int   `json:"maxSolutionNotesChars"`
 	MaxCollectionNameChars int   `json:"maxCollectionNameChars"`
@@ -220,6 +222,8 @@ func (a *App) overviewLimits() OverviewLimits {
 		MaxTagChars:            m.MaxTagChars,
 		MaxNotesChars:          m.MaxNotesChars,
 		MaxLinksPerItem:        m.MaxLinksPerItem,
+		MaxGeneratedTestCases:  m.MaxGeneratedTestCases,
+		MaxLargeTestCases:      m.MaxLargeTestCases,
 		MaxSolutionNameChars:   m.MaxSolutionNameChars,
 		MaxSolutionNotesChars:  m.MaxSolutionNotesChars,
 		MaxCollectionNameChars: m.MaxCollectionNameChars,
@@ -266,7 +270,7 @@ func (a *App) Overview(ctx context.Context) (Overview, error) {
 		if err != nil {
 			return err
 		}
-		out.Preferences = testCasePreferences(renderPreferences(stored))
+		out.Preferences = testCasePreferences(renderPreferences(stored, a.limits))
 		if out.Tags, err = tx.ListTags(); err != nil {
 			return err
 		}

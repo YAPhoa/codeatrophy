@@ -9,6 +9,16 @@ const (
 	MaxTestCasesPerItem  = 1000
 )
 
+// Bounds an instance may set on AI generations (Limits): the default and
+// the highest allowed value of the most test cases one generation writes,
+// and of the most large test cases it asks for.
+const (
+	DefaultMaxGeneratedTestCases = 30
+	MaxGeneratedTestCasesCeiling = 100
+	DefaultMaxLargeTestCases     = 5
+	MaxLargeTestCasesCeiling     = 20
+)
+
 // TestCase is one stdin / expected stdout pair of a problem.
 type TestCase struct {
 	ID             string     `json:"id"`

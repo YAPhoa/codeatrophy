@@ -27,10 +27,9 @@ const (
 	// comfortable while being large enough to separate O(n log n) from
 	// O(n^2) at the usual bounds.
 	MaxLargeInputBytes = 1 << 20
-	// MaxLargeTestCases is the most large test cases one generation may
-	// ask for, and DefaultLargeTestCases how many a client asks for unless
-	// the user prefers otherwise.
-	MaxLargeTestCases     = 5
+	// DefaultLargeTestCases is how many large test cases a client asks
+	// for unless the user prefers otherwise (never more than the instance's
+	// Limits.MaxLargeTestCases, the most one generation may ask for).
 	DefaultLargeTestCases = 3
 	// A generator runs as a plain program with these limits: generous,
 	// because it may build a worst case with some work, but bounded.
@@ -43,9 +42,9 @@ const (
 
 // validateLargeCount checks the number of large test cases a request asks
 // for, returning a validation message or "".
-func validateLargeCount(n int) string {
-	if n < 0 || n > MaxLargeTestCases {
-		return fmt.Sprintf("must be between 0 and %d", MaxLargeTestCases)
+func (a *App) validateLargeCount(n int) string {
+	if n < 0 || n > a.limits.MaxLargeTestCases {
+		return fmt.Sprintf("must be between 0 and %d", a.limits.MaxLargeTestCases)
 	}
 	return ""
 }

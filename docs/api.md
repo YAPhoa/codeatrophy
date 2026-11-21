@@ -190,9 +190,20 @@ to show.
   higher limit still load and the item's other fields still save;
   `maxTestDataBytes` to each of a test case's `stdin` and `expectedStdout`;
   `maxGeneratedTestCases` is the upper bound of `count` in
-  `POST /items/{id}/ai/testcases`; `maxLargeInputBytes` is the largest input
-  a [large test case](#large-test-cases) may have and `maxLargeTestCases` the
-  most of them one generation may ask for. A source URL must be `http`
+  `POST /items/{id}/ai/testcases` and of `testCaseCount` in
+  [draft](#draft-requests) and [variant](#variant-requests) requests;
+  `maxLargeInputBytes` is the largest input a
+  [large test case](#large-test-cases) may have and `maxLargeTestCases` the
+  most of them one generation may ask for. The operator sets the two maxima
+  with `CODEATROPHY_MAX_GENERATED_TEST_CASES` (default 30, from 1 to 100) and
+  `CODEATROPHY_MAX_LARGE_TEST_CASES` (default 5, from 1 to 20). The defaults
+  suit most uses. Raising them makes each generation slower and costlier,
+  makes a reply cut off by the model's output limit more likely (the whole
+  generation then fails and is retried from scratch), and tends to lower
+  quality: more near-duplicate cases and more wrong expected outputs for the
+  check to catch, and cases past what the 50-second draft check reaches stay
+  unverified. Each large test case is also a generator program the judge
+  runs, so more of them lengthen the check too. A source URL must be `http`
   or `https`.
   `maxTestDataBytes` also bounds the custom `stdin` of a run.
   `maxRequestBytes` bounds any JSON request body (`413` beyond it);
@@ -1297,6 +1308,18 @@ turn rough input into a complete item draft.
 - `largeTestCases` — integer 0–`limits.maxLargeTestCases`, default `0`: also
   build that many [large test cases](#large-test-cases). Ignored for a
   reading.
+- `testCaseCount` — integer 0–`limits.maxGeneratedTestCases`, default `0`:
+  how many test cases the draft has at least, not counting large ones. The
+  sample cases matching the body's examples come first, then hidden
+  (non-sample) cases until there are `testCaseCount`; if the examples alone
+  are that many or more, all of them are kept as samples and no hidden case
+  is added. A revision keeps the cases of its `previousDraft` (unless the
+  `instruction` asks to change them) and only adds hidden cases up to
+  `testCaseCount`: it never removes cases to reach it. The hidden cases follow the same test-design guidance as
+  [test-case generation](#post-itemsidaitestcases) (the built-in rules, or
+  the [custom test case prompt](#test-case-prompt) that replaces them). `0`
+  asks for the sample cases only. Applies to a revision too. Ignored for a
+  reading.
 - `providerId` — optional; the [provider](#ai) to use instead of the default.
 
 The result, `DraftResponse`:
@@ -1368,8 +1391,10 @@ broken harness shows before anything is saved:
   first failure in plain words (a compile error, a mismatch, …). Nothing in
   the draft is corrected automatically, with one exception: a Python harness
   prefix that lacks `from __future__ import annotations` gets it added.
-- the check is bounded: at most the first 10 test cases and 50 seconds. Cases
-  it did not reach stay unverified, and `check.error` says how far it got.
+- the check is bounded: it runs every test case (a draft has at most
+  `limits.maxGeneratedTestCases`, besides large ones), hidden ones as well as
+  samples, within 50 seconds. Cases it did not reach in time stay
+  unverified, and `check.error` says how far it got.
 
 `check.attempted` is `false` (with `engine: null`, `passed: 0`, `error: null`
 and every `verified` `false`) when there is no engine, no reference solution
@@ -1400,7 +1425,10 @@ and sets each test case's `origin` to `ai`). Each draft test case has a
 `generator`: `null`, or for a [large test case](#large-test-cases) the
 program that printed its `stdin`; saving the draft with the case's `stdin`
 and `generator` stores both, so the generator is kept with the case. `problem` is `null` and
-`testCases` is `[]` for a reading. `assumptions` lists everything the model
+`testCases` is `[]` for a reading. A test case the model wrote whose `stdin`
+equals that of an earlier one (ignoring trailing whitespace) is left out, as
+in test-case generation, and at most `limits.maxGeneratedTestCases` are kept;
+a draft can therefore have fewer than `testCaseCount` cases. `assumptions` lists everything the model
 inferred or invented that was not in the input; it is for display during
 review and is not stored. `tags` are the model's suggestions, normalised like
 item tags and with whitespace inside a tag replaced by `-`, so they match
@@ -1423,6 +1451,9 @@ angle.
 default.
 `largeTestCases` (integer 0–`limits.maxLargeTestCases`, default `0`) asks
 for [large test cases](#large-test-cases), as for a draft.
+`testCaseCount` (integer 0–`limits.maxGeneratedTestCases`, default `0`) is
+how many test cases the variant has at least, samples first and then hidden
+ones, as for a draft (a revision never removes cases to reach it); it is ignored when the original is a reading.
 `instruction` is at most 2000 characters. `previousDraft` is an optional
 `ItemDraft` from an earlier variant generation; with `instruction` it asks
 for a revision of that variant rather than a fresh one.
@@ -1458,7 +1489,7 @@ Propose test cases for an existing problem.
 { "count": 8, "language": "python", "instruction": null, "largeTestCases": 0 }
 ```
 
-- `count` — 1–30, default 8.
+- `count` — 1–`limits.maxGeneratedTestCases`, default 8 (or the limit, if lower).
 - `largeTestCases` — integer 0–`limits.maxLargeTestCases`, default `0`: also
   build that many [large test cases](#large-test-cases), in addition to the
   `count` cases.
@@ -2514,9 +2545,9 @@ Every key is always present; the values above are the defaults.
 | Key | Values | Meaning for a client |
 | --- | --- | --- |
 | `hideTestCases` | boolean | When `true`, show how many test cases a problem has and how many a run used, but keep the content of non-sample cases (in the test list and in submission results) out of sight until the user asks to reveal it. Sample cases are part of the statement and stay visible |
-| `generatedTestCases` | integer 1–`limits.maxGeneratedTestCases` | How many test cases to ask for by default when generating them: the initial value of the count a client sends as `count` to `POST /items/{id}/ai/testcases` |
+| `generatedTestCases` | integer 1–`limits.maxGeneratedTestCases` | How many test cases to ask for by default when generating them: the initial value of the count a client sends as `count` to `POST /items/{id}/ai/testcases`, and the count it sends as `testCaseCount` in draft and variant requests. A value saved under a higher `limits.maxGeneratedTestCases` reads as the limit, and writing one above it is `422`; the default never exceeds it |
 | `largeTestCase` | boolean | Whether to ask for [large test cases](#large-test-cases) by default: whether a client sends a non-zero `largeTestCases` in draft and variant requests, and the initial value of that choice for `POST /items/{id}/ai/testcases` |
-| `largeTestCaseCount` | integer 1–`limits.maxLargeTestCases` | How many large test cases to ask for when they are asked for: the value a client sends as `largeTestCases` |
+| `largeTestCaseCount` | integer 1–`limits.maxLargeTestCases` | How many large test cases to ask for when they are asked for: the value a client sends as `largeTestCases`. A value saved under a higher `limits.maxLargeTestCases` reads as the limit, and writing one above it is `422`; the default never exceeds it |
 | `editor.autocomplete` | boolean | Offer code completion while typing |
 | `editor.closeBrackets` | boolean | Insert the closing bracket or quote automatically |
 | `editor.matchBrackets` | boolean | Highlight the bracket matching the one at the cursor |

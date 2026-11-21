@@ -57,6 +57,11 @@ func builtinPrompts() string {
 	add("guide style", AuthoringGuide("", style), "")
 	env := NewEnvelope(GuideTexts("", style)...)
 	add("guide in", env.Rules()+"\n"+AuthoringGuideIn(env, "", style), "")
+	s, u = DraftPrompt{Text: "two sum", TypeHint: "problem", Toolchains: tools, TestCases: 8,
+		Large: LargeCases{Count: 2, MaxBytes: 1000}}.Build()
+	add("draft test cases", s, u)
+	s, u = VariantPrompt{Original: `{"title":"o"}`, Mode: "harder", Interface: "function", TestCases: 1}.Build()
+	add("variant one test case", s, u)
 	return b.String()
 }
 

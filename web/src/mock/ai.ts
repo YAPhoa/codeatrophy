@@ -1052,6 +1052,29 @@ function maxSubarray(values: number[]): number {
 }
 
 /**
+ * A drafted problem's ordinary test cases filled up to the `testCaseCount`
+ * a request asks for with hidden cases, after the ones it has. Nothing is
+ * ever removed: a draft, or a revision, that has that many or more keeps
+ * them all. `0` leaves the draft as it is, and so does a reading.
+ */
+export function withTestCaseCount(draft: ItemDraft, count: number): ItemDraft {
+  if (count <= 0 || draft.type !== 'problem' || !draft.problem || draft.testCases.length >= count) return draft;
+  const cases = [...draft.testCases];
+  const seen = new Set(cases.map((c) => c.stdin));
+  const solutionOnly = draft.problem.interface === 'function';
+  for (let i = 0; cases.length < count; i++) {
+    const [name, , base] = ARCHETYPES[i % ARCHETYPES.length]!;
+    const round = Math.floor(i / ARCHETYPES.length);
+    const values = base.map((v) => v + round);
+    const stdin = solutionOnly ? `${JSON.stringify(values)}\n` : `${values.length}\n${values.join(' ')}\n`;
+    if (seen.has(stdin)) continue;
+    seen.add(stdin);
+    cases.push({ name: round > 0 ? `${name} (${round + 1})` : name, stdin, expectedStdout: `${maxSubarray(values)}\n`, isSample: false, verified: false, generator: null });
+  }
+  return { ...draft, testCases: cases };
+}
+
+/**
  * The reference solution a proposal comes with: the problem's own when it is
  * in the requested language, else something believable. For a "solution
  * only" problem that is the solution part only: another saved solution in

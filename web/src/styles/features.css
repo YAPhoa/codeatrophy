@@ -1710,6 +1710,11 @@ a.pager-btn.is-current:hover {
   max-width: 300px;
 }
 
+/* Two digits, with room for a third typed out of range; the row of compact controls has little room. */
+.test-count-picker .stepper-input {
+  width: 50px;
+}
+
 .style-link {
   display: inline-flex;
   align-items: center;

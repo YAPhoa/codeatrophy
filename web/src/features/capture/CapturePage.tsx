@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { PenLine, Sparkles, Trash2 } from 'lucide-react';
 import { api, jobError } from '../../api/client';
 import { invalidateJobs, qk, useLargeTestCaseCount, useMeta, usePreferences, useStyles } from '../../api/queries';
-import type { DraftRequest } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { finePointer } from '../../lib/pointer';
 import { charCount, emptyForm, type ItemFormState } from '../../lib/itemForm';
@@ -19,7 +18,9 @@ import { DraftReview } from '../drafts/DraftReview';
 import type { ServerDraft } from '../drafts/useServerDraft';
 import { ModelPicker, useProviderChoice, type ProviderChoice } from './ModelPicker';
 import { GeneratingPanel, Steps } from './parts';
+import { draftRequest } from './requests';
 import { StylePicker, resolveStyleChoice, type StyleChoice } from './StylePicker';
+import { TestCountPicker, useTestCaseCount } from './TestCountPicker';
 
 const STEPS = ['Capture', 'Review', 'Save'] as const;
 
@@ -29,14 +30,10 @@ const freshInput = (): CaptureInput => ({ text: '', typeHint: 'auto', interfaceH
 interface Unsent extends CaptureInput {
   styleChoice?: StyleChoice;
   providerChoice?: ProviderChoice;
+  testCaseCount?: number;
 }
 
 const UNSENT_KEY = 'capture:input';
-
-/** The draft request for a capture's input. */
-function draftRequest(input: CaptureInput, styleId: StyleChoice, largeTestCases: number, provider: { providerId?: string | null }): DraftRequest {
-  return { text: input.text, typeHint: input.typeHint, ...(input.typeHint !== 'reading' ? { interfaceHint: input.interfaceHint } : {}), styleId, largeTestCases, ...provider };
-}
 
 /** A form written by hand from the input: what was typed becomes the statement. */
 function handForm(input: CaptureInput, collectionIds: string[]): ItemFormState {
@@ -51,6 +48,8 @@ interface CaptureFormProps {
   onStyleChange: (choice: StyleChoice) => void;
   providerChoice: ProviderChoice;
   onProviderChange: (id: string) => void;
+  testCaseCount: number | undefined;
+  onTestCaseCountChange: (count: number) => void;
   /** A generation under way: when it started, and how to stop it. */
   running: { startedAt: number | null; onCancel: () => void } | null;
   /** The request is on its way. */
@@ -71,6 +70,7 @@ function CaptureForm(props: CaptureFormProps) {
   const styles = stylesQuery.data ?? [];
   const styleChoice = resolveStyleChoice(props.styleChoice, styles);
   const provider = useProviderChoice(props.providerChoice, props.error);
+  const testCases = useTestCaseCount(props.testCaseCount);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const { input, running } = props;
   const busy = running !== null || props.starting;
@@ -161,6 +161,7 @@ function CaptureForm(props: CaptureFormProps) {
           />
           {aiEnabled && stylesQuery.isSuccess && <StylePicker styles={styles} value={styleChoice} onChange={props.onStyleChange} disabled={busy} />}
           {aiEnabled && <ModelPicker settings={provider.settings} value={provider.value} onChange={props.onProviderChange} disabled={busy} />}
+          {aiEnabled && kind !== 'reading' && <TestCountPicker value={testCases.count} max={testCases.max} onChange={props.onTestCaseCountChange} disabled={busy} />}
           <span className="spacer" />
           {/* An alert only while something is wrong, so the running count is not read out on every keystroke. */}
           <span id="capture-count" className={tooLong || needsText ? 'field-error' : 'muted capture-count'} role={tooLong || needsText ? 'alert' : undefined}>
@@ -242,6 +243,7 @@ export default function CapturePage() {
   const provider = useProviderChoice(unsent.providerChoice, error);
   const largeCount = useLargeTestCaseCount();
   const largeTestCases = usePreferences().largeTestCase ? largeCount : 0;
+  const testCaseCount = useTestCaseCount(unsent.testCaseCount).count;
   const presetCollection = searchParams.get('collection');
   const collectionIds = presetCollection ? [presetCollection] : [];
 
@@ -272,6 +274,7 @@ export default function CapturePage() {
     input,
     styleChoice: unsent.styleChoice,
     providerChoice: unsent.providerChoice,
+    testCaseCount: unsent.testCaseCount,
     ...(collectionIds.length > 0 ? { collectionIds } : {}),
   });
 
@@ -291,7 +294,7 @@ export default function CapturePage() {
 
   const draft = () =>
     void start(async () => {
-      const created = await api.drafts.create({ kind: 'capture', content: { ...content(null) }, generate: draftRequest(input, resolveStyleChoice(unsent.styleChoice, styles), largeTestCases, provider.request) });
+      const created = await api.drafts.create({ kind: 'capture', content: { ...content(null) }, generate: draftRequest(input, resolveStyleChoice(unsent.styleChoice, styles), largeTestCases, testCaseCount, provider.request) });
       qc.setQueryData(qk.draft(created.id), created);
       return created;
     });
@@ -308,6 +311,8 @@ export default function CapturePage() {
         onStyleChange={(c) => setUnsent((s) => ({ ...s, styleChoice: c }))}
         providerChoice={unsent.providerChoice}
         onProviderChange={(id) => setUnsent((s) => ({ ...s, providerChoice: id }))}
+        testCaseCount={unsent.testCaseCount}
+        onTestCaseCountChange={(n) => setUnsent((s) => ({ ...s, testCaseCount: n }))}
         running={null}
         starting={starting}
         error={error}
@@ -333,6 +338,8 @@ export function CaptureDraft({ sd, content }: { sd: ServerDraft; content: DraftC
   const form = content.form;
   const backToInput = searchParams.get('step') === 'input';
   const requested = draft.request && 'text' in draft.request ? draft.request : null;
+  const testCaseChoice = content.testCaseCount ?? (requested?.testCaseCount || undefined);
+  const testCaseCount = useTestCaseCount(testCaseChoice).count;
   const input: CaptureInput = content.input ?? { ...freshInput(), text: requested?.text ?? '', typeHint: requested?.typeHint ?? 'auto', interfaceHint: requested?.interfaceHint ?? 'auto' };
   useDocumentTitle(form ? (form.title.trim() ? `Draft: ${form.title}` : 'Draft') : 'Capture');
 
@@ -366,7 +373,7 @@ export function CaptureDraft({ sd, content }: { sd: ServerDraft; content: DraftC
             text: input.text,
             typeHint: ask.form.type,
             // The form's own choice of interface is the one a revision keeps.
-            ...(ask.form.type === 'problem' ? { interfaceHint: ask.form.interface } : {}),
+            ...(ask.form.type === 'problem' ? { interfaceHint: ask.form.interface, testCaseCount: ask.testCaseCount } : {}),
             instruction: ask.instruction,
             previousDraft: ask.previousDraft,
             styleId: ask.styleId,
@@ -393,7 +400,7 @@ export function CaptureDraft({ sd, content }: { sd: ServerDraft; content: DraftC
   const draftAgain = async () => {
     setAskError(null);
     try {
-      await sd.generate(draftRequest(input, resolveStyleChoice(content.styleChoice, styles), largeTestCases, provider.request));
+      await sd.generate(draftRequest(input, resolveStyleChoice(content.styleChoice, styles), largeTestCases, testCaseCount, provider.request));
     } catch (e) {
       setAskError(e);
     }
@@ -425,6 +432,8 @@ export function CaptureDraft({ sd, content }: { sd: ServerDraft; content: DraftC
         onStyleChange={(choice) => sd.update((c) => ({ ...c, styleChoice: choice }))}
         providerChoice={content.providerChoice}
         onProviderChange={(id) => sd.update((c) => ({ ...c, providerChoice: id }))}
+        testCaseCount={testCaseChoice}
+        onTestCaseCountChange={(n) => sd.update((c) => ({ ...c, testCaseCount: n }))}
         running={running}
         starting={false}
         error={error}

@@ -43,6 +43,11 @@ type Limits struct {
 	// when links are added, so an item linked under a higher limit keeps
 	// its links.
 	MaxLinksPerItem int
+	// MaxGeneratedTestCases bounds the test cases one AI generation writes
+	// (besides large ones), and MaxLargeTestCases the large test cases it
+	// asks for. A stored preference above one is read as the bound.
+	MaxGeneratedTestCases int
+	MaxLargeTestCases     int
 }
 
 // Source attributes an item to where it came from.

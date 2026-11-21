@@ -51,7 +51,7 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
   await expect(page.getByRole('button', { name: /^Runner/ })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('sys.stdin')).toHaveCount(0);
   await expect(page.getByText('Python, written by the AI')).toBeVisible();
-  await expect(page.getByText('Passes 2 of 2 test cases')).toBeVisible();
+  await expect(page.getByText('Passes 8 of 8 test cases')).toBeVisible();
   await expect(page.getByText('seen = {}')).toHaveCount(0);
   // Each language's runner was proven, and the generation says what it cost.
   await expect(page.getByRole('tab', { name: /Python\s*runner ran/ })).toBeVisible();
@@ -64,7 +64,7 @@ test('solution only: the runner and the AI\'s solution stay out of sight from ca
 
   // The saved reference solution is tested without its code being shown.
   await page.getByRole('button', { name: 'Test it' }).click();
-  await expect(page.getByText('Passes 2 of 2 test cases')).toBeVisible();
+  await expect(page.getByText('Passes 8 of 8 test cases')).toBeVisible();
   await expect(page.getByText('seen = {}')).toHaveCount(0);
 
   // Solving starts from the stub, in a language that has a runner.
@@ -477,6 +477,9 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await page.getByRole('button', { name: 'Fewer large test cases' }).click();
   await expect(count).toHaveValue('2');
   await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  // The examples only, so the large cases follow them.
+  await page.getByLabel('Test cases to generate', { exact: true }).fill('2');
+  await page.getByLabel('Test cases to generate', { exact: true }).blur();
 
   await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /New item/ }).click();
   await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
@@ -716,7 +719,7 @@ test('verify all: a draft is checked again as edited, and a saved problem from t
   await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
   await page.getByRole('radiogroup', { name: 'What you write' }).getByText('Full program').click();
   await page.getByRole('button', { name: 'Draft with AI' }).click();
-  await expect(page.getByText('Passes 2 of 2 test cases')).toBeVisible();
+  await expect(page.getByText('Passes 8 of 8 test cases')).toBeVisible();
 
   // Editing a case takes its mark away; "Verify all" runs the check again on the cases as they stand.
   const second = page.getByRole('listitem').filter({ has: page.getByRole('textbox', { name: 'Name of case 2' }) });
@@ -725,14 +728,15 @@ test('verify all: a draft is checked again as edited, and a saved problem from t
   await expect(page.getByText('Checked before your edits')).toBeVisible();
   await page.getByRole('button', { name: 'Verify all' }).click();
   const result = page.locator('section[aria-labelledby="cases-heading"]').getByRole('status').filter({ hasText: /^Passes/ });
-  await expect(result).toHaveText(/^Passes 1 of 2 test cases\. Example 2: expected 1 2 MOCK:WA/);
+  await expect(result).toHaveText(/^Passes 7 of 8 test cases\. Example 2: expected 1 2 MOCK:WA/);
   await expect(page.getByRole('listitem').filter({ has: page.getByRole('textbox', { name: 'Name of case 1' }) }).getByText('verified')).toBeVisible();
   await expect(second.getByText('wrong', { exact: true })).toBeVisible();
 
   // The case it found wrong goes in one step, and the check follows.
   await page.getByRole('button', { name: 'Discard 1 failed' }).click();
-  await expect(page.getByRole('textbox', { name: 'Name of case 2' })).toHaveCount(0);
-  await expect(result).toHaveText('Passes 1 of 1 test case');
+  await expect(page.getByRole('textbox', { name: /^Name of case \d+$/ })).toHaveCount(7);
+  await expect(page.getByRole('textbox', { name: 'Name of case 2' })).not.toHaveValue('Example 2');
+  await expect(result).toHaveText('Passes 7 of 7 test cases');
 
   // Without a reference solution there is nothing to verify with, and the button says why.
   await page.getByRole('button', { name: 'Remove the reference solution' }).click();
