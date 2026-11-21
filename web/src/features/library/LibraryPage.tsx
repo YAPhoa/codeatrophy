@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, GripVertical, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../../api/client';
 import { qk, useCollections, useItemPage, useMeta, useQuickUpdate, useStats, useTags } from '../../api/queries';
 import type { Collection, ItemStatus, ItemSummary, Stats } from '../../api/types';
@@ -21,7 +21,7 @@ import { Button, LinkButton, cx } from '../../ui/Button';
 import { Checkbox } from '../../ui/Field';
 import { MenuButton } from '../../ui/Popover';
 import { NumberChange } from '../../ui/Animated';
-import { EmptyState, ErrorState, Spinner } from '../../ui/misc';
+import { EmptyState, ErrorState, Kbd, Spinner } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { BulkBar } from './BulkBar';
@@ -681,7 +681,14 @@ export function LibraryPage() {
                 {reveal === 'cross' && <SkeletonRows count={skeletonRows} leaving />}
               </div>
               <div className="item-list-foot">
-                {reorderable && <p className="item-list-hint">Drag rows or press Alt+↑ / Alt+↓ to reorder.</p>}
+                {reorderable && (
+                  <p className="item-list-hint">
+                    <GripVertical size={14} aria-hidden="true" />
+                    <span>
+                      Drag rows or press <Kbd>Alt</Kbd>+<Kbd>↑</Kbd> / <Kbd>Alt</Kbd>+<Kbd>↓</Kbd> to reorder
+                    </span>
+                  </p>
+                )}
                 <Pager
                   page={page}
                   pageCount={pageCount}

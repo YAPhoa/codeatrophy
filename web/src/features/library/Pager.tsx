@@ -17,8 +17,8 @@ interface PagerProps {
 }
 
 /**
- * The bar under the list: how many items a page holds and which this one
- * shows, then the pages. Each page is a link to the same view with its
+ * The bar under the list, kept together on its right: which items this page
+ * shows, how many a page holds, then the pages. Each page is a link to the same view with its
  * `page=`, so it can be opened in a new tab, and back and forward move
  * between pages.
  */
@@ -43,6 +43,9 @@ export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageS
   return (
     <div className="pager">
       <div className="pager-info">
+        <span className="pager-range">
+          Showing <strong>{total === 0 ? 0 : offset + 1}–{offset + shown}</strong> of <strong>{total}</strong>
+        </span>
         <Select
           id={sizeId}
           name="page-size"
@@ -52,9 +55,6 @@ export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageS
           options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
         />
         <label htmlFor={sizeId}>per page</label>
-        <span className="pager-range">
-          Showing {total === 0 ? 0 : offset + 1}–{offset + shown} of {total}
-        </span>
       </div>
       <nav className="pager-pages" aria-label="Pages">
         {step(page - 1, false)}

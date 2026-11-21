@@ -167,7 +167,7 @@ test('sort: a collection in manual order names its columns too, and says how to 
   const head = page.locator('.item-list-head');
   await expect(head.getByRole('button', { name: /^Sort by/ })).toHaveCount(3);
   await expect(head.locator('[aria-pressed="true"]')).toHaveCount(0);
-  await expect(page.locator('.item-list-hint')).toHaveText('Drag rows or press Alt+↑ / Alt+↓ to reorder.');
+  await expect(page.locator('.item-list-hint')).toHaveText('Drag rows or press Alt+↑ / Alt+↓ to reorder');
   // Sorting by a column leaves manual order, and the third click comes back to it.
   const title = head.getByRole('button', { name: /^Sort by title/ });
   await title.click();

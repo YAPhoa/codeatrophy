@@ -1094,12 +1094,14 @@
 
 /* Under the rows: in manual order, how to reorder; then how many items a
    page holds and which this one shows, and the pages. */
+/* One row: the reorder hint on the left, the pager kept together on the
+   right. Short of room, the pager wraps under the hint. */
 .item-list-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-3);
@@ -1107,17 +1109,24 @@
 }
 
 .item-list-hint {
-  flex-basis: 100%;
-  font-size: var(--text-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+}
+
+.item-list-hint > svg {
+  flex: none;
+  color: var(--text-3);
 }
 
 .pager {
   display: flex;
-  flex: 1;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-2) var(--space-4);
+  margin-left: auto;
 }
 
 .pager-info {
@@ -1137,9 +1146,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A rule between the count and the page size. */
 .pager-range {
-  margin-left: var(--space-2);
+  margin-right: var(--space-2);
+  padding-right: var(--space-4);
+  border-right: 1px solid var(--border);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+.pager-range strong {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .pager-pages {
