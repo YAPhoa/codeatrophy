@@ -74,6 +74,7 @@ type MetaLimits struct {
 	MaxSolutionsPerItem        int   `json:"maxSolutionsPerItem"`
 	MaxSolutionNameChars       int   `json:"maxSolutionNameChars"`
 	MaxSolutionNotesChars      int   `json:"maxSolutionNotesChars"`
+	MaxNotesChars              int   `json:"maxNotesChars"`
 	MaxPageSize                int   `json:"maxPageSize"`
 	MaxRequestBytes            int   `json:"maxRequestBytes"`
 }
@@ -139,6 +140,7 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 			MaxSolutionsPerItem:        domain.MaxSolutionsPerItem,
 			MaxSolutionNameChars:       domain.MaxSolutionNameChars,
 			MaxSolutionNotesChars:      domain.MaxSolutionNotesChars,
+			MaxNotesChars:              a.limits.MaxNotesChars,
 			MaxPageSize:                domain.MaxPageSize,
 			MaxRequestBytes:            domain.MaxRequestBytes,
 		},

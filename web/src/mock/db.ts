@@ -206,6 +206,7 @@ export const LIMITS: Limits = {
   maxSolutionsPerItem: 50,
   maxSolutionNameChars: 100,
   maxSolutionNotesChars: 5000,
+  maxNotesChars: 4000,
   maxDraftTextChars: 50000,
   maxInstructionChars: 2000,
   maxPreviousDraftBytes: 2097152,

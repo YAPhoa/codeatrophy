@@ -140,6 +140,12 @@ export interface Limits {
   maxSolutionsPerItem: number;
   maxSolutionNameChars: number;
   maxSolutionNotesChars: number;
+  /**
+   * An item's `notes`, in code points after line endings are normalised. Set by
+   * the operator; checked only when the notes change, so longer notes saved
+   * under a higher limit still load.
+   */
+  maxNotesChars: number;
 }
 
 export interface Stats {

@@ -162,6 +162,9 @@ func New(opts Options) *App {
 	if a.limits.MaxSourceBytes == 0 {
 		a.limits.MaxSourceBytes = 64 << 10
 	}
+	if a.limits.MaxNotesChars == 0 {
+		a.limits.MaxNotesChars = domain.DefaultMaxNotesChars
+	}
 	if a.limits.MaxImportBytes == 0 {
 		a.limits.MaxImportBytes = 50 << 20
 	}

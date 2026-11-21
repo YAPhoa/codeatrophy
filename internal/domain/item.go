@@ -25,12 +25,20 @@ const (
 	MaxTextBytes         = 1 << 20 // body, notes, raw input
 	MaxURLChars          = 2048
 	MaxSourceNoteChars   = 2000
+	// DefaultMaxNotesChars is the default bound, in characters, on an
+	// item's notes; MaxNotesCharsCeiling is the highest an instance may set
+	// it to (it stays well inside MaxTextBytes).
+	DefaultMaxNotesChars = 4000
+	MaxNotesCharsCeiling = 100000
 )
 
 // Limits are the instance-configurable size limits.
 type Limits struct {
 	MaxImportBytes int64
 	MaxSourceBytes int
+	// MaxNotesChars bounds an item's notes, in characters. It is checked
+	// only when the notes are written (see ValidateNotes).
+	MaxNotesChars int
 }
 
 // Source attributes an item to where it came from.
@@ -520,6 +528,18 @@ func ValidateItem(it *Item, lim Limits) FieldErrors {
 		}
 	}
 	return errs
+}
+
+// ValidateNotes checks an item's notes, already normalized, against the
+// instance's notes limit, counting characters (code points) as stored. It is
+// checked only when the notes change, so notes written under a higher limit
+// stay readable and editable in other fields; ValidateItem checks only their
+// size in bytes.
+func ValidateNotes(notes string, lim Limits) string {
+	if lim.MaxNotesChars > 0 && utf8.RuneCountInString(notes) > lim.MaxNotesChars {
+		return fmt.Sprintf("must be at most %d characters", lim.MaxNotesChars)
+	}
+	return ""
 }
 
 // ValidateURL checks an absolute http(s) URL.

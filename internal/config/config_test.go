@@ -15,7 +15,7 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
-		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
+		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
 		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" || c.AI.Workers != 2 {
 		t.Errorf("defaults: %+v", c)
 	}
@@ -53,10 +53,17 @@ func TestParsing(t *testing.T) {
 		"CODEATROPHY_JUDGE_ENGINE": "docker", "CODEATROPHY_LOG_LEVEL": "loud", "CODEATROPHY_MCP_ENABLED": "maybe",
 		"CODEATROPHY_JUDGE0_TIMEOUT": "soon", "CODEATROPHY_AI_PROVIDER": "mistral", "CODEATROPHY_JUDGE0_MEMORY_ALLOWANCES": "java",
 		"CODEATROPHY_MAX_SOURCE_BYTES": "10", "CODEATROPHY_AI_WORKERS": "0",
+		"CODEATROPHY_MAX_NOTES_CHARS": "0",
 	} {
 		if _, err := LoadFrom(env(map[string]string{k: v})); err == nil {
 			t.Errorf("%s=%s should be rejected", k, v)
 		}
+	}
+	if c, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_NOTES_CHARS": "100000"})); err != nil || c.MaxNotesChars != 100000 {
+		t.Errorf("notes limit: %d %v", c.MaxNotesChars, err)
+	}
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_NOTES_CHARS": "100001"})); err == nil {
+		t.Error("a notes limit above 100000 should be rejected")
 	}
 }
 

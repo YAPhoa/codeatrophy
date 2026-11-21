@@ -266,6 +266,9 @@ func (a *App) newItem(in domain.ItemInput) (newItemRecords, error) {
 	fe.Merge("", domain.ApplyItemInput(&it, in))
 	domain.NormalizeItem(&it)
 	fe.Merge("", domain.ValidateItem(&it, a.limits))
+	if msg := domain.ValidateNotes(it.Notes, a.limits); msg != "" {
+		fe.Add("notes", msg)
+	}
 
 	var cases []domain.TestCase
 	if in.TestCases.HasValue() && len(in.TestCases.Val) > 0 {
@@ -429,6 +432,11 @@ func (a *App) UpdateItem(ctx context.Context, id string, in domain.ItemInput) (d
 		fe := domain.ApplyItemInput(&next, in)
 		domain.NormalizeItem(&next)
 		fe.Merge("", domain.ValidateItem(&next, a.limits))
+		if next.Notes != cur.Notes {
+			if msg := domain.ValidateNotes(next.Notes, a.limits); msg != "" {
+				fe.Add("notes", msg)
+			}
+		}
 		var collIDs []string
 		if in.CollectionIDs.Set {
 			if in.CollectionIDs.Null {
@@ -512,6 +520,11 @@ func (a *App) EditItemText(ctx context.Context, id string, in EditTextInput) (do
 		}
 		if len(text) > domain.MaxTextBytes {
 			return errField(in.Field, "is too long")
+		}
+		if in.Field == "notes" && text != cur.Notes {
+			if msg := domain.ValidateNotes(text, a.limits); msg != "" {
+				return errField("notes", msg)
+			}
 		}
 		next := cur.Clone()
 		if in.Field == "body" {

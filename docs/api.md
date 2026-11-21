@@ -173,7 +173,8 @@ to show.
     "maxBundleDescriptionChars": 5000,
     "maxSolutionsPerItem": 50,
     "maxSolutionNameChars": 100,
-    "maxSolutionNotesChars": 5000
+    "maxSolutionNotesChars": 5000,
+    "maxNotesChars": 4000
   }
 }
 ```
@@ -181,6 +182,11 @@ to show.
 - `limits` publishes every bound the server enforces on user input, so
   clients validate against the server's values rather than copies of them.
   `maxTextBytes` applies to each of an item's `body`, `notes` and `rawInput`;
+  `maxNotesChars` bounds an item's `notes` in characters (Unicode code
+  points, counted after line endings are normalised to `\n`). The operator
+  sets it with `CODEATROPHY_MAX_NOTES_CHARS` (default 4000, at most 100000);
+  notes are checked against it only when they change, so notes saved under a
+  higher limit still load and the item's other fields still save;
   `maxTestDataBytes` to each of a test case's `stdin` and `expectedStdout`;
   `maxGeneratedTestCases` is the upper bound of `count` in
   `POST /items/{id}/ai/testcases`; `maxLargeInputBytes` is the largest input
@@ -330,8 +336,11 @@ are left out.
   paragraph holding only a one-line `$$...$$` as one. The UI draws a ```` ```mermaid ```` fenced block as a diagram (its source when it
   does not parse) and shows images given as `data:image/` URLs (PNG, JPEG,
   GIF, WebP, SVG); raw HTML is never rendered.
-- `notes` is the user's private Markdown notes. `rawInput` is the original
-  text an AI draft was generated from, or `null`. Neither is ever exported.
+- `notes` is the user's private Markdown notes, at most
+  `limits.maxNotesChars` characters. A write that changes them to anything
+  longer is refused with `422` on `notes`; notes already longer (saved under
+  a higher limit) are kept as they are. `rawInput` is the original text an
+  AI draft was generated from, or `null`. Neither is ever exported.
 - `problem` is `null` for readings and always an object for problems.
   `referenceSolution` is nullable. `starterCode` is keyed by language id.
 - Starter code may mark lines the solver need not read, such as input
@@ -569,7 +578,9 @@ Targeted text replacement inside a long text field, without resending it.
 `field` is `body` or `notes`. Edits apply in order; each `oldText` must occur
 exactly once in the text as it stands at that point, otherwise nothing is
 written and the response is `422` naming the failing edit index in
-`error.fields`. `expectedRevision` is optional, as for `PATCH`. Returns `Item`.
+`error.fields`. Edited `notes` longer than `limits.maxNotesChars` are refused
+with `422` on `notes`. `expectedRevision` is optional, as for `PATCH`.
+Returns `Item`.
 
 ### `DELETE /items/{id}`
 

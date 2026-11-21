@@ -482,6 +482,31 @@ describe('creating and editing items', () => {
     expect((await api.items.get(id)).body).toBe(edited.body);
   });
 
+  it('bounds notes by characters, and only when they change', async () => {
+    const id = seedIds.items.twoSum;
+    const max = LIMITS.maxNotesChars;
+    const tooLong = { notes: `must be at most ${max} characters` };
+    // Code points after line endings are normalised, not bytes or UTF-16 units.
+    const atLimit = await api.items.update(id, { notes: '😀'.repeat(max - 2) + '\r\né' });
+    expect(atLimit.notes).toBe('😀'.repeat(max - 2) + '\né');
+    const over = await failure(api.items.update(id, { notes: 'n'.repeat(max + 1) }));
+    expect(over.status).toBe(422);
+    expect(over.fields).toEqual(tooLong);
+    expect((await failure(api.items.create({ type: 'reading', title: 'Long notes', notes: 'n'.repeat(max + 1) }))).fields).toEqual(tooLong);
+    expect((await failure(api.items.edits(id, { field: 'notes', edits: [{ oldText: '\né', newText: '\néé' }] }))).fields).toEqual(tooLong);
+    expect((await api.items.get(id)).notes).toBe(atLimit.notes);
+
+    // Notes saved under a higher limit still load, and the item's other fields still save.
+    const long = 'n'.repeat(max + 10) + ' end';
+    server.db.getItem(id).notes = long;
+    expect((await api.items.get(id)).notes).toBe(long);
+    expect(await api.items.update(id, { title: 'Renamed', status: 'done', notes: long })).toMatchObject({ title: 'Renamed', notes: long });
+    // Changing them to anything still over the limit is refused.
+    expect((await failure(api.items.update(id, { notes: long.slice(1) }))).fields).toEqual(tooLong);
+    expect((await failure(api.items.edits(id, { field: 'notes', edits: [{ oldText: ' end', newText: '' }] }))).fields).toEqual(tooLong);
+    expect((await api.items.update(id, { notes: 'short' })).notes).toBe('short');
+  });
+
   it('applies bulk actions and ignores unknown ids', async () => {
     const ids = [seedIds.items.lis, seedIds.items.editDistance, 'missing'];
     expect(await api.items.bulk({ ids, action: 'addTags', tags: ['Revisit'] })).toEqual({ affected: 2 });

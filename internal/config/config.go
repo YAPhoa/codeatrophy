@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"codeatrophy/internal/domain"
 )
 
 // Config is the complete server configuration.
@@ -40,6 +42,7 @@ type Config struct {
 
 	MaxImportBytes int64
 	MaxSourceBytes int
+	MaxNotesChars  int
 
 	Judge JudgeConfig
 	AI    AIConfig
@@ -156,6 +159,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AllowedHosts:   list("CODEATROPHY_ALLOWED_HOSTS"),
 		MaxImportBytes: int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", 50<<20)),
 		MaxSourceBytes: getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
+		MaxNotesChars:  getInt("CODEATROPHY_MAX_NOTES_CHARS", domain.DefaultMaxNotesChars),
 	}
 	c.DBPath = get("CODEATROPHY_DB_PATH", filepath.Join(c.DataDir, "codeatrophy.db"))
 	// The URL may hold a password: it is never repeated in a message.
@@ -206,6 +210,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	if c.MaxSourceBytes < 1<<10 || c.MaxSourceBytes > 16<<20 {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_SOURCE_BYTES: must be between 1024 and 16777216"))
+	}
+	if c.MaxNotesChars < 1 || c.MaxNotesChars > domain.MaxNotesCharsCeiling {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_NOTES_CHARS: must be between 1 and %d", domain.MaxNotesCharsCeiling))
 	}
 
 	c.Judge = JudgeConfig{

@@ -322,6 +322,78 @@ func TestEditItemText(t *testing.T) {
 	wantCode(t, err, app.CodeValidation)
 }
 
+func TestNotesLimit(t *testing.T) {
+	e := newEnv(t, func(o *app.Options) { o.Limits.MaxNotesChars = 10 })
+	if got := must(e.app.Meta(e.ctx)).Limits.MaxNotesChars; got != 10 {
+		t.Errorf("meta maxNotesChars = %d, want the configured 10", got)
+	}
+	notesErr := func(err error) string {
+		t.Helper()
+		msg, _ := wantCode(t, err, app.CodeValidation).Fields["notes"].(string)
+		return msg
+	}
+	const want = "must be at most 10 characters"
+
+	// Characters, not bytes, counted after line endings are normalised.
+	it := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R","body":"x","notes":"ééééé\r\néééé"}`)))
+	if it.Notes != "ééééé\néééé" {
+		t.Errorf("notes: %q", it.Notes)
+	}
+	_, err := e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R","notes":"12345678901"}`))
+	if msg := notesErr(err); msg != want {
+		t.Errorf("create: %q", msg)
+	}
+	_, err = e.app.UpdateItem(e.ctx, it.ID, input(t, `{"notes":"12345678901"}`))
+	if msg := notesErr(err); msg != want {
+		t.Errorf("update: %q", msg)
+	}
+	_, err = e.app.EditItemText(e.ctx, it.ID, decodeInto[app.EditTextInput](t,
+		`{"field":"notes","edits":[{"oldText":"é\né","newText":"é\n\né"}]}`))
+	if msg := notesErr(err); msg != want {
+		t.Errorf("edit: %q", msg)
+	}
+	if cur := must(e.app.GetItem(e.ctx, it.ID)); cur.Notes != it.Notes {
+		t.Error("a refused save must not write anything")
+	}
+	// The body is not bound by the notes limit.
+	must(e.app.EditItemText(e.ctx, it.ID, decodeInto[app.EditTextInput](t, `{"field":"body","edits":[{"oldText":"x","newText":"y"}]}`)))
+}
+
+func TestNotesOverALoweredLimit(t *testing.T) {
+	e := newEnv(t, func(o *app.Options) { o.Limits.MaxNotesChars = 10 })
+	it := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R","body":"b"}`)))
+	// Notes written while the limit was higher.
+	long := strings.Repeat("n", 20)
+	if err := e.db.Write(e.ctx, func(tx store.Tx) error {
+		cur, err := tx.GetItem(it.ID)
+		if err != nil {
+			return err
+		}
+		cur.Notes = long
+		return tx.UpdateItem(&cur)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := must(e.app.GetItem(e.ctx, it.ID)); got.Notes != long {
+		t.Fatalf("existing notes must still load: %q", got.Notes)
+	}
+	// Other fields still save, and so do the unchanged notes sent back.
+	up := must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"title":"Renamed","status":"done","notes":"`+long+`"}`)))
+	if up.Title != "Renamed" || up.Notes != long {
+		t.Errorf("update: %q %q", up.Title, up.Notes)
+	}
+	must(e.app.EditItemText(e.ctx, it.ID, decodeInto[app.EditTextInput](t, `{"field":"body","edits":[{"oldText":"b","newText":"c"}]}`)))
+	// Changed notes still over the limit are refused, shorter or not.
+	_, err := e.app.UpdateItem(e.ctx, it.ID, input(t, `{"notes":"`+long[1:]+`"}`))
+	wantCode(t, err, app.CodeValidation)
+	_, err = e.app.EditItemText(e.ctx, it.ID, decodeInto[app.EditTextInput](t, `{"field":"notes","edits":[{"oldText":"nnnnn","newText":"n"}]}`))
+	wantCode(t, err, app.CodeValidation)
+	// Within the limit again, they save.
+	if got := must(e.app.UpdateItem(e.ctx, it.ID, input(t, `{"notes":"short"}`))); got.Notes != "short" {
+		t.Errorf("notes: %q", got.Notes)
+	}
+}
+
 func TestBulkActionsAndTags(t *testing.T) {
 	e := newEnv(t)
 	a := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"A","tags":["x"]}`)))

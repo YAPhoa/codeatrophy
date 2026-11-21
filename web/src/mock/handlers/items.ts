@@ -156,6 +156,8 @@ function parseFields(db: MockDb, raw: Record<string, unknown>, v: Validator, sel
     if (typeof raw[key] !== 'string') return v.add(key, 'must be a string');
     const value = normaliseText(raw[key]);
     if (byteLength(value) > LIMITS.maxTextBytes) v.add(key, tooLarge);
+    // Notes saved under a higher limit stay as they are until they change.
+    else if (key === 'notes' && value !== self?.notes && charCount(value) > LIMITS.maxNotesChars) v.add(key, atMostChars(LIMITS.maxNotesChars));
     else out[key] = value;
   };
 
@@ -655,6 +657,7 @@ function editItemText(db: MockDb, req: Req) {
   });
   text = normaliseText(text);
   if (byteLength(text) > LIMITS.maxTextBytes) throw invalid(field, `must be at most ${LIMITS.maxTextBytes} bytes`);
+  if (field === 'notes' && text !== item.notes && charCount(text) > LIMITS.maxNotesChars) throw invalid('notes', atMostChars(LIMITS.maxNotesChars));
 
   if (text !== item[field]) {
     item[field] = text;
