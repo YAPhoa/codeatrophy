@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router';
 import { Menu as MenuIcon, Plus, Search } from 'lucide-react';
-import { useMeta } from '../api/queries';
+import { useAiSettings, useMeta } from '../api/queries';
 import { CollectionActionsProvider } from '../features/collections/CollectionActions';
 import { isBooting } from '../lib/boot';
 import { useHotkeys } from '../lib/hotkeys';
@@ -47,6 +47,9 @@ function MenuIconWithJobs() {
 /** Application frame: sidebar, routed content, and the global keyboard shortcuts. */
 export function Shell() {
   const meta = useMeta();
+  // Loaded ahead of any AI screen, so its model choice is there when it first
+  // renders rather than pushing the form down a moment later.
+  useAiSettings(meta.data?.ai.enabled === true);
   const navigate = useNavigate();
   const location = useLocation();
   const newHref = useNewItemHref();

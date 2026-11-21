@@ -242,8 +242,9 @@ export function useTestCasePrompt() {
   return useQuery({ queryKey: qk.testCasePrompt, queryFn: ({ signal }) => api.settings.testCasePrompt(signal) });
 }
 
-export function useAiSettings() {
-  return useQuery({ queryKey: qk.aiSettings, queryFn: ({ signal }) => api.settings.getAi(signal) });
+/** The AI settings; `enabled: false` waits (the shell keeps them loaded while AI is on). */
+export function useAiSettings(enabled = true) {
+  return useQuery({ queryKey: qk.aiSettings, queryFn: ({ signal }) => api.settings.getAi(signal), enabled });
 }
 
 /** A numbered page of the AI activity log, newest first; the page before stays shown while the next loads. */
