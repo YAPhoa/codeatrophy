@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { READING_SCALE, type ReadingSize } from './readingSize';
 import { readString, writeString } from './storage';
 
 /** How wide the reader's text column may grow, kept per browser like the reading text size. */
@@ -18,8 +19,13 @@ export const TEXT_WIDTHS: readonly { value: TextWidth; label: string }[] = [
  */
 export const TEXT_COLUMN_PX = { narrow: 540, standard: 720, wide: 940 } as const;
 
-/** The width of the outline ("On this page") when it is docked beside the text. */
+/** The width of the outline ("On this page") when it is docked beside the text, at the default reading size. */
 export const OUTLINE_PX = 220;
+
+/** The docked outline's width at a reading size: it grows with its text, so larger entries wrap no more. */
+export function outlineWidth(size: ReadingSize): number {
+  return Math.round(OUTLINE_PX * READING_SCALE[size]);
+}
 
 /**
  * How far below its cap the column may give way to keep the outline docked
@@ -40,17 +46,18 @@ export function columnCap(width: TextWidth): string {
 }
 
 /**
- * Whether the outline docks beside the text, given the room the pane leaves
- * for the two (inside its padding, less the gap between them). The chosen
- * width wins: the outline docks only while the column keeps its cap, less
- * `DOCK_TOLERANCE_PX`, and beside at least a Wide column when the width is
- * Full; otherwise it folds into a button and the column gets its whole cap.
+ * Whether the outline docks beside the text, given its width (`outlineWidth`)
+ * and the room the pane leaves for the two (inside its padding, less the gap
+ * between them). The chosen width wins: the outline docks only while the
+ * column keeps its cap, less `DOCK_TOLERANCE_PX`, and beside at least a Wide
+ * column when the width is Full; otherwise it folds into a button and the
+ * column gets its whole cap.
  * Once docked it stays until the room falls short; folded, it waits for
  * `DOCK_MARGIN_PX` more (`wasDocked` false).
  */
-export function outlineDocks(width: TextWidth, room: number, wasDocked: boolean): boolean {
+export function outlineDocks(width: TextWidth, outline: number, room: number, wasDocked: boolean): boolean {
   const column = width === 'full' ? TEXT_COLUMN_PX.wide : TEXT_COLUMN_PX[width] - DOCK_TOLERANCE_PX;
-  const need = column + OUTLINE_PX;
+  const need = column + outline;
   return room >= need + (wasDocked ? 0 : DOCK_MARGIN_PX);
 }
 

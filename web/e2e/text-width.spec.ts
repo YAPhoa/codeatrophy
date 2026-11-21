@@ -146,3 +146,42 @@ test('text width: the chosen width wins over the outline, which folds into the b
   expect(await columnWidth(page)).toBe(540);
 });
 
+
+test('text width: the outline and the header grow with the reading text size', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 });
+  await open(page, RAFT);
+  const outline = page.locator('.reader-layout').getByRole('navigation', { name: 'On this page' });
+  await expect(outline).toBeVisible();
+  const size = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontSize);
+  const outlineWidth = () => outline.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  expect(await outlineWidth()).toBe(220);
+  expect(await size('.reader-outline a')).toBe('13px');
+  expect(await size('.reader-outline h2')).toBe('12px');
+  expect(await size('.reader-head h1')).toBe('30px');
+  expect(await size('.reader-meta')).toBe('13px');
+
+  await page.getByRole('link', { name: 'Settings' }).click();
+  await page.getByRole('link', { name: 'Preferences' }).click();
+  await page.getByRole('radiogroup', { name: 'Reading text size' }).getByText('Large').click();
+  await page.goto(`${RAFT}?mock=fast`);
+  await expect(outline).toBeVisible();
+  // The docked outline is as wide as the docking reckoned with, and its entries and indent scale.
+  expect(await outlineWidth()).toBe(253);
+  expect(parseFloat(await size('.reader-outline a'))).toBeCloseTo(14.95, 1);
+  expect(parseFloat(await size('.reader-outline h2'))).toBeCloseTo(13.8, 1);
+  expect(parseFloat(await size('.reader-head h1'))).toBeCloseTo(34.5, 1);
+  expect(parseFloat(await size('.reader-meta'))).toBeCloseTo(14.95, 1);
+  // Tag chips keep the interface size.
+  expect(await size('.reader-head .chip')).toBe('12px');
+  const [text, nav] = await Promise.all([page.locator('.reader-article').boundingBox(), outline.boundingBox()]);
+  expect(text!.x + text!.width).toBeLessThan(nav!.x);
+
+  // Folded, the panel grows with it.
+  await chooseWidth(page, 'Wide');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const button = page.getByRole('button', { name: 'On this page' });
+  await button.click();
+  const pop = page.getByRole('dialog', { name: 'On this page' });
+  // offsetWidth: the panel scales in as it opens.
+  expect(await pop.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(322);
+});

@@ -4,6 +4,9 @@ import { readString, writeString } from './storage';
 /** The size of rendered Markdown (statements, readings, notes), kept per browser like the theme. */
 export type ReadingSize = 'small' | 'default' | 'large';
 
+/** Each size's --reading-scale. tokens.css sets the same numbers; keep the two in step. */
+export const READING_SCALE: Record<ReadingSize, number> = { small: 0.9, default: 1, large: 1.15 };
+
 const KEY = 'readingSize';
 const listeners = new Set<() => void>();
 

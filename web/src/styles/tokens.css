@@ -24,7 +24,8 @@
   /* Static code; the code editor itself is 14px by default. */
   --text-code: 13px;
   /* Reading text size (Preferences, lib/readingSize.ts): rendered Markdown
-     scales its sizes by this. */
+     and the reader's header and outline scale their sizes by this. The Small and Large
+     numbers are READING_SCALE in lib/readingSize.ts too; keep them in step. */
   --reading-scale: 1;
 
   /* Spacing, on a 4px grid. The half steps --space-0-5 and --space-1-5 are

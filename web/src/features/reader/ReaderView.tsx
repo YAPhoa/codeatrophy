@@ -6,7 +6,8 @@ import type { Item } from '../../api/types';
 import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
 import { exitDuration, slideFrom, token, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
-import { columnCap, OUTLINE_PX, outlineDocks, setTextWidth, TEXT_WIDTHS, useTextWidth, type TextWidth } from '../../lib/textWidth';
+import { useReadingSize } from '../../lib/readingSize';
+import { columnCap, outlineDocks, outlineWidth, setTextWidth, TEXT_WIDTHS, useTextWidth, type TextWidth } from '../../lib/textWidth';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
 import { MenuButton, Popover } from '../../ui/Popover';
@@ -175,12 +176,16 @@ export function ReaderView({ item }: { item: Item }) {
     ro?.observe(scroller);
     return () => ro?.disconnect();
   }, []);
+  // The outline grows with the reading text size; the grid track and the
+  // docking below use the same width.
+  const outline = outlineWidth(useReadingSize());
   // Whether the outline fits beside nearly the whole chosen column, remembered with
-  // the width it was decided for: the margin against flicker applies only
+  // the widths it was decided for: the margin against flicker applies only
   // while the room changes, never to a new choice of width.
-  const [fit, setFit] = useState<{ width: TextWidth; fits: boolean } | null>(null);
-  const fits = room !== null && outlineDocks(textWidth, room, fit === null || fit.width !== textWidth || fit.fits);
-  if (room !== null && (fit?.width !== textWidth || fit.fits !== fits)) setFit({ width: textWidth, fits });
+  const [fit, setFit] = useState<{ width: TextWidth; outline: number; fits: boolean } | null>(null);
+  const fresh = fit === null || fit.width !== textWidth || fit.outline !== outline;
+  const fits = room !== null && outlineDocks(textWidth, outline, room, fresh || fit.fits);
+  if (room !== null && (fresh || fit.fits !== fits)) setFit({ width: textWidth, outline, fits });
   const hasOutline = headings.length > 2;
   const docked = hasOutline && fits && !notesOpen;
 
@@ -221,7 +226,7 @@ export function ReaderView({ item }: { item: Item }) {
 
       <div className="reader-body">
         <div className="reader-scroll" role="region" aria-label="Reading" tabIndex={0} ref={scrollRef}>
-          <div className={cx('reader-layout', docked && 'has-outline')} ref={layoutRef} style={{ '--reader-column': columnCap(textWidth), '--reader-outline': `${OUTLINE_PX}px` } as CSSProperties}>
+          <div className={cx('reader-layout', docked && 'has-outline')} ref={layoutRef} style={{ '--reader-column': columnCap(textWidth), '--reader-outline': `${outline}px` } as CSSProperties}>
             <article className="reader-article" ref={articleRef}>
               <header className="reader-head">
                 <h1>{item.title}</h1>
@@ -284,12 +289,14 @@ interface OutlineProps {
 function Outline({ headings, active, onChoose }: OutlineProps) {
   const ref = useSlidingIndicator<HTMLElement>(OUTLINE_ACTIVE, OUTLINE_MARKER);
   const minTop = Math.min(...headings.map((h) => h.level), 3);
+  // 12px a level at the default reading size, scaled with the entries.
+  const indent = (level: number) => `calc(${(level - minTop) * 12}px * var(--reading-scale))`;
   return (
     <nav ref={ref} className="reader-outline" aria-label="On this page">
       <h2>On this page</h2>
       <ul>
         {headings.map((h) => (
-          <li key={h.id} style={{ paddingLeft: (h.level - minTop) * 12 }}>
+          <li key={h.id} style={{ paddingLeft: indent(h.level) }}>
             <a
               href={`#${h.id}`}
               onClick={() => onChoose(h.id)}

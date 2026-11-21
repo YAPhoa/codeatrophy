@@ -74,29 +74,50 @@ describe('text width', () => {
     const { outlineDocks, OUTLINE_PX, DOCK_TOLERANCE_PX } = await load();
     expect(DOCK_TOLERANCE_PX).toBe(80);
     const beside = (column: number) => column + OUTLINE_PX;
-    expect(outlineDocks('standard', beside(720), true)).toBe(true);
-    expect(outlineDocks('standard', beside(696), true)).toBe(true);
-    expect(outlineDocks('standard', beside(640), true)).toBe(true);
-    expect(outlineDocks('standard', beside(639), true)).toBe(false);
-    expect(outlineDocks('narrow', beside(460), true)).toBe(true);
-    expect(outlineDocks('narrow', beside(459), true)).toBe(false);
-    expect(outlineDocks('wide', beside(860), true)).toBe(true);
-    expect(outlineDocks('wide', beside(859), true)).toBe(false);
+    expect(outlineDocks('standard', OUTLINE_PX, beside(720), true)).toBe(true);
+    expect(outlineDocks('standard', OUTLINE_PX, beside(696), true)).toBe(true);
+    expect(outlineDocks('standard', OUTLINE_PX, beside(640), true)).toBe(true);
+    expect(outlineDocks('standard', OUTLINE_PX, beside(639), true)).toBe(false);
+    expect(outlineDocks('narrow', OUTLINE_PX, beside(460), true)).toBe(true);
+    expect(outlineDocks('narrow', OUTLINE_PX, beside(459), true)).toBe(false);
+    expect(outlineDocks('wide', OUTLINE_PX, beside(860), true)).toBe(true);
+    expect(outlineDocks('wide', OUTLINE_PX, beside(859), true)).toBe(false);
     // Full keeps it beside a whole Wide column at least.
-    expect(outlineDocks('full', beside(940), true)).toBe(true);
-    expect(outlineDocks('full', beside(939), true)).toBe(false);
-    expect(outlineDocks('full', 3000, true)).toBe(true);
+    expect(outlineDocks('full', OUTLINE_PX, beside(940), true)).toBe(true);
+    expect(outlineDocks('full', OUTLINE_PX, beside(939), true)).toBe(false);
+    expect(outlineDocks('full', OUTLINE_PX, 3000, true)).toBe(true);
   });
 
   it('waits for a little more room before a folded outline docks again', async () => {
     const { outlineDocks, OUTLINE_PX, DOCK_MARGIN_PX } = await load();
     const need = 640 + OUTLINE_PX;
-    expect(outlineDocks('standard', need, false)).toBe(false);
-    expect(outlineDocks('standard', need + DOCK_MARGIN_PX - 1, false)).toBe(false);
-    expect(outlineDocks('standard', need + DOCK_MARGIN_PX, false)).toBe(true);
+    expect(outlineDocks('standard', OUTLINE_PX, need, false)).toBe(false);
+    expect(outlineDocks('standard', OUTLINE_PX, need + DOCK_MARGIN_PX - 1, false)).toBe(false);
+    expect(outlineDocks('standard', OUTLINE_PX, need + DOCK_MARGIN_PX, false)).toBe(true);
     // Docked, it stays down to the exact need.
-    expect(outlineDocks('standard', need, true)).toBe(true);
-    expect(outlineDocks('standard', need - 1, true)).toBe(false);
+    expect(outlineDocks('standard', OUTLINE_PX, need, true)).toBe(true);
+    expect(outlineDocks('standard', OUTLINE_PX, need - 1, true)).toBe(false);
+  });
+
+  it('widens the outline with the reading text size, 220px at the default', async () => {
+    const { outlineWidth } = await load();
+    expect(outlineWidth('default')).toBe(220);
+    expect(outlineWidth('small')).toBe(198);
+    expect(outlineWidth('large')).toBe(253);
+  });
+
+  it('docks a larger outline only when the room holds it', async () => {
+    const { outlineDocks, outlineWidth } = await load();
+    const large = outlineWidth('large');
+    // Room for the default outline beside a Standard column is not room for the large one.
+    expect(outlineDocks('standard', 220, 640 + 220, true)).toBe(true);
+    expect(outlineDocks('standard', large, 640 + 220, true)).toBe(false);
+    expect(outlineDocks('standard', large, 640 + large - 1, true)).toBe(false);
+    expect(outlineDocks('standard', large, 640 + large, true)).toBe(true);
+    expect(outlineDocks('full', large, 940 + large, true)).toBe(true);
+    expect(outlineDocks('full', large, 940 + large - 1, true)).toBe(false);
+    // A small outline docks in a little less.
+    expect(outlineDocks('standard', outlineWidth('small'), 640 + 198, true)).toBe(true);
   });
 
   it('caps the column in px, and Full not at all', async () => {

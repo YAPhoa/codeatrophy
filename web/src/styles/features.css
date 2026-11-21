@@ -3313,8 +3313,10 @@ button.case-chip:hover {
   border-bottom: 1px solid var(--border);
 }
 
+/* The title, summary and meta line scale with the reading text; the tag
+   chips and the difficulty badge keep the interface size. */
 .reader-head h1 {
-  font-size: 30px;
+  font-size: calc(30px * var(--reading-scale));
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
@@ -3323,7 +3325,7 @@ button.case-chip:hover {
 .reader-summary {
   margin-top: var(--space-2);
   color: var(--text-2);
-  font-size: 17px;
+  font-size: calc(17px * var(--reading-scale));
   line-height: 1.5;
 }
 
@@ -3334,7 +3336,7 @@ button.case-chip:hover {
   gap: var(--space-1) var(--space-4);
   margin: var(--space-3) 0 var(--space-3);
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: calc(var(--text-sm) * var(--reading-scale));
 }
 
 .reader-meta a {
@@ -3351,13 +3353,14 @@ button.case-chip:hover {
   max-height: calc(100dvh - 120px);
   overflow: auto;
   overscroll-behavior: contain;
-  font-size: var(--text-sm);
+  /* Scales with the reading text, as its width does (lib/textWidth.ts). */
+  font-size: calc(var(--text-sm) * var(--reading-scale));
 }
 
 .reader-outline h2 {
   margin-bottom: var(--space-2);
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: calc(var(--text-xs) * var(--reading-scale));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3402,7 +3405,12 @@ button.case-chip:hover {
   border-left-color: var(--border);
 }
 
-/* The outline folded into the bar's button. */
+/* The outline folded into the bar's button. The panel grows with its
+   entries, like the docked outline. */
+.reader-outline-pop {
+  width: calc(280px * var(--reading-scale));
+}
+
 .reader-outline-pop .reader-outline {
   position: relative;
   top: auto;
@@ -3503,7 +3511,7 @@ button.case-chip:hover {
   }
 
   .reader-head h1 {
-    font-size: 25px;
+    font-size: calc(25px * var(--reading-scale));
   }
 }
 
