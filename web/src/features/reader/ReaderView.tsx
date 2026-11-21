@@ -12,6 +12,7 @@ import { Button, IconButton, cx } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
 import { MenuButton, Popover } from '../../ui/Popover';
 import { Callout } from '../../ui/misc';
+import { revealTarget } from '../../ui/revealTarget';
 import { useCollectionActions } from '../collections/CollectionActions';
 import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl, TagChips } from '../item/controls';
 import { libraryHref, useItemActions } from '../item/itemActions';
@@ -54,7 +55,8 @@ function useOutline(containerRef: React.RefObject<HTMLElement | null>, source: s
     let frame = 0;
     const update = () => {
       frame = 0;
-      const nodes = headings.map((h) => document.getElementById(h.id)).filter((n): n is HTMLElement => n !== null);
+      // A heading inside a closed details block is not on the page to be read.
+      const nodes = headings.map((h) => document.getElementById(h.id)).filter((n): n is HTMLElement => n?.checkVisibility() === true);
       const first = nodes[0];
       const last = nodes[nodes.length - 1];
       if (!first || !last) return;
@@ -97,6 +99,8 @@ function useOutline(containerRef: React.RefObject<HTMLElement | null>, source: s
   }, [containerRef, headings]);
 
   const choose = (id: string) => {
+    // The link's own jump follows; a heading in a closed details block opens first.
+    revealTarget(id);
     chosen.current = id;
     setActive(id);
   };

@@ -11,8 +11,9 @@ import "strings"
 // of their own (a custom system prompt). The fixed parts are rules the app
 // depends on: the stdin/stdout judging, the program and function interfaces
 // and their harness protocol, the folded input region, comparison, limits,
-// language ids and versions, and expected outputs coming from a reference
-// solution. They always apply.
+// language ids and versions, expected outputs coming from a reference
+// solution, and the one HTML block the renderer draws (`<details>`). They
+// always apply.
 //
 // Without a custom text the parts are sent interleaved, in their order here,
 // as AuthoringConventions. With one, the custom text is sent followed by
@@ -190,6 +191,12 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+`},
+	{fixed: true, text: `- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: ` + "`<details>`" + `, ` + "`<summary>Answer</summary>`" + `, a blank
+  line, the Markdown, a blank line and ` + "`</details>`" + `. The reader clicks the
+  summary to show it.
 `},
 }
 

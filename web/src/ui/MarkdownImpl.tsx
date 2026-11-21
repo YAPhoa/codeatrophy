@@ -6,16 +6,19 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import { ImageOff } from 'lucide-react';
-import { displayMathAlone, headingSlugs } from './markdownPlugins';
+import { detailsBlocks, displayMathAlone, headingSlugs } from './markdownPlugins';
 import { markdownUrlTransform } from './markdownUrl';
 import { MermaidDiagram } from './Mermaid';
+import { hashTarget, revealTarget } from './revealTarget';
 
 // Item bodies can come from imported third-party bundles, so they are treated
 // as untrusted: raw HTML in the Markdown is never turned into elements (there
 // is deliberately no `rehype-raw` here), KaTeX runs with `trust` off, and
 // react-markdown's default URL filter drops `javascript:` and similar links
-// (an image may still be a data URL of an image: `markdownUrl.ts`).
-const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath, displayMathAlone];
+// (an image may still be a data URL of an image: `markdownUrl.ts`). The one
+// exception to the first is a collapsible `<details>` block, which
+// `detailsBlocks` rebuilds from its tags alone (`markdownPlugins.ts`).
+const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, remarkMath, displayMathAlone, detailsBlocks];
 const rehypePlugins: Options['rehypePlugins'] = [
   // KaTeX writes errorColor inline on a command it will not render; its own
   // #cc0000 is too faint on the dark theme.
@@ -63,9 +66,16 @@ function ExternalLink({ href, children, ...rest }: ComponentPropsWithoutRef<'a'>
   // Links whose URL was rejected by the sanitiser (`javascript:`, `data:`, …)
   // arrive with an empty href; show their text without making it clickable.
   if (!href) return <span className="md-dead-link" title="This link was removed because its address is not safe to open">{children}</span>;
-  const internal = typeof href === 'string' && (href.startsWith('#') || href.startsWith('/'));
+  const internal = href.startsWith('#') || href.startsWith('/');
+  const target = hashTarget(href);
   return (
-    <a {...rest} href={href} {...(internal ? {} : { target: '_blank', rel: 'noopener noreferrer nofollow' })}>
+    <a
+      {...rest}
+      href={href}
+      // A heading or footnote inside a closed details block opens before the jump.
+      onClick={target === null ? undefined : () => revealTarget(target)}
+      {...(internal ? {} : { target: '_blank', rel: 'noopener noreferrer nofollow' })}
+    >
       {children}
     </a>
   );

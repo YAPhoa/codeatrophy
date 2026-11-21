@@ -233,6 +233,66 @@
   margin: 0 auto;
 }
 
+/* A collapsible block (`<details>` in the source; markdownPlugins.ts): an
+   answer or a hint that stays hidden until its summary row is clicked. The
+   body fades in with every details (ui.css). */
+.md .md-details {
+  margin: 0 0 0.9em;
+  padding: 0 0.9em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.md .md-details-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  margin: 0 -0.9em;
+  padding: 0.45em 0.9em;
+  border-radius: calc(var(--radius) - 1px);
+  color: var(--text-2);
+  font-weight: 500;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration-hover), background-color var(--duration-hover);
+}
+
+.md .md-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.md .md-details-summary::before {
+  content: '▸';
+  flex: none;
+  color: var(--text-3);
+  font-size: 0.85em;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.md .md-details-summary:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.md .md-details[open] > .md-details-summary {
+  margin-bottom: 0.75em;
+  border-bottom: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+}
+
+.md .md-details[open] > .md-details-summary::before {
+  transform: rotate(90deg);
+}
+
+.md .md-details > :last-child:not(summary) {
+  margin-bottom: 0.75em;
+}
+
+.md-longform .md-details {
+  margin-bottom: 1.15em;
+}
+
 /* Under the source of a diagram that could not be drawn. */
 .md .md-mermaid-note {
   margin-top: -0.5em;

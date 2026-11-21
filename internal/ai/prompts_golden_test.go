@@ -102,7 +102,8 @@ func TestConventionsSplit(t *testing.T) {
 	}
 	for _, want := range []string{"**stdin/stdout** basis", "The **interface** says what the solver writes", "# region input",
 		"public class Main", "**harness suffix** reads one test case", "from __future__ import annotations",
-		"Language ids:", "Python 3.8", "compared token by token", "(`isSample: true`)", "Expected outputs must come from running a reference solution"} {
+		"Language ids:", "Python 3.8", "compared token by token", "(`isSample: true`)", "Expected outputs must come from running a reference solution",
+		"`<summary>Answer</summary>`"} {
 		if !strings.Contains(FixedConventions, want) || strings.Contains(EditableConventions, want) {
 			t.Errorf("%q should be a fixed rule", want)
 		}
@@ -145,6 +146,9 @@ func TestCustomConventionsReplaceTheEditableOnes(t *testing.T) {
 		}
 		if !strings.Contains(p, "<"+BlockStylePreset+"-") {
 			t.Errorf("%s lost the style block", name)
+		}
+		if !strings.Contains(p, "collapsible block: `<details>`") {
+			t.Errorf("%s lost the one HTML block that renders", name)
 		}
 	}
 	if !strings.Contains(draft, DraftRules()) || !strings.HasSuffix(draft, jsonOnly) {

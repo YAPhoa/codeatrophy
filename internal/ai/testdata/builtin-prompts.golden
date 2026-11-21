@@ -169,6 +169,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Drafting rules
 
@@ -374,6 +379,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Style preferences
 
@@ -618,6 +628,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Drafting rules
 
@@ -832,6 +847,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Variant rules
 
@@ -1035,6 +1055,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Style preferences
 
@@ -1377,6 +1402,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Code rules
 
@@ -1570,6 +1600,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Style preferences
 
@@ -1773,6 +1808,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Working with the Codeatrophy tools
 
@@ -1972,6 +2012,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Style preferences
 
@@ -2182,6 +2227,11 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: `<details>`, `<summary>Answer</summary>`, a blank
+  line, the Markdown, a blank line and `</details>`. The reader clicks the
+  summary to show it.
 
 ## Style preferences
 

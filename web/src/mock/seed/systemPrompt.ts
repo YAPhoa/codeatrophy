@@ -178,7 +178,15 @@ prefix, the solver's code and the suffix, each starting on a new line:
   "Submit".
 - Expected outputs must come from running a reference solution, never from
   hand computation. Provide the reference solution together with the inputs
-  and verify, so the server computes the expected output.`;
+  and verify, so the server computes the expected output.
+
+## All items
+
+- Raw HTML in a body is not rendered, with one exception: an answer to an
+  exercise, or a hint that should not be seen at a glance, goes in a
+  collapsible block: \`<details>\`, \`<summary>Answer</summary>\`, a blank
+  line, the Markdown, a blank line and \`</details>\`. The reader clicks the
+  summary to show it.`;
 
 export const DRAFT_RULES = `## Drafting rules
 

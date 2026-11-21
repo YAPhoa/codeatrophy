@@ -168,7 +168,7 @@ third-party origin.
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
 | `library-*`, `tags`, `palette`, `select` | The library list, its filters, paging and sorting; the Tags page; the command palette; selects |
-| `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown; the reader's text width |
+| `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks; the reader's text width |
 | `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
 | `built/` | How a reload paints, judged on a production build (a second project, served by `vite preview` on port 5175, or `E2E_BUILT_PORT`, built afresh each run) |
 
@@ -279,7 +279,9 @@ A few conventions worth knowing:
   shown. Anything new that displays test data has to honour this
   (`useReveal()` in `features/solve`).
 - **Item bodies are untrusted.** They can come from imported bundles. The
-  Markdown renderer never turns raw HTML into elements, drops unsafe URLs
+  Markdown renderer never turns raw HTML into elements (the one exception, a
+  `<details>` block, is rebuilt from its tags alone by `detailsBlocks` in
+  `src/ui/markdownPlugins.ts`), drops unsafe URLs
   (an image may be a `data:image/` URL, `src/ui/markdownUrl.ts`), and does
   not load remote images until asked. `src/ui/Markdown.test.tsx` guards this;
   do not add `rehype-raw`. Mermaid diagrams are drawn at its `strict` level,

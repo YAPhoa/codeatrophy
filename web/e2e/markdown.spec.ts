@@ -79,3 +79,96 @@ test('markdown: the editor preview draws a diagram once typing pauses', async ({
   const after = Number((await drawnId())?.replace(/\D/g, ''));
   expect(after - before).toBeLessThan(10);
 });
+
+// A reading whose answers wait in collapsible blocks, added to the mock's
+// library before the app loads it.
+const EXERCISES = '/items/99999999-9999-4999-8999-0000000000d1';
+const EXERCISES_BODY = [
+  '## Warm-up',
+  '',
+  'What is the time complexity of binary search?',
+  '',
+  '<details>',
+  '<summary>Answer</summary>',
+  '',
+  'It is $O(\\log n)$: each step halves the range.',
+  '',
+  '</details>',
+  '',
+  '## Practice',
+  '',
+  'Write it iteratively.',
+  '',
+  '<details>',
+  '<summary>Solution</summary>',
+  '',
+  '### Worked solution',
+  '',
+  '```python',
+  'def search(xs, x):',
+  '    lo, hi = 0, len(xs)',
+  '```',
+  '',
+  '</details>',
+  '',
+  ...Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of filler, so the page scrolls.\n`),
+  '## Further reading',
+  '',
+  ...Array.from({ length: 20 }, (_, i) => `Paragraph ${i + 41} of filler.\n`),
+].join('\n');
+
+async function withExercises(page: Page): Promise<void> {
+  await page.addInitScript((body) => {
+    type Item = { id: string; type: string; title: string; body: string; tags: string[]; seq: number };
+    type Mock = { db: { items: Map<string, Item>; nextSeq: () => number } };
+    let mock: Mock | undefined;
+    Object.defineProperty(window, '__codeatrophyMock', {
+      configurable: true,
+      get: () => mock,
+      set: (m: Mock) => {
+        mock = m;
+        const base = [...m.db.items.values()].find((i) => i.type === 'reading')!;
+        const id = '99999999-9999-4999-8999-0000000000d1';
+        m.db.items.set(id, { ...base, id, title: 'Binary search exercises', body, tags: [], seq: m.db.nextSeq() });
+      },
+    });
+  }, EXERCISES_BODY);
+}
+
+test('markdown: an answer in a details block is hidden until its summary is clicked, and the outline opens it', async ({ page }) => {
+  await withExercises(page);
+  await open(page, EXERCISES);
+  const body = page.locator('.md');
+  const answer = body.locator('details').filter({ has: page.locator('summary', { hasText: 'Answer' }) });
+  await expect(answer).toHaveCount(1);
+  await expect(answer.getByText('each step halves the range')).toBeHidden();
+  await expect(answer.locator('.katex')).toBeHidden();
+
+  await answer.getByText('Answer', { exact: true }).click();
+  await expect(answer).toHaveAttribute('open', '');
+  await expect(answer.getByText('each step halves the range')).toBeVisible();
+  await expect(answer.locator('.katex')).toBeVisible();
+  // Clicking the summary again folds it away.
+  await answer.getByText('Answer', { exact: true }).click();
+  await expect(answer.getByText('each step halves the range')).toBeHidden();
+
+  // A heading inside a closed block is in the outline; choosing it opens the block and lands on it.
+  const solution = body.locator('details').filter({ has: page.locator('summary', { hasText: 'Solution' }) });
+  const heading = body.getByRole('heading', { name: 'Worked solution' });
+  await expect(heading).toBeHidden();
+  // With the block just below the top of the pane, the section being read is
+  // the one around it, not the hidden heading inside.
+  await body.getByRole('heading', { name: 'Practice' }).evaluate((h) => h.scrollIntoView({ block: 'start' }));
+  // With the notes beside the text, the outline is folded into the bar.
+  await page.getByRole('button', { name: 'On this page' }).click();
+  const outline = page.getByRole('dialog', { name: 'On this page' });
+  await expect(outline.getByRole('link', { name: 'Practice' })).toHaveAttribute('aria-current', 'location');
+  await expect(outline.getByRole('link', { name: 'Worked solution' })).not.toHaveAttribute('aria-current');
+  await outline.getByRole('link', { name: 'Worked solution' }).click();
+  await expect(solution).toHaveAttribute('open', '');
+  await expect(heading).toBeInViewport();
+  await expect(page).toHaveURL(/#h-worked-solution$/);
+  await expect(solution.locator('pre code')).toContainText('def search');
+  // The other closed block stays closed.
+  await expect(answer).not.toHaveAttribute('open');
+});

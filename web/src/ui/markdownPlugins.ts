@@ -87,3 +87,138 @@ export function displayMathAlone() {
     visit(tree);
   };
 }
+
+// Collapsible blocks. Raw HTML is never rendered (see MarkdownImpl.tsx), with
+// one exception: `<details>` (or `<details open>`), an optional
+// `<summary>…</summary>` and `</details>` around ordinary Markdown become a
+// real details element, so an exercise can hide its answer until clicked.
+// GFM parses those tags as `html` nodes beside the Markdown between them; this
+// plugin pairs them up and wraps what lies between. Nothing else in the tags is
+// honoured: an attribute other than `open` leaves the tag as it was, and the
+// summary's content is plain text. A tag that finds no partner stays as raw
+// HTML, shown as text like any other.
+
+const OPEN_TAG = /^<details(\s+open)?\s*>/i;
+const SUMMARY_TAG = /^<summary\s*>([\s\S]*?)<\/summary\s*>/i;
+const CLOSE_TAG = /^<\/details\s*>/i;
+const TRAILING_CLOSE_TAG = /<\/details\s*>\s*$/i;
+
+type DetailsToken =
+  | { kind: 'open'; open: boolean; raw: string }
+  | { kind: 'summary'; text: string; raw: string }
+  | { kind: 'close'; raw: string }
+  | { kind: 'node'; node: MdastNode };
+
+/** Nodes that hold block content, where a details block may sit. */
+const CONTAINERS = new Set(['root', 'blockquote', 'list', 'listItem', 'footnoteDefinition']);
+
+const rawHtml = (raw: string): MdastNode => ({ type: 'html', value: raw });
+
+/** The summary's text as written, on one line; tags inside it are text too. */
+const summaryText = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+export function detailsBlocks(this: { parse(text: string): unknown }) {
+  // Text that shares an HTML block with the tags (a body written right under
+  // `</summary>` without a blank line) is parsed as Markdown on its own.
+  const parse = (text: string): MdastNode => {
+    const tree = this.parse(text) as MdastNode;
+    displayMathAlone()(tree, { value: text });
+    transform(tree);
+    stripPositions(tree);
+    return tree;
+  };
+
+  /** The tags at the start and end of an HTML node and the text between, or null when it does not start with one. */
+  const lexHtml = (value: string): DetailsToken[] | null => {
+    const lead: DetailsToken[] = [];
+    let rest = value;
+    for (;;) {
+      const s = rest.trimStart();
+      let m: RegExpMatchArray | null;
+      if ((m = s.match(OPEN_TAG))) lead.push({ kind: 'open', open: m[1] !== undefined, raw: m[0] });
+      else if ((m = s.match(SUMMARY_TAG))) lead.push({ kind: 'summary', text: summaryText(m[1] ?? ''), raw: m[0] });
+      else if ((m = s.match(CLOSE_TAG))) lead.push({ kind: 'close', raw: m[0] });
+      else break;
+      rest = s.slice(m[0].length);
+    }
+    if (lead.length === 0) return null;
+    const tail: DetailsToken[] = [];
+    for (let m = rest.match(TRAILING_CLOSE_TAG); m && m.index !== undefined; m = rest.match(TRAILING_CLOSE_TAG)) {
+      tail.unshift({ kind: 'close', raw: m[0].trim() });
+      rest = rest.slice(0, m.index);
+    }
+    const middle = rest.trim();
+    return [...lead, ...(middle === '' ? [] : tokensOf(parse(middle).children ?? [])), ...tail];
+  };
+
+  const tokensOf = (children: MdastNode[]): DetailsToken[] =>
+    children.flatMap((node): DetailsToken[] => {
+      if (node.type === 'html') return lexHtml(node.value ?? '') ?? [{ kind: 'node', node }];
+      if (node.type !== 'paragraph') return [{ kind: 'node', node }];
+      // `last line</details>`: the closing tag ends the paragraph inline.
+      const inline = [...(node.children ?? [])];
+      const closes: DetailsToken[] = [];
+      for (;;) {
+        while (inline.length > 0 && inline[inline.length - 1]?.type === 'text' && (inline[inline.length - 1]?.value ?? '').trim() === '') inline.pop();
+        const last = inline[inline.length - 1];
+        if (last?.type !== 'html' || !/^<\/details\s*>$/i.test((last.value ?? '').trim())) break;
+        inline.pop();
+        closes.unshift({ kind: 'close', raw: (last.value ?? '').trim() });
+      }
+      if (closes.length === 0) return [{ kind: 'node', node }];
+      const tail = inline[inline.length - 1];
+      if (tail?.type === 'text') inline[inline.length - 1] = { ...tail, value: (tail.value ?? '').trimEnd() };
+      return [...(inline.length > 0 ? [{ kind: 'node' as const, node: { ...node, children: inline } }] : []), ...closes];
+    });
+
+  interface Frame {
+    open?: Extract<DetailsToken, { kind: 'open' }>;
+    summary?: Extract<DetailsToken, { kind: 'summary' }>;
+    children: MdastNode[];
+  }
+
+  const details = (frame: Frame): MdastNode => ({
+    type: 'details',
+    data: { hName: 'details', hProperties: { className: ['md-details'], ...(frame.open?.open ? { open: true } : {}) } },
+    children: [
+      { type: 'detailsSummary', data: { hName: 'summary', hProperties: { className: ['md-details-summary'] }, hChildren: [{ type: 'text', value: frame.summary?.text || 'Details' }] } },
+      ...frame.children,
+    ],
+  });
+
+  const build = (tokens: DetailsToken[]): MdastNode[] => {
+    const stack: Frame[] = [{ children: [] }];
+    const top = () => stack[stack.length - 1] as Frame;
+    for (const t of tokens) {
+      if (t.kind === 'node') top().children.push(t.node);
+      else if (t.kind === 'open') stack.push({ open: t, children: [] });
+      else if (t.kind === 'summary') {
+        const frame = top();
+        if (frame.open && !frame.summary && frame.children.length === 0) frame.summary = t;
+        else frame.children.push(rawHtml(t.raw));
+      } else if (stack.length > 1) {
+        const frame = stack.pop() as Frame;
+        top().children.push(details(frame));
+      } else top().children.push(rawHtml(t.raw));
+    }
+    // An opening tag never closed is left as it was, its content after it.
+    while (stack.length > 1) {
+      const frame = stack.pop() as Frame;
+      top().children.push(rawHtml(frame.open?.raw ?? ''), ...(frame.summary ? [rawHtml(frame.summary.raw)] : []), ...frame.children);
+    }
+    return top().children;
+  };
+
+  const transform = (node: MdastNode): void => {
+    if (!CONTAINERS.has(node.type) || !node.children) return;
+    for (const child of node.children) transform(child);
+    if (node.type !== 'list') node.children = build(tokensOf(node.children));
+  };
+
+  return (tree: MdastNode): void => transform(tree);
+}
+
+function stripPositions(node: MdastNode): void {
+  delete node.position;
+  for (const child of node.children ?? []) stripPositions(child);
+}

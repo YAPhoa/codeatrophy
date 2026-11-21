@@ -259,8 +259,9 @@ other.
 
 When the user has written a custom system prompt in the app's settings (see
 "System prompt" in `docs/api.md`), the authoring guide carries it in place
-of the editable conventions, followed by the fixed rules the app depends on,
-in `instructions`, the resource and every prompt, `write_test_cases`
+of the editable conventions, followed by the fixed rules the app depends on
+(among them that a `<details>` block, for answers and hints, is the only
+HTML that renders), in `instructions`, the resource and every prompt, `write_test_cases`
 included. No tool reads, creates or changes it. The custom test case
 prompt, which only the app's own test generation uses, appears in none of
 them.

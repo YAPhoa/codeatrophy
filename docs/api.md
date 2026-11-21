@@ -348,7 +348,9 @@ are left out.
   display equation goes between `$$` lines of their own; the UI also draws a
   paragraph holding only a one-line `$$...$$` as one. The UI draws a ```` ```mermaid ```` fenced block as a diagram (its source when it
   does not parse) and shows images given as `data:image/` URLs (PNG, JPEG,
-  GIF, WebP, SVG); raw HTML is never rendered.
+  GIF, WebP, SVG); raw HTML is never rendered, except a collapsible block:
+  `<details>` (or `<details open>`), an optional `<summary>…</summary>` of
+  plain text, and `</details>` around Markdown, with no other attributes.
 - `notes` is the user's private Markdown notes, at most
   `limits.maxNotesChars` characters. A write that changes them to anything
   longer is refused with `422` on `notes`; notes already longer (saved under
@@ -2354,8 +2356,9 @@ on. The user may replace the first kind, the **editable conventions**, with
 a text of their own. The second kind, the **fixed rules**, always applies:
 judging on stdin/stdout, the `program` and `function` interfaces and their
 harness protocol, the folded input region, how output is compared, limits,
-language ids and versions, and expected outputs coming from a reference
-solution. So do the rules each request adds after the conventions and the
+language ids and versions, expected outputs coming from a reference
+solution, and the one HTML block that renders (`<details>`, for answers and
+hints). So do the rules each request adds after the conventions and the
 style preset (sample test cases with correct outputs, the reference
 solution, assumptions, large test cases, the JSON-only answer), and the
 judge's languages in the user turn.

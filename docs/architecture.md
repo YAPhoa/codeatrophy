@@ -591,7 +591,8 @@ The *editable* parts are about the prose: statement sections, readings,
 titles, tags, what makes a good test set. The *fixed* parts are what the app
 depends on: stdin/stdout judging, the two interfaces and the harness
 protocol, the folded input region, comparison, limits, language ids and
-versions, expected outputs from a reference solution. A user may replace
+versions, expected outputs from a reference solution, and the one HTML
+block that renders (`<details>`). A user may replace
 all the editable parts with one text of their own, a **custom system
 prompt**, kept as an instance setting. A prompt then carries that text,
 then the fixed parts gathered under their own heading, then the style
@@ -769,7 +770,11 @@ until the reader asks for it. Images embedded as `data:image/` URLs are shown
 as images, where an SVG cannot run script. A ```` ```mermaid ```` block is
 drawn as a diagram by Mermaid, loaded only when a page has one, at its
 `strict` security level and in the app's theme; one that does not draw shows
-its source with a short note.
+its source with a short note. The one piece of HTML that renders is a
+collapsible block: `<details>` (or `<details open>`), an optional
+`<summary>…</summary>` and `</details>` around Markdown become a real details
+element, rebuilt from those tags alone; the summary is plain text, and a tag
+with any other attribute, or without its partner, stays text like other HTML.
 
 ## Deployment
 
