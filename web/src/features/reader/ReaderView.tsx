@@ -121,6 +121,7 @@ export function ReaderView({ item }: { item: Item }) {
     writeJson('reader:notes', v);
   };
   const notes = usePresence(notesOpen, '--duration-medium');
+  const [notesWidth, setNotesWidth] = useState(() => clampNotesWidth(readJson('reader:notesWidth', NOTES_WIDTH.initial)));
   const notesToggled = useChangeCount(notesOpen) > 0;
   useLayoutEffect(() => {
     const from = columnWas.current;
@@ -263,7 +264,9 @@ export function ReaderView({ item }: { item: Item }) {
             className={cx('reader-notes', notesToggled && notesOpen && 'is-opening', notes.closing && 'is-closing')}
             aria-label="Private notes"
             inert={notes.closing}
+            style={{ '--notes-width': `${notesWidth}px` } as CSSProperties}
           >
+            <NotesResizer width={notesWidth} onChange={setNotesWidth} />
             <div className="reader-notes-head">
               <h2>Notes</h2>
               <IconButton size="sm" label="Close notes" icon={<X size={14} />} onClick={() => setNotesOpen(false)} />
@@ -273,6 +276,55 @@ export function ReaderView({ item }: { item: Item }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** The notes panel's width in px: a little either side of where it starts. */
+const NOTES_WIDTH = { min: 320, initial: 380, max: 480 };
+
+function clampNotesWidth(w: unknown): number {
+  return typeof w === 'number' && Number.isFinite(w) ? Math.round(Math.max(NOTES_WIDTH.min, Math.min(NOTES_WIDTH.max, w))) : NOTES_WIDTH.initial;
+}
+
+/** The notes panel's left edge, dragged (or moved with the arrow keys) to make it a little wider or narrower. */
+function NotesResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const set = (w: number) => {
+    const next = clampNotesWidth(w);
+    onChange(next);
+    writeJson('reader:notesWidth', next);
+  };
+  return (
+    <div
+      role="separator"
+      tabIndex={0}
+      aria-label="Notes width"
+      aria-orientation="vertical"
+      aria-valuemin={NOTES_WIDTH.min}
+      aria-valuemax={NOTES_WIDTH.max}
+      aria-valuenow={width}
+      className="reader-notes-resize"
+      onPointerDown={(e) => {
+        drag.current = { x: e.clientX, w: width };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }}
+      onPointerMove={(e) => {
+        if (drag.current) set(drag.current.w + drag.current.x - e.clientX);
+      }}
+      onPointerUp={(e) => {
+        drag.current = null;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      onDoubleClick={() => set(NOTES_WIDTH.initial)}
+      onKeyDown={(e) => {
+        const step = e.key === 'ArrowLeft' ? 16 : e.key === 'ArrowRight' ? -16 : 0;
+        if (step !== 0 || e.key === 'Home') {
+          e.preventDefault();
+          set(e.key === 'Home' ? NOTES_WIDTH.initial : width + step);
+        }
+      }}
+    />
   );
 }
 

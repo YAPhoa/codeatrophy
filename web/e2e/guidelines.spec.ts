@@ -74,6 +74,8 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await open(page, '/');
   await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
   await page.getByRole('tab', { name: /^Notes/ }).click();
+  // Two Sum has notes: they show rendered until Edit.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByLabel('Private notes (Markdown)').pressSequentially(' x');
   const state = page.locator('.notes-state').getByRole('status');
   await expect(state).toHaveText('Unsaved');
@@ -81,6 +83,55 @@ test('notes: text typed just before the tab goes away is still saved', async ({ 
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
   await expect(state).not.toHaveText('Unsaved', { timeout: 300 });
   await expect(state).toHaveText('Saved');
+});
+
+test('notes: empty ones open ready to write, ones with text show it with Edit, and closing the pane saves', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const field = page.getByLabel('Private notes (Markdown)');
+  const edit = page.getByRole('button', { name: 'Edit', exact: true });
+  await expect(field).toBeVisible();
+  await expect(edit).toHaveCount(0);
+  await field.fill('Partition **first**.');
+  // Closed well inside the autosave delay, then opened again: the text was
+  // saved as the pane closed, and shows rendered, with Edit.
+  await page.getByRole('button', { name: 'Close notes' }).click();
+  await expect(page.locator('.reader-notes')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(page.locator('.notes-state').getByRole('status')).toHaveText('');
+  const panel = page.getByRole('complementary', { name: 'Private notes' });
+  await expect(panel.locator('.notes-preview strong')).toHaveText('first');
+  await expect(field).toHaveCount(0);
+  await edit.click();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue('Partition **first**.');
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(panel.locator('.notes-preview')).toContainText('Partition first.');
+});
+
+test('notes: typing that never pauses is still saved now and then, but not on every key', async ({ page }) => {
+  await page.clock.install();
+  await open(page, '/');
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const field = page.getByLabel('Private notes (Markdown)');
+  await expect(field).toBeVisible();
+  // Every status the bar shows, as it shows it.
+  await page.locator('.notes-state').evaluate((el) => {
+    const seen: string[] = [];
+    (window as unknown as { seen: string[] }).seen = seen;
+    new MutationObserver(() => seen.push(el.textContent ?? '')).observe(el, { subtree: true, childList: true, characterData: true });
+  });
+  // A key every second for 20 seconds: never the pause that saves, so one
+  // save, at 15 seconds.
+  for (let i = 0; i < 20; i++) {
+    await field.press('a');
+    await page.clock.runFor(1000);
+  }
+  const seen = await page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+  const saves = seen.filter((t, i) => t.includes('Saving') && !seen[i - 1]?.includes('Saving'));
+  expect(saves).toHaveLength(1);
 });
 
 test('deep links: the open tabs of the solve page are part of the address', async ({ page }) => {
@@ -540,4 +591,33 @@ test('layout: the statement pane stops growing where the statement does', async 
   // Dragged well past it, the pane holds the statement at its widest and no more.
   expect(await width('.split-horizontal > .split-pane')).toBeLessThanOrEqual(880);
   expect(await width('.statement')).toBe(820);
+});
+
+test('notes: the panel drags a little wider or narrower, and the box drags taller', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, '/');
+  await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: 'Private notes' });
+  const edge = panel.getByRole('separator', { name: 'Notes width' });
+  const width = () => panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  expect(await width()).toBe(380);
+  // Dragged far to the left, it stops at its widest; the keys move it too.
+  const box = (await edge.boundingBox())!;
+  await page.mouse.move(box.x + 4, box.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 400, box.y + 200, { steps: 4 });
+  await page.mouse.up();
+  expect(await width()).toBe(480);
+  await edge.focus();
+  await page.keyboard.press('ArrowRight');
+  expect(await width()).toBe(464);
+  // Kept when the notes open again.
+  await page.getByRole('button', { name: 'Close notes' }).click();
+  await expect(page.locator('.reader-notes')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  expect(await width()).toBe(464);
+  const field = page.getByLabel('Private notes (Markdown)');
+  await expect(field).toHaveCSS('resize', 'vertical');
+  await expect(field).toHaveCSS('height', '240px');
 });

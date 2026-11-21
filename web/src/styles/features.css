@@ -2830,16 +2830,21 @@ fieldset.stack legend {
   font-size: var(--text-sm);
 }
 
+/* A manageable box to start with; its corner drags it taller. */
 .notes-text {
-  flex: 1;
-  min-height: 180px;
-  resize: none;
+  flex: none;
+  height: 240px;
+  min-height: 120px;
+  max-height: 100%;
+  resize: vertical;
   font-size: var(--text-md);
   line-height: 1.6;
 }
 
+/* As tall as the notes, scrolling past the panel. */
 .notes-preview {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
   padding: var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3451,9 +3456,11 @@ button.case-chip:hover {
 }
 
 .reader-notes {
+  position: relative;
   display: flex;
   flex-direction: column;
-  flex: 0 0 min(380px, 38%);
+  /* --notes-width is the dragged width (ReaderView), 320–480px. */
+  flex: 0 0 min(var(--notes-width, 380px), 45%);
   min-width: 0;
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-left: 1px solid var(--border);
@@ -3472,7 +3479,7 @@ button.case-chip:hover {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(380px, 38%);
+  width: min(var(--notes-width, 380px), 45%);
   animation: notes-out var(--duration-medium) var(--ease-out) forwards;
 }
 
@@ -3490,6 +3497,24 @@ button.case-chip:hover {
     transform: translateX(10%);
     filter: blur(var(--blur-small));
   }
+}
+
+/* A strip over the panel's left border to drag it a little wider or narrower. */
+.reader-notes-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 2;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.reader-notes-resize:hover,
+.reader-notes-resize:focus-visible {
+  background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
+  outline: none;
 }
 
 .reader-notes-head {
@@ -3519,6 +3544,10 @@ button.case-chip:hover {
     flex: 0 0 42%;
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .reader-notes-resize {
+    display: none;
   }
 
   .reader-notes.is-closing {
