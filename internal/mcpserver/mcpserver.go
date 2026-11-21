@@ -117,8 +117,8 @@ func Handler(opts Options) http.Handler {
 			return
 		}
 		if opts.Token != "" {
-			got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(got)), []byte(opts.Token)) != 1 {
+			got, ok := bearerToken(r.Header.Get("Authorization"))
+			if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(opts.Token)) != 1 {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
@@ -131,6 +131,17 @@ func Handler(opts Options) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// bearerToken is the token of an Authorization header in the Bearer
+// scheme, whose name is case-insensitive (RFC 7235); the token itself is
+// compared exactly by the caller.
+func bearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(header, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	return strings.TrimSpace(token), true
 }
 
 // NewServer builds an MCP server over the application.

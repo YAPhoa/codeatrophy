@@ -219,19 +219,14 @@ func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, in
 	}
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return out, 0, ai.Errorf(0, "the AI provider did not respond in time")
-		}
-		cause := err.Error()
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			cause = ue.Err.Error()
-		}
-		return out, 0, ai.Errorf(0, ai.Redact("could not reach the AI provider: "+cause, p.apiKey))
+		return out, 0, p.transportError(err, "the AI provider did not respond in time")
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return out, resp.StatusCode, errCancelled()
+		}
 		return out, resp.StatusCode, ai.Errorf(0, "could not read the provider's response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -259,6 +254,27 @@ func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, in
 	return out, resp.StatusCode, nil
 }
 
+// transportError describes a request that got no response: late (in the
+// words given), cancelled, or one that could not reach the provider.
+func (p *Provider) transportError(err error, late string) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return ai.Errorf(0, late)
+	case errors.Is(err, context.Canceled):
+		return errCancelled()
+	}
+	cause := err.Error()
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		cause = ue.Err.Error()
+	}
+	return ai.Errorf(0, ai.Redact("could not reach the AI provider: "+cause, p.apiKey))
+}
+
+// errCancelled is the error for a request its caller cancelled, worded as
+// the other providers word it.
+func errCancelled() error { return ai.Errorf(0, "the request was cancelled") }
+
 // ListModels implements ai.ModelLister with GET {baseURL}/models, which
 // answers {"data": [{"id": ...}, ...]}. Servers that do not implement it
 // (404, or another body) are reported as an error.
@@ -275,15 +291,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
 	}
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ai.Errorf(0, "the AI provider did not list its models in time")
-		}
-		cause := err.Error()
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			cause = ue.Err.Error()
-		}
-		return nil, ai.Errorf(0, ai.Redact("could not reach the AI provider: "+cause, p.apiKey))
+		return nil, p.transportError(err, "the AI provider did not list its models in time")
 	}
 	defer resp.Body.Close()
 	switch {
@@ -296,8 +304,11 @@ func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, ai.MaxModelListBytes+1))
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
 			return nil, ai.Errorf(0, "the AI provider did not list its models in time")
+		case errors.Is(err, context.Canceled):
+			return nil, errCancelled()
 		}
 		return nil, ai.Errorf(0, "could not read the provider's model list")
 	}

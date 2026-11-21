@@ -333,9 +333,6 @@ func (t *tools) register(s *mcp.Server) {
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
 			}
-			if in.ItemIDs == nil {
-				in.ItemIDs = []string{}
-			}
 			return a.SetCollectionItems(ctx, in.ID, in.ItemIDs)
 		})
 

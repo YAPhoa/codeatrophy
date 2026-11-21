@@ -78,6 +78,18 @@ func newFixtureWith(t *testing.T, token string, mounted bool, opts ...func(*mcps
 	return f
 }
 
+// authorization sends an Authorization header as given.
+type authorization struct {
+	value string
+	base  http.RoundTripper
+}
+
+func (a authorization) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", a.value)
+	return a.base.RoundTrip(r)
+}
+
 type bearer struct {
 	token string
 	base  http.RoundTripper
@@ -384,7 +396,8 @@ func TestAccessControl(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") != `Bearer realm="codeatrophy"` {
 		t.Errorf("without token: %d %v", resp.StatusCode, resp.Header)
 	}
-	for _, auth := range []string{"Bearer nope", "Basic czNjcmV0OnMzY3JldA==", "s3cret", "Bearer"} {
+	for _, auth := range []string{"Bearer nope", "bearer nope", "BEARER nope", "Bearer S3CRET", "bearer s3cret2",
+		"Basic czNjcmV0OnMzY3JldA==", "s3cret", "Bearer", "bearer", "Bearers3cret", "Bearerx s3cret"} {
 		req, _ := http.NewRequest("POST", f.srv.URL, strings.NewReader(`{}`))
 		req.Header.Set("Authorization", auth)
 		resp, err := http.DefaultClient.Do(req)
@@ -402,6 +415,21 @@ func TestAccessControl(t *testing.T) {
 	s := f.connect(t, "s3cret")
 	if _, err := s.ListTools(f.ctx, nil); err != nil {
 		t.Errorf("with token: %v", err)
+	}
+	// The scheme's name is case-insensitive; the token is not.
+	for _, auth := range []string{"bearer s3cret", "BEARER s3cret", "bEaReR s3cret"} {
+		c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+		ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+		s, err := c.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: f.endpoint,
+			HTTPClient: &http.Client{Transport: authorization{auth, http.DefaultTransport}}}, nil)
+		if err == nil {
+			_, err = s.ListTools(ctx, nil)
+			s.Close()
+		}
+		cancel()
+		if err != nil {
+			t.Errorf("Authorization %q: %v", auth, err)
+		}
 	}
 	req, _ := http.NewRequest("POST", f.srv.URL, strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer s3cret")
@@ -702,6 +730,14 @@ func TestCollectionTagAndTestCaseTools(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
+	// refused checks a validation error naming field.
+	refused := func(field string) func(map[string]any) bool {
+		return func(r map[string]any) bool {
+			e, _ := r["error"].(map[string]any)
+			f, _ := e["fields"].(map[string]any)
+			return e["code"] == "validation_failed" && f[field] != nil
+		}
+	}
 	steps := []struct {
 		tool  string
 		args  map[string]any
@@ -717,8 +753,16 @@ func TestCollectionTagAndTestCaseTools(t *testing.T) {
 			func(r map[string]any) bool { return r["removed"] == oid && r["collectionId"] == cid }},
 		{"add_items_to_collection", map[string]any{"id": cid, "itemIds": []string{oid}},
 			func(r map[string]any) bool { return ids(r["itemIds"]) == id+","+oid }},
-		// Without itemIds the membership is cleared.
-		{"set_collection_items", map[string]any{"id": cid},
+		// itemIds is required, to set or to add: missing or null is refused
+		// and changes nothing (adding a member already there lists them);
+		// [] clears.
+		{"set_collection_items", map[string]any{"id": cid}, refused("itemIds")},
+		{"set_collection_items", map[string]any{"id": cid, "itemIds": nil}, refused("itemIds")},
+		{"add_items_to_collection", map[string]any{"id": cid}, refused("itemIds")},
+		{"add_items_to_collection", map[string]any{"id": cid, "itemIds": nil}, refused("itemIds")},
+		{"add_items_to_collection", map[string]any{"id": cid, "itemIds": []string{oid}},
+			func(r map[string]any) bool { return ids(r["itemIds"]) == id+","+oid }},
+		{"set_collection_items", map[string]any{"id": cid, "itemIds": []string{}},
 			func(r map[string]any) bool { v, ok := r["itemIds"].([]any); return ok && len(v) == 0 }},
 		{"delete_collection", map[string]any{"id": cid}, func(r map[string]any) bool { return r["deleted"] == cid }},
 		{"delete_tag", map[string]any{"name": "dp"}, func(r map[string]any) bool { return r["deleted"] == "dp" }},
@@ -729,7 +773,8 @@ func TestCollectionTagAndTestCaseTools(t *testing.T) {
 		{"delete_test_case", map[string]any{"id": tcid}, func(r map[string]any) bool { return r["deleted"] == tcid }},
 	}
 	for _, st := range steps {
-		if r, isErr := call(t, s, st.tool, st.args); isErr || !st.check(r) {
+		// A result is an error exactly when it carries one.
+		if r, isErr := call(t, s, st.tool, st.args); isErr != (r["error"] != nil) || !st.check(r) {
 			t.Errorf("%s %v: %v", st.tool, st.args, r)
 		}
 	}

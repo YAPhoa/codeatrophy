@@ -929,9 +929,21 @@ func TestCollectionsAndTagsEndpoints(t *testing.T) {
 	if got := c.expect("PUT", api+"/collections/"+a+"/items", `{"itemIds":["`+item+`"]}`, 200).json(t); fmt.Sprint(got["itemIds"]) != "["+item+"]" {
 		t.Errorf("set items: %v", got)
 	}
-	// Without itemIds the membership is cleared.
-	if r := c.expect("PUT", api+"/collections/"+a+"/items", `{}`, 200); !strings.Contains(string(r.body), `"itemIds":[]`) {
+	// itemIds is required: missing or null is refused and changes nothing;
+	// [] clears the membership.
+	c.expectField("PUT", api+"/collections/"+a+"/items", `{}`, "itemIds")
+	c.expectField("PUT", api+"/collections/"+a+"/items", `{"itemIds":null}`, "itemIds")
+	if got := c.expect("GET", api+"/collections/"+a+"/items", "", 200).json(t); fmt.Sprint(got["itemIds"]) != "["+item+"]" {
+		t.Errorf("a refused set changed the items: %v", got)
+	}
+	if r := c.expect("PUT", api+"/collections/"+a+"/items", `{"itemIds":[]}`, 200); !strings.Contains(string(r.body), `"itemIds":[]`) {
 		t.Errorf("set no items: %s", r.body)
+	}
+	// Adding needs itemIds too; [] adds nothing.
+	c.expectField("POST", api+"/collections/"+a+"/items", `{}`, "itemIds")
+	c.expectField("POST", api+"/collections/"+a+"/items", `{"itemIds":null}`, "itemIds")
+	if r := c.expect("POST", api+"/collections/"+a+"/items", `{"itemIds":[]}`, 200); !strings.Contains(string(r.body), `"itemIds":[]`) {
+		t.Errorf("add no items: %s", r.body)
 	}
 	if got := c.expect("POST", api+"/collections/"+a+"/items", `{"itemIds":["`+item+`"]}`, 200).json(t); fmt.Sprint(got["itemIds"]) != "["+item+"]" {
 		t.Errorf("add items: %v", got)

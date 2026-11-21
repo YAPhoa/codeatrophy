@@ -112,11 +112,24 @@ function deleteCollection(db: MockDb, req: Req) {
   return noContent();
 }
 
-function parseItemIds(db: MockDb, req: Req): string[] {
+/**
+ * The item ids of a membership request, as the server checks them: required
+ * (missing or null never clears a collection; [] does), each an existing
+ * item, and listed once unless duplicates are allowed (adding), in which case
+ * they are dropped.
+ */
+function parseItemIds(db: MockDb, req: Req, allowDuplicates: boolean): string[] {
   const raw = objectBody(req);
+  if (raw.itemIds === undefined || raw.itemIds === null) throw invalid('itemIds', 'is required');
   if (!isStringArray(raw.itemIds)) throw invalid('itemIds', 'must be an array of item ids');
-  if (raw.itemIds.some((id) => !db.items.has(id))) throw invalid('itemIds', 'contains an unknown item id');
-  return [...new Set(raw.itemIds)];
+  const seen = new Set<string>();
+  for (const id of raw.itemIds) {
+    if (seen.has(id) && !allowDuplicates) throw invalid('itemIds', `item ${id} is listed more than once`);
+    seen.add(id);
+  }
+  const missing = raw.itemIds.find((id) => !db.items.has(id));
+  if (missing !== undefined) throw invalid('itemIds', `item ${missing} does not exist`);
+  return [...seen];
 }
 
 /** The normalised tag a path names; 404 for one that does not exist. */
@@ -177,7 +190,7 @@ export function organiseRoutes(db: MockDb): [string, string, Handler][] {
       '/collections/:id/items',
       (req) => {
         const c = db.getCollection(req.params.id!);
-        c.itemIds = parseItemIds(db, req);
+        c.itemIds = parseItemIds(db, req, false);
         return ok({ itemIds: [...c.itemIds] });
       },
     ],
@@ -186,7 +199,7 @@ export function organiseRoutes(db: MockDb): [string, string, Handler][] {
       '/collections/:id/items',
       (req) => {
         const c = db.getCollection(req.params.id!);
-        for (const id of parseItemIds(db, req)) if (!c.itemIds.includes(id)) c.itemIds.push(id);
+        for (const id of parseItemIds(db, req, true)) if (!c.itemIds.includes(id)) c.itemIds.push(id);
         return ok({ itemIds: [...c.itemIds] });
       },
     ],

@@ -248,7 +248,45 @@ func TestListModelsFailures(t *testing.T) {
 			return p.(ai.ModelLister)
 		},
 		Unreachable: "could not reach the AI provider: ",
+		Cancelled:   "the request was cancelled",
 	})
+}
+
+// A cancelled generation says it was cancelled, not that the provider could
+// not be reached.
+func TestGenerateCancelled(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		fmt.Fprint(w, `{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"{\"ok\": true}"}}]}`)
+	}))
+	defer srv.Close()
+	p, _ := New(ai.Config{Model: "m", BaseURL: srv.URL, APIKey: "k"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := p.Generate(ctx, ai.GenerateRequest{Schema: ai.PingSchema()})
+	var pe *ai.Error
+	if !errors.As(err, &pe) || err.Error() != "the request was cancelled" || pe.Status != 0 || calls.Load() != 0 {
+		t.Errorf("cancelled: %v after %d calls", err, calls.Load())
+	}
+
+	// Cancelled while the provider is answering.
+	started, release := make(chan struct{}), make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		// The server does not notice the client leave before the body is
+		// read, so the handler is released when the test ends.
+		<-release
+	}))
+	defer slow.Close()
+	defer close(release)
+	p, _ = New(ai.Config{Model: "m", BaseURL: slow.URL, APIKey: "k"})
+	ctx, cancel = context.WithCancel(context.Background())
+	go func() { <-started; cancel() }()
+	_, err = p.Generate(ctx, ai.GenerateRequest{Schema: ai.PingSchema()})
+	if !errors.As(err, &pe) || err.Error() != "the request was cancelled" || pe.Status != 0 {
+		t.Errorf("cancelled while waiting: %v", err)
+	}
 }
 
 // prompt_tokens includes the cached part, which is reported apart; the

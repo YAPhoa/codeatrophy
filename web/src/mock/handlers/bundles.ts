@@ -134,7 +134,7 @@ async function exportBundle(db: MockDb, req: Req) {
       bytes,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${slugify(name)}.codeatrophy.zip"`,
+        'Content-Disposition': `attachment; filename=${slugify(name)}.codeatrophy.zip`,
       },
     },
   };

@@ -680,10 +680,15 @@ func (a *App) prepareTestCases(ctx context.Context, itemID string, in GenerateTe
 		if err != nil {
 			return GenerateTestCasesResponse{}, err
 		}
+		refFailed := false
 		if len(out.Cases) > 0 {
-			a.verifyGenerated(ctx, it, h, &out)
+			refFailed = a.verifyGenerated(ctx, it, h, &out)
 		}
-		if in.LargeTestCases > 0 {
+		if in.LargeTestCases > 0 && refFailed {
+			// As for a draft: their expected output would come from a
+			// reference solution that just failed.
+			out.LargeCases = failAll(newLargeCaseReports(gens, in.LargeTestCases), "skipped", refFailedReason)
+		} else if in.LargeTestCases > 0 {
 			// After the proposed cases, never repeating them or the stored ones.
 			var known []namedInput
 			for _, c := range existingCases.Items {
@@ -793,9 +798,13 @@ func existingCasesText(cases []domain.TestCase) string {
 	return b.String()
 }
 
-func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.HarnessCode, out *GenerateTestCasesResponse) {
+// verifyGenerated runs the reference solution on the proposed cases, taking
+// each output it printed as the case's expected output, and returns whether
+// the reference solution failed: did not run or compile, or failed a case.
+// The judge engine failing is not the reference solution failing.
+func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.HarnessCode, out *GenerateTestCasesResponse) (failed bool) {
 	if a.engine == nil {
-		return
+		return false
 	}
 	name := a.engine.Name()
 	out.Verification = Verification{Attempted: true, Engine: &name}
@@ -808,12 +817,12 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 	}
 	if err := a.requireLanguage(ctx, out.ReferenceSolution.Language); err != nil {
 		setErr(AsError(err).Message)
-		return
+		return false
 	}
 	prog, _, err := a.runnable(ctx, it.Problem, out.ReferenceSolution.Language, h, out.ReferenceSolution.Source, "referenceSolution")
 	if err != nil {
 		setErr("the reference solution cannot run: " + validationText(err))
-		return
+		return true
 	}
 	stdins := make([]string, len(out.Cases))
 	for i, c := range out.Cases {
@@ -822,7 +831,7 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 	execs := a.grader.RunAll(ctx, prog, stdins, nil)
 	if execs[0].CompileFailed() {
 		setErr("the reference solution does not compile: " + domain.Truncate(strings.TrimSpace(execs[0].Result.CompileOutput), 2000))
-		return
+		return true
 	}
 	allFailed := true
 	for i, e := range execs {
@@ -838,11 +847,15 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 		}
 		msg := describeFailure(v, e)
 		c.Error = &msg
+		if e.Err == nil && e.Result.Status != judge.StatusInternalError {
+			failed = true
+		}
 	}
 	if allFailed && execs[0].Err != nil {
 		msg := "verification could not run: " + grader.ErrorMessage(execs[0])
 		out.Verification.Error = &msg
 	}
+	return failed
 }
 
 func describeFailure(v domain.Verdict, e grader.Execution) string {
@@ -881,9 +894,11 @@ func validationText(err error) string {
 }
 
 // Bounds on the draft check. A draft carries its sample cases only, but a
-// model can return up to MaxGeneratedCases of them. The time bound keeps a
-// draft that took the provider's whole timeout (5 minutes by default)
-// within the HTTP API's 6-minute deadline for AI requests.
+// model can return up to MaxGeneratedCases of them. The check runs in the
+// draft's AI job after the generation, with no request deadline over it:
+// its own time bound keeps a slow or stuck judge engine from holding the
+// job, and a worker of the job queue, for long. Cancelling the job stops it
+// sooner.
 var draftCheckBounds = checkBounds{maxCases: 10, timeout: 50 * time.Second}
 
 // checkBounds bound a check: how many test cases it runs (0: all) and for
@@ -935,7 +950,7 @@ func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large
 	if large > 0 && refFailed {
 		// Their expected output would come from a reference solution that
 		// just failed: they would be marked verified and probably be wrong.
-		c.LargeCases = failAll(newLargeCaseReports(gens, large), "skipped", "the reference solution did not pass the other test cases")
+		c.LargeCases = failAll(newLargeCaseReports(gens, large), "skipped", refFailedReason)
 	} else if large > 0 {
 		known := make([]namedInput, len(d.TestCases))
 		for i, tc := range d.TestCases {

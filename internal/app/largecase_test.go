@@ -475,8 +475,9 @@ func TestGeneratedTestsWithLargeCases(t *testing.T) {
 }
 
 // Generated tests build no large case without an engine, nor from a
-// reference solution too large for the engine to run; the proposed cases
-// are still returned.
+// reference solution too large for the engine to run (which, as in a
+// draft, did not pass the other cases: verification says why); the
+// proposed cases are still returned.
 func TestGeneratedLargeCasesNeedARunnableReference(t *testing.T) {
 	answer := func(lang, source string) func(ai.GenerateRequest) (any, error) {
 		return func(ai.GenerateRequest) (any, error) {
@@ -492,7 +493,7 @@ func TestGeneratedLargeCasesNeedARunnableReference(t *testing.T) {
 		want                 string
 	}{
 		"no engine": {withoutEngine(), "python", "sum", "skipped", "no judge engine is configured"},
-		"too large": {withToolchains(20), "cpp", "int main() { return 0; }", "failed", "the reference solution cannot run: the program is"},
+		"too large": {withToolchains(20), "cpp", "int main() { return 0; }", "skipped", "the reference solution did not pass the other test cases"},
 	} {
 		e := newEnv(t, c.opt)
 		e.enableAI(t)
@@ -513,6 +514,47 @@ func TestGeneratedLargeCasesNeedARunnableReference(t *testing.T) {
 				t.Errorf("%s: %+v %s", name, lc, ptrString(lc.Error))
 			}
 		}
+		if v := res.Verification.Error; name == "too large" && (v == nil || !strings.Contains(*v, "the reference solution cannot run: the program is")) {
+			t.Errorf("%s: verification %s", name, ptrString(v))
+		}
+	}
+}
+
+// Generated tests build no large case from a reference solution that
+// failed a proposed case, as a draft does not: its output would be marked
+// verified and probably be wrong. A prediction the reference solution
+// disagrees with is not a failure.
+func TestGeneratedLargeCasesSkippedWhenTheReferenceFails(t *testing.T) {
+	e := newEnv(t)
+	e.enableAI(t)
+	e.engine.Handler = generatorHandler
+	it := e.problem(t, "")
+	answer := func(source, predicted string) {
+		e.ai.Respond = func(ai.GenerateRequest) (any, error) {
+			a := casesAnswer("4 4", predicted)
+			a["referenceSolution"] = map[string]any{"language": "python", "source": source}
+			a["largeCases"] = []any{gen("gen 2000"), named("Second", "gen 3000")}
+			return a, nil
+		}
+	}
+	for _, source := range []string{"crash", "timeout", "COMPILE_ERROR"} {
+		answer(source, "8")
+		res := must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1,"largeTestCases":2}`)))
+		if len(res.Cases) != 1 || res.Cases[0].Verified || len(res.LargeCases) != 2 {
+			t.Errorf("%s: %+v %+v", source, res.Cases, res.LargeCases)
+			continue
+		}
+		for i, lc := range res.LargeCases {
+			if lc.Status != "skipped" || lc.Error == nil || *lc.Error != "the reference solution did not pass the other test cases" ||
+				lc.Index != nil || lc.Name == nil || *lc.Name != []string{"Many sevens", "Second"}[i] || lc.Generator == nil {
+				t.Errorf("%s: %+v %s", source, lc, ptrString(lc.Error))
+			}
+		}
+	}
+	answer("sum", "9")
+	res := must(e.app.GenerateTestCases(e.ctx, it.ID, decodeInto[app.GenerateTestCasesInput](t, `{"count":1,"largeTestCases":2}`)))
+	if len(res.Cases) != 3 || *res.Cases[0].PredictionMatched || res.LargeCases[0].Status != "added" || res.LargeCases[1].Status != "added" {
+		t.Errorf("a wrong prediction: %+v %+v", res.Cases, res.LargeCases)
 	}
 }
 

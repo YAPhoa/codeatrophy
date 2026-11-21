@@ -104,6 +104,11 @@ func newLargeCaseReports(gens []*ai.ModelLargeCase, n int) []*LargeCaseReport {
 	return out
 }
 
+// refFailedReason is why the large cases are skipped when the reference
+// solution failed the other cases: their expected output would come from
+// it, be marked verified and probably be wrong.
+const refFailedReason = "the reference solution did not pass the other test cases"
+
 // failAll gives every report the same outcome, for a reason that applies to
 // all of them.
 func failAll(reports []*LargeCaseReport, status, msg string) []*LargeCaseReport {

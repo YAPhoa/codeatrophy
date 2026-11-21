@@ -1346,6 +1346,50 @@ describe('collections and tags', () => {
     expect((await failure(api.collections.itemIds('00000000-0000-4000-8000-000000000000'))).status).toBe(404);
   });
 
+  it('requires itemIds to set a collection, and clears it with []', async () => {
+    const id = seedIds.collections.dynamicProgramming;
+    const { itemIds } = await api.collections.itemIds(id);
+    expect(itemIds.length).toBeGreaterThan(0);
+    for (const body of ['{}', '{"itemIds":null}']) {
+      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'PUT', body });
+      expect(res.status).toBe(422);
+      const err = (await res.json()) as { error: { code: string; fields: Record<string, string> } };
+      expect(err.error.code).toBe('validation_failed');
+      expect(err.error.fields.itemIds).toBe('is required');
+    }
+    expect((await api.collections.itemIds(id)).itemIds).toEqual(itemIds);
+    expect((await api.collections.setItems(id, [])).itemIds).toEqual([]);
+    expect((await api.collections.itemIds(id)).itemIds).toEqual([]);
+  });
+
+  it('requires itemIds to add to a collection, and adds nothing with []', async () => {
+    const id = seedIds.collections.dynamicProgramming;
+    const { itemIds } = await api.collections.itemIds(id);
+    for (const body of ['{}', '{"itemIds":null}']) {
+      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'POST', body });
+      expect(res.status).toBe(422);
+      const err = (await res.json()) as { error: { code: string; fields: Record<string, string> } };
+      expect(err.error.code).toBe('validation_failed');
+      expect(err.error.fields.itemIds).toBe('is required');
+    }
+    expect((await api.collections.addItems(id, [])).itemIds).toEqual(itemIds);
+  });
+
+  it('refuses an id listed twice when setting a collection, and adds it once', async () => {
+    const id = seedIds.collections.graphs;
+    const before = (await api.collections.itemIds(id)).itemIds;
+    const twice = await failure(api.collections.setItems(id, [seedIds.items.twoSum, seedIds.items.twoSum]));
+    expect(twice.status).toBe(422);
+    expect(twice.code).toBe('validation_failed');
+    expect(twice.fields.itemIds).toBe(`item ${seedIds.items.twoSum} is listed more than once`);
+    expect((await api.collections.itemIds(id)).itemIds).toEqual(before);
+    const missing = await failure(api.collections.setItems(id, ['missing']));
+    expect(missing.fields.itemIds).toBe('item missing does not exist');
+    const added = await api.collections.addItems(id, [seedIds.items.twoSum, seedIds.items.twoSum]);
+    expect(added.itemIds.filter((x) => x === seedIds.items.twoSum)).toHaveLength(1);
+    expect(added.itemIds).toHaveLength(before.length + (before.includes(seedIds.items.twoSum) ? 0 : 1));
+  });
+
   it('leaves revision and updatedAt alone when membership changes', async () => {
     const before = await api.items.get(seedIds.items.twoSum);
     await api.collections.addItems(seedIds.collections.graphs, [before.id]);

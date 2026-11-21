@@ -404,7 +404,7 @@ The two features built on it are provider independent:
   runner that does not compile shows during review. This *draft check* runs
   code for something that is not saved, never fails the draft (no engine, an
   unreachable one, a compile error or a timeout are reported in it), runs at
-  most 10 cases and stops after 50 seconds or when the request is
+  most 10 cases and stops after 50 seconds or when the job is
   cancelled, and corrects nothing. For a function problem it then proves
   every harness, not only the reference solution's: each language's starter
   code, which is written to compile and run with a placeholder result, runs

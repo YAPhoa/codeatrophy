@@ -941,8 +941,8 @@ members only.
 | `PATCH /collections/{id}` | Body: any of `name`, `description`, `parentId`, `position`. Moving under itself or a descendant is `409 conflict`. Setting `position` inserts at that index among the (new) siblings and renumbers them. Returns `Collection` |
 | `DELETE /collections/{id}` | Child collections move up to the deleted collection's parent. Items are not deleted. `204` |
 | `GET /collections/{id}/items` | `{ "itemIds": [...] }` — the full ordered membership, ids only. Not paginated |
-| `PUT /collections/{id}/items` | Body `{ "itemIds": [...] }` — replaces membership and order with exactly this list. Returns `{ "itemIds": [...] }` |
-| `POST /collections/{id}/items` | Body `{ "itemIds": [...] }` — appends those not already members. Returns `{ "itemIds": [...] }` (full ordered membership) |
+| `PUT /collections/{id}/items` | Body `{ "itemIds": [...] }` — replaces membership and order with exactly this list; `[]` empties the collection, and an id listed twice is `422`. `itemIds` is required: missing or `null` is `422` (`fields.itemIds`). Returns `{ "itemIds": [...] }` |
+| `POST /collections/{id}/items` | Body `{ "itemIds": [...] }` — appends those not already members, in order; an id listed twice is added once, and `[]` adds nothing. `itemIds` is required: missing or `null` is `422` (`fields.itemIds`). Returns `{ "itemIds": [...] }` (full ordered membership) |
 | `DELETE /collections/{id}/items/{itemId}` | `204` |
 
 To list a collection's items use `GET /items?collectionId={id}&sort=position`.
@@ -1130,9 +1130,14 @@ that names a provider too. The provider is checked again when the job
 starts.
 
 None of these requests holds the connection open for the generation, so a
-reverse proxy needs no special timeout for them. `POST /items/check` and
-`POST /items/{id}/testcases/verify` still run synchronously; a proxy in front
-of the server must allow them at least six minutes.
+reverse proxy needs no special timeout for them, and like the
+[AI job](#ai-jobs) routes they get the server's default two-minute deadline.
+The requests that still wait on something slow get a six-minute deadline
+instead, and a proxy in front of the server must allow them as long:
+`POST /items/check`, `POST /items/{id}/testcases/verify`, `POST /export`,
+`POST /import`, `POST /import/preview`, and the provider's
+[connection test](#post-settingsaitest) and
+[model list](#post-settingsaimodels).
 
 ### AI jobs
 
@@ -1513,7 +1518,10 @@ passing `origin: "ai"`, each case's `verified` flag, and the
 the generator with the case without running it again.
 
 `largeCases` reports on the [large test cases](#large-test-cases): one entry
-for each the request asked for, `[]` when it asked for none.
+for each the request asked for, `[]` when it asked for none. When the
+reference solution did not compile, cannot run, or failed on a proposed
+input, none is built: each is `skipped` with the error `the reference
+solution did not pass the other test cases`, as in a draft.
 
 ### `POST /ai/code`
 
@@ -1661,9 +1669,10 @@ for, in the model's order:
   repeats an existing case or the input an earlier generator of the same
   request printed; `skipped` when there is no judge engine or
   no reference solution, the engine could not be reached or failed during a
-  run, the request was cancelled, or — in a draft — the check was not
-  attempted, the reference solution did not pass the other test cases, or the
-  check's time ran out. `error` gives the reason in plain words for `failed`
+  run, the request was cancelled, the reference solution did not pass the
+  other test cases (in test generation: it did not compile, cannot run, or
+  failed on a proposed input), or — in a draft — the check was not attempted
+  or the check's time ran out. `error` gives the reason in plain words for `failed`
   and `skipped`, and that case is not added. A large case that fails never
   fails the request, the other test cases or the other large cases.
 - `index` — where the case is in `draft.testCases` or `cases`; `null` unless
@@ -2545,7 +2554,9 @@ Bundle layout and semantics are specified in `bundle-format.md`.
   items left out of the bundle or deleted.
 
 Returns `200` `application/zip` with
-`Content-Disposition: attachment; filename="<slug>.codeatrophy.zip"`.
+`Content-Disposition: attachment; filename=<slug>.codeatrophy.zip`. The slug
+has only lowercase letters, digits and `-`, so the filename is a token and is
+sent unquoted; a client should accept a quoted one too.
 
 ### `POST /import/preview`
 

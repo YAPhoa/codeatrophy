@@ -255,18 +255,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Request deadlines. The server itself has no write timeout, because the
-// MCP endpoint holds long-lived streams; other routes get one here. AI
-// requests, verification runs and bundle transfers may legitimately take
-// minutes.
+// MCP endpoint holds long-lived streams; other routes get one here. The
+// requests that wait on the judge engine, an AI provider or a bundle
+// transfer may legitimately take minutes. AI generations are jobs that
+// answer at once, so the AI routes that start or read them do not.
 const (
 	defaultDeadline = 2 * time.Minute
 	longDeadline    = 6 * time.Minute
 )
 
+// longRunning reports whether a request waits on something slow: a check
+// or verification run in the judge engine, an export or import, or the AI
+// provider's connection test and model list.
 func longRunning(path string) bool {
 	p := strings.TrimPrefix(path, Prefix)
-	return strings.HasPrefix(p, "/ai/") || strings.Contains(p, "/ai/") ||
-		strings.HasSuffix(p, "/testcases/verify") || p == "/items/check" || p == "/export" || strings.HasPrefix(p, "/import")
+	switch p {
+	case "/items/check", "/export", "/settings/ai/test", "/settings/ai/models":
+		return true
+	}
+	return strings.HasSuffix(p, "/testcases/verify") || p == "/import" || strings.HasPrefix(p, "/import/")
 }
 
 func setDeadlines(w http.ResponseWriter, path string) {
@@ -694,9 +701,6 @@ func (s *Server) setCollectionItems(w http.ResponseWriter, r *http.Request) erro
 	var in itemIDsBody
 	if err := decode(r, &in); err != nil {
 		return err
-	}
-	if in.ItemIDs == nil {
-		in.ItemIDs = []string{}
 	}
 	res, err := s.app.SetCollectionItems(r.Context(), r.PathValue("id"), in.ItemIDs)
 	if err != nil {

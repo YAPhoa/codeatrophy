@@ -289,10 +289,11 @@ which an older Codeatrophy refuses to import; upgrade it first.
   beyond the local machine, put it behind a reverse proxy that authenticates,
   and set `CODEATROPHY_PUBLIC_URL` to the public URL (its origin is then
   allowed to make changes, and MCP clients are told the endpoint's URL).
-  AI generations run in the background, but verification runs and
-  connection tests can take minutes: raise the proxy's read timeout to at
-  least six minutes for `/api/v1/items/check`,
-  `/api/v1/items/*/testcases/verify` and `/api/v1/settings/ai/`, and leave
+  AI generations run in the background, but verification runs, bundle
+  transfers and connection tests can take minutes: raise the proxy's read
+  timeout to at least six minutes for `/api/v1/items/check`,
+  `/api/v1/items/*/testcases/verify`, `/api/v1/export`, `/api/v1/import*`,
+  `/api/v1/settings/ai/test` and `/api/v1/settings/ai/models`, and leave
   `/mcp` unbuffered with a long timeout, since it streams.
 - **Host names it answers to (DNS rebinding).** The API and `/mcp` answer
   only to requests whose `Host` is `localhost` or a loopback address, the host

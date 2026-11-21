@@ -254,9 +254,14 @@ func (a *App) checkMembers(tx store.Tx, ids []string, allowDuplicates bool) erro
 	return nil
 }
 
-// SetCollectionItems replaces a collection's membership and order.
+// SetCollectionItems replaces a collection's membership and order. itemIDs
+// is required: nil (missing or null in a request) is an error rather than
+// clearing the collection, which an empty list does.
 func (a *App) SetCollectionItems(ctx context.Context, id string, itemIDs []string) (CollectionItems, error) {
 	var out CollectionItems
+	if itemIDs == nil {
+		return out, errField("itemIds", "is required")
+	}
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		if _, err := tx.GetCollection(id); err != nil {
 			return notFoundAs(err, "collection")
@@ -274,9 +279,13 @@ func (a *App) SetCollectionItems(ctx context.Context, id string, itemIDs []strin
 	return out, err
 }
 
-// AddCollectionItems appends items that are not yet members.
+// AddCollectionItems appends items that are not yet members. itemIDs is
+// required as for SetCollectionItems; an empty list adds nothing.
 func (a *App) AddCollectionItems(ctx context.Context, id string, itemIDs []string) (CollectionItems, error) {
 	var out CollectionItems
+	if itemIDs == nil {
+		return out, errField("itemIds", "is required")
+	}
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		if _, err := tx.GetCollection(id); err != nil {
 			return notFoundAs(err, "collection")

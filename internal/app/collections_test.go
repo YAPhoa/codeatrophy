@@ -96,6 +96,17 @@ func TestCollectionMembership(t *testing.T) {
 	}
 	_, err := e.app.SetCollectionItems(e.ctx, col.ID, []string{ids[0], ids[0]})
 	wantCode(t, err, app.CodeValidation)
+	// The list is required: nil never clears the collection.
+	_, err = e.app.SetCollectionItems(e.ctx, col.ID, nil)
+	wantField(t, err, "itemIds")
+	_, err = e.app.AddCollectionItems(e.ctx, col.ID, nil)
+	wantField(t, err, "itemIds")
+	if got := must(e.app.CollectionItemIDs(e.ctx, col.ID)); len(got.ItemIDs) != 3 {
+		t.Errorf("nil changed the membership: %v", got.ItemIDs)
+	}
+	if got := must(e.app.AddCollectionItems(e.ctx, col.ID, []string{})); len(got.ItemIDs) != 3 {
+		t.Errorf("adding none: %v", got.ItemIDs)
+	}
 	_, err = e.app.AddCollectionItems(e.ctx, col.ID, []string{"missing"})
 	wantCode(t, err, app.CodeValidation)
 	if err := e.app.RemoveCollectionItem(e.ctx, col.ID, ids[2]); err != nil {

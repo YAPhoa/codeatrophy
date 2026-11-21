@@ -24,7 +24,7 @@ Clients that only speak stdio can bridge with
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `CODEATROPHY_MCP_ENABLED` | `true` | Set `false` to remove the endpoint |
-| `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` |
+| `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` (the scheme name in any case) |
 | `CODEATROPHY_MCP_ALLOWED_ORIGINS` | unset | Extra `Origin` values to accept, comma-separated |
 | `CODEATROPHY_MCP_MAX_SESSIONS` | `100` | Most sessions open at once |
 
