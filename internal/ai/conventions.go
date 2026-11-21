@@ -62,7 +62,9 @@ a **reading** (a technical note or article).
   4. ` + "`## Examples`" + `: at least one example as fenced code blocks (input, then
      output; for a function, the arguments as the solver would write them and
      the output exactly as the runner prints it), each followed by a
-     short explanation when it helps.
+     short explanation when it helps. When an example is a series of
+     operations, explain it with a table of calls and results that uses the
+     example's own values.
   5. ` + "`## Constraints`" + `: bounds for every input value, e.g. $1 \le n \le 10^5$.
   6. ` + "`## Notes`" + ` (optional): hints, edge cases, references.
 `},
@@ -182,10 +184,8 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - The body is a well-structured Markdown article or note: a short
   introduction, sections with headings, and code samples in fenced blocks
   with a language tag. Add key takeaways at the end only where they help.
-- Optional: where a picture clearly helps (a flow, a sequence, states), a
-  small ` + "```mermaid" + ` diagram (a handful of nodes, plain labels, no styling or
-  click directives), or a small image as a ` + "`data:image/...`" + ` URL. The text
-  must make sense without it; never replace an explanation with a diagram.
+- Optional: where a picture clearly helps, a small image as a
+  ` + "`data:image/...`" + ` URL. The text must make sense without it.
 `},
 	{heading: "## All items"},
 	{text: `- Title: short and specific (at most 200 characters).
@@ -196,6 +196,22 @@ prefix, the solver's code and the suffix, each starting on a new line:
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
   use a comma, a colon, parentheses or a new sentence.
+- No diagram by default. A small ` + "```mermaid" + ` diagram is allowed only where
+  the material has links between its parts that a written example does not
+  show at a glance: pointers (a linked list), edges (a graph, a tree), states
+  and their transitions, a flow that branches, or messages between parties.
+  Never draw an array, a string, numbers, intervals or a matrix: written
+  out, they already are the picture. At most one diagram per section. The
+  text must make sense without it; never replace an explanation with a
+  diagram.
+- Keep a diagram small and plain: at most about eight nodes or messages,
+  plain labels, boxes by default. Use another shape only when it carries a
+  meaning (a circle for a graph vertex, a diamond for a decision), and
+  emphasise with a thick (` + "`==>`" + `) or dotted (` + "`-.->`" + `) edge or an edge label. No
+  colours, styling, subgraphs or click directives.
+- In a problem, a diagram draws one example and nothing else: its input, and
+  its expected output when that is a structure too, with the same nodes,
+  edges and values as that example's code blocks. Never draw the approach.
 `},
 	{fixed: true, text: `- Raw HTML in a body is not rendered, with one exception: an answer to an
   exercise, or a hint that should not be seen at a glance, goes in a

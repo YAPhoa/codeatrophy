@@ -90,7 +90,13 @@ A reading teaches the material; it is not a summary of the source. Write the not
 
 Slides, transcripts and chapters are the usual trap: their order and their bullets are how the material was delivered, and the speaker filled the gaps out loud. Organise the note by idea rather than by slide, explain what the source only lists (the definitions, the reasoning, the steps of a worked example), and leave out what belongs only to the delivery, such as agendas, recaps and course logistics.
 
-A small Mermaid diagram (a ```` ```mermaid ```` block: flowchart, sequence, state) or an image embedded as a `data:image/...` URL is optional, for where a picture clearly helps. Keep a diagram to a handful of nodes with plain labels and no styling or click directives, and make the text stand on its own: if the diagram fails to draw, the reader sees its source.
+In a reading or a statement, the default is no diagram. A small Mermaid diagram (a ```` ```mermaid ```` block) is for material with links between its parts that a written example does not show at a glance: pointers (a linked list), edges (a graph, a tree), states and their transitions, a flow that branches, messages between parties. Never draw an array, a string, numbers, intervals or a matrix: written out, they already are the picture. Use at most one diagram per section, and make the text stand on its own: if the diagram fails to draw, the reader sees its source.
+
+Keep a diagram small and plain: about eight nodes or messages at most, plain labels, boxes by default. Use another shape only when it carries a meaning (a circle for a graph vertex, a diamond for a decision), and emphasise with a thick (`==>`) or dotted (`-.->`) edge or an edge label. No colours, styling, subgraphs or click directives.
+
+In a problem, a diagram draws one example and nothing else: its input, and its expected output when that is a structure too, with the same nodes, edges and values as that example's code blocks. Never draw the approach. When an example is a series of operations, explain it with a table of calls and results that uses the example's own values.
+
+In a reading, a small image embedded as a `data:image/...` URL is optional, for where a picture clearly helps.
 
 In a reading or a statement, put an exercise's answer or a hint the reader should not see at a glance in a `<details>` block, with `<summary>Answer</summary>` and a blank line after it and before `</details>`. It stays folded until clicked, and it is the only HTML that renders.
 
