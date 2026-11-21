@@ -86,7 +86,9 @@ After saving an item, or when the user asks, look for the few items closely rela
 
 ## Readings
 
-Write the note the user would want to reread in six months: what it is about in two sentences, then the ideas in order, with a small example for each. Keep their source link and attribution. Do not pad a short note into an article.
+A reading teaches the material; it is not a summary of the source. Write the note the user would want to reread in six months: what it is about in two sentences, then the ideas, each explained well enough to follow without the source and each with a small example. Keep their source link and attribution. Do not pad a short note into an article.
+
+Slides, transcripts and chapters are the usual trap: their order and their bullets are how the material was delivered, and the speaker filled the gaps out loud. Organise the note by idea rather than by slide, explain what the source only lists (the definitions, the reasoning, the steps of a worked example), and leave out what belongs only to the delivery, such as agendas, recaps and course logistics.
 
 A small Mermaid diagram (a ```` ```mermaid ```` block: flowchart, sequence, state) or an image embedded as a `data:image/...` URL is optional, for where a picture clearly helps. Keep a diagram to a handful of nodes with plain labels and no styling or click directives, and make the text stand on its own: if the diagram fails to draw, the reader sees its source.
 

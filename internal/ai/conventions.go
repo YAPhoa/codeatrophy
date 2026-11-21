@@ -174,9 +174,14 @@ prefix, the solver's code and the suffix, each starting on a new line:
   and verify, so the server computes the expected output.
 `},
 	{heading: "## Readings"},
-	{text: `- The body is a well-structured Markdown article or note: a short
-  introduction, sections with headings, code samples in fenced blocks with a
-  language tag, and a short summary or key takeaways.
+	{text: `- A reading teaches its material; it is not a record of the source. When the
+  source is slides, a transcript or a chapter, explain what it only lists:
+  define the terms, give the reasoning, work through the examples. Organise
+  it by idea, not by slide or page order, and leave out what belongs only to
+  the delivery (agendas, recaps, course logistics).
+- The body is a well-structured Markdown article or note: a short
+  introduction, sections with headings, and code samples in fenced blocks
+  with a language tag. Add key takeaways at the end only where they help.
 - Optional: where a picture clearly helps (a flow, a sequence, states), a
   small ` + "```mermaid" + ` diagram (a handful of nodes, plain labels, no styling or
   click directives), or a small image as a ` + "`data:image/...`" + ` URL. The text

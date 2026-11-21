@@ -48,9 +48,14 @@ a **reading** (a technical note or article).
 
 ## Readings
 
+- A reading teaches its material; it is not a record of the source. When the
+  source is slides, a transcript or a chapter, explain what it only lists:
+  define the terms, give the reasoning, work through the examples. Organise
+  it by idea, not by slide or page order, and leave out what belongs only to
+  the delivery (agendas, recaps, course logistics).
 - The body is a well-structured Markdown article or note: a short
-  introduction, sections with headings, code samples in fenced blocks with a
-  language tag, and a short summary or key takeaways.
+  introduction, sections with headings, and code samples in fenced blocks
+  with a language tag. Add key takeaways at the end only where they help.
 
 ## All items
 
