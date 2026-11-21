@@ -171,7 +171,7 @@ third-party origin.
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
-| `library-*`, `tags`, `palette`, `select` | The library list, its filters, paging and sorting; the Tags page; the command palette; selects |
+| `library-*`, `tags`, `palette`, `select` | The library list, the count by its title, its filters, paging and sorting; the Tags page; the command palette; selects |
 | `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks; the reader's text width |
 | `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
 | `long-text` | Values at their longest with nothing to break at (titles, collection names, tags, test case names, a model id) stay inside their boxes on each screen that shows them, wrapped or cut short with their full text on hover |
@@ -273,7 +273,10 @@ A few conventions worth knowing:
 - **Preferences live on the server** (`/settings/preferences`), so they follow
   the user between browsers; only the theme, the reading text size and the
   reader's text width (`src/lib/textWidth.ts`, also switched from the reader's
-  bar) are local. `usePreferences()`
+  bar) are local, with the library's page size and its sort. The sort is
+  remembered for each view of the sidebar and each collection apart, for 30
+  days from the last visit (`src/lib/sortStore.ts`); a URL that names a sort
+  wins, and a search sorts by relevance. `usePreferences()`
   returns them, with the defaults until they have loaded. Every CodeMirror
   editor goes through `src/ui/CodeEditor.tsx`, which applies the editor
   preferences itself — callers pass nothing.

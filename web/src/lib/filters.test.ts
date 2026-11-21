@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortDirections, toListParams, toggleIn, typeInBar, viewNoun } from './filters';
+import { EMPTY_FILTERS, activeFilterCount, barFilterCount, canReorder, clearBarFilters, defaultOrder, directionText, effectiveSort, filtersToSearch, nextColumnSort, parseFilters, sortApplies, sortChange, sortDirections, sortScope, toListParams, toggleIn, typeInBar, viewNoun, withRememberedSort, type LibraryFilters } from './filters';
 
 const parse = (qs: string) => parseFilters(new URLSearchParams(qs));
 
@@ -204,5 +204,98 @@ describe('viewNoun', () => {
     expect(viewNoun(parse('favorite=true'), null)).toBe('items');
     expect(viewNoun(parse('uncollected=true&type=problem'), null)).toBe('items');
     expect(viewNoun(parse('type=reading'), 'c1')).toBe('items');
+  });
+});
+
+describe('the remembered sort', () => {
+  const title = { sort: 'title', order: null } as const;
+
+  it('is one for each of the sidebar\'s views and one per collection', () => {
+    const scope = (qs: string, collectionId: string | null = null) => sortScope(parse(qs), collectionId);
+    expect([scope(''), scope('type=problem'), scope('type=reading'), scope('favorite=true'), scope('uncollected=true')]).toEqual(['view:all', 'view:problem', 'view:reading', 'view:favorite', 'view:uncollected']);
+    expect(scope('', 'c1')).toBe('collection:c1');
+    expect(scope('', 'c2')).toBe('collection:c2');
+    // The search, the filter bar and its type (in Favorites, in a collection) narrow the view and keep its sort.
+    expect(scope('type=problem&q=x&status=done&tag=dp&sort=title')).toBe('view:problem');
+    expect(scope('favorite=true&type=problem')).toBe('view:favorite');
+    expect(scope('type=reading&recursive=true', 'c1')).toBe('collection:c1');
+    // As the title names the view.
+    expect(scope('uncollected=true&favorite=true&type=problem')).toBe('view:uncollected');
+  });
+
+  it('never applies relevance, and a collection\'s own order only there without its nested ones', () => {
+    expect(sortApplies('relevance', parse(''), null)).toBe(false);
+    expect(sortApplies('position', parse(''), null)).toBe(false);
+    expect(sortApplies('position', parse('recursive=true'), 'c1')).toBe(false);
+    expect(sortApplies('position', parse(''), 'c1')).toBe(true);
+    expect(sortApplies('title', parse('recursive=true'), 'c1')).toBe(true);
+  });
+
+  it('stands in for a URL that names no sort, outside a search', () => {
+    expect(withRememberedSort(parse('type=reading'), null, { sort: 'title', order: 'desc' })).toMatchObject({ sort: 'title', order: 'desc' });
+    // The URL wins, its order alone too.
+    expect(withRememberedSort(parse('sort=difficulty'), null, title)).toMatchObject({ sort: 'difficulty', order: null });
+    expect(withRememberedSort(parse('order=asc'), null, title)).toMatchObject({ sort: null, order: 'asc' });
+    // A search sorts by relevance.
+    expect(effectiveSort(withRememberedSort(parse('q=graph'), null, title), null)).toBe('relevance');
+    // One that cannot apply leaves the view's default.
+    expect(effectiveSort(withRememberedSort(parse('recursive=true'), 'c1', { sort: 'position', order: null }), 'c1')).toBe('updated');
+    expect(withRememberedSort(parse(''), null, null)).toEqual(EMPTY_FILTERS);
+  });
+
+  /** A change made on the filters shown with `remembered`, from a URL of `qs`. */
+  const change = (qs: string, remembered: { sort: 'title' | 'updated'; order: 'asc' | 'desc' | null } | null, edit: (f: LibraryFilters) => LibraryFilters, collectionId: string | null = null) => {
+    const url = parse(qs);
+    const shown = withRememberedSort(url, collectionId, remembered);
+    return sortChange(shown, edit(shown), url, collectionId, remembered);
+  };
+
+  it('stays out of the URL when another filter changes, and does not follow a search', () => {
+    expect(change('', title, (f) => ({ ...f, status: ['done'] }))).toEqual({ url: { ...EMPTY_FILTERS, status: ['done'] }, remember: undefined });
+    const searched = change('', title, (f) => ({ ...f, q: 'graph' }));
+    expect(searched.url).toMatchObject({ q: 'graph', sort: null, order: null });
+    expect(searched.remember).toBeUndefined();
+    // A sort the URL names stays there.
+    expect(change('sort=difficulty', title, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ sort: 'difficulty' });
+  });
+
+  it('is what a column\'s name chooses, and forgotten on the way back to the default', () => {
+    const first = change('', null, (f) => nextColumnSort(f, null, 'title'));
+    expect(first).toEqual({ url: { ...EMPTY_FILTERS, sort: 'title' }, remember: title });
+    // From the remembered sort, with a URL that names none.
+    expect(change('', title, (f) => nextColumnSort(f, null, 'title'))).toEqual({ url: { ...EMPTY_FILTERS, sort: 'title', order: 'desc' }, remember: { sort: 'title', order: 'desc' } });
+    expect(change('', { sort: 'title', order: 'desc' }, (f) => nextColumnSort(f, null, 'title'))).toEqual({ url: EMPTY_FILTERS, remember: null });
+    // Another column from the remembered one: Updated is the default.
+    expect(change('', title, (f) => nextColumnSort(f, null, 'updated'))).toEqual({ url: EMPTY_FILTERS, remember: null });
+    expect(change('', null, (f) => nextColumnSort(f, null, 'updated')).remember).toEqual({ sort: 'updated', order: 'asc' });
+  });
+
+  it('forgets a pick of the view\'s default from the menu, and leaves it out of the URL', () => {
+    expect(change('', title, (f) => ({ ...f, sort: 'updated', order: null }))).toEqual({ url: EMPTY_FILTERS, remember: null });
+    expect(change('', title, (f) => ({ ...f, sort: 'position', order: null }), 'c1')).toEqual({ url: EMPTY_FILTERS, remember: null });
+    expect(change('recursive=true', title, (f) => ({ ...f, sort: 'updated', order: null }), 'c1').remember).toBeNull();
+    // Its other direction is a choice.
+    expect(change('', null, (f) => ({ ...f, sort: 'updated', order: 'asc' })).remember).toEqual({ sort: 'updated', order: 'asc' });
+  });
+
+  it('leaves the URL as a search starts on it, when the URL names the remembered sort', () => {
+    // Clicked this visit: in the URL and remembered.
+    expect(change('sort=title', title, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ q: 'graph', sort: null, order: null });
+    expect(change('sort=title&order=asc', title, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ sort: null, order: null });
+    expect(change('sort=title&order=desc', { sort: 'title', order: 'desc' }, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ sort: null, order: null });
+    // Another sort than the remembered one (a shared link) stays.
+    expect(change('sort=title&order=desc', title, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ sort: 'title', order: 'desc' });
+    expect(change('sort=title', null, (f) => ({ ...f, q: 'graph' })).url).toMatchObject({ sort: 'title' });
+    // Only as the search starts: one chosen during it, or another filter, keeps it.
+    expect(change('q=graph&sort=title', title, (f) => ({ ...f, q: 'graphs' })).url).toMatchObject({ sort: 'title' });
+    expect(change('sort=title', title, (f) => ({ ...f, status: ['done'] })).url).toMatchObject({ sort: 'title' });
+    // Cleared, the search leaves no sort in the URL, and the remembered one applies again.
+    const cleared = change('q=graph', title, (f) => ({ ...f, q: '' }));
+    expect(cleared.url).toMatchObject({ q: '', sort: null, order: null });
+    expect(effectiveSort(withRememberedSort(cleared.url, null, title), null)).toBe('title');
+  });
+
+  it('is not changed by a sort chosen while searching, which stays in the URL', () => {
+    expect(change('q=graph', title, (f) => ({ ...f, sort: 'title', order: null }))).toEqual({ url: { ...EMPTY_FILTERS, q: 'graph', sort: 'title' }, remember: undefined });
   });
 });

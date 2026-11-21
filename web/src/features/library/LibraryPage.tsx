@@ -8,15 +8,17 @@ import type { Collection, ItemStatus, ItemSummary, Stats } from '../../api/types
 import { ITEM_STATUSES } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { DRAG_ITEMS } from '../../app/Sidebar';
-import { activeFilterCount, barFilterCount, canReorder, clearBarFilters, filtersToSearch, parseFilters, toListParams, type LibraryFilters } from '../../lib/filters';
+import { activeFilterCount, barFilterCount, canReorder, clearBarFilters, filtersToSearch, parseFilters, sortChange, sortScope, toListParams, withRememberedSort, type LibraryFilters } from '../../lib/filters';
 import { plural } from '../../lib/format';
 import { useHotkeys } from '../../lib/hotkeys';
 import { exitDuration, prefersReducedMotion, useChangeCount, useLoadingShown } from '../../lib/motion';
 import { isBooting } from '../../lib/boot';
 import { useNewItemHref } from '../../lib/newItem';
 import { parsePage, setPageSize, usePageSize, withPage } from '../../lib/paging';
+import { rememberSort, useRememberedSort } from '../../lib/sortStore';
 import { writeString } from '../../lib/storage';
 import { moveIndex, pathTo, placeAfter, siblingsOf } from '../../lib/tree';
+import { libraryView, titleCount } from '../../lib/viewCount';
 import { Button, LinkButton, cx } from '../../ui/Button';
 import { Checkbox } from '../../ui/Field';
 import { MenuButton } from '../../ui/Popover';
@@ -36,10 +38,11 @@ const nextStatus = (s: ItemStatus): ItemStatus => ITEM_STATUSES[(ITEM_STATUSES.i
  * How many items the view lists with no bar filter, from counts already
  * loaded, or `null` where none matches the view exactly: a collection's count
  * covers direct members only, so it does not fit "Include nested", and no
- * count fits a view narrowed two ways (Favorites of one type, say).
+ * count fits a view narrowed two ways (Favorites of one type, say), nor a
+ * collection's view before the collections load.
  */
-function unfilteredTotal(f: LibraryFilters, collection: Collection | null, stats: Stats | undefined): number | null {
-  if (collection) return f.recursive || f.type || f.favorite ? null : collection.itemCount;
+function unfilteredTotal(f: LibraryFilters, collectionId: string | null, collection: Collection | null, stats: Stats | undefined): number | null {
+  if (collectionId) return !collection || f.recursive || f.type || f.favorite ? null : collection.itemCount;
   if (!stats) return null;
   const views = (f.type ? 1 : 0) + (f.favorite ? 1 : 0) + (f.uncollected ? 1 : 0);
   if (views > 1) return null;
@@ -119,8 +122,19 @@ export function LibraryPage() {
   const collectionActions = useCollectionActions();
   const quickUpdate = useQuickUpdate();
 
-  const filters = useMemo(() => parseFilters(searchParams), [searchParams]);
-  const setFilters = useCallback((next: LibraryFilters) => setSearchParams(filtersToSearch(next), { replace: true }), [setSearchParams]);
+  // The URL's filters, with the sort remembered for this view where the URL names none.
+  const urlFilters = useMemo(() => parseFilters(searchParams), [searchParams]);
+  const scope = sortScope(urlFilters, collectionId);
+  const remembered = useRememberedSort(scope);
+  const filters = useMemo(() => withRememberedSort(urlFilters, collectionId, remembered), [urlFilters, collectionId, remembered]);
+  const setFilters = useCallback(
+    (next: LibraryFilters) => {
+      const change = sortChange(filters, next, urlFilters, collectionId, remembered);
+      if (change.remember !== undefined) rememberSort(scope, change.remember);
+      setSearchParams(filtersToSearch(change.url), { replace: true });
+    },
+    [filters, urlFilters, collectionId, scope, remembered, setSearchParams],
+  );
 
   const collection = collectionId ? (collections.find((c) => c.id === collectionId) ?? null) : null;
   const params = useMemo(() => toListParams(filters, collectionId), [filters, collectionId]);
@@ -145,6 +159,14 @@ export function LibraryPage() {
   // The skeleton, like any loading indicator, shows only once the load is slow.
   const skeletonShown = useLoadingShown(query.isPending);
   const reveal = useSkeletonReveal(query.isPending, skeletonShown);
+
+  // The view the page on screen was loaded for: a page kept while the next
+  // loads is the last one that loaded, maybe for another view.
+  const view = libraryView(filters, collectionId);
+  const ownPage = query.isSuccess && !query.isPlaceholderData;
+  const [loadedView, setLoadedView] = useState<string | null>(null);
+  if (ownPage && loadedView !== view) setLoadedView(view);
+  const shownView = ownPage ? view : loadedView;
 
   useEffect(() => setOrderOverride(null), [collectionId, serverItems]);
 
@@ -448,7 +470,14 @@ export function LibraryPage() {
   const sortProps = { filters, collectionId, onChange: setFilters };
   const filterCount = activeFilterCount(filters);
   const barFilters = barFilterCount(filters, collectionId);
-  const viewTotal = unfilteredTotal(filters, collection, stats.data);
+  const viewTotal = unfilteredTotal(filters, collectionId, collection, stats.data);
+  const count = titleCount({
+    total: query.isSuccess ? query.data.total : null,
+    waiting: query.isPending || query.isPlaceholderData,
+    sameView: shownView === view,
+    barFilters,
+    viewTotal,
+  });
   const libraryEmpty = stats.data?.items.total === 0;
   const allSelected = items.length > 0 && items.every((i) => selection.has(i.id));
   const newHref = useNewItemHref();
@@ -486,12 +515,13 @@ export function LibraryPage() {
           <h1 className="page-title">
             {title || '\u00a0'}
             <span className="page-count">
-              {query.isSuccess && (
+              {count !== null && (
                 <>
+                  {/* Keyed by view: another view's count is not a change of this one's, so it does not roll. */}
                   <span aria-hidden="true">
-                    <NumberChange value={total} />
+                    <NumberChange key={view} value={count} />
                   </span>
-                  <span className="sr-only">, {plural(total, 'item')}</span>
+                  <span className="sr-only">, {plural(count, 'item')}</span>
                 </>
               )}
             </span>

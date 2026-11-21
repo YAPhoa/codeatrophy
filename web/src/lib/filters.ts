@@ -225,3 +225,85 @@ export function canReorder(f: LibraryFilters, collectionId: string | null): bool
 export function toggleIn<T>(list: readonly T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
+
+// ---- The remembered sort ----
+// A sort chosen outside a search is remembered in the browser (sortStore.ts):
+// one for each of the sidebar's views, one for each collection. The URL still
+// wins: the remembered sort only stands in for a URL that names none.
+
+/** A sort as remembered: `order` is `null` for the sort's natural direction. */
+export interface RememberedSort {
+  sort: ItemSort;
+  order: SortOrder | null;
+}
+
+/**
+ * Which remembered sort a view uses: one for each view the sidebar picks
+ * (All items, Problems, Readings, Favorites, Uncollected, as its title names
+ * it) and one for each collection, with or without its nested ones. A type
+ * picked in the filter bar (in Favorites or a collection) narrows the view
+ * and keeps its sort.
+ */
+export function sortScope(f: LibraryFilters, collectionId: string | null): string {
+  if (collectionId) return `collection:${collectionId}`;
+  if (f.uncollected) return 'view:uncollected';
+  if (f.favorite) return 'view:favorite';
+  return f.type ? `view:${f.type}` : 'view:all';
+}
+
+/** Whether a remembered sort can apply to a view: never relevance, and a collection's own order only in that collection without its nested ones. */
+export function sortApplies(sort: ItemSort, f: LibraryFilters, collectionId: string | null): boolean {
+  if (sort === 'relevance') return false;
+  if (sort === 'position') return collectionId != null && !f.recursive;
+  return true;
+}
+
+/**
+ * The filters a view is shown with: the URL's, with the remembered sort in
+ * place of the default when the URL names no sort or order, no search is
+ * typed (a search sorts by relevance), and the sort can apply here.
+ */
+export function withRememberedSort(f: LibraryFilters, collectionId: string | null, remembered: RememberedSort | null): LibraryFilters {
+  if (!remembered || f.sort || f.order || f.q.trim() || !sortApplies(remembered.sort, f, collectionId)) return f;
+  return { ...f, sort: remembered.sort, order: remembered.order };
+}
+
+/** Whether the URL names the remembered sort, in either spelling of its natural direction. */
+function sameSort(url: LibraryFilters, remembered: RememberedSort | null): boolean {
+  if (!remembered || !url.sort) return false;
+  return url.sort === remembered.sort && (url.order ?? defaultOrder(url.sort)) === (remembered.order ?? defaultOrder(remembered.sort));
+}
+
+/**
+ * What a change made on screen (`next`, from the `shown` filters) puts in
+ * the URL, whose own filters are `url`, and in the remembered sort:
+ * `undefined` leaves it as it is, `null` forgets it.
+ *
+ * A change that keeps the sort keeps the URL's own, so a remembered sort is
+ * not written into the URL, and does not follow a search. A search that
+ * starts on the remembered sort also takes it out of the URL, where a click
+ * put it this visit, so it sorts by relevance as on any later visit; a sort
+ * the URL names otherwise (a shared link) stays. A sort chosen outside a
+ * search goes into the URL as before and is remembered; the view's default
+ * is left out of the URL and forgets the remembered one. One chosen while
+ * searching is only in the URL.
+ */
+export function sortChange(
+  shown: LibraryFilters,
+  next: LibraryFilters,
+  url: LibraryFilters,
+  collectionId: string | null,
+  remembered: RememberedSort | null,
+): { url: LibraryFilters; remember: RememberedSort | null | undefined } {
+  if (next.sort === shown.sort && next.order === shown.order) {
+    const searchStarts = !shown.q.trim() && next.q.trim() !== '';
+    const keep = !(searchStarts && sameSort(url, remembered));
+    return { url: { ...next, sort: keep ? url.sort : null, order: keep ? url.order : null }, remember: undefined };
+  }
+  if (next.q.trim()) return { url: next, remember: undefined };
+  const sort = effectiveSort(next, collectionId);
+  const order = next.order ?? defaultOrder(sort);
+  const byDefault = sort === effectiveSort({ ...next, sort: null }, collectionId) && order === defaultOrder(sort);
+  if (byDefault) return { url: { ...next, sort: null, order: null }, remember: null };
+  return { url: next, remember: { sort, order: order === defaultOrder(sort) ? null : order } };
+}
