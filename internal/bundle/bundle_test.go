@@ -719,3 +719,11 @@ func TestRelatedLinks(t *testing.T) {
 		t.Errorf("related after rewriting: %v, warnings %v", got.Items[0].Related, warnings)
 	}
 }
+
+// The most links an instance may allow an item is the most a bundle item's
+// related field holds, so that an exported item always fits the format.
+func TestLinkCeilingMatchesTheFormat(t *testing.T) {
+	if domain.MaxLinksPerItemCeiling != MaxRelated {
+		t.Errorf("domain.MaxLinksPerItemCeiling = %d, MaxRelated = %d", domain.MaxLinksPerItemCeiling, MaxRelated)
+	}
+}

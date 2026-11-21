@@ -39,6 +39,10 @@ type Limits struct {
 	// MaxNotesChars bounds an item's notes, in characters. It is checked
 	// only when the notes are written (see ValidateNotes).
 	MaxNotesChars int
+	// MaxLinksPerItem bounds the links an item has. It is checked only
+	// when links are added, so an item linked under a higher limit keeps
+	// its links.
+	MaxLinksPerItem int
 }
 
 // Source attributes an item to where it came from.

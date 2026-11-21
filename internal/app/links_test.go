@@ -13,6 +13,7 @@ import (
 
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/domain"
+	"codeatrophy/internal/store"
 )
 
 func (e *env) reading(t *testing.T, title string) domain.Item {
@@ -206,24 +207,34 @@ func TestLinksToDeletedItems(t *testing.T) {
 	}
 }
 
-// An item has at most domain.MaxLinksPerItem links, on either side of a
-// new link.
+// withLinkLimit configures the instance's link limit.
+func withLinkLimit(n int) option { return func(o *app.Options) { o.Limits.MaxLinksPerItem = n } }
+
+// An item has at most the configured number of links, on either side of a
+// new link; the default is domain.DefaultMaxLinksPerItem.
 func TestLinkLimit(t *testing.T) {
-	e := newEnv(t)
+	if got := newEnv(t).app.Limits().MaxLinksPerItem; got != domain.DefaultMaxLinksPerItem {
+		t.Errorf("default link limit: %d", got)
+	}
+	const limit = 4
+	e := newEnv(t, withLinkLimit(limit))
+	if got := must(e.app.Meta(e.ctx)).Limits.MaxLinksPerItem; got != limit {
+		t.Errorf("meta maxLinksPerItem = %d, want the configured %d", got, limit)
+	}
 	hub, other := e.reading(t, "Hub"), e.reading(t, "Other")
 	var ids []string
-	for i := range domain.MaxLinksPerItem {
+	for i := range limit {
 		ids = append(ids, e.reading(t, fmt.Sprint("R", i)).ID)
 	}
-	must(e.app.LinkItems(e.ctx, hub.ID, ids[:domain.MaxLinksPerItem-1]))
-	ae := wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, []string{ids[domain.MaxLinksPerItem-1], other.ID})), app.CodeValidation)
-	if ae.Fields["otherIds"] == nil {
+	must(e.app.LinkItems(e.ctx, hub.ID, ids[:limit-1]))
+	ae := wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, []string{ids[limit-1], other.ID})), app.CodeValidation)
+	if ae.Fields["otherIds"] != fmt.Sprintf("an item can have at most %d links; this one has %d", limit, limit-1) {
 		t.Errorf("over the limit: %v", ae.Fields)
 	}
 	// Already linked ids do not count again.
-	must(e.app.LinkItems(e.ctx, hub.ID, []string{ids[0], ids[domain.MaxLinksPerItem-1]}))
+	must(e.app.LinkItems(e.ctx, hub.ID, []string{ids[0], ids[limit-1]}))
 	ae = wantCode(t, must2(e.app.LinkItem(e.ctx, other.ID, hub.ID)), app.CodeValidation)
-	if !strings.Contains(fmt.Sprint(ae.Fields["itemId"]), fmt.Sprintf("already has %d links", domain.MaxLinksPerItem)) {
+	if !strings.Contains(fmt.Sprint(ae.Fields["itemId"]), fmt.Sprintf("already has %d links", limit)) {
 		t.Errorf("the other side over the limit: %v", ae.Fields)
 	}
 	// A link to a deleted item counts.
@@ -235,6 +246,123 @@ func TestLinkLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	must(e.app.LinkItem(e.ctx, hub.ID, other.ID))
+}
+
+// An item linked under a higher limit keeps its links, loads and saves;
+// only adding a link to it is refused.
+func TestLinksOverALoweredLimit(t *testing.T) {
+	e := newEnv(t, withLinkLimit(2))
+	hub, other := e.reading(t, "Hub"), e.reading(t, "Other")
+	var ids []string
+	for i := range 4 {
+		ids = append(ids, e.reading(t, fmt.Sprint("R", i)).ID)
+	}
+	// Links made while the limit was higher.
+	if err := e.db.Write(e.ctx, func(tx store.Tx) error {
+		for _, id := range ids {
+			if _, err := tx.LinkItems(hub.ID, id, time.Now()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := must(e.app.GetItem(e.ctx, hub.ID)); got.LinkCount != 4 {
+		t.Fatalf("existing links must still load: %d", got.LinkCount)
+	}
+	if got := e.links(t, hub.ID); got != "R0,R1,R2,R3" {
+		t.Errorf("links: %q", got)
+	}
+	if up := must(e.app.UpdateItem(e.ctx, hub.ID, input(t, `{"title":"Renamed","status":"done"}`))); up.Title != "Renamed" || up.LinkCount != 4 {
+		t.Errorf("update: %q %d", up.Title, up.LinkCount)
+	}
+	// Linking a pair already linked still does nothing and succeeds.
+	must(e.app.LinkItems(e.ctx, hub.ID, ids[:2]))
+	must(e.app.LinkItem(e.ctx, ids[3], hub.ID))
+	// Adding a link, on either side, is refused.
+	ae := wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, []string{other.ID})), app.CodeValidation)
+	if ae.Fields["otherIds"] != "an item can have at most 2 links; this one has 4" {
+		t.Errorf("adding to the item: %v", ae.Fields)
+	}
+	ae = wantCode(t, must2(e.app.LinkItem(e.ctx, other.ID, hub.ID)), app.CodeValidation)
+	if !strings.Contains(fmt.Sprint(ae.Fields["itemId"]), "already has 4 links") {
+		t.Errorf("adding from the other side: %v", ae.Fields)
+	}
+	// Unlinking one is not enough to add one; unlinking all of them in
+	// one call is allowed.
+	must(e.app.UnlinkItems(e.ctx, hub.ID, ids[:1]))
+	wantCode(t, must2(e.app.LinkItem(e.ctx, hub.ID, other.ID)), app.CodeValidation)
+	if l := must(e.app.UnlinkItems(e.ctx, hub.ID, ids)); len(l.Links) != 0 {
+		t.Errorf("after unlinking all: %v", l.Links)
+	}
+	must(e.app.LinkItems(e.ctx, hub.ID, []string{other.ID, ids[0]}))
+}
+
+// The id lists of LinkItems and UnlinkItems are bounded up front, with one
+// error, and an unknown id is repeated cut short.
+func TestLinkItemsBounds(t *testing.T) {
+	e := newEnv(t, withLinkLimit(3))
+	hub := e.reading(t, "Hub")
+	tooMany := []string{"a", "b", "c", "d"}
+	ae := wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, tooMany)), app.CodeValidation)
+	if len(ae.Fields) != 1 || ae.Fields["otherIds"] != "must list at most 3 item ids; this lists 4" {
+		t.Errorf("too many ids: %v", ae.Fields)
+	}
+	long := strings.Repeat("x", 59) + "é" + strings.Repeat("y", 500)
+	ae = wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, []string{long})), app.CodeValidation)
+	if want := "item " + strings.Repeat("x", 59) + "é… does not exist"; ae.Fields["otherIds.0"] != want {
+		t.Errorf("a long unknown id: %q", ae.Fields["otherIds.0"])
+	}
+	ae = wantCode(t, must2(e.app.LinkItem(e.ctx, hub.ID, long)), app.CodeValidation)
+	if msg := fmt.Sprint(ae.Fields["itemId"]); len([]rune(msg)) > 100 {
+		t.Errorf("a long unknown id, linked alone: %q", msg)
+	}
+	short := strings.Repeat("z", 60)
+	ae = wantCode(t, must2(e.app.LinkItems(e.ctx, hub.ID, []string{short})), app.CodeValidation)
+	if ae.Fields["otherIds.0"] != "item "+short+" does not exist" {
+		t.Errorf("an id of 60 characters is repeated whole: %q", ae.Fields["otherIds.0"])
+	}
+	// Unlinking takes up to the most links any item can have.
+	var ids []string
+	for i := range domain.MaxLinksPerItemCeiling + 1 {
+		ids = append(ids, fmt.Sprint("gone-", i))
+	}
+	must(e.app.UnlinkItems(e.ctx, hub.ID, ids[:domain.MaxLinksPerItemCeiling]))
+	ae = wantCode(t, must2(e.app.UnlinkItems(e.ctx, hub.ID, ids)), app.CodeValidation)
+	if len(ae.Fields) != 1 || ae.Fields["otherIds"] != fmt.Sprintf("must list at most %d item ids; this lists %d",
+		domain.MaxLinksPerItemCeiling, domain.MaxLinksPerItemCeiling+1) {
+		t.Errorf("unlinking too many ids: %v", ae.Fields)
+	}
+	wantCode(t, must2(e.app.UnlinkItems(e.ctx, hub.ID, nil)), app.CodeValidation)
+}
+
+// An import leaves out the links over the configured limit, with a
+// warning.
+func TestImportLinkCapUsesTheConfiguredLimit(t *testing.T) {
+	src := newEnv(t, withLinkLimit(6))
+	hub := src.reading(t, "Hub")
+	var ids []string
+	for i := range 5 {
+		ids = append(ids, src.reading(t, fmt.Sprint("R", i)).ID)
+	}
+	must(src.app.LinkItems(src.ctx, hub.ID, ids))
+	data := src.export(t, `{"scope":"all"}`)
+
+	dst := newEnv(t, withLinkLimit(3))
+	res := must(dst.app.Import(dst.ctx, data, ""))
+	if n := must(dst.app.GetItem(dst.ctx, hub.ID)).LinkCount; n != 3 {
+		t.Errorf("links after the import: %d, want the configured 3", n)
+	}
+	warned := 0
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "would give an item more than 3 links; left out") {
+			warned++
+		}
+	}
+	if warned == 0 {
+		t.Errorf("no warning about the links left out: %q", res.Warnings)
+	}
 }
 
 // Links are exported with each item, sorted, including links to items

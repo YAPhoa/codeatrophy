@@ -165,6 +165,9 @@ func New(opts Options) *App {
 	if a.limits.MaxNotesChars == 0 {
 		a.limits.MaxNotesChars = domain.DefaultMaxNotesChars
 	}
+	if a.limits.MaxLinksPerItem == 0 {
+		a.limits.MaxLinksPerItem = domain.DefaultMaxLinksPerItem
+	}
 	if a.limits.MaxImportBytes == 0 {
 		a.limits.MaxImportBytes = 50 << 20
 	}

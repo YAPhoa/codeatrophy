@@ -2,9 +2,15 @@ package domain
 
 import "time"
 
-// MaxLinksPerItem bounds the links an item has, counting links to items
-// that no longer exist.
-const MaxLinksPerItem = 30
+// DefaultMaxLinksPerItem is the default bound on the links an item has,
+// counting links to items that no longer exist (Limits.MaxLinksPerItem).
+// MaxLinksPerItemCeiling is the highest an instance may set it to: the most
+// ids a bundle item's related field holds (bundle.MaxRelated), so that an
+// exported item's links always fit the bundle format.
+const (
+	DefaultMaxLinksPerItem = 30
+	MaxLinksPerItemCeiling = 50
+)
 
 // LinkedItem is an item as seen from another one: the other end of a link,
 // or a variant's origin. Links and variantOf are kept when the item they

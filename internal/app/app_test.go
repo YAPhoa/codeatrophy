@@ -359,6 +359,40 @@ func TestNotesLimit(t *testing.T) {
 	must(e.app.EditItemText(e.ctx, it.ID, decodeInto[app.EditTextInput](t, `{"field":"body","edits":[{"oldText":"x","newText":"y"}]}`)))
 }
 
+// The overview's limits are /meta's, under the same names, and include the
+// configured ones.
+func TestOverviewLimitsMatchMeta(t *testing.T) {
+	e := newEnv(t, func(o *app.Options) { o.Limits.MaxNotesChars = 10; o.Limits.MaxLinksPerItem = 7 })
+	asMap := func(v any) map[string]any {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	meta := asMap(must(e.app.Meta(e.ctx)).Limits)
+	ov := asMap(must(e.app.Overview(e.ctx)).Limits)
+	for _, k := range []string{"maxTestDataBytes", "maxLargeInputBytes", "maxTestCasesPerItem", "maxSourceBytes",
+		"timeLimitMs", "memoryLimitKb", "maxNotesChars", "maxLinksPerItem", "maxTitleChars", "maxSummaryChars",
+		"maxTags", "maxTagChars", "maxSolutionNameChars", "maxSolutionNotesChars", "maxCollectionNameChars"} {
+		if _, ok := ov[k]; !ok {
+			t.Errorf("overview limits lack %s", k)
+		}
+	}
+	for k, v := range ov {
+		if mv, ok := meta[k]; !ok || fmt.Sprint(mv) != fmt.Sprint(v) {
+			t.Errorf("overview %s = %v, meta has %v", k, v, mv)
+		}
+	}
+	if ov["maxNotesChars"] != float64(10) || ov["maxLinksPerItem"] != float64(7) {
+		t.Errorf("configured limits: %v", ov)
+	}
+}
+
 func TestNotesOverALoweredLimit(t *testing.T) {
 	e := newEnv(t, func(o *app.Options) { o.Limits.MaxNotesChars = 10 })
 	it := must(e.app.CreateItem(e.ctx, input(t, `{"type":"reading","title":"R","body":"b"}`)))

@@ -213,7 +213,11 @@ to show.
   `maxImportUncompressedBytes`).
   `maxSolutionsPerItem`, `maxSolutionNameChars` and `maxSolutionNotesChars`
   bound [solutions](#solutions); `maxLinksPerItem` bounds an item's
-  [links](#links). `maxSystemPromptChars` bounds a
+  [links](#links). The operator sets it with
+  `CODEATROPHY_MAX_LINKS_PER_ITEM` (default 30, from 1 to 50, the most a
+  bundle item's `related` holds); it is checked only when links are added,
+  so an item linked under a higher limit keeps its links and still loads
+  and saves. `maxSystemPromptChars` bounds a
   [custom system prompt](#system-prompt) and a
   [custom test case prompt](#test-case-prompt).
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
@@ -635,7 +639,10 @@ unavailable (a client can show it as a dead link) until an item with that
 id exists again. An [import](#import-and-export) can also bring a link to
 an item this library never had. Linking and unlinking are not content
 changes: neither `revision` nor `updatedAt` moves. An item has at most
-`limits.maxLinksPerItem` (30) links, unavailable ones included.
+`limits.maxLinksPerItem` links, unavailable ones included: 30 by default,
+set by the operator with `CODEATROPHY_MAX_LINKS_PER_ITEM` (1 to 50). An item
+that has more, linked under a higher limit, keeps them; only adding a link to
+it is refused.
 
 `LinkedItem` — the other item of a link:
 

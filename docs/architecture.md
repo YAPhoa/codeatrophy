@@ -173,8 +173,9 @@ the record, and the links come alive again. An import may also bring links
 to items the library never had, which are unavailable without a title.
 Links are not content: they leave `revision` and `updatedAt` alone, a bundle
 carries them outside the content hash, and the rules (both items exist when
-linked, at most 30 per item) live in the application service that both
-transports call.
+linked, at most `CODEATROPHY_MAX_LINKS_PER_ITEM` per item, 30 by default and
+never more than the 50 a bundle item's `related` holds) live in the
+application service that both transports call.
 
 ### Schema migrations
 

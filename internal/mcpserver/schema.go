@@ -1,8 +1,16 @@
 package mcpserver
 
-import "codeatrophy/internal/domain"
+import (
+	"fmt"
 
-// JSON Schema helpers for tool input schemas.
+	"codeatrophy/internal/domain"
+)
+
+// JSON Schema helpers for tool input schemas. A field with a bound the
+// server checks carries it as maxLength or maxItems, taken from the domain
+// constants or, for a configurable bound, from the instance's limits when
+// the server is built. The schemas are advisory: the server validates the
+// arguments itself.
 
 type props map[string]any
 
@@ -15,6 +23,18 @@ func object(p props, required ...string) map[string]any {
 }
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+
+// maxLen sets the most characters (code points) a string schema allows.
+func maxLen(m map[string]any, n int) map[string]any {
+	m["maxLength"] = n
+	return m
+}
+
+// maxItems sets the most elements an array schema allows.
+func maxItems(m map[string]any, n int) map[string]any {
+	m["maxItems"] = n
+	return m
+}
 
 func nullableStr(desc string) map[string]any {
 	return map[string]any{"type": []any{"string", "null"}, "description": desc}
@@ -48,7 +68,7 @@ var expectedRevision = integer("The item revision you last read. If the item has
 
 func testCaseSchema() map[string]any {
 	return object(props{
-		"name":           str("Short name, e.g. \"Example 1\"; for a large case, say what the input is"),
+		"name":           maxLen(str("Short name, e.g. \"Example 1\"; for a large case, say what the input is"), domain.MaxTestCaseNameChars),
 		"stdin":          str("Exact standard input. Omit it when you give a generator for the server to run"),
 		"expectedStdout": str("Exact expected standard output. Required unless you give a generator; may be a placeholder when you will run verify_test_cases with updateExpected"),
 		"isSample":       boolean("Shown with the statement and used by run (default false)"),
@@ -100,20 +120,21 @@ func harnessSchema() map[string]any {
 }
 
 // itemFieldProps are the writable item fields shared by create_item and
-// update_item.
-func itemFieldProps() props {
+// update_item; lim gives the configurable bounds.
+func itemFieldProps(lim domain.Limits) props {
 	return props{
-		"title":      str("1-200 characters"),
-		"summary":    str("One sentence"),
+		"title":      maxLen(str(fmt.Sprintf("1-%d characters", domain.MaxTitleChars)), domain.MaxTitleChars),
+		"summary":    maxLen(str("One sentence"), domain.MaxSummaryChars),
 		"body":       str("Markdown body following the authoring conventions"),
 		"difficulty": map[string]any{"type": []any{"string", "null"}, "enum": []any{"easy", "medium", "hard", nil}},
-		"tags":       arrayOf(str("Lower-case tag"), "Replaces all tags (at most 30, 1-40 characters each)"),
-		"status":     enumStr("Personal progress", "todo", "in_progress", "done"),
-		"favorite":   boolean("Personal favorite flag"),
-		"notes":      str("The user's private Markdown notes"),
+		"tags": maxItems(arrayOf(maxLen(str("Lower-case tag"), domain.MaxTagChars),
+			fmt.Sprintf("Replaces all tags (at most %d, 1-%d characters each)", domain.MaxTags, domain.MaxTagChars)), domain.MaxTags),
+		"status":   enumStr("Personal progress", "todo", "in_progress", "done"),
+		"favorite": boolean("Personal favorite flag"),
+		"notes":    maxLen(str("The user's private Markdown notes, at most limits.maxNotesChars characters (get_overview)"), lim.MaxNotesChars),
 		"source": object(props{
-			"url":  nullableStr("Where the item came from (http or https URL)"),
-			"note": nullableStr("Free-form attribution"),
+			"url":  maxLen(nullableStr("Where the item came from (http or https URL)"), domain.MaxURLChars),
+			"note": maxLen(nullableStr("Free-form attribution"), domain.MaxSourceNoteChars),
 		}),
 		"problem": object(props{
 			"interface":         enumStr("What the solver writes: program (a full program, the default) or function (only a function or class, run inside the harness)", "program", "function"),

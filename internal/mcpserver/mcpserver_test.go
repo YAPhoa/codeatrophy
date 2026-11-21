@@ -41,11 +41,17 @@ func newFixture(t *testing.T, token string, opts ...func(*mcpserver.Options)) *f
 // behind the HTTP API's root handler, as the server does.
 func newFixtureWith(t *testing.T, token string, mounted bool, opts ...func(*mcpserver.Options)) *fixture {
 	t.Helper()
+	return newFixtureLimits(t, token, mounted, domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 16}, opts...)
+}
+
+// newFixtureLimits is newFixtureWith over an application with the given
+// limits.
+func newFixtureLimits(t *testing.T, token string, mounted bool, lim domain.Limits, opts ...func(*mcpserver.Options)) *fixture {
+	t.Helper()
 	ctx := context.Background()
 	db := teststore.Open(t)
 	box, _ := secrets.NewBox(bytes.Repeat([]byte{1}, 32))
-	a := app.New(app.Options{Store: db, Engine: judgetest.New("python"), Secrets: box, Version: "test",
-		Limits: domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 16}})
+	a := app.New(app.Options{Store: db, Engine: judgetest.New("python"), Secrets: box, Version: "test", Limits: lim})
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -960,5 +966,103 @@ func TestLinkTools(t *testing.T) {
 	if text := p.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(text, "search_items") ||
 		!strings.Contains(text, "link_items") || !strings.Contains(text, `"title": "DFS"`) {
 		t.Errorf("link_related: %s", text)
+	}
+}
+
+// get_overview publishes the bounds of items as well as of test cases, the
+// configurable ones as configured; tool input schemas carry the bounds as
+// maxLength and maxItems, and link_items states the configured link limit.
+func TestLimitsInOverviewAndSchemas(t *testing.T) {
+	f := newFixtureLimits(t, "", false, domain.Limits{MaxImportBytes: 1 << 20, MaxSourceBytes: 1 << 16,
+		MaxNotesChars: 123, MaxLinksPerItem: 7})
+	s := f.connect(t, "")
+	ov, isErr := call(t, s, "get_overview", map[string]any{})
+	lim, _ := ov["limits"].(map[string]any)
+	for k, want := range map[string]float64{"maxNotesChars": 123, "maxLinksPerItem": 7,
+		"maxTitleChars": domain.MaxTitleChars, "maxSummaryChars": domain.MaxSummaryChars, "maxTags": domain.MaxTags,
+		"maxTagChars": domain.MaxTagChars, "maxSolutionNameChars": domain.MaxSolutionNameChars,
+		"maxSolutionNotesChars": domain.MaxSolutionNotesChars, "maxCollectionNameChars": domain.MaxCollectionNameChars,
+		"maxSourceBytes": 1 << 16, "maxTestCasesPerItem": domain.MaxTestCasesPerItem} {
+		if isErr || lim[k] != want {
+			t.Errorf("get_overview limits.%s = %v, want %v", k, lim[k], want)
+		}
+	}
+
+	res, err := s.ListTools(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas, descs := map[string]map[string]any{}, map[string]string{}
+	for _, tool := range res.Tools {
+		var m map[string]any
+		b, _ := json.Marshal(tool.InputSchema)
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		schemas[tool.Name], descs[tool.Name] = m, tool.Description
+	}
+	// at follows a path of property names ("[]" for an array's items).
+	at := func(tool string, path ...string) map[string]any {
+		m := schemas[tool]
+		for _, p := range path {
+			if p == "[]" {
+				m, _ = m["items"].(map[string]any)
+			} else {
+				ps, _ := m["properties"].(map[string]any)
+				m, _ = ps[p].(map[string]any)
+			}
+		}
+		return m
+	}
+	for _, c := range []struct {
+		tool string
+		path []string
+		key  string
+		want float64
+	}{
+		{"create_item", []string{"title"}, "maxLength", domain.MaxTitleChars},
+		{"update_item", []string{"title"}, "maxLength", domain.MaxTitleChars},
+		{"create_item", []string{"summary"}, "maxLength", domain.MaxSummaryChars},
+		{"create_item", []string{"tags"}, "maxItems", domain.MaxTags},
+		{"update_item", []string{"tags", "[]"}, "maxLength", domain.MaxTagChars},
+		{"create_item", []string{"notes"}, "maxLength", 123},
+		{"update_item", []string{"notes"}, "maxLength", 123},
+		{"create_item", []string{"source", "note"}, "maxLength", domain.MaxSourceNoteChars},
+		{"create_item", []string{"testCases", "[]", "name"}, "maxLength", domain.MaxTestCaseNameChars},
+		{"add_test_cases", []string{"cases", "[]", "name"}, "maxLength", domain.MaxTestCaseNameChars},
+		{"update_test_case", []string{"name"}, "maxLength", domain.MaxTestCaseNameChars},
+		{"bulk_update_items", []string{"tags", "[]"}, "maxLength", domain.MaxTagChars},
+		{"rename_tag", []string{"newName"}, "maxLength", domain.MaxTagChars},
+		{"create_collection", []string{"name"}, "maxLength", domain.MaxCollectionNameChars},
+		{"update_collection", []string{"name"}, "maxLength", domain.MaxCollectionNameChars},
+		{"save_solution", []string{"name"}, "maxLength", domain.MaxSolutionNameChars},
+		{"save_solution", []string{"notes"}, "maxLength", domain.MaxSolutionNotesChars},
+		{"link_items", []string{"otherIds"}, "maxItems", 7},
+		{"unlink_items", []string{"otherIds"}, "maxItems", domain.MaxLinksPerItemCeiling},
+	} {
+		if got := at(c.tool, c.path...)[c.key]; got != c.want {
+			t.Errorf("%s %v: %s = %v, want %v", c.tool, c.path, c.key, got, c.want)
+		}
+	}
+	if d, _ := at("create_item", "notes")["description"].(string); !strings.Contains(d, "limits.maxNotesChars") {
+		t.Errorf("notes description: %q", d)
+	}
+	if d := descs["link_items"]; !strings.Contains(d, "at most 7 links") || strings.Contains(d, "30") {
+		t.Errorf("link_items description: %q", d)
+	}
+
+	// The service refuses a longer list with one error.
+	hub, _ := call(t, s, "create_item", map[string]any{"type": "reading", "title": "Hub"})
+	r, isErr := call(t, s, "link_items", map[string]any{"itemId": hub["id"], "otherIds": []string{"a", "b", "c", "d", "e", "f", "g", "h"}})
+	e, _ := r["error"].(map[string]any)
+	if fields, _ := e["fields"].(map[string]any); !isErr || len(fields) != 1 || fields["otherIds"] == nil {
+		t.Errorf("too many ids: %v", r)
+	}
+	p, err := s.GetPrompt(f.ctx, &mcp.GetPromptParams{Name: "link_related", Arguments: map[string]string{"itemId": hub["id"].(string)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := p.Messages[0].Content.(*mcp.TextContent).Text; !strings.Contains(text, "at most 7 more links") {
+		t.Errorf("link_related does not use the configured limit")
 	}
 }

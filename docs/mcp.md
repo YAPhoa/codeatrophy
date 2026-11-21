@@ -75,6 +75,14 @@ expires; open sessions are unaffected. A request body may be at most
   item's revision (see `revision` in `docs/api.md`).
 - Failures are reported as tool errors (`isError: true`) with the same `code`
   and `message` the HTTP API would return.
+- Input schemas carry the bounds the server checks as `maxLength` (in
+  characters) and `maxItems`: an item's `title`, `summary`, `tags` (and each
+  tag), `source.url` and `source.note`; the names of test cases, solutions,
+  collections and tags; a collection's description and a solution's notes. The configurable
+  bounds, `notes` (`limits.maxNotesChars`) and `link_items`'s `otherIds`
+  (`limits.maxLinksPerItem`), are those of the instance when the session
+  starts. The server checks every argument itself whether or not a client
+  honours the schema.
 - Tools are annotated (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so
   clients can apply their own confirmation policy.
 - AI provider settings and credentials, their usage counts, the AI
@@ -88,7 +96,7 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the test case limits (below). A good first call |
+| `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the limits of items and test cases (below). A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
 | `get_item` | One item in full, including a problem's `interface` and `harness`, with its `links` and, for a variant, `item.variantOrigin` (see [Links](#links)). `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
@@ -103,7 +111,10 @@ expires; open sessions are unaffected. A request body may be at most
   "preferences": { "generatedTestCases": 8, "largeTestCase": false, "largeTestCaseCount": 3, "hideTestCases": true },
   "limits": {
     "maxTestDataBytes": 8388608, "maxLargeInputBytes": 1048576, "maxTestCasesPerItem": 1000, "maxSourceBytes": 65536,
-    "timeLimitMs": { "min": 100, "max": 30000 }, "memoryLimitKb": { "min": 16384, "max": 2097152 }
+    "timeLimitMs": { "min": 100, "max": 30000 }, "memoryLimitKb": { "min": 16384, "max": 2097152 },
+    "maxTitleChars": 200, "maxSummaryChars": 5000, "maxTags": 30, "maxTagChars": 40,
+    "maxNotesChars": 4000, "maxLinksPerItem": 30,
+    "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxCollectionNameChars": 200
   }
 }
 ```
@@ -111,8 +122,12 @@ expires; open sessions are unaffected. A request body may be at most
 `preferences` are the user's current values (see "Preferences" in
 `docs/api.md`): how many test cases to write, whether to add large ones and
 how many, and whether hidden test cases are kept out of sight. They are
-read-only over MCP. `limits` are the bounds of test cases, as in
+read-only over MCP. `limits` are the bounds of test cases and of the item
+fields an assistant writes, with the same names and values as in
 `GET /api/v1/meta` (`maxSourceBytes` also bounds a generator).
+`maxNotesChars` and `maxLinksPerItem` are set by the operator
+(`CODEATROPHY_MAX_NOTES_CHARS`, `CODEATROPHY_MAX_LINKS_PER_ITEM`); notes or
+links an item already has over them are kept.
 
 ### Writing items
 
@@ -128,8 +143,8 @@ read-only over MCP. `limits` are the bounds of test cases, as in
 
 | Tool | Purpose |
 | --- | --- |
-| `link_items` | Link an item (`itemId`) to closely related items (`otherIds`). Links go both ways, have no label and are not content (the revision stays); a pair already linked is left as it is. Every other id must name an existing item other than this one, or nothing is linked and the error names each bad one as `otherIds.<index>`. An item has at most 30 links. Returns `{ "links": [LinkedItem] }` |
-| `unlink_items` | Remove the links between an item and `otherIds`, also to items that have been deleted; an id that is not linked is ignored. Returns the links that remain |
+| `link_items` | Link an item (`itemId`) to closely related items (`otherIds`). Links go both ways, have no label and are not content (the revision stays); a pair already linked is left as it is. Every other id must name an existing item other than this one, or nothing is linked and the error names each bad one as `otherIds.<index>` (an id longer than 60 characters is repeated cut short, ending in `…`). An item has at most `limits.maxLinksPerItem` links (30 by default; the description gives the instance's value), and `otherIds` may list at most that many ids: a longer list is refused with one error on `otherIds`. Returns `{ "links": [LinkedItem] }` |
+| `unlink_items` | Remove the links between an item and `otherIds`, also to items that have been deleted; an id that is not linked is ignored. `otherIds` may list at most 50 ids, the most links any item can have, so one call can clear an item linked under a higher limit. Returns the links that remain |
 
 A link stays when either item is deleted. `get_item` returns the item's
 links as `links`, each a `LinkedItem` as in `GET /items/{id}/links`
@@ -217,7 +232,7 @@ and runners are written.
 | --- | --- | --- |
 | `draft_item` | `text`, `type?`, `style?` | Turn a rough or incomplete snippet into a complete item and save it, choosing a problem's interface |
 | `write_test_cases` | `itemId`, `count?` | Write a reference solution and a verified test set for a problem. `count` defaults to the user's `generatedTestCases` preference |
-| `create_variant` | `itemId`, `mode?`, `instruction?`, `style?` | Derive a related new item and save it linked to the original |
+| `create_variant` | `itemId`, `mode?`, `instruction?`, `style?` | Derive a related new item and save it linked to the original. `instruction` is at most 2000 characters |
 | `link_related` | `itemId` | Search the library for the few problems and readings closely related to the item, suggest them, and link the ones the user agrees to with `link_items` |
 
 The prompts that ask for test cases (the first three, for a problem) follow the

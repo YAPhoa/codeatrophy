@@ -152,7 +152,12 @@ func serve() error {
 			OpenAIBaseURL:    cfg.AI.OpenAIBaseURL,
 			Timeout:          cfg.AI.Timeout,
 		},
-		Limits:           domain.Limits{MaxImportBytes: cfg.MaxImportBytes, MaxSourceBytes: cfg.MaxSourceBytes, MaxNotesChars: cfg.MaxNotesChars},
+		Limits: domain.Limits{
+			MaxImportBytes:  cfg.MaxImportBytes,
+			MaxSourceBytes:  cfg.MaxSourceBytes,
+			MaxNotesChars:   cfg.MaxNotesChars,
+			MaxLinksPerItem: cfg.MaxLinksPerItem,
+		},
 		JudgeWorkers:     cfg.Judge.Workers,
 		JudgeConcurrency: cfg.Judge.Concurrency,
 		AIWorkers:        cfg.AI.Workers,

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
-		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
+		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.MaxLinksPerItem != 30 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
 		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" || c.AI.Workers != 2 {
 		t.Errorf("defaults: %+v", c)
 	}
@@ -64,6 +65,21 @@ func TestParsing(t *testing.T) {
 	}
 	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_NOTES_CHARS": "100001"})); err == nil {
 		t.Error("a notes limit above 100000 should be rejected")
+	}
+}
+
+func TestLinkLimit(t *testing.T) {
+	for _, v := range []string{"1", "12", "50"} {
+		c, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_LINKS_PER_ITEM": v}))
+		if err != nil || fmt.Sprint(c.MaxLinksPerItem) != v {
+			t.Errorf("link limit %s: %d %v", v, c.MaxLinksPerItem, err)
+		}
+	}
+	for _, v := range []string{"0", "51", "-3", "many", "30.5"} {
+		_, err := LoadFrom(env(map[string]string{"CODEATROPHY_MAX_LINKS_PER_ITEM": v}))
+		if err == nil || !strings.Contains(err.Error(), "CODEATROPHY_MAX_LINKS_PER_ITEM") {
+			t.Errorf("a link limit of %q should be rejected naming the variable: %v", v, err)
+		}
 	}
 }
 

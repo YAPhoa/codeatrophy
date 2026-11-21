@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -37,18 +38,20 @@ func (a *App) LinkItem(ctx context.Context, id, otherID string) (domain.ItemLink
 }
 
 // LinkItems links an item to each of the others, all or none; validation
-// errors name otherIds.<index>. It returns the item's links.
+// errors name otherIds.<index>. It returns the item's links. A list longer
+// than the link limit is refused as a whole, as no item could take it.
 func (a *App) LinkItems(ctx context.Context, id string, otherIDs []string) (domain.ItemLinks, error) {
-	if len(otherIDs) == 0 {
-		return domain.ItemLinks{}, errField("otherIds", "at least one item id is required")
+	if err := checkIDList(otherIDs, a.limits.MaxLinksPerItem); err != nil {
+		return domain.ItemLinks{}, err
 	}
 	return a.linkItems(ctx, id, otherIDs, "otherIds", func(i int) string { return fmt.Sprintf("otherIds.%d", i) })
 }
 
 // linkItems links id to each of others. A pair already linked is left as
 // it is. Every other item must exist and differ from the item, and neither
-// side may go over domain.MaxLinksPerItem links; otherwise nothing is
-// written.
+// side of a new link may go over the instance's MaxLinksPerItem links;
+// otherwise nothing is written. An item that already has more (linked under
+// a higher limit) keeps its links, and only adding one is refused.
 func (a *App) linkItems(ctx context.Context, id string, others []string, listField string, field func(int) string) (domain.ItemLinks, error) {
 	var out domain.ItemLinks
 	err := a.store.Write(ctx, func(tx store.Tx) error {
@@ -78,7 +81,7 @@ func (a *App) linkItems(ctx context.Context, id string, others []string, listFie
 			case other == id:
 				fe.Add(field(i), "an item cannot be linked to itself")
 			case !existing[other]:
-				fe.Add(field(i), fmt.Sprintf("item %s does not exist", other))
+				fe.Add(field(i), fmt.Sprintf("item %s does not exist", clipID(other)))
 			case linked[other]:
 			default:
 				if _, seen := index[other]; !seen {
@@ -90,9 +93,10 @@ func (a *App) linkItems(ctx context.Context, id string, others []string, listFie
 		if err := errValidation(fe); err != nil {
 			return err
 		}
-		if it.LinkCount+len(add) > domain.MaxLinksPerItem {
+		limit := a.limits.MaxLinksPerItem
+		if len(add) > 0 && it.LinkCount+len(add) > limit {
 			return errField(listField, fmt.Sprintf("an item can have at most %d links; this one has %d",
-				domain.MaxLinksPerItem, it.LinkCount))
+				limit, it.LinkCount))
 		}
 		if len(add) > 0 {
 			sums, _, err := tx.ListItems(store.ItemFilter{IDs: add})
@@ -100,9 +104,9 @@ func (a *App) linkItems(ctx context.Context, id string, others []string, listFie
 				return err
 			}
 			for _, s := range sums {
-				if s.LinkCount >= domain.MaxLinksPerItem {
+				if s.LinkCount >= limit {
 					fe.Add(field(index[s.ID]), fmt.Sprintf("item %s already has %d links, the most an item can have",
-						s.ID, s.LinkCount))
+						clipID(s.ID), s.LinkCount))
 				}
 			}
 			if err := errValidation(fe); err != nil {
@@ -130,10 +134,13 @@ func (a *App) UnlinkItem(ctx context.Context, id, otherID string) error {
 }
 
 // UnlinkItems removes the links between an item and each of the others, as
-// UnlinkItem does, and returns the item's links.
+// UnlinkItem does, and returns the item's links. The list may be as long as
+// the most links an item can have under any limit
+// (domain.MaxLinksPerItemCeiling), so that one call can remove all the links
+// of an item linked under a higher limit.
 func (a *App) UnlinkItems(ctx context.Context, id string, otherIDs []string) (domain.ItemLinks, error) {
-	if len(otherIDs) == 0 {
-		return domain.ItemLinks{}, errField("otherIds", "at least one item id is required")
+	if err := checkIDList(otherIDs, domain.MaxLinksPerItemCeiling); err != nil {
+		return domain.ItemLinks{}, err
 	}
 	return a.unlinkItems(ctx, id, otherIDs, func(i int) string { return fmt.Sprintf("otherIds.%d", i) })
 }
@@ -166,4 +173,28 @@ func (a *App) unlinkItems(ctx context.Context, id string, others []string, field
 		return err
 	})
 	return out, err
+}
+
+// checkIDList refuses an empty list of other item ids, or one longer than
+// max, with one error on otherIds.
+func checkIDList(ids []string, max int) error {
+	switch {
+	case len(ids) == 0:
+		return errField("otherIds", "at least one item id is required")
+	case len(ids) > max:
+		return errField("otherIds", fmt.Sprintf("must list at most %d item ids; this lists %d", max, len(ids)))
+	}
+	return nil
+}
+
+// maxEchoedIDChars bounds an id repeated in an error message.
+const maxEchoedIDChars = 60
+
+// clipID returns an id as an error message repeats it: cut to
+// maxEchoedIDChars code points, with an ellipsis, when it is longer.
+func clipID(id string) string {
+	if utf8.RuneCountInString(id) <= maxEchoedIDChars {
+		return id
+	}
+	return string([]rune(id)[:maxEchoedIDChars]) + "…"
 }

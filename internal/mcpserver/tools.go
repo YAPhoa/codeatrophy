@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
 
@@ -51,10 +52,11 @@ type idArg struct {
 
 func (t *tools) register(s *mcp.Server) {
 	a := t.app
+	lim := a.Limits()
 
 	// Reading.
 	t.add(s, "get_overview", "Library overview",
-		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge engine offers, the user's test case preferences (preferences: generatedTestCases, largeTestCase, largeTestCaseCount, hideTestCases; read-only) and the bounds test cases keep to (limits). A good first call.",
+		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge engine offers, the user's test case preferences (preferences: generatedTestCases, largeTestCase, largeTestCaseCount, hideTestCases; read-only) and the bounds items and test cases keep to (limits: of test cases and code, and of an item's title, summary, tags, notes, links, solutions and collection names). A good first call.",
 		object(props{}), readOnly, func(ctx context.Context, _ json.RawMessage) (any, error) {
 			return a.Overview(ctx)
 		})
@@ -158,7 +160,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	// Writing items.
-	createProps := itemFieldProps()
+	createProps := itemFieldProps(lim)
 	createProps["type"] = enumStr("Item type", "problem", "reading")
 	createProps["testCases"] = arrayOf(testCaseSchema(), "Test cases to create with the item (problems only)")
 	t.add(s, "create_item", "Create item",
@@ -171,7 +173,7 @@ func (t *tools) register(s *mcp.Server) {
 			return a.CreateItem(ctx, in)
 		})
 
-	updateProps := itemFieldProps()
+	updateProps := itemFieldProps(lim)
 	updateProps["id"] = str("Item id")
 	updateProps["expectedRevision"] = expectedRevision
 	t.add(s, "update_item", "Update item",
@@ -228,7 +230,7 @@ func (t *tools) register(s *mcp.Server) {
 		object(props{
 			"ids":          arrayOf(str("Item id"), "Items to change"),
 			"action":       enumStr("Action", "delete", "addTags", "removeTags", "setStatus", "setFavorite", "addToCollection", "removeFromCollection"),
-			"tags":         arrayOf(str("Tag"), "For addTags and removeTags"),
+			"tags":         arrayOf(maxLen(str("Tag"), domain.MaxTagChars), "For addTags and removeTags"),
 			"status":       enumStr("For setStatus", "todo", "in_progress", "done"),
 			"favorite":     boolean("For setFavorite"),
 			"collectionId": str("For addToCollection and removeFromCollection"),
@@ -241,13 +243,15 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	// Linking.
-	linking := object(props{
-		"itemId":   str("Item id"),
-		"otherIds": arrayOf(str("Item id"), "The other items"),
-	}, "itemId", "otherIds")
+	linking := func(maxIDs int, desc string) map[string]any {
+		return object(props{
+			"itemId":   str("Item id"),
+			"otherIds": maxItems(arrayOf(str("Item id"), desc), maxIDs),
+		}, "itemId", "otherIds")
+	}
 	t.add(s, "link_items", "Link items",
-		"Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most 30 links. Not a content change: the revision stays. Returns the item's links.",
-		linking, idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		fmt.Sprintf("Link an item to other items that are closely related, such as a problem and the reading that explains its technique. Links go both ways and have no label; linking a pair that is already linked does nothing. Every other item must exist; otherwise nothing is linked and the error names each bad id (otherIds.<index>). An item has at most %d links (limits.maxLinksPerItem). Not a content change: the revision stays. Returns the item's links.", lim.MaxLinksPerItem),
+		linking(lim.MaxLinksPerItem, fmt.Sprintf("The other items, at most %d", lim.MaxLinksPerItem)), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID   string   `json:"itemId"`
 				OtherIDs []string `json:"otherIds"`
@@ -260,7 +264,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "unlink_items", "Unlink items",
 		"Remove the links between an item and other items, including links to items that have been deleted (available: false). An id that is not linked is ignored. Returns the item's links.",
-		linking, idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		linking(domain.MaxLinksPerItemCeiling, fmt.Sprintf("The other items, at most %d", domain.MaxLinksPerItemCeiling)), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID   string   `json:"itemId"`
 				OtherIDs []string `json:"otherIds"`
@@ -274,8 +278,8 @@ func (t *tools) register(s *mcp.Server) {
 	// Organising.
 	t.add(s, "create_collection", "Create collection", "Create a collection, optionally nested under a parent. It is appended after its siblings.",
 		object(props{
-			"name":        str("1-200 characters"),
-			"description": str("Optional description"),
+			"name":        maxLen(str(fmt.Sprintf("1-%d characters", domain.MaxCollectionNameChars)), domain.MaxCollectionNameChars),
+			"description": maxLen(str("Optional description"), domain.MaxCollectionDescriptionChars),
 			"parentId":    nullableStr("Parent collection id, or null for the top level"),
 		}, "name"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in domain.CollectionInput
@@ -289,8 +293,8 @@ func (t *tools) register(s *mcp.Server) {
 		"Rename, describe, move (parentId) or reorder (position among siblings) a collection.",
 		object(props{
 			"id":          str("Collection id"),
-			"name":        str("New name"),
-			"description": str("New description"),
+			"name":        maxLen(str("New name"), domain.MaxCollectionNameChars),
+			"description": maxLen(str("New description"), domain.MaxCollectionDescriptionChars),
 			"parentId":    nullableStr("New parent id, or null for the top level"),
 			"position":    integer("Index among the (new) siblings"),
 		}, "id"), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -366,7 +370,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "rename_tag", "Rename tag", "Rename a tag on every item, merging with an existing tag of the new name.",
-		object(props{"name": str("Current tag name"), "newName": str("New tag name")}, "name", "newName"), idempotent,
+		object(props{"name": str("Current tag name"), "newName": maxLen(str("New tag name"), domain.MaxTagChars)}, "name", "newName"), idempotent,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				Name    string `json:"name"`
@@ -417,7 +421,7 @@ func (t *tools) register(s *mcp.Server) {
 		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it. A generator runs and what it prints replaces stdin; generator: null drops the generator and keeps stdin; setting stdin without a generator drops the generator too. Giving stdin and a non-null generator together is refused here.",
 		object(props{
 			"id":             str("Test case id"),
-			"name":           str("Name"),
+			"name":           maxLen(str("Name"), domain.MaxTestCaseNameChars),
 			"stdin":          str("Standard input"),
 			"expectedStdout": str("Expected output"),
 			"isSample":       boolean("Sample flag"),
@@ -470,10 +474,10 @@ func (t *tools) register(s *mcp.Server) {
 		object(props{
 			"itemId":           str("Problem id, to create a solution"),
 			"id":               str("Solution id, to change an existing solution"),
-			"name":             str("Short single-line name, e.g. the approach"),
+			"name":             maxLen(str("Short single-line name, e.g. the approach"), domain.MaxSolutionNameChars),
 			"language":         languageEnum("Language id"),
 			"source":           str(solutionSource),
-			"notes":            str("Markdown notes, e.g. complexity"),
+			"notes":            maxLen(str("Markdown notes, e.g. complexity"), domain.MaxSolutionNotesChars),
 			"isReference":      boolean("Make this the reference solution"),
 			"expectedRevision": expectedRevision,
 			"submissionId":     str("When creating: a completed submission of this problem with the same language and source, whose figures become lastRun; ignored otherwise"),

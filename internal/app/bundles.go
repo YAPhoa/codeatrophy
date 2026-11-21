@@ -575,9 +575,10 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 // not content, and an import only ever adds them. A link to an item
 // duplicated by this import points at the copy; one to an item in neither
 // the bundle nor the library is kept, unavailable until that item is
-// imported. A link that would give an item more than domain.MaxLinksPerItem
-// links is left out with a warning.
+// imported. A link that would give an item more than the instance's
+// MaxLinksPerItem links is left out with a warning.
 func (a *App) importLinks(tx store.Tx, plans []itemPlan, finalID map[string]string, now time.Time, res *ImportResult) error {
+	limit := a.limits.MaxLinksPerItem
 	counts := map[string]int{}
 	count := func(id string) (int, error) {
 		if n, ok := counts[id]; ok {
@@ -605,7 +606,7 @@ func (a *App) importLinks(tx store.Tx, plans []itemPlan, finalID map[string]stri
 			if err != nil {
 				return err
 			}
-			if nf >= domain.MaxLinksPerItem || nt >= domain.MaxLinksPerItem {
+			if nf >= limit || nt >= limit {
 				already, err := linked(tx, from, to)
 				if err != nil {
 					return err
@@ -614,7 +615,7 @@ func (a *App) importLinks(tx store.Tx, plans []itemPlan, finalID map[string]stri
 					continue
 				}
 				res.Warnings = append(res.Warnings, fmt.Sprintf("%s: the link to %s would give an item more than %d links; left out",
-					p.item.Dir, rel, domain.MaxLinksPerItem))
+					p.item.Dir, rel, limit))
 				continue
 			}
 			added, err := tx.LinkItems(from, to, now)

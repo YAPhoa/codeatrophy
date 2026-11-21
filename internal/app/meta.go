@@ -100,53 +100,59 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 		AI:      info,
 		Judge:   a.JudgeStatus(),
 		MCP:     m,
-		Limits: MetaLimits{
-			MaxImportBytes:             a.limits.MaxImportBytes,
-			MaxSourceBytes:             a.limits.MaxSourceBytes,
-			MaxTitleChars:              domain.MaxTitleChars,
-			MaxSummaryChars:            domain.MaxSummaryChars,
-			MaxTextBytes:               domain.MaxTextBytes,
-			MaxSourceURLChars:          domain.MaxURLChars,
-			MaxSourceNoteChars:         domain.MaxSourceNoteChars,
-			MaxTags:                    domain.MaxTags,
-			MaxTagChars:                domain.MaxTagChars,
-			MaxCollectionNameChars:     domain.MaxCollectionNameChars,
-			MaxCollectionDescription:   domain.MaxCollectionDescriptionChars,
-			TimeLimitMs:                Range{domain.MinTimeLimitMs, domain.MaxTimeLimitMs},
-			MemoryLimitKb:              Range{domain.MinMemoryLimitKb, domain.MaxMemoryLimitKb},
-			MaxTestCasesPerItem:        domain.MaxTestCasesPerItem,
-			MaxTestDataBytes:           domain.MaxTestCaseBytes,
-			MaxTestCaseNameChars:       domain.MaxTestCaseNameChars,
-			MaxDraftTextChars:          MaxDraftTextChars,
-			MaxInstructionChars:        domain.MaxGenerationInstructionChars,
-			MaxPreviousDraftBytes:      domain.MaxPreviousDraftBytes,
-			MaxGeneratedTestCases:      MaxGeneratedCases,
-			MaxLargeInputBytes:         MaxLargeInputBytes,
-			MaxLargeTestCases:          MaxLargeTestCases,
-			MaxStylePresets:            domain.MaxStylePresets,
-			MaxStyleNameChars:          domain.MaxStyleNameChars,
-			MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,
-			MaxSystemPromptChars:       domain.MaxSystemPromptChars,
-			MaxModelIDChars:            domain.MaxModelIDChars,
-			MaxAPIKeyChars:             domain.MaxAPIKeyChars,
-			MaxAIProviders:             domain.MaxAIProviders,
-			MaxAIProviderNameChars:     domain.MaxAIProviderNameChars,
-			MinAITimeoutSeconds:        domain.MinAITimeoutSeconds,
-			MaxAITimeoutSeconds:        domain.MaxAITimeoutSeconds,
-			MaxBundleNameChars:         domain.MaxBundleNameChars,
-			MaxBundleDescriptionChars:  domain.MaxBundleDescriptionChars,
-			MaxImportUncompressedBytes: domain.BundleExpansionFactor * a.limits.MaxImportBytes,
-			MaxImportEntries:           domain.MaxBundleEntries,
-			MaxImportCollections:       domain.MaxBundleCollections,
-			MaxSolutionsPerItem:        domain.MaxSolutionsPerItem,
-			MaxSolutionNameChars:       domain.MaxSolutionNameChars,
-			MaxSolutionNotesChars:      domain.MaxSolutionNotesChars,
-			MaxNotesChars:              a.limits.MaxNotesChars,
-			MaxLinksPerItem:            domain.MaxLinksPerItem,
-			MaxPageSize:                domain.MaxPageSize,
-			MaxRequestBytes:            domain.MaxRequestBytes,
-		},
+		Limits:  a.metaLimits(),
 	}, nil
+}
+
+// metaLimits are the limits /meta publishes; Overview takes its limits from
+// them too, so the two cannot disagree.
+func (a *App) metaLimits() MetaLimits {
+	return MetaLimits{
+		MaxImportBytes:             a.limits.MaxImportBytes,
+		MaxSourceBytes:             a.limits.MaxSourceBytes,
+		MaxTitleChars:              domain.MaxTitleChars,
+		MaxSummaryChars:            domain.MaxSummaryChars,
+		MaxTextBytes:               domain.MaxTextBytes,
+		MaxSourceURLChars:          domain.MaxURLChars,
+		MaxSourceNoteChars:         domain.MaxSourceNoteChars,
+		MaxTags:                    domain.MaxTags,
+		MaxTagChars:                domain.MaxTagChars,
+		MaxCollectionNameChars:     domain.MaxCollectionNameChars,
+		MaxCollectionDescription:   domain.MaxCollectionDescriptionChars,
+		TimeLimitMs:                Range{domain.MinTimeLimitMs, domain.MaxTimeLimitMs},
+		MemoryLimitKb:              Range{domain.MinMemoryLimitKb, domain.MaxMemoryLimitKb},
+		MaxTestCasesPerItem:        domain.MaxTestCasesPerItem,
+		MaxTestDataBytes:           domain.MaxTestCaseBytes,
+		MaxTestCaseNameChars:       domain.MaxTestCaseNameChars,
+		MaxDraftTextChars:          MaxDraftTextChars,
+		MaxInstructionChars:        domain.MaxGenerationInstructionChars,
+		MaxPreviousDraftBytes:      domain.MaxPreviousDraftBytes,
+		MaxGeneratedTestCases:      MaxGeneratedCases,
+		MaxLargeInputBytes:         MaxLargeInputBytes,
+		MaxLargeTestCases:          MaxLargeTestCases,
+		MaxStylePresets:            domain.MaxStylePresets,
+		MaxStyleNameChars:          domain.MaxStyleNameChars,
+		MaxStyleInstructionsChars:  domain.MaxStyleInstructionsChars,
+		MaxSystemPromptChars:       domain.MaxSystemPromptChars,
+		MaxModelIDChars:            domain.MaxModelIDChars,
+		MaxAPIKeyChars:             domain.MaxAPIKeyChars,
+		MaxAIProviders:             domain.MaxAIProviders,
+		MaxAIProviderNameChars:     domain.MaxAIProviderNameChars,
+		MinAITimeoutSeconds:        domain.MinAITimeoutSeconds,
+		MaxAITimeoutSeconds:        domain.MaxAITimeoutSeconds,
+		MaxBundleNameChars:         domain.MaxBundleNameChars,
+		MaxBundleDescriptionChars:  domain.MaxBundleDescriptionChars,
+		MaxImportUncompressedBytes: domain.BundleExpansionFactor * a.limits.MaxImportBytes,
+		MaxImportEntries:           domain.MaxBundleEntries,
+		MaxImportCollections:       domain.MaxBundleCollections,
+		MaxSolutionsPerItem:        domain.MaxSolutionsPerItem,
+		MaxSolutionNameChars:       domain.MaxSolutionNameChars,
+		MaxSolutionNotesChars:      domain.MaxSolutionNotesChars,
+		MaxNotesChars:              a.limits.MaxNotesChars,
+		MaxLinksPerItem:            a.limits.MaxLinksPerItem,
+		MaxPageSize:                domain.MaxPageSize,
+		MaxRequestBytes:            domain.MaxRequestBytes,
+	}
 }
 
 // CollectionNode is a collection with its children, for tree views.
@@ -158,15 +164,15 @@ type CollectionNode struct {
 }
 
 // Overview is a compact summary of the whole library, for an assistant
-// working on it: with the user's test case preferences and the bounds test
-// cases must keep to.
+// working on it: with the user's test case preferences and the bounds items
+// and test cases must keep to.
 type Overview struct {
 	Stats       domain.Stats        `json:"stats"`
 	Collections []CollectionNode    `json:"collections"`
 	Tags        []domain.Tag        `json:"tags"`
 	Judge       JudgeStatus         `json:"judge"`
 	Preferences OverviewPreferences `json:"preferences"`
-	Limits      TestLimits          `json:"limits"`
+	Limits      OverviewLimits      `json:"limits"`
 }
 
 // OverviewPreferences are the user's preferences about test cases (see
@@ -178,14 +184,46 @@ type OverviewPreferences struct {
 	HideTestCases      bool `json:"hideTestCases"`
 }
 
-// TestLimits are the bounds of test cases, named as in MetaLimits.
-type TestLimits struct {
-	MaxTestDataBytes    int   `json:"maxTestDataBytes"`
-	MaxLargeInputBytes  int   `json:"maxLargeInputBytes"`
-	MaxTestCasesPerItem int   `json:"maxTestCasesPerItem"`
-	MaxSourceBytes      int   `json:"maxSourceBytes"`
-	TimeLimitMs         Range `json:"timeLimitMs"`
-	MemoryLimitKb       Range `json:"memoryLimitKb"`
+// OverviewLimits are the bounds an assistant writing items and test cases
+// keeps to: a subset of MetaLimits, with the same names and values.
+type OverviewLimits struct {
+	MaxTestDataBytes       int   `json:"maxTestDataBytes"`
+	MaxLargeInputBytes     int   `json:"maxLargeInputBytes"`
+	MaxTestCasesPerItem    int   `json:"maxTestCasesPerItem"`
+	MaxSourceBytes         int   `json:"maxSourceBytes"`
+	TimeLimitMs            Range `json:"timeLimitMs"`
+	MemoryLimitKb          Range `json:"memoryLimitKb"`
+	MaxTitleChars          int   `json:"maxTitleChars"`
+	MaxSummaryChars        int   `json:"maxSummaryChars"`
+	MaxTags                int   `json:"maxTags"`
+	MaxTagChars            int   `json:"maxTagChars"`
+	MaxNotesChars          int   `json:"maxNotesChars"`
+	MaxLinksPerItem        int   `json:"maxLinksPerItem"`
+	MaxSolutionNameChars   int   `json:"maxSolutionNameChars"`
+	MaxSolutionNotesChars  int   `json:"maxSolutionNotesChars"`
+	MaxCollectionNameChars int   `json:"maxCollectionNameChars"`
+}
+
+// overviewLimits picks the overview's limits out of /meta's.
+func (a *App) overviewLimits() OverviewLimits {
+	m := a.metaLimits()
+	return OverviewLimits{
+		MaxTestDataBytes:       m.MaxTestDataBytes,
+		MaxLargeInputBytes:     m.MaxLargeInputBytes,
+		MaxTestCasesPerItem:    m.MaxTestCasesPerItem,
+		MaxSourceBytes:         m.MaxSourceBytes,
+		TimeLimitMs:            m.TimeLimitMs,
+		MemoryLimitKb:          m.MemoryLimitKb,
+		MaxTitleChars:          m.MaxTitleChars,
+		MaxSummaryChars:        m.MaxSummaryChars,
+		MaxTags:                m.MaxTags,
+		MaxTagChars:            m.MaxTagChars,
+		MaxNotesChars:          m.MaxNotesChars,
+		MaxLinksPerItem:        m.MaxLinksPerItem,
+		MaxSolutionNameChars:   m.MaxSolutionNameChars,
+		MaxSolutionNotesChars:  m.MaxSolutionNotesChars,
+		MaxCollectionNameChars: m.MaxCollectionNameChars,
+	}
 }
 
 func testCasePreferences(p Preferences) OverviewPreferences {
@@ -215,16 +253,10 @@ func (a *App) TestCasePreferences(ctx context.Context) (OverviewPreferences, err
 }
 
 // Overview returns statistics, the collection tree, tags, the judge's
-// languages, the user's test case preferences and the test case limits.
+// languages, the user's test case preferences and the limits of items and
+// test cases.
 func (a *App) Overview(ctx context.Context) (Overview, error) {
-	out := Overview{Judge: a.JudgeStatus(), Limits: TestLimits{
-		MaxTestDataBytes:    domain.MaxTestCaseBytes,
-		MaxLargeInputBytes:  MaxLargeInputBytes,
-		MaxTestCasesPerItem: domain.MaxTestCasesPerItem,
-		MaxSourceBytes:      a.limits.MaxSourceBytes,
-		TimeLimitMs:         Range{domain.MinTimeLimitMs, domain.MaxTimeLimitMs},
-		MemoryLimitKb:       Range{domain.MinMemoryLimitKb, domain.MaxMemoryLimitKb},
-	}}
+	out := Overview{Judge: a.JudgeStatus(), Limits: a.overviewLimits()}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
 		if out.Stats, err = tx.Stats(); err != nil {

@@ -40,9 +40,10 @@ type Config struct {
 	// AllowedHosts are extra Host header values accepted on /api/ and /mcp.
 	AllowedHosts []string
 
-	MaxImportBytes int64
-	MaxSourceBytes int
-	MaxNotesChars  int
+	MaxImportBytes  int64
+	MaxSourceBytes  int
+	MaxNotesChars   int
+	MaxLinksPerItem int
 
 	Judge JudgeConfig
 	AI    AIConfig
@@ -150,16 +151,17 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Addr:           get("CODEATROPHY_ADDR", ":8080"),
-		DataDir:        get("CODEATROPHY_DATA_DIR", "./data"),
-		SecretKey:      getenv("CODEATROPHY_SECRET_KEY"),
-		LogFormat:      strings.ToLower(get("CODEATROPHY_LOG_FORMAT", "text")),
-		AllowedOrigins: list("CODEATROPHY_ALLOWED_ORIGINS"),
-		PublicURL:      strings.TrimRight(get("CODEATROPHY_PUBLIC_URL", ""), "/"),
-		AllowedHosts:   list("CODEATROPHY_ALLOWED_HOSTS"),
-		MaxImportBytes: int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", 50<<20)),
-		MaxSourceBytes: getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
-		MaxNotesChars:  getInt("CODEATROPHY_MAX_NOTES_CHARS", domain.DefaultMaxNotesChars),
+		Addr:            get("CODEATROPHY_ADDR", ":8080"),
+		DataDir:         get("CODEATROPHY_DATA_DIR", "./data"),
+		SecretKey:       getenv("CODEATROPHY_SECRET_KEY"),
+		LogFormat:       strings.ToLower(get("CODEATROPHY_LOG_FORMAT", "text")),
+		AllowedOrigins:  list("CODEATROPHY_ALLOWED_ORIGINS"),
+		PublicURL:       strings.TrimRight(get("CODEATROPHY_PUBLIC_URL", ""), "/"),
+		AllowedHosts:    list("CODEATROPHY_ALLOWED_HOSTS"),
+		MaxImportBytes:  int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", 50<<20)),
+		MaxSourceBytes:  getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
+		MaxNotesChars:   getInt("CODEATROPHY_MAX_NOTES_CHARS", domain.DefaultMaxNotesChars),
+		MaxLinksPerItem: getInt("CODEATROPHY_MAX_LINKS_PER_ITEM", domain.DefaultMaxLinksPerItem),
 	}
 	c.DBPath = get("CODEATROPHY_DB_PATH", filepath.Join(c.DataDir, "codeatrophy.db"))
 	// The URL may hold a password: it is never repeated in a message.
@@ -213,6 +215,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	if c.MaxNotesChars < 1 || c.MaxNotesChars > domain.MaxNotesCharsCeiling {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_NOTES_CHARS: must be between 1 and %d", domain.MaxNotesCharsCeiling))
+	}
+	if c.MaxLinksPerItem < 1 || c.MaxLinksPerItem > domain.MaxLinksPerItemCeiling {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_MAX_LINKS_PER_ITEM: must be between 1 and %d", domain.MaxLinksPerItemCeiling))
 	}
 
 	c.Judge = JudgeConfig{

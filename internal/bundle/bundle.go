@@ -24,8 +24,10 @@ const (
 )
 
 // MaxRelated is the most ids an item's related field holds, a rule of the
-// format. A library may allow an item fewer links (domain.MaxLinksPerItem);
-// an import leaves out the links over that limit with a warning.
+// format, and domain.MaxLinksPerItemCeiling, the most links an instance may
+// allow an item, is the same number. A library may allow an item fewer
+// links (domain.Limits.MaxLinksPerItem); an import leaves out the links over
+// that limit with a warning.
 const MaxRelated = 50
 
 // Format versions.
