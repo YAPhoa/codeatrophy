@@ -4,11 +4,26 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"codeatrophy/internal/app"
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
 )
+
+// SeededStylePresets are the built-in presets as migration 5 seeds them,
+// before migration 15 refreshes their text; store.BuiltinStylePresets are
+// the presets as they are now. Tests check that the migrations agree.
+var SeededStylePresets = []store.BuiltinStylePreset{
+	{Name: "Interview practice", IsDefault: true,
+		Instructions: `Write the statement the way an interviewer would pose it: two or three short paragraphs in plain language, with no back-story. Name the inputs and say exactly what to print. Give two or three small examples, each followed by one or two sentences explaining why that output is correct. Keep the constraints to a short list, chosen so that the intended time complexity matters. Under Notes, add a "Follow-up" line that asks for a better complexity or a harder twist without giving the approach away. Starter code in Python and Java.`},
+	{Name: "Contest style",
+		Instructions: `Write in the style of a programming-contest problem: a short, concrete scenario of at most one paragraph, then a precise formal statement. Use math notation for every bound. Choose the limits so that the intended complexity is implied but never named. Give at least two examples and explain only the non-obvious one, under Notes. No hints. Starter code in C++ and Python.`},
+	{Name: "Study notes",
+		Instructions: `Write for revision rather than for a test. For a reading: open with a two-sentence summary, then short sections with descriptive headings, each with a small worked example or code sample, and close with "Key takeaways" (three to five bullets) and "Check yourself" (three questions without answers). For a problem: keep the statement brief, and use Notes to name the underlying technique and point to related topics without giving the solution. Prefer plain words to jargon, and define each term the first time it appears.`},
+}
 
 // MigrationDB is a database the migration suite can inspect and close.
 type MigrationDB interface {
@@ -51,6 +66,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0012AIJobs", testAIJobsMigration},
 		{"0013Generator", testGeneratorMigration},
 		{"0014Links", testLinksMigration},
+		{"0015BuiltinPresets", testBuiltinPresetsMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -360,6 +376,86 @@ func testLinksMigration(t *testing.T, h MigrationHarness) {
 		"a pair in the wrong order": `INSERT INTO item_links (item_a, item_b, created_at) VALUES ('z', 'a', 0)`,
 		"a pair stored twice":       `INSERT INTO item_links (item_a, item_b, created_at) VALUES ('origin', 'variant', 0)`,
 		"a test case of no item":    `INSERT INTO test_cases (id, item_id, position, name, stdin, expected_stdout, is_sample, origin, verified, created_at, updated_at) VALUES ('x', 'nobody', 0, '', '', '', false, 'manual', false, 0, 0)`,
+	})
+}
+
+// Migration 15 refreshes the text of every built-in preset that still has
+// its built-in name and seeded text, also when it was made the default
+// since, and changes nothing else: an edited, renamed or deleted preset is
+// left as it is, and no column but the text changes.
+func testBuiltinPresetsMigration(t *testing.T, h MigrationHarness) {
+	ctx := context.Background()
+	builtin := map[string]string{}
+	for _, b := range store.BuiltinStylePresets {
+		builtin[b.Name] = b.Instructions
+	}
+	seeded := map[string]string{}
+	for _, b := range SeededStylePresets {
+		seeded[b.Name] = b.Instructions
+	}
+	// At version 14, a preset with a built-in preset's text has the text
+	// migration 5 seeded, whatever its name.
+	asSeeded := func(db MigrationDB) {
+		quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+		for name, text := range builtin {
+			if err := h.Exec(db, `UPDATE style_presets SET instructions = `+quote(seeded[name])+
+				` WHERE instructions = `+quote(text)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	allButText := func(t *testing.T, b store.Bulk) map[string][]string {
+		return DumpWithout(t, b, map[string][]string{"style_presets": {"instructions"}})
+	}
+	texts := func(t *testing.T, db store.Store, want map[string]string) {
+		t.Helper()
+		got := map[string]string{}
+		for _, p := range Read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() }) {
+			got[p.Name] = p.Instructions
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("preset texts after migration 15:\n  %v\nwant\n  %v", got, want)
+		}
+	}
+
+	// The fixture keeps the default untouched, edits "Contest style",
+	// deletes "Study notes" and adds a preset of the user's.
+	t.Run("Library", func(t *testing.T) {
+		want, db := h.rerun(t, 15, func(db MigrationDB) { Populate(t, db) }, asSeeded, allButText)
+		SameDump(t, "after migration 15", want, allButText(t, db))
+		texts(t, db, map[string]string{"Interview practice": builtin["Interview practice"],
+			"Contest style": "My own contest rules.", "Mine": "Short."})
+	})
+
+	// "Contest style" was made the default, which changes its updated_at
+	// and that of no other preset, and "Study notes" was renamed.
+	t.Run("DefaultAndRenamed", func(t *testing.T) {
+		want, db := h.rerun(t, 15, func(db MigrationDB) {
+			a := app.New(app.Options{Store: db, Secrets: FixtureSecrets, Now: func() time.Time { return now }})
+			list := Read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() })
+			for _, p := range list {
+				var in domain.StylePresetInput
+				switch p.Name {
+				case "Contest style":
+					in.IsDefault = domain.Some(true)
+				case "Study notes":
+					in.Name = domain.Some("My notes")
+				default:
+					continue
+				}
+				if _, err := a.UpdateStylePreset(ctx, p.ID, in); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, p := range Read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() }) {
+				if moved := !p.UpdatedAt.Equal(p.CreatedAt); moved != (p.Name != "Interview practice") || p.IsDefault != (p.Name == "Contest style") {
+					t.Fatalf("%s: default %v, created %v, updated %v", p.Name, p.IsDefault, p.CreatedAt, p.UpdatedAt)
+				}
+			}
+		}, asSeeded, allButText)
+		SameDump(t, "after migration 15", want, allButText(t, db))
+		texts(t, db, map[string]string{"Interview practice": builtin["Interview practice"],
+			"Contest style": builtin["Contest style"], "My notes": seeded["Study notes"]})
 	})
 }
 

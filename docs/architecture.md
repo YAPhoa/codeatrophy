@@ -184,7 +184,8 @@ own transaction, logging each one. The numbers are *logical schema versions*
 shared by both backends: PostgreSQL starts from one consolidated migration
 (`0005_initial_schema.sql`) that yields the schema SQLite reaches with
 0001–0005, including the built-in style presets seeded the same way (only
-into an empty table, only once).
+into an empty table, only once). Migration 0015 refreshes the text of each
+built-in preset whose name and text are still exactly as seeded.
 
 The rule for every later schema change: **add one migration per backend with
 the same new number**, bump `store.SchemaVersion`, and update `store.Tables`
@@ -230,9 +231,9 @@ keys. It runs in one transaction on the destination, which commits only when
 every table has the same row count on both sides, and it refuses a
 destination that already holds library data unless told to replace it.
 "Holds no library data" means every table is empty except style presets, and
-those are only built-in presets exactly as seeded, never edited; any setting,
-provider, usage count, AI log entry, AI job, draft, item, collection or
-submission counts. The destination's own seeded
+those are only built-in presets exactly as this version ships them, never
+edited; any setting, provider, usage count, AI log entry, AI job, draft,
+item, collection or submission counts. The destination's own seeded
 presets are replaced by the source's. Stored API keys travel as ciphertext,
 so the destination needs the same secret key.
 
@@ -639,9 +640,10 @@ The design limits what such text can achieve rather than trying to detect it:
   over MCP. The one exception is the three built-in presets a new instance
   starts with: they ship with the app (seeded once, by a database migration,
   into an empty preset list) and are then ordinary presets the user can edit
-  or delete. The custom system prompt and the custom test case prompt are
-  each one text with the same character rules and a cap of 20000 code
-  points, set the same way only; tag-like
+  or delete; a later migration may refresh the text of one whose name and
+  text are still as shipped. The custom system prompt and the custom test
+  case prompt are each one text with the same character rules and a cap of
+  20000 code points, set the same way only; tag-like
   text in it is defanged, the envelope's nonce avoids it like any other
   untrusted text, and the fixed rules that follow it say they win. Shared
   content therefore cannot plant standing instructions.

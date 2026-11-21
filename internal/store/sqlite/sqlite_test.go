@@ -105,6 +105,48 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 	}
 }
 
+// Migration 15 refreshes the presets migration 5 seeds: a database seeded
+// before it holds the current built-in presets afterwards.
+func TestBuiltinStylePresetsAreRefreshed(t *testing.T) {
+	db := openTest(t)
+	clearStylePresets(t, db)
+	undoMigrationsFrom(t, db, 5)
+	if err := db.migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	list := read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() })
+	if len(list) != len(store.BuiltinStylePresets) {
+		t.Fatalf("%d presets", len(list))
+	}
+	for i, p := range list {
+		if b := store.BuiltinStylePresets[i]; p.Name != b.Name || p.Instructions != b.Instructions || p.IsDefault != b.IsDefault {
+			t.Errorf("%s differs from store.BuiltinStylePresets", p.Name)
+		}
+	}
+	checkPresetMigrations(t, "0005_builtin_style_presets.sql", "0015_refresh_builtin_style_presets.sql")
+}
+
+// checkPresetMigrations checks that the seeding migration holds the seeded
+// text of every built-in preset and the refreshing one both texts.
+func checkPresetMigrations(t *testing.T, seeding, refreshing string) {
+	t.Helper()
+	seed, err := migrationFS.ReadFile("migrations/" + seeding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := migrationFS.ReadFile("migrations/" + refreshing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range storetest.SeededStylePresets {
+		quoted := "'" + b.Instructions + "'"
+		if !strings.Contains(string(seed), quoted) || !strings.Contains(string(refresh), quoted) ||
+			!strings.Contains(string(refresh), "'"+store.BuiltinStylePresets[i].Instructions+"'") {
+			t.Errorf("%s: the migrations' text differs from the tests' copy", b.Name)
+		}
+	}
+}
+
 func TestMigrationsAreIdempotentAndForwardOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "m.db")
 	var logs bytes.Buffer

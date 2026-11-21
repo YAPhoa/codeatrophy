@@ -2319,7 +2319,8 @@ authoring conventions alone unless a request names a preset.
 
 A new instance starts with a few built-in presets, one of them the default.
 They are ordinary presets: they can be edited or deleted like any other,
-count towards the limit, and are not recreated once changed or deleted.
+count towards the limit, and are not recreated once changed or deleted. An
+app update may refresh the text of a built-in preset that was never edited.
 
 | Endpoint | Behaviour |
 | --- | --- |

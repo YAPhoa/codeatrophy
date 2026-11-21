@@ -104,6 +104,26 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 	}
 }
 
+// The migrations hold the seeded text of every built-in preset, and the
+// refreshing one the current text too.
+func TestBuiltinStylePresetMigrations(t *testing.T) {
+	seed, err := migrationFS.ReadFile("migrations/0005_initial_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := migrationFS.ReadFile("migrations/0015_refresh_builtin_style_presets.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range storetest.SeededStylePresets {
+		quoted := "'" + b.Instructions + "'"
+		if !strings.Contains(string(seed), quoted) || !strings.Contains(string(refresh), quoted) ||
+			!strings.Contains(string(refresh), "'"+store.BuiltinStylePresets[i].Instructions+"'") {
+			t.Errorf("%s: the migrations' text differs from the tests' copy", b.Name)
+		}
+	}
+}
+
 // The database refuses to change a provider's kind, even when asked
 // directly.
 func TestAIProviderKindIsImmutable(t *testing.T) {
