@@ -4,13 +4,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateJobs, isActiveJob, qk, useAiJobs } from '../../api/queries';
 import type { AiJob, AiJobStatus } from '../../api/types';
 import { useToast } from '../../ui/Toast';
-import { jobBelongsTo, jobKindLabel } from './labels';
+import { jobBelongsTo, jobKindLabel, listedJobs } from './labels';
 
 /** What a finished job came to, in a word. */
 export const OUTCOME: Record<Exclude<AiJobStatus, 'queued' | 'running'>, string> = { succeeded: 'Ready', failed: 'Failed', cancelled: 'Cancelled' };
 
 export interface JobsState {
-  /** The jobs no open screen has collected; the open screen's own are left to it. */
+  /** The jobs listed: all that run, and those finished elsewhere that no screen has collected. */
   shown: AiJob[];
   /** How many of them are queued or running. */
   active: number;
@@ -37,10 +37,10 @@ export function useJobs(): JobsState {
 
 /**
  * The AI jobs, for the sidebar's jobs entry: generations running and
- * recently finished that no screen has collected yet. A job whose screen is
- * open is left to that screen. When a job seen running finishes while its
- * screen is not open, the list opens by itself to show it, if the sidebar
- * is on screen (`canOpen`), and the finish is announced either way.
+ * recently finished that no screen has collected yet. A finished job whose
+ * screen is open is left to that screen. When a job seen running finishes
+ * while its screen is not open, the list opens by itself to show it, if the
+ * sidebar is on screen (`canOpen`), and the finish is announced either way.
  */
 export function JobsProvider({ canOpen, children }: { canOpen: boolean; children: ReactNode }) {
   const pathname = useLocation().pathname;
@@ -52,7 +52,7 @@ export function JobsProvider({ canOpen, children }: { canOpen: boolean; children
   const watching = state.open && canOpen;
   const jobs = useAiJobs(watching);
   const all = useMemo(() => jobs.data ?? [], [jobs.data]);
-  const shown = useMemo(() => all.filter((j) => !jobBelongsTo(j, pathname)), [all, pathname]);
+  const shown = useMemo(() => listedJobs(all, pathname), [all, pathname]);
   const open = watching && shown.length > 0;
   if (state.open && !open) setState({ open: false, opened: 'user' });
 

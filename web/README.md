@@ -295,9 +295,9 @@ A few conventions worth knowing:
   Drafts page lists them, and the sidebar counts them. Test-case and code
   generation find their job again on return by kind, item and `origin`
   (`features/jobs/useScreenJob.ts`). The AI jobs entry in the sidebar's
-  footer (`features/jobs`) lists what no open screen has collected, each row
-  a link to where its job is looked at, and polls only while a job runs or
-  its list is open.
+  footer (`features/jobs`) lists every running job and the finished ones no
+  open screen has collected, each row a link to where its job is looked at,
+  and polls only while a job runs or its list is open.
 - **Work in progress is kept locally.** Solution code is stored per item and
   language in `localStorage`, and the custom input per item (up to 64 KB);
   so is the capture text typed before a draft exists. The

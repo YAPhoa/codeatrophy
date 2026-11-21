@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiJob, AiJobKind, AiJobStatus } from '../../api/types';
-import { draftStateLabel, elapsedLabel, jobBelongsTo, jobKindLabel, jobLink, jobTarget } from './labels';
+import { draftStateLabel, elapsedLabel, jobBelongsTo, jobKindLabel, jobLink, jobTarget, listedJobs } from './labels';
 
 describe('draftStateLabel', () => {
   it('names each state, in the tone it is shown in', () => {
@@ -31,6 +31,24 @@ describe('where a job belongs', () => {
     expect(jobBelongsTo({ draftId: 'd1', origin: '/items/i1' }, '/drafts/d1')).toBe(true);
     expect(jobBelongsTo({ draftId: 'd1', origin: '/items/i1' }, '/items/i1')).toBe(false);
     expect(jobBelongsTo({ draftId: null, origin: null }, '/')).toBe(false);
+  });
+});
+
+describe('which jobs the AI jobs list shows', () => {
+  type Listed = Pick<AiJob, 'status' | 'draftId' | 'origin'>;
+  const job = (status: AiJobStatus, target: Partial<Listed>): Listed => ({ status, draftId: null, origin: null, ...target });
+
+  it('shows every queued or running job, the open screen’s own too', () => {
+    const jobs = [job('queued', { draftId: 'd1' }), job('running', { draftId: 'd1' }), job('running', { origin: '/items/i1/tests/generate' })];
+    expect(listedJobs(jobs, '/drafts/d1')).toEqual(jobs);
+    expect(listedJobs(jobs, '/items/i1/tests/generate')).toEqual(jobs);
+  });
+
+  it('leaves the open screen’s finished jobs to it, and shows those of other screens', () => {
+    const own = [job('succeeded', { draftId: 'd1' }), job('failed', { draftId: 'd1' }), job('cancelled', { draftId: 'd1' })];
+    const other = [job('succeeded', { draftId: 'd2' }), job('failed', { origin: '/items/i1/edit?tab=code' }), job('succeeded', {})];
+    expect(listedJobs([...own, ...other], '/drafts/d1')).toEqual(other);
+    expect(listedJobs([...own, ...other], '/items/i1/edit')).toEqual([...own, other[0], other[2]]);
   });
 });
 

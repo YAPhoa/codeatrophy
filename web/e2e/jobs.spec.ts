@@ -138,8 +138,8 @@ test('jobs: a running job’s row leads to its draft; the list closes on Escape 
   await expect(page).toHaveURL(new RegExp(`${draft}$`));
   await expect(page.getByText('Drafting…')).toBeVisible();
   await expect(jobsWindow(page)).toHaveCount(0);
-  // Its own screen follows it now.
-  await expect(jobsEntry(page)).toHaveCount(0);
+  // Still running, it stays listed on its own screen.
+  await expect(jobsEntry(page)).toHaveAccessibleName('AI jobs: 1 running');
 });
 
 test('jobs: on the rail, the jobs entry counts them and opens the same list', async ({ page }) => {
@@ -277,6 +277,64 @@ test('jobs: a revision that fails says so, keeps the draft, and is asked again',
   await expect(page.getByText('Revising the draft…')).toBeVisible();
   await expect(failed).toBeVisible();
   await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+});
+
+test('jobs: a revision running on its own draft is listed; its row only closes the list', async ({ page }) => {
+  await open(page, '/new');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum');
+  const draft = new URL(page.url()).pathname;
+  await expect(jobsEntry(page)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  await page.getByLabel('What to change').fill('make it harder MOCK:SLOW');
+  await page.getByRole('button', { name: 'Revise draft' }).click();
+  await expect(page.getByText('Revising the draft…')).toBeVisible();
+  await expect(jobsEntry(page)).toHaveAccessibleName('AI jobs: 1 running');
+  await expect(jobsEntry(page)).toHaveText('1 running');
+
+  await jobsEntry(page).click();
+  const row = jobsWindow(page).getByRole('listitem');
+  await expect(row).toContainText(/Draft · \d+\u00a0s/);
+  await expect(row.getByRole('link')).toHaveAttribute('href', draft);
+  await row.getByRole('link').click();
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`${draft}$`));
+  await expect(page.getByText('Revising the draft…')).toBeVisible();
+});
+
+test('jobs: a revision that finishes on its own draft leaves the footer, and the list stays closed', async ({ page }) => {
+  await open(page, '/new', 'default');
+  await page.getByLabel('What you have').fill(TWO_SUM_TEXT);
+  await page.getByRole('button', { name: 'Draft with AI' }).click();
+  await expect(page.getByLabel('Title')).toHaveValue('Two Sum', { timeout: 10_000 });
+  await expect(jobsEntry(page)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Ask for a revision' }).click();
+  await page.getByLabel('What to change').fill('make it harder');
+  await page.getByRole('button', { name: 'Revise draft' }).click();
+  await expect(page.getByText('Revising the draft…')).toBeVisible();
+  await expect(jobsEntry(page)).toHaveText('1 running');
+
+  // Taken in by the draft: gone from the footer, without opening the list.
+  await expect(page.getByText('Revising the draft…')).toHaveCount(0, { timeout: 10_000 });
+  await expect(jobsEntry(page)).toHaveCount(0);
+  await expect(jobsWindow(page)).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: /^Draft “/ })).toHaveCount(0);
+});
+
+test('jobs: test cases generating on their own page are listed, and leave the footer once shown there', async ({ page }) => {
+  await open(page, `/items/${TWO_SUM}/tests/generate`, 'default');
+  await page.getByRole('button', { name: 'Generate test cases', exact: true }).click();
+  await expect(page.getByText('Writing a solution and test cases…')).toBeVisible();
+  await expect(jobsEntry(page)).toHaveAccessibleName('AI jobs: 1 running');
+  await jobsEntry(page).click();
+  await expect(jobsWindow(page).getByRole('listitem')).toContainText(/Test cases · (Queued|\d+\u00a0s)/);
+
+  await expect(page.getByRole('heading', { name: 'Proposed cases' })).toBeVisible({ timeout: 10_000 });
+  await expect(jobsEntry(page)).toHaveCount(0);
+  await expect(jobsWindow(page)).toHaveCount(0);
 });
 
 test('jobs: a server restart ends a running job as interrupted', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { AlertCircle, CheckCircle2, ChevronDown, CircleSlash, Clock, Sparkles, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { isActiveJob, useDrafts } from '../../api/queries';
@@ -40,6 +40,7 @@ function useNow(ticking: boolean): number {
 /** The rows, mounted only while the list is open, so the clock ticks only then. */
 function JobsList({ onLeave }: { onLeave: () => void }) {
   const { shown, active, act } = useJobs();
+  const pathname = useLocation().pathname;
   const now = useNow(active > 0);
   const drafts = useDrafts();
   const draftIds = useMemo(() => (drafts.data ? new Set(drafts.data.map((d) => d.id)) : null), [drafts.data]);
@@ -49,10 +50,20 @@ function JobsList({ onLeave }: { onLeave: () => void }) {
         const running = isActiveJob(job);
         const since = Date.parse(job.startedAt ?? job.createdAt);
         const meta = job.status === 'queued' ? 'Queued' : running ? elapsedLabel(now - since) : OUTCOME[job.status as 'succeeded'];
+        const to = jobLink(job, draftIds);
+        // Its screen is the one open: the row only closes the list.
+        const here = to.split(/[?#]/)[0] === pathname;
         return (
           <li key={job.id} className={cx('job-row', `is-${job.status}`)}>
             {/* The row is the link; its buttons sit beside it, not inside. */}
-            <Link to={jobLink(job, draftIds)} className="job-link" onClick={onLeave}>
+            <Link
+              to={to}
+              className="job-link"
+              onClick={(e) => {
+                if (here && !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) e.preventDefault();
+                onLeave();
+              }}
+            >
               <StatusIcon status={job.status} />
               <span className="job-text">
                 <span className="job-title truncate" title={job.title}>

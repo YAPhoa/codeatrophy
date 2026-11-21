@@ -42,11 +42,20 @@ export function jobLink(job: Pick<AiJob, 'kind' | 'itemId' | 'draftId' | 'origin
   return job.kind === 'draft' || job.kind === 'variant' ? '/drafts' : '/';
 }
 
-/** Whether a job's outcome is collected on the screen at `pathname`, so the AI jobs list leaves it to that screen. */
+/** Whether a job's outcome is collected on the screen at `pathname`. */
 export function jobBelongsTo(job: Pick<AiJob, 'draftId' | 'origin'>, pathname: string): boolean {
   const target = jobTarget(job);
   if (!target) return false;
   return target.split(/[?#]/)[0] === pathname;
+}
+
+/**
+ * The jobs the AI jobs list shows with the screen at `pathname` open: every
+ * queued or running one, and the finished ones of other screens. The open
+ * screen collects its own finished jobs.
+ */
+export function listedJobs<J extends Pick<AiJob, 'status' | 'draftId' | 'origin'>>(jobs: readonly J[], pathname: string): J[] {
+  return jobs.filter((j) => j.status === 'queued' || j.status === 'running' || !jobBelongsTo(j, pathname));
 }
 
 /** Seconds as the AI jobs list shows them: "8 s", "1:05". */
