@@ -78,3 +78,17 @@ test('collections: one is renamed and moved from its menu, and deleted without i
   await expect(renamed).toHaveCount(0);
   await expect(page.getByRole('link', { name: first, exact: true })).toBeVisible();
 });
+
+test('collections: one without a description keeps the line, so the list starts where it does under one with', async ({ page }) => {
+  const listTop = async (n: number) => {
+    await open(page, `/collections/22222222-2222-4222-8222-00000000000${n}`);
+    await expect(page.locator('.item-list-head')).toBeVisible();
+    return page.locator('.item-list-head').evaluate((el) => el.getBoundingClientRect().top);
+  };
+  // Arrays & hashing has no description; Dynamic programming has a one-line one.
+  const without = await listTop(2);
+  await expect(page.locator('.page-sub')).toHaveAttribute('aria-hidden', 'true');
+  const withOne = await listTop(3);
+  await expect(page.locator('.page-sub')).toHaveText('State, transition, order of evaluation.');
+  expect(without).toBe(withOne);
+});

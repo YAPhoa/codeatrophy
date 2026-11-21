@@ -494,7 +494,12 @@ export function LibraryPage() {
               )}
             </span>
           </h1>
-          {collection?.description && <p className="page-sub">{collection.description}</p>}
+          {/* A collection without a description keeps the line, so the header does not jump between collections. */}
+          {collection && (
+            <p className="page-sub" aria-hidden={!collection.description.trim() || undefined}>
+              {collection.description.trim() ? collection.description : '\u00a0'}
+            </p>
+          )}
           {filters.uncollected && !collection && <p className="page-sub">Items that are not in any collection yet.</p>}
           {children.length > 0 && (
             <div className="subcollections">
