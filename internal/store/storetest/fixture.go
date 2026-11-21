@@ -135,6 +135,7 @@ func Populate(t *testing.T, db store.Store) {
 				Verified: true, CreatedAt: now, UpdatedAt: now}
 			if i == 2 {
 				tc.Stdin, tc.ExpectedStdout = x, x
+				tc.Generator = &domain.GeneratorSpec{Language: "python", Source: x}
 			}
 			if err := tx.InsertTestCase(&tc); err != nil {
 				return err
@@ -266,6 +267,18 @@ func ClearNewerData(t *testing.T, db store.Store) {
 			s.LastRun = nil
 			if err := tx.UpdateSolution(&s); err != nil {
 				return err
+			}
+		}
+		cases, err := tx.ListTestCases("origin")
+		if err != nil {
+			return err
+		}
+		for _, c := range cases {
+			if c.Generator != nil {
+				c.Generator = nil
+				if err := tx.UpdateTestCase(&c); err != nil {
+					return err
+				}
 			}
 		}
 		return nil

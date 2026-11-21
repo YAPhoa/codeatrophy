@@ -577,6 +577,9 @@ func (a *App) SaveDraft(ctx context.Context, id string, in DraftSaveInput) (doma
 	if d.VariantOf != nil && !item.VariantOf.Set {
 		item.VariantOf = domain.Some(*d.VariantOf)
 	}
+	if err := a.generateItemCases(ctx, &item); err != nil {
+		return domain.Item{}, err
+	}
 	n, err := a.newItem(item)
 	if err != nil {
 		return domain.Item{}, err

@@ -1,11 +1,15 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import type { LargeCaseReport, SourceCode } from '../../api/types';
 import { describeLargeCase, summariseLargeCases } from '../../lib/checks';
+import { formatBytes, plural } from '../../lib/format';
 import { languageName } from '../../lib/languages';
 import { Button, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
+import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { InfoTip } from '../../ui/InfoTip';
+import { Badge } from '../../ui/misc';
+import { lineCount } from '../solutions/solutionWrites';
 
 interface LargeCaseSummaryProps {
   reports: readonly LargeCaseReport[];
@@ -59,20 +63,38 @@ export function LargeCaseSummary({ reports, timeLimitMs, open, onToggle, info, c
   );
 }
 
-/**
- * The generator program of a large test case, read-only. `of` names the
- * case, e.g. "case 3"; `labelClassName` matches the label to those of the
- * case's data.
- */
-export function LargeCaseGenerator({ generator, of, labelClassName = 'io-label' }: { generator: SourceCode; of: string; labelClassName?: string }) {
+/** Marks a case whose input a generator printed, with the size of that input. */
+export function LargeBadge({ stdin }: { stdin: string }) {
   return (
-    <div className="io-block">
-      <div className={labelClassName}>
-        Generator<span className="io-note"> · {languageName(generator.language)}</span>
-      </div>
-      <div className="editor-frame large-case-generator">
-        <CodeEditor value={generator.source} language={generator.language} readOnly ariaLabel={`Generator of ${of}, ${languageName(generator.language)} (read-only)`} />
-      </div>
+    <Badge title="Input printed by a generator">
+      Large · {formatBytes(stdin.length)}
+    </Badge>
+  );
+}
+
+/**
+ * The generator program of a large test case, read-only and closed until
+ * asked for. `of` names the case, e.g. "case 3", for the editor's label.
+ */
+export function LargeCaseGenerator({ generator, of }: { generator: SourceCode; of: string }) {
+  const [open, setOpen] = useState(false);
+  const language = languageName(generator.language);
+  return (
+    <div className={cx('runner case-generator', open && 'is-open')}>
+      <button type="button" className="runner-toggle" aria-label={`Generator of ${of}, ${language}`} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <ExpandChevron open={open} />
+        <strong>Generator</strong>
+        <span className="muted">{language}</span>
+        <span className="spacer" />
+        <span className="muted">{plural(lineCount(generator.source), 'line')}</span>
+      </button>
+      <Collapse open={open} heavy>
+        <div className="runner-parts">
+          <div className="editor-frame large-case-generator">
+            <CodeEditor value={generator.source} language={generator.language} readOnly ariaLabel={`Generator of ${of}, ${language} (read-only)`} />
+          </div>
+        </div>
+      </Collapse>
     </div>
   );
 }

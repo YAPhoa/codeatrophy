@@ -103,12 +103,19 @@ type testsJSON struct {
 }
 
 type testCaseJSON struct {
-	Name     string `json:"name"`
-	Input    string `json:"input"`
-	Output   string `json:"output"`
-	Sample   bool   `json:"sample"`
-	Origin   string `json:"origin"`
-	Verified bool   `json:"verified"`
+	Name      string             `json:"name"`
+	Input     string             `json:"input"`
+	Output    string             `json:"output"`
+	Sample    bool               `json:"sample"`
+	Origin    string             `json:"origin"`
+	Verified  bool               `json:"verified"`
+	Generator *caseGeneratorJSON `json:"generator,omitempty"`
+}
+
+// caseGeneratorJSON names the file holding a test case's generator.
+type caseGeneratorJSON struct {
+	Language string `json:"language"`
+	File     string `json:"file"`
 }
 
 func marshalPretty(v any) ([]byte, error) {
@@ -236,10 +243,15 @@ func Write(w io.Writer, b *Bundle) error {
 					if origin == "" {
 						origin = string(domain.OriginManual)
 					}
-					tj.Cases = append(tj.Cases, testCaseJSON{Name: tc.Name, Input: base + ".in", Output: base + ".out",
-						Sample: tc.IsSample, Origin: origin, Verified: tc.Verified})
+					cj := testCaseJSON{Name: tc.Name, Input: base + ".in", Output: base + ".out",
+						Sample: tc.IsSample, Origin: origin, Verified: tc.Verified}
 					files = append(files, pending{dir + "/tests/" + base + ".in", []byte(tc.Stdin)},
 						pending{dir + "/tests/" + base + ".out", []byte(tc.ExpectedStdout)})
+					if g := tc.Generator; g != nil {
+						cj.Generator = &caseGeneratorJSON{Language: g.Language, File: base + ".gen." + extension(g.Language)}
+						files = append(files, pending{dir + "/tests/" + cj.Generator.File, []byte(g.Source)})
+					}
+					tj.Cases = append(tj.Cases, cj)
 				}
 				data, err := marshalPretty(tj)
 				if err != nil {

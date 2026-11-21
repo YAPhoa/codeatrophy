@@ -54,7 +54,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Reading.
 	t.add(s, "get_overview", "Library overview",
-		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), and which languages the judge engine offers. A good first call.",
+		"Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge engine offers, the user's test case preferences (preferences: generatedTestCases, largeTestCase, largeTestCaseCount, hideTestCases; read-only) and the bounds test cases keep to (limits). A good first call.",
 		object(props{}), readOnly, func(ctx context.Context, _ json.RawMessage) (any, error) {
 			return a.Overview(ctx)
 		})
@@ -363,7 +363,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Test cases and execution.
 	t.add(s, "add_test_cases", "Add test cases",
-		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Test-case changes do not change the item revision. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
+		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Test-case changes do not change the item revision. A large case is given as a generator instead of stdin: the server runs it, before storing anything, and the case's stdin is what it printed. A case given both stdin and a generator is stored as given without running anything; the server does not check that the input came from the generator. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
 		object(props{
 			"itemId":            str("Problem id"),
 			"cases":             arrayOf(testCaseSchema(), "Test cases to add"),
@@ -382,7 +382,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "update_test_case", "Update test case",
-		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it.",
+		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it. A generator runs and what it prints replaces stdin; generator: null drops the generator and keeps stdin; setting stdin without a generator drops the generator too. Giving stdin and a non-null generator together is refused here.",
 		object(props{
 			"id":             str("Test case id"),
 			"name":           str("Name"),
@@ -390,6 +390,7 @@ func (t *tools) register(s *mcp.Server) {
 			"expectedStdout": str("Expected output"),
 			"isSample":       boolean("Sample flag"),
 			"verified":       boolean("Verified flag"),
+			"generator":      map[string]any{"anyOf": []any{generatorSchema(), map[string]any{"type": "null"}}, "description": generatorDesc + ". null drops the generator and keeps stdin"},
 		}, "id"), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ID string `json:"id"`

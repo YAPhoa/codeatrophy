@@ -53,6 +53,7 @@ items/
       01.out
       02.in
       02.out
+      02.gen.py               (optional: the generator of case 2)
   cap-theorem-notes-0193b2f4/
     item.json
     body.md
@@ -218,6 +219,26 @@ file is missing, larger than `limits.maxTestDataBytes`, or not valid UTF-8 is
 skipped with a warning naming the file and the reason; the rest of the item
 is imported.
 
+A large test case may carry the **generator** that printed its input (see
+"Generators" in the HTTP API): an optional `generator` naming its language
+and a file inside `tests/` that holds its source. Writers include it only
+for a case that has one, naming the file
+`<case base name>.gen.<extension for the language>`:
+
+```json
+{ "name": "200,000 equal values", "input": "02.in", "output": "02.out", "sample": false, "origin": "ai", "verified": true,
+  "generator": { "language": "python", "file": "02.gen.py" } }
+```
+
+The input file is written and required as for any case, so an importer
+never has to run code; the generator is kept for reference and to build
+the input again. Like `origin` it is not part of the content hash, so
+adding or removing one does not make an item `changed`. A reader stores it
+with the case when it is usable: a known language, and a file that exists,
+is valid UTF-8 and holds a non-empty source of at most `maxSourceBytes`.
+Otherwise the case is imported without it, with a warning. Older readers
+ignore the field and the file.
+
 ## Content hash
 
 `contentHash` identifies an item's shareable content. It lets an importer
@@ -243,8 +264,8 @@ with the runner code itself. A full-program problem has neither, so its
 hash is the same in both versions and the hashes of version 1 bundles stay
 valid.
 
-Ids, timestamps, `origin`, `verified`, a solution's `lastRun` and everything
-personal are excluded.
+Ids, timestamps, `origin`, `verified`, a test case's `generator`, a
+solution's `lastRun` and everything personal are excluded.
 `problem`, `solutions` and `testCases` are omitted for readings. The hash
 always describes what is *in the bundle*: if solutions or hidden tests were
 left out of the export, they are left out of the hash too (`solutions` is
@@ -336,6 +357,7 @@ and say what is wrong, and skip as little as possible:
 | A solution with an unknown language, invalid name, or missing/too large/non-UTF-8 file | That solution is skipped |
 | `solutions.json` or `tests.json` not JSON or with a wrongly typed field | The item is skipped (importing it without them could replace the local ones with none) |
 | A test case file missing, too large or non-UTF-8 | That case is skipped |
+| A test case's `generator` with a wrong type, an unknown language, or a missing, non-UTF-8, empty or too large file | The case is imported without its generator |
 | Stored `contentHash` differs from the recomputed one | Warning only |
 
 ## Versioning
@@ -349,7 +371,7 @@ never changes within a version.
 
 | Version | Adds |
 | --- | --- |
-| 1 | Items, test cases, solutions, collections |
+| 1 | Items, test cases, solutions, collections; later, without a new version, test case generators (an optional field) |
 | 2 | Solution-only problems: `problem.interface`, `problem.harness` and the `harness/` directory, and the interface and harness in the content hash |
 
 Version 2 is a version of its own rather than optional fields because a

@@ -91,13 +91,18 @@ function bulkCases(db: MockDb, req: Req) {
 function patchCase(db: MockDb, req: Req) {
   const tc = getCase(db, req.params.id!);
   const v = new Validator();
-  const input = parseTestCaseInput(objectBody(req), v, '', true);
+  const raw = objectBody(req);
+  const input = parseTestCaseInput(raw, v, '', true);
   v.check();
+  // An input set by hand no longer comes from the generator.
+  if (raw.stdin !== undefined && raw.generator === undefined) input.generator = null;
 
   const ioChanged =
     (input.stdin !== undefined && input.stdin !== tc.stdin) ||
     (input.expectedStdout !== undefined && input.expectedStdout !== tc.expectedStdout);
-  const changed = (Object.keys(input) as (keyof TestCaseInput)[]).some((key) => input[key] !== tc[key]);
+  const changed = (Object.keys(input) as (keyof TestCaseInput)[]).some((key) =>
+    key === 'generator' ? JSON.stringify(input.generator) !== JSON.stringify(tc.generator) : input[key] !== tc[key],
+  );
 
   // Actually editing the input or the expected output invalidates an earlier
   // verification, unless the same request sets `verified`. Sending a value

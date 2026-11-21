@@ -424,7 +424,16 @@ The two features built on it are provider independent:
   reference solution, so several take about as long as one; one that fails
   never affects the others. In a draft this runs after the other cases and
   before the runners, inside the check's time bound and outside its 10-case
-  cap. The generators themselves are not stored.
+  cap. Each case keeps its generator, which is stored with it when the
+  case is saved: a stored generator marks a case as large. A client can
+  also give a test case a generator instead of its stdin, which is how an
+  MCP assistant adds large cases without pasting a megabyte into a tool
+  call: the same step runs it and checks its output (shared by both paths),
+  before the write transaction, and the request fails as a whole if one
+  generator does. A new case given both its stdin and a generator (a
+  draft's large case being saved) is stored as given without running it. The stdin is stored either way, so nothing has to run a
+  generator again, and bundles carry it as a source file beside the input,
+  outside the content hash.
   Large test data never enters a prompt (and so never the AI log): wherever
   a prompt lists test cases, one larger than 4 KiB is named with its size
   instead.
@@ -691,7 +700,13 @@ Design points:
 - **Built for incremental edits.** Tools return compact results, support
   partial updates and targeted text replacement inside long Markdown bodies,
   and carry the item `revision` so an assistant never silently overwrites a
-  concurrent human edit.
+  concurrent human edit. Test data larger than 16 KiB in any tool result is
+  replaced by its size and first bytes (in the MCP adapter only), so one
+  large test case cannot fill the assistant's context.
+- **The user's preferences.** `get_overview` reports the user's test case
+  preferences and the test case limits, and the prompts follow them (how
+  many cases, whether to add large ones as generators); like style presets,
+  they cannot be changed over MCP.
 - **Access.** The endpoint can be disabled, and can require a bearer token.
   It shares the HTTP API's request checks (below). Idle sessions are closed
   after 30 minutes and the number of open sessions is capped.

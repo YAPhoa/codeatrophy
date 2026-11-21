@@ -55,6 +55,9 @@ type DraftTestCase struct {
 	// Verified is true when the draft's reference solution printed the
 	// expected output.
 	Verified bool `json:"verified"`
+	// Generator is the program that printed Stdin, for a large test case,
+	// or nil. Saving the draft stores it with the case.
+	Generator *domain.GeneratorSpec `json:"generator"`
 	// outcome is what the check found for this case (see CaseOutcome).
 	outcome CaseOutcome
 }
@@ -590,6 +593,9 @@ type GeneratedCase struct {
 	Verified          bool    `json:"verified"`
 	PredictionMatched *bool   `json:"predictionMatched"`
 	Error             *string `json:"error"`
+	// Generator is the program that printed Stdin, for a large case, or
+	// nil.
+	Generator *domain.GeneratorSpec `json:"generator"`
 }
 
 // Verification reports whether proposed cases were run.
@@ -722,8 +728,9 @@ func (a *App) prepareTestCases(ctx context.Context, itemID string, in GenerateTe
 				if lc == nil {
 					continue
 				}
+				g := lc.Generator
 				out.Cases = append(out.Cases, GeneratedCase{Name: lc.Name, Rationale: lc.Rationale, Stdin: lc.Stdin,
-					ExpectedStdout: lc.Expected, Verified: true})
+					ExpectedStdout: lc.Expected, Verified: true, Generator: &g})
 				at := len(out.Cases) - 1
 				reports[i].Index = &at
 			}
@@ -969,8 +976,9 @@ func (a *App) checkDraft(ctx context.Context, d *ItemDraft, b checkBounds, large
 			if lc == nil {
 				continue
 			}
+			g := lc.Generator
 			d.TestCases = append(d.TestCases, DraftTestCase{Name: lc.Name, Stdin: lc.Stdin, ExpectedStdout: lc.Expected,
-				Verified: true})
+				Verified: true, Generator: &g})
 			at := len(d.TestCases) - 1
 			reports[i].Index = &at
 			c.Passed++

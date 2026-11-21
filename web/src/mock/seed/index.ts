@@ -577,6 +577,7 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
       isSample: c.sample ?? false,
       origin: c.origin ?? 'manual',
       verified: c.verified ?? false,
+      generator: null,
       createdAt: at(p.created),
       updatedAt: at(p.updated),
     });

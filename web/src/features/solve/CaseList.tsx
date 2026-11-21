@@ -5,6 +5,7 @@ import { describeCases } from '../../lib/format';
 import { textFilename } from '../../lib/largeText';
 import { Button, LinkButton } from '../../ui/Button';
 import { Callout, ErrorState, PageLoading } from '../../ui/misc';
+import { LargeBadge, LargeCaseGenerator } from '../tests/LargeCaseOutcome';
 import { Output } from './ResultPanel';
 import type { Reveal } from './useReveal';
 
@@ -107,6 +108,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
                   ) : (
                     <span className="chip">{c.isSample ? 'sample' : 'hidden'}</span>
                   )}
+                  {c.generator && <LargeBadge stdin={c.stdin} />}
                   <span className="spacer" />
                   {onUseInput && (
                     <Button size="sm" variant="ghost" onClick={() => onUseInput(c.stdin)} title="Copy this input to the Custom input tab">
@@ -114,6 +116,7 @@ export function CaseList({ item, cases, reveal, aiEnabled, onUseInput }: CaseLis
                     </Button>
                   )}
                 </div>
+                {c.generator && <LargeCaseGenerator generator={c.generator} of={`case ${number}`} />}
                 <div className="io-pair">
                   <Output label="Input" text={c.stdin} filename={textFilename(item.title, c.name || `case ${number}`, 'input')} />
                   <Output label="Expected output" text={c.expectedStdout} filename={textFilename(item.title, c.name || `case ${number}`, 'output')} />

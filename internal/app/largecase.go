@@ -60,13 +60,13 @@ func largeAsk(n int) ai.LargeCases {
 
 // LargeCaseReport says what became of a requested large test case.
 type LargeCaseReport struct {
-	Status     string           `json:"status"` // added, failed or skipped
-	Error      *string          `json:"error"`
-	Index      *int             `json:"index"`
-	Name       *string          `json:"name"`
-	InputBytes *int             `json:"inputBytes"`
-	TimeMs     *int             `json:"timeMs"`
-	Generator  *domain.Solution `json:"generator"`
+	Status     string                `json:"status"` // added, failed or skipped
+	Error      *string               `json:"error"`
+	Index      *int                  `json:"index"`
+	Name       *string               `json:"name"`
+	InputBytes *int                  `json:"inputBytes"`
+	TimeMs     *int                  `json:"timeMs"`
+	Generator  *domain.GeneratorSpec `json:"generator"`
 }
 
 func (r *LargeCaseReport) fail(status, format string, args ...any) *LargeCaseReport {
@@ -89,7 +89,7 @@ func newLargeCaseReports(gens []*ai.ModelLargeCase, n int) []*LargeCaseReport {
 		}
 		switch {
 		case gen != nil:
-			r.Generator = &domain.Solution{Language: gen.Language, Source: domain.NormalizeText(gen.Source)}
+			r.Generator = &domain.GeneratorSpec{Language: gen.Language, Source: domain.NormalizeText(gen.Source)}
 			name := truncateRunes(oneLine(gen.Name), domain.MaxTestCaseNameChars)
 			if name == "" {
 				name = "Large input"
@@ -116,6 +116,7 @@ func failAll(reports []*LargeCaseReport, status, msg string) []*LargeCaseReport 
 // largeCase is a built large test case.
 type largeCase struct {
 	Name, Rationale, Stdin, Expected string
+	Generator                        domain.GeneratorSpec
 }
 
 // namedInput is a test input a large case must not repeat.
@@ -192,45 +193,16 @@ func (a *App) buildLargeCases(ctx context.Context, spec *domain.ProblemSpec, gen
 // when r says added.
 func (a *App) buildLargeCase(ctx context.Context, spec *domain.ProblemSpec, gen *ai.ModelLargeCase, prog grader.Program,
 	r *LargeCaseReport, existing []namedInput) (string, *largeCase) {
-	lc := &largeCase{Name: *r.Name, Rationale: strings.TrimSpace(gen.Rationale)}
-	if fe := domain.ValidateSolution(*r.Generator, a.limits); len(fe) > 0 {
-		r.fail("failed", "the generator is not usable: %s", fe.First())
-		return "", nil
-	}
-	if err := a.requireLanguage(ctx, r.Generator.Language); err != nil {
-		if AsError(err).Code == CodeJudgeUnavailable {
-			r.fail("skipped", "%s", validationText(err))
-		} else {
-			r.fail("failed", "the generator is in a language the judge does not run: %s", validationText(err))
-		}
-		return "", nil
-	}
+	lc := &largeCase{Name: *r.Name, Rationale: strings.TrimSpace(gen.Rationale), Generator: *r.Generator}
 
 	// 1. The generator, as a plain program.
-	g := a.grader.RunAll(ctx, grader.Program{Language: r.Generator.Language, Source: r.Generator.Source,
-		TimeLimitMs: generatorTimeLimitMs, MemoryLimitKb: generatorMemoryLimitKb}, []string{""}, nil)[0]
-	if msg, skip := engineTrouble(ctx, g); msg != "" {
-		r.fail(map[bool]string{true: "skipped", false: "failed"}[skip], "%s", msg)
+	g := a.runGenerator(ctx, *r.Generator)
+	if g.err != "" {
+		r.fail(map[bool]string{true: "skipped", false: "failed"}[g.skip], "%s", g.err)
 		return "", nil
 	}
-	out := g.Result.Stdout
+	out := g.input
 	msg := ""
-	switch {
-	case g.CompileFailed():
-		msg = "the generator does not compile: " + domain.Truncate(strings.TrimSpace(g.Result.CompileOutput), 1000)
-	case len(out) > MaxLargeInputBytes:
-		msg = fmt.Sprintf("the generator printed more than %d bytes", MaxLargeInputBytes)
-	case g.Result.Status != judge.StatusOK:
-		msg = "the generator " + strings.TrimPrefix(describeFailure(grader.Verdict(spec.Compare, g, nil), g), "the reference solution ")
-	case strings.TrimSpace(out) == "":
-		msg = "the generator printed nothing"
-	case !utf8.ValidString(out):
-		msg = "the generator printed something that is not UTF-8"
-	}
-	if msg != "" {
-		r.fail("failed", "%s", msg)
-		return "", nil
-	}
 	n := len(out)
 	r.InputBytes = &n
 	for i, c := range existing {
@@ -268,6 +240,56 @@ func (a *App) buildLargeCase(ctx context.Context, spec *domain.ProblemSpec, gen 
 	return out, lc
 }
 
+// generatorRun is what running one generator gave: the input it printed,
+// or the reason in plain words why it gave none (err), with skip true when
+// the reason says nothing about the generator (no engine, the engine could
+// not be reached or failed, the time ran out).
+type generatorRun struct {
+	input string
+	err   string
+	skip  bool
+}
+
+// runGenerator checks a generator, runs it in the judge engine as a plain
+// program with the generator limits, and checks what it printed: something,
+// at most MaxLargeInputBytes, valid UTF-8. Whether the input repeats
+// another case is for the caller to check. The draft and test generation
+// paths and the test case endpoints all run generators through it.
+func (a *App) runGenerator(ctx context.Context, gen domain.GeneratorSpec) generatorRun {
+	if msg := domain.ValidateGenerator(gen, a.limits); msg != "" {
+		return generatorRun{err: msg}
+	}
+	if err := a.requireLanguage(ctx, gen.Language); err != nil {
+		if AsError(err).Code == CodeJudgeUnavailable {
+			return generatorRun{err: validationText(err), skip: true}
+		}
+		return generatorRun{err: "the generator is in a language the judge does not run: " + validationText(err)}
+	}
+	g := a.grader.RunAll(ctx, grader.Program{Language: gen.Language, Source: gen.Source,
+		TimeLimitMs: generatorTimeLimitMs, MemoryLimitKb: generatorMemoryLimitKb}, []string{""}, nil)[0]
+	if msg, skip := engineTrouble(ctx, g); msg != "" {
+		return generatorRun{err: msg, skip: skip}
+	}
+	out := g.Result.Stdout
+	msg := ""
+	switch {
+	case g.CompileFailed():
+		msg = "the generator does not compile: " + domain.Truncate(strings.TrimSpace(g.Result.CompileOutput), 1000)
+	case len(out) > MaxLargeInputBytes:
+		msg = fmt.Sprintf("the generator printed more than %d bytes", MaxLargeInputBytes)
+	case g.Result.Status != judge.StatusOK:
+		msg = "the generator " + strings.TrimPrefix(describeFailure(grader.Verdict(domain.CompareExact, g, nil), g), "the reference solution ")
+	case strings.TrimSpace(out) == "":
+		msg = "the generator printed nothing"
+	case !utf8.ValidString(out):
+		msg = "the generator printed something that is not UTF-8"
+	}
+	if msg != "" {
+		return generatorRun{err: msg}
+	}
+	return generatorRun{input: out}
+}
+
 // engineTrouble describes an execution that says nothing about the program:
 // the engine failed (skip: true when it could not be reached or the time
 // ran out).
@@ -291,7 +313,9 @@ func isLargeData(stdin, expected string) bool {
 }
 
 // elidePreviousDraft takes the large test cases out of a previous draft's
-// testCases and lists them by name and size under ai.OmittedCasesKey.
+// testCases and lists them by name and size under ai.OmittedCasesKey. A
+// case with a generator is a large one whatever its size: a revision does
+// not carry large cases over.
 func elidePreviousDraft(obj map[string]any) {
 	cases, ok := obj["testCases"].([]any)
 	if !ok {
@@ -306,7 +330,7 @@ func elidePreviousDraft(obj map[string]any) {
 		}
 		in, _ := m["stdin"].(string)
 		exp, _ := m["expectedStdout"].(string)
-		if !isLargeData(in, exp) {
+		if !isLargeData(in, exp) && (m["generator"] == nil) {
 			kept = append(kept, c)
 			continue
 		}

@@ -10,6 +10,7 @@ import {
   checkRequestFromForm,
   discardableCases,
   draftFromForm,
+  editedCase,
   effectiveHarness,
   emptyForm,
   formLanguages,
@@ -51,7 +52,7 @@ const draft: ItemDraft = {
     harness: {},
     referenceSolution: { language: 'python', source: 'print(2)' },
   },
-  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, verified: true }],
+  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, verified: true, generator: null }],
   assumptions: ['Assumed 0-based indices.'],
 };
 
@@ -119,7 +120,7 @@ describe('formFromDraft', () => {
   });
 
   it('marks every large test case the generation added', () => {
-    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true });
+    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true, generator: null });
     const big: ItemDraft = { ...draft, testCases: [...draft.testCases, large('Large', '9\n'), large('Larger', '10\n')] };
     const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 2, timeMs: 5, generator: null };
     const failed: LargeCaseReport = { ...report, status: 'failed', error: 'the generator crashed', index: null };
@@ -130,25 +131,53 @@ describe('formFromDraft', () => {
   });
 
   it('lists the large cases last, each with its own generator', () => {
-    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true });
+    const large = (name: string, stdin: string) => ({ name, stdin, expectedStdout: '1\n', isSample: false, verified: true, generator: null });
     const big: ItemDraft = { ...draft, testCases: [large('Large', '9\n'), ...draft.testCases, large('Larger', '10\n')] };
     const gen = (source: string) => ({ language: 'python', source });
     const report: LargeCaseReport = { status: 'added', error: null, index: 0, name: 'Large', inputBytes: 2, timeMs: 5, generator: gen('a') };
     const form = formFromDraft(big, {}, [report, { ...report, index: 2, name: 'Larger', generator: gen('b') }]);
-    expect(form.testCases.map((t) => [t.name, t.generator?.source])).toEqual([
-      ['Example 1', undefined],
+    expect(form.testCases.map((t) => [t.name, t.generator?.source ?? null])).toEqual([
+      ['Example 1', null],
       ['Large', 'a'],
       ['Larger', 'b'],
     ]);
     // A report without a generator still marks its case.
     const bare = formFromDraft(big, {}, [{ ...report, generator: null }]).testCases.find((t) => t.large);
-    expect(bare).toMatchObject({ name: 'Large', large: true });
-    expect(bare).not.toHaveProperty('generator');
+    expect(bare).toMatchObject({ name: 'Large', large: true, generator: null });
+  });
+
+  it('takes the generator a case carries, and marks the case large by it', () => {
+    const gen = { language: 'python', source: 'print(9)' };
+    const big: ItemDraft = { ...draft, testCases: [{ name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true, generator: gen }, ...draft.testCases] };
+    const form = formFromDraft(big);
+    expect(form.testCases.map((t) => [t.name, t.large === true, t.generator])).toEqual([
+      ['Example 1', false, null],
+      ['Large', true, gen],
+    ]);
+    // Its own generator comes before the report's.
+    const report: LargeCaseReport = { status: 'added', error: null, index: 0, name: 'Large', inputBytes: 2, timeMs: 5, generator: { language: 'python', source: 'old' } };
+    expect(formFromDraft(big, {}, [report]).testCases[1]!.generator).toEqual(gen);
+    // A copy: editing the form leaves the generation alone.
+    expect(form.testCases[1]!.generator).not.toBe(gen);
   });
 
   it('uses the problem defaults for a reading draft', () => {
     const form = formFromDraft({ ...draft, type: 'reading', problem: null, testCases: [] });
     expect(form).toMatchObject({ type: 'reading', timeLimitMs: 2000, memoryLimitKb: 262144, compare: 'tokens', interface: 'program', starterCode: {}, harness: {}, testCases: [], referenceSolution: null });
+  });
+});
+
+describe('editedCase', () => {
+  const generator = { language: 'python', source: 'print(1)' };
+  const base: FormTestCase = { key: 'k', name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, origin: 'ai', verified: true, large: true, generator, outcome: { outcome: 'passed', error: null } };
+
+  it('drops the generator of a case whose input is edited, and its verification', () => {
+    expect(editedCase(base, { stdin: '' })).toMatchObject({ stdin: '', generator: null, verified: false, large: true, outcome: undefined });
+  });
+
+  it('keeps the generator for any other edit', () => {
+    expect(editedCase(base, { expectedStdout: '2\n' })).toMatchObject({ generator, verified: false });
+    expect(editedCase(base, { name: 'Renamed', isSample: true })).toMatchObject({ name: 'Renamed', isSample: true, generator, verified: true });
   });
 });
 
@@ -167,6 +196,13 @@ describe('draftFromForm', () => {
     expect(back.problem).toMatchObject({ interface: 'function', harness: { python: runner }, referenceSolution: { language: 'python', source: 'print(2)' } });
     // Switched to a full program in the form, the runner is not part of the draft any more.
     expect(draftFromForm({ ...formFromDraft(functionDraft), interface: 'program' }, []).problem).toMatchObject({ interface: 'program', harness: {} });
+  });
+
+  it('keeps the generator field of the cases it sends back', () => {
+    const form = formFromDraft(draft);
+    const gen = { language: 'python', source: 'print(1)' };
+    const cases = [{ ...form.testCases[0]!, generator: gen }, { ...form.testCases[0]!, key: 'old', generator: undefined }];
+    expect(draftFromForm({ ...form, testCases: cases }, []).testCases.map((t) => t.generator)).toEqual([gen, null]);
   });
 
   it('leaves the large test cases, and any test data too large to show a model, out of a revision', () => {
@@ -211,11 +247,15 @@ describe('inputFromForm', () => {
     expect(inputFromForm({ ...switched, interface: 'function' }).problem?.harness).toEqual({ python: runner });
   });
 
-  it('sends nothing of a large case but its data: not its generator, nor which fields were cleared', () => {
+  it('saves a large case with its input and its generator, so nothing runs again, and without which fields were cleared', () => {
     const form = formFromDraft(draft);
-    const big = { ...form.testCases[0]!, large: true, generator: { language: 'python', source: 'print(1)' }, unlocked: ['stdin' as const] };
-    expect(inputFromForm({ ...form, testCases: [big] }).testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
-    expect(checkRequestFromForm({ ...form, testCases: [big] }).testCases[0]).not.toHaveProperty('generator');
+    const generator = { language: 'python', source: 'print(1)' };
+    const big = { ...form.testCases[0]!, large: true, generator, unlocked: ['expectedStdout' as const] };
+    expect(inputFromForm({ ...form, testCases: [big] }).testCases).toEqual([{ name: 'Example 1', stdin: '1\n', generator, expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
+    // One whose input was edited, so it has no generator any more, goes with its input.
+    expect(inputFromForm({ ...form, testCases: [{ ...big, generator: null }] }).testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
+    // A check runs on the input the case has: no generator is run again.
+    expect(checkRequestFromForm({ ...form, testCases: [big] }).testCases).toEqual([{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, origin: 'ai', verified: true }]);
   });
 
   it('sends no problem part or test cases for a reading', () => {
@@ -456,7 +496,7 @@ describe('upgradeForm', () => {
 
 describe('checking a draft again', () => {
   const report: LargeCaseReport = { status: 'added', error: null, index: 1, name: 'Large', inputBytes: 9, timeMs: 5, generator: null };
-  const twoCases: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true }] };
+  const twoCases: ItemDraft = { ...draft, testCases: [...draft.testCases, { name: 'Large', stdin: '9\n', expectedStdout: '1\n', isSample: false, verified: true, generator: null }] };
   const form = formFromDraft(twoCases, {}, [report]);
   const answer = {
     check: { attempted: true, engine: 'judge0', passed: 1, total: 2, error: 'Example 1: expected 2', runners: [], largeCases: [] },

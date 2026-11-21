@@ -11,15 +11,18 @@ import (
 
 // Test cases.
 
-const testCaseColumns = `id, item_id, position, name, stdin, expected_stdout, is_sample, origin, verified, created_at, updated_at`
+const testCaseColumns = `id, item_id, position, name, stdin, expected_stdout, is_sample, origin, verified, created_at, updated_at,
+	generator_language, generator_source`
 
 func scanTestCase(sc interface{ Scan(...any) error }) (domain.TestCase, error) {
 	var (
 		tc               domain.TestCase
 		created, updated int64
+		genLang, genSrc  sql.NullString
 	)
 	err := sc.Scan(&tc.ID, &tc.ItemID, &tc.Position, &tc.Name, &tc.Stdin, &tc.ExpectedStdout, &tc.IsSample, &tc.Origin,
-		&tc.Verified, &created, &updated)
+		&tc.Verified, &created, &updated, &genLang, &genSrc)
+	tc.Generator = generatorOf(genLang, genSrc)
 	tc.CreatedAt, tc.UpdatedAt = fromUnix(created), fromUnix(updated)
 	return tc, err
 }
@@ -50,17 +53,36 @@ func (t *tx) GetTestCase(id string) (domain.TestCase, error) {
 }
 
 func (t *tx) InsertTestCase(tc *domain.TestCase) error {
-	_, err := t.exec(`INSERT INTO test_cases (`+testCaseColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+	lang, src := generatorCols(tc.Generator)
+	_, err := t.exec(`INSERT INTO test_cases (`+testCaseColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		tc.ID, tc.ItemID, tc.Position, text(tc.Name), text(tc.Stdin), text(tc.ExpectedStdout), tc.IsSample,
-		string(tc.Origin), tc.Verified, toUnix(tc.CreatedAt), toUnix(tc.UpdatedAt))
+		string(tc.Origin), tc.Verified, toUnix(tc.CreatedAt), toUnix(tc.UpdatedAt), lang, src)
 	return err
 }
 
+// generatorOf reads a test case's generator columns.
+func generatorOf(lang, src sql.NullString) *domain.GeneratorSpec {
+	if !lang.Valid || !src.Valid {
+		return nil
+	}
+	return &domain.GeneratorSpec{Language: lang.String, Source: src.String}
+}
+
+// generatorCols are the column values of a test case's generator; the
+// source is bytea, like every other piece of code.
+func generatorCols(g *domain.GeneratorSpec) (lang, src any) {
+	if g == nil {
+		return nil, nil
+	}
+	return g.Language, text(g.Source)
+}
+
 func (t *tx) UpdateTestCase(tc *domain.TestCase) error {
+	lang, src := generatorCols(tc.Generator)
 	res, err := t.exec(`UPDATE test_cases SET position = $1, name = $2, stdin = $3, expected_stdout = $4, is_sample = $5,
-		origin = $6, verified = $7, updated_at = $8 WHERE id = $9`,
+		origin = $6, verified = $7, updated_at = $8, generator_language = $9, generator_source = $10 WHERE id = $11`,
 		tc.Position, text(tc.Name), text(tc.Stdin), text(tc.ExpectedStdout), tc.IsSample, string(tc.Origin), tc.Verified,
-		toUnix(tc.UpdatedAt), tc.ID)
+		toUnix(tc.UpdatedAt), lang, src, tc.ID)
 	if err != nil {
 		return err
 	}

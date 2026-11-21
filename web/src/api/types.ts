@@ -241,11 +241,22 @@ export interface Item extends ItemSummary {
 
 export interface TestCaseInput {
   name?: string;
+  /**
+   * On create, sent with `generator` both are stored as given; `generator`
+   * alone is run for it. On PATCH, set without `generator` on a case that
+   * has one, it drops the generator; with a non-null one it is a `422`.
+   */
   stdin?: string;
   expectedStdout: string;
   isSample?: boolean;
   origin?: TestOrigin;
   verified?: boolean;
+  /**
+   * The program that prints the case's `stdin`, up to
+   * `limits.maxLargeInputBytes`. Given without `stdin` it is run (on PATCH,
+   * replacing `stdin`); `null` drops it and keeps `stdin`.
+   */
+  generator?: SourceCode | null;
 }
 
 /** Body of `POST /items`. Only `type` and `title` are required. */
@@ -352,6 +363,8 @@ export interface TestCase {
   isSample: boolean;
   origin: TestOrigin;
   verified: boolean;
+  /** The program that printed `stdin`, for a large case; `null` otherwise. */
+  generator: SourceCode | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -518,6 +531,8 @@ export interface DraftTestCase {
   isSample: boolean;
   /** The draft's reference solution was run on this case and printed the expected output. */
   verified: boolean;
+  /** The program that printed `stdin`, for a large case; `null` otherwise. */
+  generator: SourceCode | null;
 }
 
 export interface DraftProblemSpec {
@@ -598,7 +613,7 @@ export interface LargeCaseReport {
   inputBytes: number | null;
   /** How long the reference solution took on the input. */
   timeMs: number | null;
-  /** For inspection only; not stored with the test case. */
+  /** The program the model wrote; an added case carries it too. */
   generator: SourceCode | null;
 }
 
@@ -679,6 +694,8 @@ export interface ProposedTestCase {
   verified: boolean;
   predictionMatched: boolean | null;
   error: string | null;
+  /** The program that printed `stdin`, for a large case; `null` otherwise. */
+  generator: SourceCode | null;
 }
 
 export interface AiTestCasesResponse {

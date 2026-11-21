@@ -7,6 +7,7 @@ import type {
   CompareMode,
   Difficulty,
   DraftCheck,
+  DraftTestCase,
   HarnessCode,
   Item,
   ItemCheckRequest,
@@ -37,8 +38,12 @@ export interface FormTestCase {
   verified: boolean;
   /** One of the large test cases the generation built; a revision does not carry it over. */
   large?: boolean;
-  /** The program that built this large case, to read; never sent to the server. */
-  generator?: SourceCode;
+  /**
+   * The program that printed this case's input, saved with it. `null` when
+   * it has none, or no longer has one because its input was edited;
+   * `undefined` in a form kept from before cases carried their generators.
+   */
+  generator?: SourceCode | null;
   /** The fields of a large case cleared or typed into since; the others show only their size. */
   unlocked?: TestDataKey[];
   /** What "Verify all" found for this case, while the form is as it was checked. */
@@ -49,6 +54,20 @@ export type TestDataKey = 'stdin' | 'expectedStdout';
 
 /** Whether a field of a case shows only its size: one a large case came with, until it is cleared. */
 export const concealedData = (t: FormTestCase, field: TestDataKey): boolean => t.large === true && t[field] !== '' && !t.unlocked?.includes(field);
+
+/**
+ * A case with a change made in the form. Editing what it feeds in or expects
+ * undoes its verification, as on the server; an input edited no longer comes
+ * from its generator, which is dropped.
+ */
+export function editedCase(t: FormTestCase, change: Partial<FormTestCase>): FormTestCase {
+  return {
+    ...t,
+    ...change,
+    ...('stdin' in change || 'expectedStdout' in change ? { verified: false, outcome: undefined } : {}),
+    ...('stdin' in change ? { generator: null } : {}),
+  };
+}
 
 /** The cases with the large ones last, as the form lists them; otherwise in their order. */
 export const largeLast = (cases: readonly FormTestCase[]): FormTestCase[] => [...cases.filter((t) => !t.large), ...cases.filter((t) => t.large)];
@@ -120,13 +139,16 @@ export function normalizeTags(tags: readonly string[]): string[] {
   return Array.from(new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))).sort();
 }
 
-/** `largeCases` says which of the draft's test cases are large ones, if any, and with which generator. */
+/**
+ * `largeCases` says which of the draft's test cases are large ones, if any,
+ * and with which generator, for a generation from before each case carried
+ * its own.
+ */
 export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState> = {}, largeCases: readonly LargeCaseReport[] = []): ItemFormState {
   const largeAt = new Map(largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [[c.index, c.generator] as const] : [])));
-  const large = (i: number): Partial<FormTestCase> => {
-    if (!largeAt.has(i)) return {};
-    const generator = largeAt.get(i);
-    return generator ? { large: true, generator: { ...generator } } : { large: true };
+  const large = (t: DraftTestCase, i: number): Partial<FormTestCase> => {
+    const generator = t.generator ?? largeAt.get(i) ?? null;
+    return { ...(largeAt.has(i) || generator ? { large: true } : {}), generator: generator && { ...generator } };
   };
   return {
     ...emptyForm(draft.type),
@@ -143,7 +165,7 @@ export function formFromDraft(draft: ItemDraft, defaults: Partial<ItemFormState>
     interface: draft.problem?.interface ?? PROBLEM_DEFAULTS.interface,
     starterCode: { ...(draft.problem?.starterCode ?? {}) },
     harness: structuredClone(draft.problem?.harness ?? {}),
-    testCases: largeLast(draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...large(i) }))),
+    testCases: largeLast(draft.testCases.map((t, i) => ({ ...t, verified: t.verified === true, key: newKey(), origin: 'ai' as const, ...large(t, i) }))),
     referenceSolution: draft.problem?.referenceSolution ? { ...draft.problem.referenceSolution } : null,
   };
 }
@@ -178,7 +200,7 @@ export function draftFromForm(form: ItemFormState, assumptions: readonly string[
     testCases: isProblem
       ? form.testCases
           .filter((t) => !t.large && !isLargeText(t.stdin) && !isLargeText(t.expectedStdout))
-          .map(({ name, stdin, expectedStdout, isSample, verified }) => ({ name, stdin, expectedStdout, isSample, verified }))
+          .map(({ name, stdin, expectedStdout, isSample, verified, generator }) => ({ name, stdin, expectedStdout, isSample, verified, generator: generator ?? null }))
       : [],
     assumptions: [...assumptions],
   };
@@ -260,6 +282,23 @@ export interface CreateExtras {
   variantOf?: string | null;
 }
 
+/**
+ * A case of a form as it is sent: with its input and, to be saved with it
+ * (`withGenerator`), the generator that printed it. Sent together, the
+ * server stores both as given and runs nothing.
+ */
+function caseInput(t: FormTestCase, withGenerator: boolean): TestCaseInput {
+  return {
+    name: t.name.trim(),
+    stdin: t.stdin,
+    ...(withGenerator && t.generator ? { generator: { ...t.generator } } : {}),
+    expectedStdout: t.expectedStdout,
+    isSample: t.isSample,
+    origin: t.origin,
+    verified: t.verified,
+  };
+}
+
 /** Body for `POST /items` from a reviewed form. */
 export function inputFromForm(form: ItemFormState, extras: CreateExtras = {}): ItemInput {
   const isProblem = form.type === 'problem';
@@ -285,16 +324,7 @@ export function inputFromForm(form: ItemFormState, extras: CreateExtras = {}): I
       harness: effectiveHarness(form),
       referenceSolution: form.referenceSolution && form.referenceSolution.source.trim() !== '' ? { ...form.referenceSolution } : null,
     };
-    input.testCases = form.testCases.map(
-      (t): TestCaseInput => ({
-        name: t.name.trim(),
-        stdin: t.stdin,
-        expectedStdout: t.expectedStdout,
-        isSample: t.isSample,
-        origin: t.origin,
-        verified: t.verified,
-      }),
-    );
+    input.testCases = form.testCases.map((t) => caseInput(t, true));
   }
   return input;
 }
@@ -455,10 +485,13 @@ export function checkedState(form: ItemFormState): string {
   return JSON.stringify([form.interface, form.compare, form.referenceSolution, effectiveHarness(form), form.testCases.map((t) => [t.stdin, t.expectedStdout])]);
 }
 
-/** Body of `POST /items/check` for a form: its problem and test cases, as they would be saved. */
+/**
+ * Body of `POST /items/check` for a form: its problem and test cases, as they
+ * would be saved. Each case goes with the input it has, so no generator runs again.
+ */
 export function checkRequestFromForm(form: ItemFormState): ItemCheckRequest {
   const input = inputFromForm({ ...form, type: 'problem' });
-  return { problem: input.problem ?? {}, testCases: input.testCases ?? [] };
+  return { problem: input.problem ?? {}, testCases: form.testCases.map((t) => caseInput(t, false)) };
 }
 
 /** A draft under review, as the capture and variant pages keep it. */

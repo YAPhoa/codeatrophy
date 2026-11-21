@@ -153,23 +153,84 @@ type CollectionNode struct {
 	Children  []CollectionNode `json:"children"`
 }
 
-// Overview is a compact summary of the whole library.
+// Overview is a compact summary of the whole library, for an assistant
+// working on it: with the user's test case preferences and the bounds test
+// cases must keep to.
 type Overview struct {
-	Stats       domain.Stats     `json:"stats"`
-	Collections []CollectionNode `json:"collections"`
-	Tags        []domain.Tag     `json:"tags"`
-	Judge       JudgeStatus      `json:"judge"`
+	Stats       domain.Stats        `json:"stats"`
+	Collections []CollectionNode    `json:"collections"`
+	Tags        []domain.Tag        `json:"tags"`
+	Judge       JudgeStatus         `json:"judge"`
+	Preferences OverviewPreferences `json:"preferences"`
+	Limits      TestLimits          `json:"limits"`
 }
 
-// Overview returns statistics, the collection tree, tags and the judge's
-// languages.
+// OverviewPreferences are the user's preferences about test cases (see
+// preferenceSchema), for an assistant to follow.
+type OverviewPreferences struct {
+	GeneratedTestCases int  `json:"generatedTestCases"`
+	LargeTestCase      bool `json:"largeTestCase"`
+	LargeTestCaseCount int  `json:"largeTestCaseCount"`
+	HideTestCases      bool `json:"hideTestCases"`
+}
+
+// TestLimits are the bounds of test cases, named as in MetaLimits.
+type TestLimits struct {
+	MaxTestDataBytes    int   `json:"maxTestDataBytes"`
+	MaxLargeInputBytes  int   `json:"maxLargeInputBytes"`
+	MaxTestCasesPerItem int   `json:"maxTestCasesPerItem"`
+	MaxSourceBytes      int   `json:"maxSourceBytes"`
+	TimeLimitMs         Range `json:"timeLimitMs"`
+	MemoryLimitKb       Range `json:"memoryLimitKb"`
+}
+
+func testCasePreferences(p Preferences) OverviewPreferences {
+	out := OverviewPreferences{GeneratedTestCases: DefaultGeneratedCases, LargeTestCaseCount: DefaultLargeTestCases, HideTestCases: true}
+	if v, ok := p["generatedTestCases"].(int); ok {
+		out.GeneratedTestCases = v
+	}
+	if v, ok := p["largeTestCase"].(bool); ok {
+		out.LargeTestCase = v
+	}
+	if v, ok := p["largeTestCaseCount"].(int); ok {
+		out.LargeTestCaseCount = v
+	}
+	if v, ok := p["hideTestCases"].(bool); ok {
+		out.HideTestCases = v
+	}
+	return out
+}
+
+// TestCasePreferences returns the user's test case preferences.
+func (a *App) TestCasePreferences(ctx context.Context) (OverviewPreferences, error) {
+	p, err := a.GetPreferences(ctx)
+	if err != nil {
+		return OverviewPreferences{}, err
+	}
+	return testCasePreferences(p), nil
+}
+
+// Overview returns statistics, the collection tree, tags, the judge's
+// languages, the user's test case preferences and the test case limits.
 func (a *App) Overview(ctx context.Context) (Overview, error) {
-	out := Overview{Judge: a.JudgeStatus()}
+	out := Overview{Judge: a.JudgeStatus(), Limits: TestLimits{
+		MaxTestDataBytes:    domain.MaxTestCaseBytes,
+		MaxLargeInputBytes:  MaxLargeInputBytes,
+		MaxTestCasesPerItem: domain.MaxTestCasesPerItem,
+		MaxSourceBytes:      a.limits.MaxSourceBytes,
+		TimeLimitMs:         Range{domain.MinTimeLimitMs, domain.MaxTimeLimitMs},
+		MemoryLimitKb:       Range{domain.MinMemoryLimitKb, domain.MaxMemoryLimitKb},
+	}}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
 		if out.Stats, err = tx.Stats(); err != nil {
 			return err
 		}
+		stored, err := a.storedPreferences(tx)
+		if err != nil {
+			return err
+		}
+		out.Preferences = testCasePreferences(renderPreferences(stored))
 		if out.Tags, err = tx.ListTags(); err != nil {
 			return err
 		}

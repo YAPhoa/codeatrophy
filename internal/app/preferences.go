@@ -14,8 +14,9 @@ import (
 )
 
 // Preferences are personal settings for clients to honour. The server stores
-// and validates them but does not act on them. They are never exported and
-// not available over MCP.
+// and validates them but does not act on them. They are never exported.
+// Over MCP the test case preferences can be read (see Overview), never
+// changed.
 
 type prefKind int
 

@@ -15,8 +15,8 @@ const draft: ItemDraft = {
   tags: [],
   problem: { interface: 'program', timeLimitMs: 1000, memoryLimitKb: 65536, compare: 'tokens', starterCode: {}, harness: {}, referenceSolution: { language: 'python', source: 'print(input())' } },
   testCases: [
-    { name: 'One', stdin: '1\n', expectedStdout: '1\n', isSample: true, verified: false },
-    { name: 'Two', stdin: '2\n', expectedStdout: '2 MOCK:WA\n', isSample: false, verified: true },
+    { name: 'One', stdin: '1\n', expectedStdout: '1\n', isSample: true, verified: false, generator: null },
+    { name: 'Two', stdin: '2\n', expectedStdout: '2 MOCK:WA\n', isSample: false, verified: true, generator: null },
   ],
   assumptions: [],
 };

@@ -70,6 +70,9 @@ type TestCase struct {
 	IsSample       bool
 	Origin         domain.TestOrigin
 	Verified       bool
+	// Generator is the program that printed Stdin, or nil. Like Origin, it
+	// is not content: it is not hashed, and Stdin is carried either way.
+	Generator *domain.GeneratorSpec
 }
 
 // Problem holds the problem-only fields of a bundle item.
@@ -201,7 +204,7 @@ func FromDomain(it domain.Item, cases []domain.TestCase, sols []domain.ItemSolut
 			}
 			out.TestCases = append(out.TestCases, TestCase{
 				Name: tc.Name, Stdin: tc.Stdin, ExpectedStdout: tc.ExpectedStdout,
-				IsSample: tc.IsSample, Origin: tc.Origin, Verified: tc.Verified,
+				IsSample: tc.IsSample, Origin: tc.Origin, Verified: tc.Verified, Generator: tc.Generator,
 			})
 		}
 	}

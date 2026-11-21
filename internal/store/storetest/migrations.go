@@ -49,6 +49,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0010Effort", testEffortMigration},
 		{"0011LastRun", testLastRunMigration},
 		{"0012AIJobs", testAIJobsMigration},
+		{"0013Generator", testGeneratorMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -274,6 +275,41 @@ func testAIJobsMigration(t *testing.T, h MigrationHarness) {
 	d := Read(t, db, func(tx store.Tx) (store.Draft, error) { return tx.GetDraft("d") })
 	if j.Status != store.JobQueued || j.ItemID == nil || *j.ItemID != item || d.Content == nil || *d.Content != content {
 		t.Errorf("after migrating: job %+v, draft %+v", j, d)
+	}
+}
+
+// Migration 13 adds a test case's generator: a database at version 12
+// keeps every row, its cases have no generator, and a generator is either
+// complete or absent.
+func testGeneratorMigration(t *testing.T, h MigrationHarness) {
+	want, db := h.rerun(t, 13, func(db MigrationDB) {
+		Populate(t, db)
+		ClearNewerData(t, db)
+	}, func(db MigrationDB) {
+		if err := h.Exec(db, `SELECT generator_language FROM test_cases`); err == nil {
+			t.Error("version 12 has the generator columns")
+		}
+	}, Dump)
+	SameDump(t, "after migration 13", want, Dump(t, db))
+	for _, c := range Read(t, db, func(tx store.Tx) ([]domain.TestCase, error) { return tx.ListTestCases("origin") }) {
+		if c.Generator != nil {
+			t.Errorf("case %s has a generator after migrating", c.ID)
+		}
+	}
+	h.rejects(t, db, map[string]string{
+		"a language without a source": `UPDATE test_cases SET generator_language = 'python' WHERE id = 'tc0'`,
+	})
+	Write(t, db, func(tx store.Tx) error {
+		c, err := tx.GetTestCase("tc0")
+		if err != nil {
+			return err
+		}
+		c.Generator = &domain.GeneratorSpec{Language: "python", Source: "print(1)"}
+		return tx.UpdateTestCase(&c)
+	})
+	if c := Read(t, db, func(tx store.Tx) (domain.TestCase, error) { return tx.GetTestCase("tc0") }); c.Generator == nil ||
+		c.Generator.Source != "print(1)" {
+		t.Errorf("after migrating: %+v", c)
 	}
 }
 

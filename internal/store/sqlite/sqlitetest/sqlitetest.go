@@ -63,6 +63,8 @@ var DownMigrations = map[int]string{
 		ALTER TABLE solutions DROP COLUMN last_run_time_ms;
 		ALTER TABLE solutions DROP COLUMN last_run_memory_kb;`,
 	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
+	13: `ALTER TABLE test_cases DROP COLUMN generator_source;
+		ALTER TABLE test_cases DROP COLUMN generator_language;`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

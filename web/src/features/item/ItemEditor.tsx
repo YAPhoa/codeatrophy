@@ -8,6 +8,7 @@ import { plural } from '../../lib/format';
 import {
   addFormLanguage,
   concealedData,
+  editedCase,
   formLanguages,
   largeLast,
   newKey,
@@ -32,7 +33,7 @@ import { Badge, Tabs, tabPanelProps } from '../../ui/misc';
 import { TagInput } from '../../ui/TagInput';
 import { useToast } from '../../ui/Toast';
 import { lineCount } from '../solutions/solutionWrites';
-import { LargeCaseGenerator, LargeCaseSummary } from '../tests/LargeCaseOutcome';
+import { LargeBadge, LargeCaseGenerator, LargeCaseSummary } from '../tests/LargeCaseOutcome';
 import { CollectionPicker } from './controls';
 
 type BodyView = 'write' | 'split' | 'preview';
@@ -187,11 +188,10 @@ export function ItemEditor({
   // When every case came out the same way (the engine was down, say), the check's own line says it once.
   const sharedOutcome = form.testCases.length > 1 && form.testCases.every((t) => t.outcome?.error === form.testCases[0]?.outcome?.error);
 
-  // Editing what a case feeds in or expects undoes its verification, as on the server.
   const setCase = (key: string, change: Partial<FormTestCase>) =>
     set(
       'testCases',
-      form.testCases.map((t) => (t.key === key ? { ...t, ...change, ...('stdin' in change || 'expectedStdout' in change ? { verified: false, outcome: undefined } : {}) } : t)),
+      form.testCases.map((t) => (t.key === key ? editedCase(t, change) : t)),
     );
   // A large case's data, once cleared or typed into, is edited like any other.
   const setData = (t: FormTestCase, field: TestDataKey, value: string) =>
@@ -206,44 +206,52 @@ export function ItemEditor({
   // A draft from before cases carried their generators: theirs are the added reports', in order, while none of the cases is gone.
   const reportedGenerators = largeReports.flatMap((r) => (r.status === 'added' && r.index !== null ? [r] : [])).sort((a, b) => a.index! - b.index!);
   const generatorOf = (t: FormTestCase) =>
-    t.generator ?? (largeCases.every((c) => !c.generator) && reportedGenerators.length === largeCases.length ? (reportedGenerators[largeCases.indexOf(t)]?.generator ?? undefined) : undefined);
+    t.generator !== undefined
+      ? t.generator
+      : largeCases.every((c) => c.generator === undefined) && reportedGenerators.length === largeCases.length
+        ? (reportedGenerators[largeCases.indexOf(t)]?.generator ?? null)
+        : null;
 
-  const caseCard = (t: FormTestCase, n: number) => (
-    <li key={t.key} className={cx('case-card', !initialCases.has(t.key) && 'is-added')}>
-      <div className="row">
-        <span className="case-no">{n}</span>
-        <TextField label={`Name of case ${n}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
-        {t.verified && (
-          <Badge tone="ok">
-            <ShieldCheck size={12} aria-hidden="true" /> verified
-          </Badge>
-        )}
-        {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
-        <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
-        <IconButton size="sm" label={`Remove case ${n}`} title="" icon={<Trash2 size={14} />} onClick={() => removeCase(t.key, n)} />
-      </div>
-      {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
-      {t.large && generatorOf(t) && <LargeCaseGenerator generator={generatorOf(t)!} of={`case ${n}`} labelClassName="field-label" />}
-      <div className="case-io">
-        <TestDataField
-          label="Input (stdin)"
-          rows={3}
-          value={t.stdin}
-          onChange={(stdin) => setData(t, 'stdin', stdin)}
-          concealed={concealedData(t, 'stdin')}
-          filename={textFilename(form.title, t.name || `case ${n}`, 'input')}
-        />
-        <TestDataField
-          label="Expected output"
-          rows={3}
-          value={t.expectedStdout}
-          onChange={(expectedStdout) => setData(t, 'expectedStdout', expectedStdout)}
-          concealed={concealedData(t, 'expectedStdout')}
-          filename={textFilename(form.title, t.name || `case ${n}`, 'output')}
-        />
-      </div>
-    </li>
-  );
+  const caseCard = (t: FormTestCase, n: number) => {
+    const generator = generatorOf(t);
+    return (
+      <li key={t.key} className={cx('case-card', !initialCases.has(t.key) && 'is-added')}>
+        <div className="row">
+          <span className="case-no">{n}</span>
+          <TextField label={`Name of case ${n}`} hideLabel value={t.name} onChange={(v) => setCase(t.key, { name: v })} placeholder="e.g. Minimum size…" maxLength={limits?.maxTestCaseNameChars} className="input-sm" fieldClassName="grow" />
+          {generator && <LargeBadge stdin={t.stdin} />}
+          {t.verified && (
+            <Badge tone="ok">
+              <ShieldCheck size={12} aria-hidden="true" /> verified
+            </Badge>
+          )}
+          {!checkStale && t.outcome && t.outcome.outcome !== 'passed' && <Badge tone={t.outcome.outcome === 'not_run' ? 'neutral' : 'danger'}>{OUTCOME_LABEL[t.outcome.outcome]}</Badge>}
+          <Checkbox checked={t.isSample} onChange={(v) => setCase(t.key, { isSample: v })} label="Sample" />
+          <IconButton size="sm" label={`Remove case ${n}`} title="" icon={<Trash2 size={14} />} onClick={() => removeCase(t.key, n)} />
+        </div>
+        {!checkStale && t.outcome?.error && !sharedOutcome && <p className={`check-line case-outcome tone-${t.outcome.outcome === 'failed' ? 'danger' : 'neutral'}`}>{sentence(t.outcome.error)}</p>}
+        {generator && <LargeCaseGenerator generator={generator} of={`case ${n}`} />}
+        <div className="case-io">
+          <TestDataField
+            label="Input (stdin)"
+            rows={3}
+            value={t.stdin}
+            onChange={(stdin) => setData(t, 'stdin', stdin)}
+            concealed={concealedData(t, 'stdin')}
+            filename={textFilename(form.title, t.name || `case ${n}`, 'input')}
+          />
+          <TestDataField
+            label="Expected output"
+            rows={3}
+            value={t.expectedStdout}
+            onChange={(expectedStdout) => setData(t, 'expectedStdout', expectedStdout)}
+            concealed={concealedData(t, 'expectedStdout')}
+            filename={textFilename(form.title, t.name || `case ${n}`, 'output')}
+          />
+        </div>
+      </li>
+    );
+  };
 
   return (
     <fieldset className="editor-grid" disabled={disabled}>

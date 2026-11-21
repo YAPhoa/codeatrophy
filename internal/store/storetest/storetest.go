@@ -708,6 +708,9 @@ func testTestCases(t *testing.T, db store.Store) {
 			tc := domain.TestCase{ID: id, ItemID: "p", Position: i, Name: "case " + id, Stdin: id + "\n",
 				ExpectedStdout: strings.ToUpper(id), IsSample: i == 0, Origin: domain.OriginAI, Verified: i == 1,
 				CreatedAt: now, UpdatedAt: now}
+			if id == "y" {
+				tc.Generator = &domain.GeneratorSpec{Language: "cpp", Source: "int main() {}\n"}
+			}
 			if err := tx.InsertTestCase(&tc); err != nil {
 				return err
 			}
@@ -716,7 +719,8 @@ func testTestCases(t *testing.T, db store.Store) {
 	})
 	list := Read(t, db, func(tx store.Tx) ([]domain.TestCase, error) { return tx.ListTestCases("p") })
 	if len(list) != 3 || list[0].ID != "z" || list[1].ID != "x" || !list[1].IsSample || !list[2].Verified ||
-		list[1].Stdin != "x\n" || list[1].ExpectedStdout != "X" || list[1].Origin != domain.OriginAI || list[1].Name != "case x" {
+		list[1].Stdin != "x\n" || list[1].ExpectedStdout != "X" || list[1].Origin != domain.OriginAI || list[1].Name != "case x" ||
+		list[1].Generator != nil || list[2].Generator == nil || *list[2].Generator != (domain.GeneratorSpec{Language: "cpp", Source: "int main() {}\n"}) {
 		t.Errorf("test cases: %+v", list)
 	}
 	Write(t, db, func(tx store.Tx) error {
@@ -725,14 +729,23 @@ func testTestCases(t *testing.T, db store.Store) {
 			return err
 		}
 		tc.Stdin, tc.Verified, tc.UpdatedAt = "new", true, now.Add(time.Minute)
+		tc.Generator = &domain.GeneratorSpec{Language: "python", Source: "print('new')"}
 		if err := tx.UpdateTestCase(&tc); err != nil {
 			return err
 		}
 		return tx.DeleteTestCase("y")
 	})
 	x := Read(t, db, func(tx store.Tx) (domain.TestCase, error) { return tx.GetTestCase("x") })
-	if x.Stdin != "new" || !x.Verified || !x.UpdatedAt.Equal(now.Add(time.Minute)) {
+	if x.Stdin != "new" || !x.Verified || !x.UpdatedAt.Equal(now.Add(time.Minute)) || x.Generator == nil ||
+		x.Generator.Source != "print('new')" || x.Generator.Language != "python" {
 		t.Errorf("updated case: %+v", x)
+	}
+	Write(t, db, func(tx store.Tx) error {
+		x.Generator = nil
+		return tx.UpdateTestCase(&x)
+	})
+	if x := Read(t, db, func(tx store.Tx) (domain.TestCase, error) { return tx.GetTestCase("x") }); x.Generator != nil {
+		t.Errorf("generator not cleared: %+v", x.Generator)
 	}
 	for _, fn := range []func(store.Tx) error{
 		func(tx store.Tx) error { _, err := tx.GetTestCase("y"); return err },
@@ -1293,7 +1306,7 @@ func testArbitraryText(t *testing.T, db store.Store) {
 			return err
 		}
 		tc := domain.TestCase{ID: "t", ItemID: "p", Name: x, Stdin: x, ExpectedStdout: x, Origin: domain.OriginImport,
-			CreatedAt: now, UpdatedAt: now}
+			Generator: &domain.GeneratorSpec{Language: "c", Source: x}, CreatedAt: now, UpdatedAt: now}
 		if err := tx.InsertTestCase(&tc); err != nil {
 			return err
 		}
@@ -1318,7 +1331,7 @@ func testArbitraryText(t *testing.T, db store.Store) {
 	tc := Read(t, db, func(tx store.Tx) (domain.TestCase, error) { return tx.GetTestCase("t") })
 	sol := Read(t, db, func(tx store.Tx) (domain.ItemSolution, error) { return tx.GetSolution("sol") })
 	s := Read(t, db, func(tx store.Tx) (domain.Submission, error) { return tx.GetSubmission("s") })
-	if c.Description != x || tc.Name != x || tc.Stdin != x || tc.ExpectedStdout != x || sol.Source != x || sol.Notes != x ||
+	if c.Description != x || tc.Name != x || tc.Stdin != x || tc.ExpectedStdout != x || tc.Generator.Source != x || sol.Source != x || sol.Notes != x ||
 		s.Source != x || *s.Stdin != x || s.CompileOutput != x || *s.Error != x {
 		t.Error("text was changed on the way through the store")
 	}

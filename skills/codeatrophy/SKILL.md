@@ -12,7 +12,15 @@ The server sends its own **authoring guide** when you connect (also readable as 
 ## Before anything else
 
 1. **Check the tools are there.** If no Codeatrophy tools are available, say so and give the one-line fix rather than improvising: `claude mcp add --transport http codeatrophy http://localhost:8080/mcp` (the address is wherever their instance runs). Do not write the problem into the chat as a substitute unless they ask for that.
-2. **Call `get_overview` first.** It tells you which collections and tags already exist, which languages the judge can run and in which versions, and how big the library is. Everything below leans on it: reusing a tag beats inventing a near-duplicate, and code you write has to run on the versions listed, which can be old.
+2. **Call `get_overview` first.** It tells you which collections and tags already exist, which languages the judge can run and in which versions, how big the library is, the user's test-case preferences and the server's limits. Everything below leans on it: reusing a tag beats inventing a near-duplicate, and code you write has to run on the versions listed, which can be old.
+
+## The user's preferences
+
+`get_overview` reports the user's test-case preferences (`preferences`) and the server's limits (`limits`). The authoring guide carries their default writing style and any custom system prompt of theirs; `list_style_presets` lists the other presets. Follow all of these unless the user says otherwise in the conversation. There is no tool to change them, so do not try; if they want a different default, they change it in the app's settings.
+
+- `generatedTestCases` — how many test cases to write.
+- `largeTestCase` and `largeTestCaseCount` — whether to add large cases, and how many.
+- `hideTestCases` — when on, do not recite hidden test cases in the chat. Name them and say what they check; show their data only if the user asks. Same spirit as keeping solutions out of the conversation.
 
 ## Receiving a prompt
 
@@ -45,11 +53,13 @@ Create it with one `create_item` call, including the sample test cases that matc
 A problem is not finished until it has tests whose expected outputs came from running code. Never type an expected output from your own arithmetic: models get these wrong in exactly the edge cases tests exist for.
 
 1. **Write a reference solution** — the straightforward correct one, in a language the judge offers, written for the version it offers.
-2. **Design the inputs.** Read `references/test-design.md` for what a good set covers. Unless the user gave a number, write about eight beyond the examples.
-3. **Save inputs and solution together** with `add_test_cases` (expected outputs may be left empty), then **`verify_test_cases` with `updateExpected: true`** so the judge fills them in.
-4. **Read the results.** A runtime error or time-out is a bug in your solution or an input that breaks the constraints — fix it and verify again; do not leave unverified cases behind.
-5. **Check the examples.** The outputs the judge produced for the sample cases must equal the examples in the statement. If they differ, either the statement or the solution is wrong; work out which and fix it. This is the single most valuable check, because it is the only one that compares your solution with something written independently of it.
-6. **When the problem is subtle,** save a second, obviously-correct brute force with `save_solution` and run `verify_test_cases` with its `solutionId`. It runs on every case, so compare the small ones; a brute force may time out on the large ones. Agreement between two independent solutions is worth far more than one solution agreeing with itself.
+2. **Design the inputs.** Read `references/test-design.md` for what a good set covers. Write `generatedTestCases` of them beyond the examples, unless the user gave a number.
+3. **When `largeTestCase` is on, add `largeTestCaseCount` large cases as generators.** A generator is a complete program that reads nothing and prints one case's stdin, near the statement's upper bounds and at most `limits.maxLargeInputBytes`. Pass it as `generator: {language, source}` in place of `stdin` in `add_test_cases`; never paste a large input. Make it deterministic (a fixed seed, no clock), make every value it prints satisfy the constraints, and aim each one at a different way a solution of the wrong complexity fails (see `references/test-design.md`). Name each case for what its input is. The server runs it and stores what it printed.
+4. **Save inputs and solution together** with `add_test_cases` (expected outputs may be left empty), then **`verify_test_cases` with `updateExpected: true`** so the judge fills them in.
+5. **Read the results.** A runtime error or time-out is a bug in your solution or an input that breaks the constraints — fix it and verify again; do not leave unverified cases behind.
+6. **Check the examples.** The outputs the judge produced for the sample cases must equal the examples in the statement. If they differ, either the statement or the solution is wrong; work out which and fix it. This is the single most valuable check, because it is the only one that compares your solution with something written independently of it.
+7. **When the problem is subtle,** save a second, obviously-correct brute force with `save_solution` and run `verify_test_cases` with its `solutionId`. It runs on every case, so compare the small ones; a brute force may time out on the large ones. Agreement between two independent solutions is worth far more than one solution agreeing with itself.
+8. **Check the large cases.** Every generator ran: one that failed comes back as an error on its field, with nothing stored from that call; fix it and send it again rather than dropping it silently. In tool results an input or output larger than 16 KiB shows only its size and first 200 bytes (`stdinBytes`, `stdinHead`): check that the head fits the input format and the size fits the bounds. `verify_test_cases` gives each case's `timeMs`; the reference solution's time on each large case should be under about a third of the time limit. If you have a brute force (step 7), it should time out on at least one large case; if it passes them all, they are not large enough.
 
 **Keep solutions out of the conversation.** The library exists so the user can practise; a solution pasted into the chat spoils the problem they just asked you to save. Save it, say that it is saved and that it passes, and show the code only if they ask to see it.
 
@@ -59,6 +69,10 @@ A problem is not finished until it has tests whose expected outputs came from ru
 - For a small fix in a long statement use `edit_item_text`; resending the whole body invites accidental changes elsewhere.
 - After changing a statement's rules or constraints, the tests may no longer be right. Re-verify, and say what changed.
 - Deleting is permanent and takes test cases, solutions and submission history with it. Delete only what the user named, and confirm before any bulk delete.
+
+## Re-read it end to end before you report
+
+Fetch the item again with `get_item` (`include: ["testCases", "solutions"]`) and read it as the solver will: the statement, the examples, the constraints, then every test case in order. Check that the samples match the examples, that every input fits the constraints, that each name says what the case checks, and that large cases show a size and a time that make sense. Fix what you find, verify again, and re-read once more. Report only after a clean read.
 
 ## Variants
 
@@ -80,6 +94,7 @@ End with a short account the user can check at a glance:
 
 - what was saved (title, problem or reading, solution only or full program) and where it was filed;
 - how many test cases, and that they were verified by running the reference solution — or exactly which could not be and why;
+- the large cases, each with its input size and the reference solution's time on it;
 - the assumptions you made;
 - anything that needs their decision.
 

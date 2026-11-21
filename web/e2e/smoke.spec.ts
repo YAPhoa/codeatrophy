@@ -504,7 +504,7 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await expect(page.getByRole('tooltip')).toHaveText('Regenerated when the AI revises the draft.');
   await page.mouse.move(0, 0);
 
-  // Opened, each is a card numbered after the others: its name, its generator, then its data, which only shows its size.
+  // Opened, each is a card numbered after the others: its name and size, its generator, then its data, which only shows its size.
   await show.click();
   await expect(largeCards).toHaveCount(2);
   await expect(cards).toHaveCount(4);
@@ -512,8 +512,14 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   const card = largeCards.first();
   const name = card.getByRole('textbox', { name: 'Name of case 3' });
   const generator = card.getByRole('textbox', { name: /^Generator of case 3, Python/ });
+  const generatorToggle = card.getByRole('button', { name: 'Generator of case 3, Python' });
   const input = card.getByRole('group', { name: 'Input (stdin)' });
   const output = card.getByRole('group', { name: 'Expected output' });
+  await expect(card.getByText(/^Large · \d+\u00a0KB$/)).toBeVisible();
+  // The generator is closed until asked for.
+  await expect(generatorToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(generator).toHaveCount(0);
+  await generatorToggle.click();
   await expect(generator).toContainText('random.seed(');
   await expect(input).toContainText(/Too large to show or edit · \d+\u00a0KB · \d+ lines?/);
   // Even an output of a few bytes is not edited in place.
@@ -536,6 +542,7 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await expect(input).toContainText('Too large to show or edit');
 
   // A generator stays with its case when another goes, and when it comes back.
+  await largeCards.nth(1).getByRole('button', { name: /^Generator of case 4/ }).click();
   const secondGenerator = await largeCards.nth(1).getByRole('textbox', { name: /^Generator of case 4/ }).textContent();
   const firstGenerator = await generator.textContent();
   expect(secondGenerator).not.toBe(firstGenerator);
@@ -544,8 +551,14 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await expect(largeCards.first().getByRole('textbox', { name: /^Generator of case 3/ })).toHaveText(secondGenerator!);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(largeCards).toHaveCount(2);
+  await largeCards.first().getByRole('button', { name: /^Generator of case 3/ }).click();
   await expect(largeCards.first().getByRole('textbox', { name: /^Generator of case 3/ })).toHaveText(firstGenerator!);
   await expect(largeCards.nth(1).getByRole('textbox', { name: /^Generator of case 4/ })).toHaveText(secondGenerator!);
+  // An input cleared no longer comes from its generator.
+  await largeCards.nth(1).getByRole('group', { name: 'Input (stdin)' }).getByRole('button', { name: 'Clear' }).click();
+  await expect(largeCards.nth(1).getByRole('button', { name: /^Generator of / })).toHaveCount(0);
+  await expect(largeCards.nth(1).getByText(/^Large · /)).toHaveCount(0);
+  await expect(largeCards.first().getByRole('button', { name: /^Generator of case 3/ })).toBeVisible();
   // A case added by hand goes before them.
   await section.getByRole('button', { name: 'Add case' }).click();
   await expect(section.locator('.case-cards').first().locator('.case-card')).toHaveCount(3);
@@ -571,7 +584,7 @@ test('large test cases: the preferences ask for them with every draft, kept out 
   await expect(summary).toHaveText('1 of 2 large cases generated');
   await showAll();
   await expect(outcomes.getByRole('listitem')).toHaveText(['Large case not added. The model wrote fewer generators than asked for.']);
-  await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^Generator of / })).toHaveCount(1);
   await expect(largeCards).toHaveCount(1);
 
   // Large cases that could not be built are reported, and nothing is added.
@@ -629,10 +642,13 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await expect(proposed).toHaveCount(6);
   await expect(outcomes.getByRole('listitem')).toHaveCount(0);
 
-  // Each opens on its generator, then its data, too large to show.
+  // Each opens on its generator, closed until asked for, then its data, too large to show.
   const last = largeProposed.last();
   const generator = last.getByRole('textbox', { name: /^Generator of “.+”, Python/ });
-  await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(3);
+  await expect(page.getByRole('button', { name: /^Generator of / })).toHaveCount(3);
+  await expect(page.getByRole('textbox', { name: /^Generator of / })).toHaveCount(0);
+  await expect(last.getByText(/^Large · \d+\u00a0KB$/)).toBeVisible();
+  await last.getByRole('button', { name: /^Generator of / }).click();
   await expect(generator).toContainText('random.seed(');
   await expect(last.getByRole('button', { name: 'Download' })).toHaveCount(2);
   expect((await generator.boundingBox())!.y).toBeLessThan((await last.getByRole('button', { name: 'Download' }).first().boundingBox())!.y);
@@ -678,6 +694,21 @@ test('large test cases: asked for on the generate form, then kept and managed on
   await row.getByRole('button', { name: 'Move Big input up' }).click();
   await expect(page.locator('.case-row').nth(-2)).toContainText('Big input');
   await expect(editor.getByText(/Too large to show or edit/)).toBeVisible();
+
+  // Saved with its generator, which shows with the case; an input set by hand drops it.
+  await expect(row.getByText(/^Large · \d+\u00a0KB$/)).toBeVisible();
+  const generator2 = editor.getByRole('button', { name: 'Generator of Big input, Python' });
+  await generator2.click();
+  await expect(editor.getByRole('textbox', { name: /^Generator of Big input, Python/ })).toContainText('random.seed(');
+  await editor.getByRole('group', { name: 'Input (stdin)' }).getByRole('button', { name: 'Clear' }).click();
+  await expect(editor.getByText('Saving drops the generator.')).toBeVisible();
+  await expect(generator2).toHaveCount(0);
+  await editor.getByLabel('Input (stdin)').fill('3\n1 2 3');
+  await editor.getByRole('button', { name: 'Save case' }).click();
+  await expect(page.getByText('Test case saved')).toBeVisible();
+  await expect(row.getByText(/^Large · /)).toHaveCount(0);
+  await expect(editor.getByText('Saving drops the generator.')).toHaveCount(0);
+  await expect(generator2).toHaveCount(0);
 });
 
 test('verify all: a draft is checked again as edited, and a saved problem from the top of its test cases', async ({ page }) => {
@@ -1382,7 +1413,7 @@ test('large test cases: a draft kept from before cases carried their generators 
   await mockApi(page, `/drafts/${draftId}`, { method: 'PATCH', body: { content: kept } });
   await page.reload();
   await page.getByRole('button', { name: 'Show large cases' }).click();
-  await expect(page.getByRole('textbox', { name: /^Generator of case \d+, Python/ })).toHaveCount(3);
+  await expect(page.getByRole('button', { name: /^Generator of case \d+, Python$/ })).toHaveCount(3);
 });
 
 test('bundles: an item exported, then deleted, comes back from its bundle', async ({ page }) => {

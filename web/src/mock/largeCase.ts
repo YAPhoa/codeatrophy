@@ -2,7 +2,9 @@
 // real server runs the generator programs the model wrote and then the
 // reference solution on what each printed; the mock prints believable inputs
 // of a few hundred kilobytes itself, one shape per case asked for, the same
-// every time.
+// every time. A test case saved with one of those generators "runs" it again
+// (`runGenerator`): the program names its shape and seed, which is all the
+// mock needs to print the same input.
 
 import type { LargeCaseReport, ProblemInterface, SourceCode } from '../api/types';
 import type { MockDb } from './db';
@@ -78,11 +80,11 @@ const SHAPES: readonly Shape[] = [
   },
 ];
 
-/** What the model wrote for one shape; deterministic, and within what Python 3.8 runs. */
+/** What the model wrote for one shape; deterministic, and within what Python 3.8 runs. `seed` also decides the values the mock prints. */
 function generatorFor(shape: Shape, face: ProblemInterface, seed: number): SourceCode {
   const print =
     face === 'function'
-      ? ['print("[" + ",".join(map(str, values)) + "]")']
+      ? [FUNCTION_PRINT]
       : ['print(n)', 'print(" ".join(map(str, values)))'];
   return {
     language: 'python',
@@ -97,6 +99,24 @@ function generatorFor(shape: Shape, face: ProblemInterface, seed: number): Sourc
       '',
     ].join('\n'),
   };
+}
+
+const FUNCTION_PRINT = 'print("[" + ",".join(map(str, values)) + "]")';
+
+/** The input a generator prints, as one of the shapes lays it out. */
+const inputOf = (values: readonly number[], face: ProblemInterface): string =>
+  face === 'function' ? `${JSON.stringify(values)}\n` : `${values.length}\n${values.join(' ')}\n`;
+
+/**
+ * What a generator prints, for one the mock wrote: the shape and seed are
+ * read back from its source. `null` for any other program, which the mock
+ * cannot run.
+ */
+export function runGenerator(generator: SourceCode): string | null {
+  const seed = /random\.seed\((\d+)\)/.exec(generator.source);
+  const shape = SHAPES.find((s) => generator.source.includes(s.python));
+  if (generator.language !== 'python' || !seed || !shape) return null;
+  return inputOf(shape.values(Number(seed[1])), generator.source.includes(FUNCTION_PRINT) ? 'function' : 'program');
 }
 
 function maxSubarray(list: readonly number[]): number {
@@ -151,7 +171,7 @@ export function buildLargeCases(db: MockDb, req: LargeCaseRequest): LargeCase[] 
     });
     if (short && i === req.count - 1) return none('failed', 'the model wrote fewer generators than asked for');
     const shape = SHAPES[i % SHAPES.length]!;
-    const seed = 20240611 + i;
+    const seed = hash32(`${req.title}#${i}`);
     const written = { name: shape.name, generator: generatorFor(shape, req.face, seed) };
     const judge = db.options.judge;
     if (judge === 'none') return none('skipped', 'there is no judge engine', written);
@@ -165,8 +185,8 @@ export function buildLargeCases(db: MockDb, req: LargeCaseRequest): LargeCase[] 
     }
     if (req.blocked) return none('skipped', req.blocked, written);
 
-    const list = shape.values(hash32(`${req.title}#${i}`));
-    const stdin = req.face === 'function' ? `${JSON.stringify(list)}\n` : `${COUNT}\n${list.join(' ')}\n`;
+    const list = shape.values(seed);
+    const stdin = inputOf(list, req.face);
     if (seen.includes(stdin)) return none('failed', 'the generated input repeats an existing case', written);
     seen.push(stdin);
     const inputBytes = byteLength(stdin);

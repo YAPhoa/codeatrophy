@@ -183,7 +183,7 @@ function addLargeCases(db: MockDb, draft: ItemDraft, check: DraftCheck, count: n
   });
   for (const one of built) {
     if (one.stdin === null || one.expectedStdout === null) continue;
-    draft.testCases.push({ name: one.report.name ?? 'Large input', stdin: one.stdin, expectedStdout: one.expectedStdout, isSample: false, verified: true });
+    draft.testCases.push({ name: one.report.name ?? 'Large input', stdin: one.stdin, expectedStdout: one.expectedStdout, isSample: false, verified: true, generator: one.report.generator });
     if (check.attempted) {
       check.passed++;
       check.total++;
@@ -347,6 +347,7 @@ export function prepareTestCases(db: MockDb, itemId: string, raw: Record<string,
             verified: true,
             predictionMatched: null,
             error: null,
+            generator: one.report.generator,
           });
         }
         proposal.largeCases = built.map((one) => one.report);

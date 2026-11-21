@@ -12,9 +12,9 @@ A test set has one job: to tell a correct solution from a plausible wrong one. T
 4. **Degenerate shapes**: all elements equal, already sorted, reverse sorted, one long chain, a star, every answer the same, no valid answer at all (when the statement defines what to print then).
 5. **Ties**, whenever the statement has a tie-breaking rule. A test that never exercises the rule cannot check it.
 6. **Cases that defeat the usual wrong approach**: the input where greedy fails, where the off-by-one shows, where a visited-set is needed, where duplicates break a hash-map solution.
-7. **At least one large case** near the upper bounds, so a solution with the wrong complexity times out instead of passing. Generate it inside the reference solution's language if writing it by hand is impractical, but keep it within the size limits for test data that the server reports.
+7. **Large cases** near the upper bounds, so a solution with the wrong complexity times out instead of passing. Add them when the user's `largeTestCase` preference is on (`largeTestCaseCount` of them) or the user asks for them. Write each as a **generator** — a deterministic program that reads nothing and prints the input, given to `add_test_cases` as `generator` in place of `stdin` — never as pasted input; it may print up to `limits.maxLargeInputBytes`. Make them differ in the shape of what they print, not only in a seed: the largest size with arbitrary values, the structure that is the worst case for the obvious slower approach, values at the extremes of their range, a degenerate input (all equal, already sorted, one long run). If the input stays small however large its values are (a single `n` up to 10^12), still make each input different.
 
-Eight to twelve hidden cases is a good default for an interview-sized problem. More is not better if the extra cases repeat a category.
+The user's `generatedTestCases` preference says how many hidden cases to write. More is not better if the extra cases repeat a category.
 
 ## Keeping it honest
 

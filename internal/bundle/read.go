@@ -685,6 +685,9 @@ func (r *reader) readTests(dir string) ([]TestCase, bool) {
 			Sample   bool    `json:"sample"`
 			Origin   *string `json:"origin"`
 			Verified bool    `json:"verified"`
+			// Generator is read apart: one that is not usable is left
+			// out, and the case is imported without it.
+			Generator json.RawMessage `json:"generator"`
 		} `json:"cases"`
 	}
 	if err := domain.DecodeJSON(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &tj); err != nil {
@@ -715,9 +718,53 @@ func (r *reader) readTests(dir string) ([]TestCase, bool) {
 			tc.Name = ""
 			r.warn("%s/tests/tests.json: case %d name too long; ignored", dir, i+1)
 		}
+		tc.Generator = r.readGenerator(dir, i, c.Generator)
 		out = append(out, tc)
 	}
 	return out, true
+}
+
+// readGenerator reads a test case's optional generator: a language and the
+// name of the file in tests/ that holds its source. One that cannot be used
+// is reported and left out; the case keeps its stdin either way.
+func (r *reader) readGenerator(dir string, i int, raw json.RawMessage) *domain.GeneratorSpec {
+	if t := bytes.TrimSpace(raw); len(t) == 0 || bytes.Equal(t, []byte("null")) {
+		return nil
+	}
+	var gj struct {
+		Language string `json:"language"`
+		File     string `json:"file"`
+	}
+	skip := func(why string) *domain.GeneratorSpec {
+		r.warn("%s/tests/tests.json: case %d: generator %s; the case is imported without it", dir, i+1, why)
+		return nil
+	}
+	if err := domain.DecodeJSON(raw, &gj); err != nil {
+		var te *domain.TypeError
+		if errors.As(err, &te) && te.Path == "" {
+			return skip("must be an object")
+		}
+		return skip(jsonProblem(err))
+	}
+	if !domain.KnownLanguage(gj.Language) {
+		return skip(fmt.Sprintf("has unknown language %q", gj.Language))
+	}
+	if gj.File == "" || strings.ContainsAny(gj.File, `/\`) {
+		return skip(fmt.Sprintf("has invalid file name %q", gj.File))
+	}
+	data, ok := r.file(dir + "/tests/" + gj.File)
+	if !ok {
+		return skip(fmt.Sprintf("file %s is missing", gj.File))
+	}
+	src, ok := textOK(data)
+	if !ok {
+		return skip(fmt.Sprintf("file %s is not valid UTF-8", gj.File))
+	}
+	g := domain.GeneratorSpec{Language: gj.Language, Source: domain.NormalizeText(src)}
+	if fe := domain.ValidateSolution(g.Solution(), domain.Limits{MaxSourceBytes: r.lim.MaxSourceBytes}); len(fe) > 0 {
+		return skip(fmt.Sprintf("file %s: %s", gj.File, fe.First()))
+	}
+	return &g
 }
 
 // testFile reads a test input or output; the second result is "" or a

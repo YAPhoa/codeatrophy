@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -34,13 +35,22 @@ func (a *App) ListTestCases(ctx context.Context, itemID string) (List[domain.Tes
 	return out, err
 }
 
+// checkProblem checks that an item exists and is a problem, before any
+// work is done for it outside the write transaction.
+func (a *App) checkProblem(ctx context.Context, itemID string) error {
+	return a.store.Read(ctx, func(tx store.Tx) error {
+		_, err := problemItem(tx, itemID)
+		return err
+	})
+}
+
 func (a *App) buildCases(itemID string, inputs []domain.TestCaseInput, start int) ([]domain.TestCase, error) {
 	now := a.clock()
 	fe := domain.FieldErrors{}
 	cases := make([]domain.TestCase, 0, len(inputs))
 	for i, in := range inputs {
 		tc, tfe := domain.NewTestCaseFromInput(in)
-		tfe.Merge("", domain.ValidateTestCase(&tc))
+		tfe.Merge("", a.validateCase(&tc))
 		fe.Merge(fmt.Sprintf("cases.%d.", i), tfe)
 		tc.ID, tc.ItemID, tc.Position, tc.CreatedAt, tc.UpdatedAt = newID(), itemID, start+i, now, now
 		cases = append(cases, tc)
@@ -48,9 +58,24 @@ func (a *App) buildCases(itemID string, inputs []domain.TestCaseInput, start int
 	return cases, errValidation(fe)
 }
 
-// AddTestCase appends a test case to a problem.
+// AddTestCase appends a test case to a problem. A case given a generator
+// and no stdin gets what the generator prints; one given both is stored as
+// given (see generatedInputs).
 func (a *App) AddTestCase(ctx context.Context, itemID string, in domain.TestCaseInput) (domain.TestCase, error) {
 	var out domain.TestCase
+	field := func(int) string { return "generator" }
+	var generated []bool
+	if needsRun(in) {
+		if err := a.checkProblem(ctx, itemID); err != nil {
+			return out, err
+		}
+		inputs := []domain.TestCaseInput{in}
+		var err error
+		if generated, err = a.generatedInputs(ctx, inputs, field); err != nil {
+			return out, err
+		}
+		in = inputs[0]
+	}
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		it, err := problemItem(tx, itemID)
 		if err != nil {
@@ -73,6 +98,9 @@ func (a *App) AddTestCase(ctx context.Context, itemID string, in domain.TestCase
 				}
 				ae.Fields = fields
 			}
+			return err
+		}
+		if err := generatedRepeats(existing, cases, generated, field); err != nil {
 			return err
 		}
 		out = cases[0]
@@ -101,12 +129,31 @@ type BulkTestCasesInput struct {
 	ExpectedRevision  domain.Opt[int]             `json:"expectedRevision"`
 }
 
-// BulkTestCases appends (or replaces) test cases.
+// BulkTestCases appends (or replaces) test cases. The cases given a
+// generator and no stdin get what their generator prints; they all run
+// before anything is stored, and if one fails nothing is. A case given both
+// is stored as given.
 func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCasesInput) (List[domain.TestCase], error) {
 	if in.ReferenceSolution.HasValue() {
 		if err := errValidation(prefixed("referenceSolution.", domain.ValidateSolution(in.ReferenceSolution.Val, a.limits))); err != nil {
 			return List[domain.TestCase]{}, err
 		}
+	}
+	field := func(i int) string { return fmt.Sprintf("cases.%d.generator", i) }
+	var generated []bool
+	if slices.ContainsFunc(in.Cases, needsRun) {
+		if err := a.checkProblem(ctx, itemID); err != nil {
+			return List[domain.TestCase]{}, err
+		}
+		if len(in.Cases) > domain.MaxTestCasesPerItem {
+			return List[domain.TestCase]{}, errField("cases", fmt.Sprintf("a problem can have at most %d test cases", domain.MaxTestCasesPerItem))
+		}
+		cases := append([]domain.TestCaseInput(nil), in.Cases...)
+		var err error
+		if generated, err = a.generatedInputs(ctx, cases, field); err != nil {
+			return List[domain.TestCase]{}, err
+		}
+		in.Cases = cases
 	}
 	var out List[domain.TestCase]
 	err := a.store.Write(ctx, func(tx store.Tx) error {
@@ -136,6 +183,13 @@ func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCases
 		}
 		cases, err := a.buildCases(itemID, in.Cases, start)
 		if err != nil {
+			return err
+		}
+		kept := existing
+		if in.Replace {
+			kept = slices.DeleteFunc(slices.Clone(existing), func(c domain.TestCase) bool { return !c.IsSample })
+		}
+		if err := generatedRepeats(kept, cases, generated, field); err != nil {
 			return err
 		}
 		if in.Replace {
@@ -185,9 +239,35 @@ func prefixed(p string, fe domain.FieldErrors) domain.FieldErrors {
 	return out
 }
 
-// UpdateTestCase applies a partial update to one test case.
+// UpdateTestCase applies a partial update to one test case. A non-null
+// generator runs, and what it prints replaces stdin; null drops the
+// generator and keeps stdin; a new stdin given without a generator drops
+// the generator too.
 func (a *App) UpdateTestCase(ctx context.Context, id string, in domain.TestCaseInput) (domain.TestCase, error) {
 	var out domain.TestCase
+	if in.Generator.HasValue() && in.Stdin.Set {
+		return out, errField("generator", "give either stdin or a generator, not both: the server sets stdin to what the generator prints")
+	}
+	field := func(int) string { return "generator" }
+	var generated []bool
+	if in.Generator.HasValue() {
+		err := a.store.Read(ctx, func(tx store.Tx) error {
+			tc, err := tx.GetTestCase(id)
+			if err != nil {
+				return notFoundAs(err, "test case")
+			}
+			_, err = problemItem(tx, tc.ItemID)
+			return err
+		})
+		if err != nil {
+			return out, err
+		}
+		inputs := []domain.TestCaseInput{in}
+		if generated, err = a.generatedInputs(ctx, inputs, field); err != nil {
+			return out, err
+		}
+		in = inputs[0]
+	}
 	err := a.store.Write(ctx, func(tx store.Tx) error {
 		tc, err := tx.GetTestCase(id)
 		if err != nil {
@@ -199,11 +279,20 @@ func (a *App) UpdateTestCase(ctx context.Context, id string, in domain.TestCaseI
 		}
 		before := tc
 		fe := domain.ApplyTestCaseInput(&tc, in)
-		fe.Merge("", domain.ValidateTestCase(&tc))
+		fe.Merge("", a.validateCase(&tc))
 		if err := errValidation(fe); err != nil {
 			return err
 		}
-		if tc == before {
+		if len(generated) > 0 {
+			others, err := tx.ListTestCases(tc.ItemID)
+			if err != nil {
+				return err
+			}
+			if err := generatedRepeats(others, []domain.TestCase{tc}, generated, field); err != nil {
+				return err
+			}
+		}
+		if domain.TestCaseEqual(&tc, &before) {
 			out = tc
 			return nil
 		}

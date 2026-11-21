@@ -25,6 +25,7 @@ import { useToast } from '../../ui/Toast';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { WriteProblems } from '../solutions/parts';
+import { LargeBadge, LargeCaseGenerator } from './LargeCaseOutcome';
 import { useSolutionWrite } from '../solutions/solutionWrites';
 
 /** The name a reference solution is given when it has none of its own (docs/api.md). */
@@ -544,6 +545,7 @@ function TestsManager({ item }: { item: Item }) {
                         <span className="case-no">{i + 1}</span>
                         <span className="grow truncate">{name || <span className="muted">{name === c.name ? 'Unnamed' : 'Hidden case'}</span>}</span>
                         {c.isSample && <Badge tone="accent">sample</Badge>}
+                        {c.generator && <LargeBadge stdin={c.stdin} />}
                         {c.origin !== 'manual' && <Badge>{ORIGIN_LABEL[c.origin]}</Badge>}
                         {v ? (
                           v.ok && v.matches ? (
@@ -607,6 +609,13 @@ function TestsManager({ item }: { item: Item }) {
                       <Checkbox className="case-flag" checked={draft.isSample} onChange={(v) => setDraft({ ...draft, isSample: v })} label="Sample" hint="Shown to “Run”" />
                       <Checkbox className="case-flag" checked={draft.verified} onChange={(v) => setDraft({ ...draft, verified: v })} label="Verified" hint="Output confirmed" />
                     </div>
+                    {/* An input edited by hand no longer comes from the generator: the server drops it on save. */}
+                    {selected?.generator &&
+                      (base && draft.stdin !== base.stdin ? (
+                        <p className="field-hint">Saving drops the generator.</p>
+                      ) : (
+                        <LargeCaseGenerator key={selected.id} generator={selected.generator} of={draft.name || 'this case'} />
+                      ))}
                     <div className="case-io">
                       <TestDataField
                         label="Input (stdin)"

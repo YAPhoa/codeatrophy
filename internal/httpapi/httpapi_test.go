@@ -732,12 +732,12 @@ func TestTestCaseEndpoints(t *testing.T) {
 	c := newServer(t)
 	id := c.expect("POST", api+"/items", `{"type":"problem","title":"P"}`, 201).json(t)["id"].(string)
 	tc := c.expect("POST", api+"/items/"+id+"/testcases", `{"name":"a","stdin":"1 2","expectedStdout":"3"}`, 201).json(t)
-	for _, k := range []string{"id", "itemId", "position", "name", "stdin", "expectedStdout", "isSample", "origin", "verified", "createdAt", "updatedAt"} {
+	for _, k := range []string{"id", "itemId", "position", "name", "stdin", "expectedStdout", "isSample", "origin", "verified", "generator", "createdAt", "updatedAt"} {
 		if _, ok := tc[k]; !ok {
 			t.Errorf("TestCase lacks %s: %v", k, tc)
 		}
 	}
-	if len(tc) != 11 || tc["itemId"] != id || tc["name"] != "a" {
+	if len(tc) != 12 || tc["itemId"] != id || tc["name"] != "a" || tc["generator"] != nil {
 		t.Errorf("created: %v", tc)
 	}
 	a := tc["id"].(string)

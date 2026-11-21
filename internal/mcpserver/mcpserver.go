@@ -184,16 +184,25 @@ func conventionsFor(ctx context.Context, a *app.App) string {
 	return c
 }
 
-// result encodes v as both structured content and text.
+// result encodes v as both structured content and text, with large test
+// data elided (see elide).
 func result(v any) *mcp.CallToolResult {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+	doc, err := elide(bytes.TrimSpace(buf.Bytes()))
+	if err != nil {
+		doc = bytes.TrimSpace(buf.Bytes())
+	}
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, doc, "", "  ") != nil {
+		pretty.Reset()
+		pretty.Write(doc)
+	}
 	return &mcp.CallToolResult{
-		Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(buf.String())}},
-		StructuredContent: json.RawMessage(bytes.TrimSpace(buf.Bytes())),
+		Content:           []mcp.Content{&mcp.TextContent{Text: pretty.String()}},
+		StructuredContent: json.RawMessage(pretty.Bytes()),
 	}
 }
 

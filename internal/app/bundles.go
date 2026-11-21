@@ -625,7 +625,7 @@ func (a *App) insertBundleCases(tx store.Tx, itemID string, cases []bundle.TestC
 	for i, c := range cases {
 		tc := domain.TestCase{ID: newID(), ItemID: itemID, Position: start + i, Name: c.Name, Stdin: c.Stdin,
 			ExpectedStdout: c.ExpectedStdout, IsSample: c.IsSample, Origin: c.Origin, Verified: c.Verified,
-			CreatedAt: now, UpdatedAt: now}
+			Generator: c.Generator, CreatedAt: now, UpdatedAt: now}
 		if !tc.Origin.Valid() {
 			tc.Origin = domain.OriginImport
 		}

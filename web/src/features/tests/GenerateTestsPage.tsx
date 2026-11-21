@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleSlash, Eye, EyeOff, FlaskConical, RefreshCw, Save, ShieldCheck, ShieldQuestion, XCircle } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
 import { qk, useItem, useLargeTestCaseCount, useLimits, useMeta, usePreferences, useSolutions, useTestCases } from '../../api/queries';
-import type { AiTestCasesResponse, Item, LargeCaseReport, ProposedTestCase, SourceCode } from '../../api/types';
+import type { AiTestCasesResponse, Item, ProposedTestCase, SourceCode } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { sentence } from '../../lib/errors';
 import { plural } from '../../lib/format';
@@ -24,7 +24,7 @@ import { useScreenJob } from '../jobs/useScreenJob';
 import { ItemBar } from '../item/ItemBar';
 import { ItemMissing } from '../item/ItemPage';
 import { Output } from '../solve/ResultPanel';
-import { LargeCaseGenerator, LargeCaseSummary } from './LargeCaseOutcome';
+import { LargeBadge, LargeCaseGenerator, LargeCaseSummary } from './LargeCaseOutcome';
 
 export default function GenerateTestsPage() {
   const { id = '' } = useParams();
@@ -51,9 +51,14 @@ export default function GenerateTestsPage() {
   return <Generator key={item.data.id} item={item.data} />;
 }
 
-/** Where the large cases that were added are among the proposed ones, with their generators. */
-const largeCasesAt = (reports: readonly LargeCaseReport[]): Map<number, SourceCode | null> =>
-  new Map(reports.flatMap((c) => (c.status === 'added' && c.index !== null ? [[c.index, c.generator] as const] : [])));
+/** Where the large cases are among the proposed ones, with their generators: those the reports say were added, and any case that has one. */
+const largeCasesAt = (res: Pick<AiTestCasesResponse, 'largeCases' | 'cases'>): Map<number, SourceCode | null> => {
+  const at = new Map(res.largeCases.flatMap((c) => (c.status === 'added' && c.index !== null ? [[c.index, c.generator] as const] : [])));
+  res.cases.forEach((c, i) => {
+    if (c.generator) at.set(i, c.generator);
+  });
+  return at;
+};
 
 /** `revealed`: the solution is on screen, so its error output (which can quote the code) may be too. */
 function CaseStatus({ c, attempted, revealed }: { c: ProposedTestCase; attempted: boolean; revealed: boolean }) {
@@ -190,7 +195,7 @@ function Generator({ item }: { item: Item }) {
     setKeep(res.cases.map((c) => !c.error));
     setSamples(res.cases.map((c) => c.isSample));
     // Open the cases that need a look, and the large ones, which are shown only when asked for.
-    const added = largeCasesAt(res.largeCases);
+    const added = largeCasesAt(res);
     setOpen(new Set(res.cases.flatMap((c, i) => (c.error || c.predictionMatched === false || added.has(i) ? [i] : []))));
     setLargeShown(false);
     setKeepSolution(true);
@@ -205,7 +210,16 @@ function Generator({ item }: { item: Item }) {
     const cases = proposal.cases
       .map((c, i) => ({ c, i }))
       .filter(({ i }) => keep[i])
-      .map(({ c, i }) => ({ name: c.name, stdin: c.stdin, expectedStdout: c.expectedStdout, isSample: samples[i] ?? c.isSample, origin: 'ai' as const, verified: c.verified }));
+      // A large case goes with its generator too; with its input given, the server runs nothing.
+      .map(({ c, i }) => ({
+        name: c.name,
+        stdin: c.stdin,
+        ...(c.generator ? { generator: c.generator } : {}),
+        expectedStdout: c.expectedStdout,
+        isSample: samples[i] ?? c.isSample,
+        origin: 'ai' as const,
+        verified: c.verified,
+      }));
     setSaving(true);
     setSaveError(null);
     try {
@@ -253,7 +267,7 @@ function Generator({ item }: { item: Item }) {
     });
 
   const kept = keep.filter(Boolean).length;
-  const largeAt = largeCasesAt(proposal?.largeCases ?? []);
+  const largeAt = largeCasesAt(proposal ?? { largeCases: [], cases: [] });
   // The large cases come last, after their summary, and only on request.
   const regularIndices = proposal?.cases.flatMap((_, i) => (largeAt.has(i) ? [] : [i])) ?? [];
   const largeIndices = proposal?.cases.flatMap((_, i) => (largeAt.has(i) ? [i] : [])) ?? [];
@@ -299,6 +313,7 @@ function Generator({ item }: { item: Item }) {
               <span className="proposal-rationale">{c.rationale}</span>
             </span>
           </button>
+          {generator && <LargeBadge stdin={c.stdin} />}
           <CaseStatus c={c} attempted={proposal.verification.attempted} revealed={showSolution} />
           <label className="proposal-sample">
             <input type="checkbox" checked={samples[i] ?? false} onChange={(e) => setSamples((s) => s.map((v, j) => (j === i ? e.target.checked : v)))} />

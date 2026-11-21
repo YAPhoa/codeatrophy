@@ -101,7 +101,7 @@ function cannedDraft(key: string, assumptions: string[]): ItemDraft {
     problem: programSpec(p.reference ?? genericSolution('python')),
     testCases: p.cases
       .filter((c) => c.sample)
-      .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.out, isSample: true, verified: false })),
+      .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.out, isSample: true, verified: false, generator: null })),
     assumptions: [...assumptions],
   };
 }
@@ -234,7 +234,7 @@ function functionSpec(form: FunctionForm): Pick<ItemDraft, 'problem' | 'testCase
       ...functionKit(form.signature),
       referenceSolution: { language: 'python', source: form.solution },
     },
-    testCases: form.examples.map(([stdin, out], i) => ({ name: `Example ${i + 1}`, stdin, expectedStdout: out, isSample: true, verified: false })),
+    testCases: form.examples.map(([stdin, out], i) => ({ name: `Example ${i + 1}`, stdin, expectedStdout: out, isSample: true, verified: false, generator: null })),
   };
 }
 
@@ -352,9 +352,9 @@ function paragraphs(text: string): string {
 }
 
 const GENERIC_SAMPLES: DraftTestCase[] = [
-  { name: 'Example 1', stdin: '5\n3 -1 4 -1 5\n', expectedStdout: '10\n', isSample: true, verified: false },
-  { name: 'Example 2', stdin: '3\n-2 -7 -4\n', expectedStdout: '-2\n', isSample: true, verified: false },
-  { name: 'Example 3', stdin: '1\n42\n', expectedStdout: '42\n', isSample: true, verified: false },
+  { name: 'Example 1', stdin: '5\n3 -1 4 -1 5\n', expectedStdout: '10\n', isSample: true, verified: false, generator: null },
+  { name: 'Example 2', stdin: '3\n-2 -7 -4\n', expectedStdout: '-2\n', isSample: true, verified: false, generator: null },
+  { name: 'Example 3', stdin: '1\n42\n', expectedStdout: '42\n', isSample: true, verified: false, generator: null },
 ];
 
 function inferDifficulty(text: string): Difficulty {
@@ -568,6 +568,8 @@ function parsePreviousDraft(value: unknown): ItemDraft {
             expectedStdout: typeof c.expectedStdout === 'string' ? c.expectedStdout : '',
             isSample: c.isSample !== false,
             verified: false,
+            // A revision does not carry a large case over, so neither does it its generator.
+            generator: null,
           }))
         : [],
     assumptions: isStringArray(value.assumptions) ? value.assumptions : [],
@@ -930,7 +932,7 @@ export function variantOfItem(
   const samples: DraftTestCase[] = db
     .casesOf(item.id)
     .filter((c) => c.isSample)
-    .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.expectedStdout, isSample: true, verified: false }));
+    .map((c, i) => ({ name: `Example ${i + 1}`, stdin: c.stdin, expectedStdout: c.expectedStdout, isSample: true, verified: false, generator: null }));
   const reference = db.referenceOf(item.id);
   const noStarter = Object.keys(problem.starterCode).length === 0 && problem.interface === 'program';
   const base: ItemDraft = {
@@ -1107,6 +1109,7 @@ export function proposeTestCases(
       isSample: false,
       verified: ran,
       predictionMatched: ran ? !mismatch : null,
+      generator: null,
       error:
         verifying && crashed
           ? 'The reference solution failed on this input (runtime_error): IndexError: list index out of range'

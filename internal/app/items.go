@@ -196,6 +196,9 @@ func (a *App) GetItem(ctx context.Context, id string) (domain.Item, error) {
 // CreateItem creates an item, optionally with test cases and collection
 // memberships, in one transaction.
 func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item, error) {
+	if err := a.generateItemCases(ctx, &in); err != nil {
+		return domain.Item{}, err
+	}
 	n, err := a.newItem(in)
 	if err != nil {
 		return domain.Item{}, err
@@ -206,6 +209,26 @@ func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item,
 		return err
 	})
 	return out, err
+}
+
+// generateItemCases runs the generators of the new item's test cases that
+// have one but no stdin, before anything is stored, and sets their stdin.
+// A case that gives both keeps them as given, as on every create path (see
+// generatedInputs). The item is validated first, so that nothing runs for
+// a request that would fail anyway.
+func (a *App) generateItemCases(ctx context.Context, in *domain.ItemInput) error {
+	if !in.TestCases.HasValue() || !slices.ContainsFunc(in.TestCases.Val, needsRun) {
+		return nil
+	}
+	if _, err := a.newItem(*in); err != nil {
+		return err
+	}
+	cases := slices.Clone(in.TestCases.Val)
+	if _, err := a.generatedInputs(ctx, cases, func(i int) string { return fmt.Sprintf("testCases.%d.generator", i) }); err != nil {
+		return err
+	}
+	in.TestCases = domain.Some(cases)
+	return nil
 }
 
 // newItemRecords is a new item as it is written: the item, its test cases
@@ -253,7 +276,7 @@ func (a *App) newItem(in domain.ItemInput) (newItemRecords, error) {
 		} else {
 			for i, tci := range in.TestCases.Val {
 				tc, tfe := domain.NewTestCaseFromInput(tci)
-				tfe.Merge("", domain.ValidateTestCase(&tc))
+				tfe.Merge("", a.validateCase(&tc))
 				fe.Merge(fmt.Sprintf("testCases.%d.", i), tfe)
 				tc.ID, tc.ItemID, tc.Position, tc.CreatedAt, tc.UpdatedAt = newID(), it.ID, i, now, now
 				cases = append(cases, tc)

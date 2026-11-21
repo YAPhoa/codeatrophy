@@ -11,7 +11,7 @@ const itemDraft = (over: Partial<ItemDraft> = {}): ItemDraft => ({
   difficulty: 'easy',
   tags: ['array'],
   problem: null,
-  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, verified: false }],
+  testCases: [{ name: 'Example 1', stdin: '1\n', expectedStdout: '2\n', isSample: true, verified: false, generator: null }],
   assumptions: ['Exactly one answer.'],
   ...over,
 });

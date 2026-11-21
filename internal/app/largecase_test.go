@@ -100,9 +100,13 @@ func TestDraftWithLargeTestCases(t *testing.T) {
 	}{{"Many sevens", 200000}, {"Second", 3000}, {"Third", 5000}} {
 		lc, tc := c.LargeCases[i], d.TestCases[i+1]
 		if lc.Status != "added" || *lc.Index != i+1 || *lc.Name != want.name || tc.Name != want.name ||
-			len(tc.Stdin) != want.bytes || tc.IsSample || !tc.Verified || tc.ExpectedStdout != strconv.Itoa(7*want.bytes/2)+"\n" {
+			len(tc.Stdin) != want.bytes || tc.IsSample || !tc.Verified || tc.ExpectedStdout != strconv.Itoa(7*want.bytes/2)+"\n" ||
+			tc.Generator == nil || *tc.Generator != *lc.Generator {
 			t.Errorf("large case %d: %+v, test case %q (%d bytes)", i, lc, tc.Name, len(tc.Stdin))
 		}
+	}
+	if d.TestCases[0].Generator != nil {
+		t.Errorf("a case the model wrote has a generator: %+v", d.TestCases[0].Generator)
 	}
 	if len(d.TestCases) != 4 || c.Passed != 4 || c.Total != 4 || c.Error != nil {
 		t.Errorf("check: %+v, %d cases", c, len(d.TestCases))
@@ -402,7 +406,8 @@ func TestGeneratedTestsWithLargeCases(t *testing.T) {
 	}
 	l := res.Cases[1]
 	if l.PredictedStdout != nil || l.PredictionMatched != nil || !l.Verified || l.IsSample || l.ExpectedStdout != "175000\n" ||
-		l.Rationale != "Big n." || len(res.Cases[2].Stdin) != 2000 {
+		l.Rationale != "Big n." || len(res.Cases[2].Stdin) != 2000 ||
+		l.Generator == nil || l.Generator.Source != "gen 50000" || res.Cases[0].Generator != nil {
 		t.Errorf("large case: %+v", l)
 	}
 	b, _ := json.Marshal(l)
@@ -536,11 +541,14 @@ func TestRevisionsDoNotShowLargeCases(t *testing.T) {
 	prev["testCases"] = []map[string]any{
 		{"name": "Example 1", "stdin": "1 2", "expectedStdout": "3", "isSample": true},
 		{"name": "Huge", "stdin": strings.Repeat("7 ", 300000), "expectedStdout": "2100000", "isSample": false},
+		// Large by its generator, however small its input.
+		{"name": "Largest n", "stdin": "1000000000000\n", "expectedStdout": "1", "generator": map[string]string{"language": "python", "source": "print(10**12)"}},
 	}
 	body := mustJSON(t, map[string]any{"text": "x", "instruction": "shorter", "previousDraft": prev})
 	must(draftWith(t, e, body, draftJSON()))
 	u := e.ai.Last().User
-	if strings.Contains(u, "7 7 7 7") || !strings.Contains(u, `"largeTestCasesOmitted":[{"expectedOutputBytes":7,"inputBytes":600000,"name":"Huge"}]`) ||
+	if strings.Contains(u, "7 7 7 7") || strings.Contains(u, "10**12") ||
+		!strings.Contains(u, `"largeTestCasesOmitted":[{"expectedOutputBytes":7,"inputBytes":600000,"name":"Huge"},{"expectedOutputBytes":1,"inputBytes":14,"name":"Largest n"}]`) ||
 		!strings.Contains(u, "Leave them out of the revision") || !strings.Contains(u, `"stdin":"1 2"`) {
 		t.Errorf("revision prompt: %.600s", u)
 	}

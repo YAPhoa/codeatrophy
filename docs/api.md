@@ -430,7 +430,13 @@ its first line, which the solver can expand.
 Only `type` and `title` are required on create; everything else defaults as
 shown. `type` cannot be changed after creation. `testCases` (an array of
 `TestCaseInput`) is accepted on create only, so a reviewed AI draft is saved
-atomically with its sample cases. Validation: `title` 1–200 chars, a
+atomically with its sample cases. A case there may carry a `generator`
+(see [Test cases](#test-cases)): with no `stdin`, the server runs it before
+anything is stored, as `POST /items/{id}/testcases` does (`422` on
+`testCases.<i>.generator` if it fails, `503 judge_unavailable` without an
+engine); with a `stdin` as well, both are stored as given, without running
+it — that is how a draft's large cases are saved with their generators.
+Validation: `title` 1–200 chars, a
 [single line](#single-line-fields); `timeLimitMs` 100–30000; `memoryLimitKb` 16384–2097152; at most 30 tags of 1–40
 chars each.
 
@@ -505,7 +511,8 @@ no AI provider is involved.
 
 `problem` and `testCases` are validated as in `ItemInput` (`422`); other keys
 of an `ItemInput` are accepted and ignored, so a client can send the item it
-is about to save.
+is about to save. A case's `generator` is not run: the check uses the
+`stdin` sent.
 
 ```json
 {
@@ -604,24 +611,71 @@ or not the action changed them). Unknown ids are ignored.
   "isSample": true,
   "origin": "manual",
   "verified": false,
+  "generator": null,
   "createdAt": "...",
   "updatedAt": "..."
 }
 ```
 
+`generator` is `null`, or `{ "language": "python", "source": "..." }` for a
+large test case: the program that printed its `stdin` (see
+[Large test cases](#large-test-cases)). `stdin` is stored either way, so
+nothing needs to run the generator again.
+
 `TestCaseInput`: `name` (default `""`), `stdin` (default `""`),
-`expectedStdout` (required, may be empty), `isSample` (default `false`),
-`origin` (default `manual`), `verified` (default `false`).
+`expectedStdout` (required, may be empty, unless a generator is given:
+then default `""`), `isSample` (default `false`), `origin` (default
+`manual`), `verified` (default `false`), `generator` (default `null`).
 
 Editing `stdin` or `expectedStdout` through `PATCH` resets `verified` to
 `false` unless the same request sets it.
 
+#### Generators
+
+A case may be given a `generator` instead of its `stdin` — on every path
+that creates test cases (`POST /items`, `POST /drafts/{id}/save`,
+`POST /items/{id}/testcases`, `POST /items/{id}/testcases/bulk`) and on
+`PATCH /testcases/{id}`: a complete, deterministic program in one of the
+judge's languages that reads nothing and prints one test input. The server
+checks it (a known language the judge offers, a source of at most
+`limits.maxSourceBytes`), runs it as a plain program with limits of its own
+(10 seconds, 512 MiB), and stores what it printed as the case's `stdin`,
+with the generator. What it prints must be non-empty, at most
+`limits.maxLargeInputBytes`, valid UTF-8, and not the input of another case
+of the problem or of an earlier case of the same request (ignoring trailing
+whitespace). The expected output is computed as for any case:
+`POST /items/{id}/testcases/verify` with `updateExpected: true`.
+
+- On create, a case that gives both `stdin` and a `generator` is stored as
+  given, and nothing runs, as in a bundle import: the server checks the
+  generator's language and size but does not check that the input came from
+  it, nor that it repeats no other case. This is how a client saves a case
+  the server built earlier with its generator (a draft's large cases, or the
+  large cases of test generation), without running it again and without
+  needing the judge. `stdin: null` is not a stdin (`422` on `stdin`).
+- On `PATCH`, giving both `stdin` (even `null`) and a non-null `generator`
+  is `422` on `generator`.
+- A generator that cannot be used or fails is `422` on `generator`
+  (`cases.<i>.generator` in a bulk request, `testCases.<i>.generator` on
+  item create), with the reason in plain
+  words — the same messages as in [`largeCases`](#large-test-cases), such as
+  "the generator does not compile: …" or "the generator printed more than
+  1048576 bytes". No judge engine, or one that cannot be reached, is
+  `503 judge_unavailable`.
+- A request is atomic: its generators all run before anything is stored, in
+  parallel, and if one fails nothing is.
+- `PATCH`: a non-null `generator` runs and replaces `stdin` (and so resets
+  `verified` unless the request sets it, when the input changed);
+  `generator: null` drops the generator and keeps `stdin`; a new `stdin`
+  without a `generator` drops the generator, since the input is no longer
+  what it printed.
+
 | Endpoint | Behaviour |
 | --- | --- |
 | `GET /items/{id}/testcases` | `{ "items": [TestCase] }` ordered by `position`; not paginated |
-| `POST /items/{id}/testcases` | Body `TestCaseInput`; appended. `201` `TestCase` |
-| `POST /items/{id}/testcases/bulk` | Body `{ "cases": [TestCaseInput], "replace": false, "referenceSolution": null }`. Appends, or with `replace: true` replaces every existing case except the samples, which keep their order and come first. A non-null `referenceSolution` (`{language, source}`) is stored on the item in the same transaction. Returns `{ "items": [TestCase] }` — the full list after the change |
-| `PATCH /testcases/{id}` | Partial `TestCaseInput`. Returns `TestCase` |
+| `POST /items/{id}/testcases` | Body `TestCaseInput`; appended. A [generator](#generators) without `stdin` runs; with `stdin` it is stored as given. `201` `TestCase` |
+| `POST /items/{id}/testcases/bulk` | Body `{ "cases": [TestCaseInput], "replace": false, "referenceSolution": null }`. Appends, or with `replace: true` replaces every existing case except the samples, which keep their order and come first. A non-null `referenceSolution` (`{language, source}`) is stored on the item in the same transaction. Cases may be given [generators](#generators), run when a case has no `stdin` and stored as given when it has one; with `replace: true` a generated input is compared with the samples that stay. Returns `{ "items": [TestCase] }` — the full list after the change |
+| `PATCH /testcases/{id}` | Partial `TestCaseInput`; `stdin` together with a non-null [generator](#generators) is `422`. Returns `TestCase` |
 | `DELETE /testcases/{id}` | `204` |
 | `PUT /items/{id}/testcases/order` | Body `{ "ids": [...] }` — must be exactly the item's case ids. Returns `{ "items": [TestCase] }` |
 | `POST /items/{id}/testcases/verify` | See below |
@@ -1170,7 +1224,7 @@ The result, `DraftResponse`:
       "referenceSolution": { "language": "python", "source": "..." }
     },
     "testCases": [
-      { "name": "Example 1", "stdin": "...", "expectedStdout": "...", "isSample": true, "verified": true }
+      { "name": "Example 1", "stdin": "...", "expectedStdout": "...", "isSample": true, "verified": true, "generator": null }
     ],
     "assumptions": [
       "The original text did not give constraints; assumed 2 ≤ n ≤ 10^5.",
@@ -1246,7 +1300,10 @@ placeholder result. `runners` is `[]` for a `program` problem and whenever
 entry for each the request asked for, `[]` when it asked for none.
 
 `ItemDraft` maps directly onto `ItemInput` (the client adds `rawInput: text`
-and sets each test case's `origin` to `ai`). `problem` is `null` and
+and sets each test case's `origin` to `ai`). Each draft test case has a
+`generator`: `null`, or for a [large test case](#large-test-cases) the
+program that printed its `stdin`; saving the draft with the case's `stdin`
+and `generator` stores both, so the generator is kept with the case. `problem` is `null` and
 `testCases` is `[]` for a reading. `assumptions` lists everything the model
 inferred or invented that was not in the input; it is for display during
 review and is not stored. `tags` are the model's suggestions, normalised like
@@ -1337,7 +1394,8 @@ Answers `202` with the `AiJob`. The result of the job, `TestCasesResponse`:
       "isSample": false,
       "verified": true,
       "predictionMatched": true,
-      "error": null
+      "error": null,
+      "generator": null
     }
   ]
 }
@@ -1366,7 +1424,9 @@ reached, the proposal is still returned: `verification.attempted` is `true`,
 
 The client saves accepted cases with `POST /items/{id}/testcases/bulk`,
 passing `origin: "ai"`, each case's `verified` flag, and the
-`referenceSolution`.
+`referenceSolution`. A large case is saved with its `stdin`, `generator`,
+`expectedStdout` and `verified` as the response gave them: the server stores
+the generator with the case without running it again.
 
 `largeCases` reports on the [large test cases](#large-test-cases): one entry
 for each the request asked for, `[]` when it asked for none.
@@ -1476,9 +1536,9 @@ limits of its own, takes what it printed as the case's `stdin`, and runs the
 reference solution on that for the expected output. Each case is then an
 ordinary test case: they are appended, in the order the model gave them, as
 the last elements of `draft.testCases` (for a draft or a variant) or of
-`cases` (for test generation), never a sample, with `verified: true`. In
-`cases` their `predictedStdout` and `predictionMatched` are `null`; the model
-has not seen the input. Only the reference solution vouches for the expected
+`cases` (for test generation), never a sample, with `verified: true` and
+their `generator`. In `cases` their `predictedStdout` and
+`predictionMatched` are `null`; the model has not seen the input. Only the reference solution vouches for the expected
 output, so it is worth as much as the smaller, hand-checked cases make the
 reference solution worth.
 
@@ -1498,7 +1558,7 @@ for, in the model's order:
   },
   {
     "status": "failed",
-    "error": "the generator crashed: IndexError: list index out of range",
+    "error": "the generator failed: runtime error: IndexError: list index out of range",
     "index": null,
     "name": "A single strictly decreasing run",
     "inputBytes": null,
@@ -1530,8 +1590,9 @@ for, in the model's order:
 - `inputBytes`, `timeMs` — the size of the generated input and how long the
   reference solution took on it, to set against the problem's time limit;
   `null` when that point was not reached.
-- `generator` — the program, for inspection; `null` if the model gave none.
-  It is not stored with the test case.
+- `generator` — the program; `null` if the model gave none. An added case
+  carries the same generator, which is stored with it when the case is
+  saved (see [Generators](#generators)).
 
 Generators the model wrote beyond the number asked for are ignored.
 
@@ -1539,11 +1600,17 @@ In a draft the large cases are part of the [check](#draft-requests): they run
 after the other test cases and before the runners, within the same time
 bound, and each one added counts in `check.passed` and `check.total`.
 
+A case can also be given a generator directly, without an AI generation
+(see [Generators](#generators)), which is how an MCP client adds large
+cases: it runs the same way and has the same output checks, and the
+expected output then comes from verifying the case.
+
 Large test data is never sent to a model. Wherever a prompt lists test cases
 — the existing cases in test generation, the cases of a `previousDraft` in a
 revision — a case whose input or expected output is larger than a few
-kilobytes is described by its name and size only. A revision therefore does
-not carry such a case over: with `largeTestCases` it builds new ones, and
+kilobytes is described by its name and size only, and in a `previousDraft`
+so is a case that has a `generator`, whatever its size. A revision therefore
+does not carry such a case over: with `largeTestCases` it builds new ones, and
 without it the revised draft has none. A client should leave the large cases
 of the earlier response out of the `previousDraft` it sends, whatever their
 size, which also keeps that request within `limits.maxPreviousDraftBytes`;
@@ -1730,7 +1797,8 @@ To cancel a draft's generation, cancel its job
 ```
 
 Creates the item exactly as [`POST /items`](#post-items) does from `item` —
-its test cases and reference solution included — and deletes the draft, in
+its test cases, with their generators, and reference solution included —
+and deletes the draft, in
 one transaction: either both happen or neither does. For a `variant` draft,
 `item.variantOf` defaults to the draft's `variantOf`. A generation still
 running is cancelled. `expectedRevision` is optional and checked as for
@@ -2314,9 +2382,11 @@ from bundles, and no MCP tool reads or sets it.
 ## Preferences
 
 How the user likes the app to behave. Preferences are stored on the server so
-they follow the user across browsers; they are personal, never exported, and
-not available over MCP. The server stores and validates them but does not act
-on them — they are for clients to honour.
+they follow the user across browsers; they are personal and never exported.
+Over MCP, `get_overview` reports the test case preferences (`hideTestCases`,
+`generatedTestCases`, `largeTestCase`, `largeTestCaseCount`) for the
+assistant to follow; no MCP tool changes them. The server stores and
+validates them but does not act on them — they are for clients to honour.
 
 ### `GET /settings/preferences`
 

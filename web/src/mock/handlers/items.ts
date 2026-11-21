@@ -36,6 +36,7 @@ import {
   Validator,
 } from '../http';
 import { checkProblem } from '../ai';
+import { runGenerator } from '../largeCase';
 import { isLanguage, sleep, uuid } from '../util';
 
 const TYPES: readonly ItemType[] = ['problem', 'reading'];
@@ -281,6 +282,28 @@ export function parseTestCaseInput(
     if (!ORIGINS.includes(raw.origin as TestOrigin)) v.add(`${prefix}origin`, 'must be manual, ai or import');
     else out.origin = raw.origin as TestOrigin;
   }
+  // A generator prints the input. Given alone it is run here, and what it
+  // printed is the case's stdin; on create, given with the stdin it printed,
+  // both are stored as they are.
+  const generator = raw.generator;
+  if (generator === null) out.generator = null;
+  else if (generator !== undefined) {
+    if (!isRecord(generator) || !isLanguage(generator.language) || typeof generator.source !== 'string') {
+      v.add(`${prefix}generator`, 'must be null or { language, source } with a known language id');
+    } else if (raw.stdin !== undefined) {
+      if (partial) v.add(`${prefix}generator`, 'cannot be given together with stdin');
+      else out.generator = { language: generator.language, source: normaliseText(generator.source) };
+    } else {
+      const program = { language: generator.language, source: normaliseText(generator.source) };
+      const printed = runGenerator(program);
+      if (printed === null) v.add(`${prefix}generator`, 'did not run: the generator crashed');
+      else if (byteLength(printed) > LIMITS.maxLargeInputBytes) v.add(`${prefix}generator`, `printed more than ${LIMITS.maxLargeInputBytes} bytes`);
+      else {
+        out.generator = program;
+        out.stdin = printed;
+      }
+    }
+  }
   return out;
 }
 
@@ -299,6 +322,7 @@ export function insertTestCase(db: MockDb, itemId: string, input: Partial<TestCa
     isSample: input.isSample ?? false,
     origin: input.origin ?? 'manual',
     verified: input.verified ?? false,
+    generator: input.generator ?? null,
     createdAt: now,
     updatedAt: now,
   };

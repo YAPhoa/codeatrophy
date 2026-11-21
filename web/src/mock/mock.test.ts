@@ -2511,6 +2511,62 @@ describe('large test cases', () => {
     expect(big.stdin.startsWith(result.stdin)).toBe(true);
   });
 
+  it('carry their generator, in a draft and in proposed cases; the other cases have none', async () => {
+    const res = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 2 });
+    for (const report of res.check!.largeCases) expect(res.draft.testCases[report.index!]!.generator).toEqual(report.generator);
+    expect(res.draft.testCases.filter((c) => c.generator === null)).toHaveLength(res.draft.testCases.length - 2);
+    const proposed = await aiTestCases(seedIds.items.twoSum, { count: 2, largeTestCases: 1 });
+    expect(proposed.cases.map((c) => c.generator !== null)).toEqual([false, false, true]);
+    expect(proposed.cases[2]!.generator).toEqual(proposed.largeCases[0]!.generator);
+    // A revision does not carry a large case over, nor its generator.
+    const revised = await aiDraft({ text: 'two sum', interfaceHint: 'program', instruction: 'shorter', previousDraft: res.draft });
+    expect(revised.draft.testCases.every((c) => c.generator === null)).toBe(true);
+  });
+
+  it('are saved with their input and generator as given, or with the generator alone, which prints the input again', async () => {
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 1, largeTestCases: 2 });
+    const [first, second] = res.cases.slice(1);
+    const one = await api.testCases.create(seedIds.items.twoSum, { name: first!.name, generator: first!.generator, expectedStdout: first!.expectedStdout, origin: 'ai', verified: true });
+    expect(one).toMatchObject({ stdin: first!.stdin, generator: first!.generator, verified: true });
+    const bulk = await api.testCases.bulk(seedIds.items.twoSum, { cases: [{ name: second!.name, generator: second!.generator, expectedStdout: second!.expectedStdout }] });
+    expect(bulk.items.at(-1)).toMatchObject({ stdin: second!.stdin, generator: second!.generator });
+    // A case written by hand has none.
+    expect((await api.testCases.create(seedIds.items.twoSum, { stdin: '1\n', expectedStdout: '1\n' })).generator).toBeNull();
+
+    // A draft saved to the library keeps them too.
+    const drafted = await aiDraft({ text: 'two sum', interfaceHint: 'program', largeTestCases: 1 });
+    const kept = drafted.draft.testCases.at(-1)!;
+    const item = await api.items.create({ type: 'problem', title: 'Large', testCases: [{ name: kept.name, generator: kept.generator, expectedStdout: kept.expectedStdout }] });
+    expect((await api.testCases.list(item.id)).items[0]).toMatchObject({ stdin: kept.stdin, generator: kept.generator });
+    const both = await api.items.create({ type: 'problem', title: 'Large', testCases: [{ name: kept.name, stdin: kept.stdin, generator: kept.generator, expectedStdout: kept.expectedStdout }] });
+    expect((await api.testCases.list(both.id)).items[0]).toMatchObject({ stdin: kept.stdin, generator: kept.generator });
+
+    // Given with the input, both are kept as they are: nothing runs, so no judge is needed.
+    start({ judge: 'none' });
+    const asGiven = await api.testCases.create(seedIds.items.twoSum, { stdin: '5\n', generator: { language: 'python', source: 'print(5)' }, expectedStdout: '5\n' });
+    expect(asGiven).toMatchObject({ stdin: '5\n', generator: { language: 'python', source: 'print(5)' } });
+    const bulkGiven = await api.testCases.bulk(seedIds.items.twoSum, { cases: [{ stdin: first!.stdin, generator: first!.generator, expectedStdout: first!.expectedStdout }] });
+    expect(bulkGiven.items.at(-1)).toMatchObject({ stdin: first!.stdin, generator: first!.generator });
+  });
+
+  it('refuse an input and a generator together on PATCH, and drop the generator when the input is set', async () => {
+    const res = await aiTestCases(seedIds.items.twoSum, { count: 1, largeTestCases: 1 });
+    const big = res.cases[1]!;
+    const unknown = await failure(api.testCases.create(seedIds.items.twoSum, { generator: { language: 'python', source: 'print(1)' }, expectedStdout: '1\n' }));
+    expect(Object.keys(unknown.fields ?? {})).toEqual(['generator']);
+
+    const tc = await api.testCases.create(seedIds.items.twoSum, { generator: big.generator, expectedStdout: big.expectedStdout });
+    const both = await failure(api.testCases.update(tc.id, { stdin: '1\n', generator: big.generator }));
+    expect(both.fields).toEqual({ generator: 'cannot be given together with stdin' });
+    // Dropped, the input stays.
+    expect(await api.testCases.update(tc.id, { generator: null })).toMatchObject({ stdin: big.stdin, generator: null });
+    // Given again, it prints the input again.
+    const back = await api.testCases.update(tc.id, { stdin: '1\n' }).then(() => api.testCases.update(tc.id, { generator: big.generator }));
+    expect(back).toMatchObject({ stdin: big.stdin, generator: big.generator });
+    // An input set by hand no longer comes from it.
+    expect(await api.testCases.update(tc.id, { stdin: '2\n' })).toMatchObject({ stdin: '2\n', generator: null });
+  });
+
   it('rejects a count that is not a whole number within the bound', async () => {
     const bound = { largeTestCases: `must be between 0 and ${LIMITS.maxLargeTestCases}` };
     expect((await failure(aiDraft({ text: 'two sum', largeTestCases: true as never }))).fields).toEqual(bound);

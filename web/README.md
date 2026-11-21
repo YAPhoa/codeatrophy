@@ -123,7 +123,10 @@ every one as failed (the generator crashed), `MOCK:LARGE-SKIP` as skipped, and
 `MOCK:LARGE-SHORT` adds all but the last, which is reported as failed with no
 name or generator (the model wrote one generator fewer than asked for).
 Without a judge, with `judge-down`, or in a draft whose reference solution
-fails its other cases (`MOCK:MISMATCH`), they are skipped as well.
+fails its other cases (`MOCK:MISMATCH`), they are skipped as well. A test
+case saved with one of those generators in place of its input gets the same
+input again, and any other generator fails as if it had crashed; saved with
+its input as well, both are kept as given.
 Results of a run cut each stream at 64 KiB, as the server does.
 "Verify all" on a draft (`POST /items/check`) reports a case as `wrong` when
 its input or expected output contains `MOCK:WA` and as `failed` when it

@@ -57,6 +57,14 @@ expires; open sessions are unaffected. A request body may be at most
 
 - Tools return JSON in the same shapes as the HTTP API (`docs/api.md`), as
   both structured content and text.
+- **Large test data is elided** in every tool result: a `stdin`,
+  `expectedStdout`, `actualStdout` (verify_test_cases) or `stdout` (the
+  results of `run_code` and `get_submission`) string larger than 16 KiB is
+  returned as `null`, followed by `<field>Bytes` (its size in bytes) and
+  `<field>Head` (its first 200 bytes, cut back so as not to split a UTF-8
+  character). Smaller values are returned as they are. This is
+  presentation over MCP only: the data is stored, run and returned by the
+  HTTP API in full. To see a large case's input, read its `generator`.
 - Listing tools return summaries, not bodies; fetch one item to read it.
 - Every tool that changes an item's own content accepts `expectedRevision`:
   `update_item`, `edit_item_text`, `add_test_cases` when it sets the
@@ -80,13 +88,31 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), and which languages the judge offers. A good first call |
+| `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the test case limits (below). A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
 | `get_item` | One item in full, including a problem's `interface` and `harness`. `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
 | `get_submission` | A submission with per-case results |
 | `list_style_presets` | The user's style presets and which is the default |
+
+`get_overview` also returns:
+
+```json
+{
+  "preferences": { "generatedTestCases": 8, "largeTestCase": false, "largeTestCaseCount": 3, "hideTestCases": true },
+  "limits": {
+    "maxTestDataBytes": 8388608, "maxLargeInputBytes": 1048576, "maxTestCasesPerItem": 1000, "maxSourceBytes": 65536,
+    "timeLimitMs": { "min": 100, "max": 30000 }, "memoryLimitKb": { "min": 16384, "max": 2097152 }
+  }
+}
+```
+
+`preferences` are the user's current values (see "Preferences" in
+`docs/api.md`): how many test cases to write, whether to add large ones and
+how many, and whether hidden test cases are kept out of sight. They are
+read-only over MCP. `limits` are the bounds of test cases, as in
+`GET /api/v1/meta` (`maxSourceBytes` also bounds a generator).
 
 ### Writing items
 
@@ -115,8 +141,8 @@ expires; open sessions are unaffected. A request body may be at most
 
 | Tool | Purpose |
 | --- | --- |
-| `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only) |
-| `update_test_case` | Change one test case |
+| `add_test_cases` | Append test cases, or replace all but the samples; may set the reference solution in the same call (for a function problem, the solution part only). A large case is given a `generator` instead of `stdin` (below); a case given both is stored as given |
+| `update_test_case` | Change one test case. A `generator` runs and replaces `stdin`; `generator: null` drops it and keeps `stdin`; a new `stdin` alone drops it too; `stdin` and a non-null `generator` together are refused |
 | `delete_test_case` | Delete one test case |
 | `verify_test_cases` | Run a solution on every case and report mismatches. With the reference solution (the default) each case's `verified` is set from the result, and with `updateExpected` the actual output becomes the expected output; `solutionId` of any other solution only checks it and leaves the cases alone. Either way the run becomes the solution's `lastRun`, unless the engine failed on a case. For a function problem the solution runs inside its language's harness; a solution in a language without one is rejected |
 | `save_solution` | Create a saved solution (`itemId`) or change one (`id`; omitted fields are kept): `name`, `language`, `source`, `notes`, `isReference`, `expectedRevision`. For a function problem, `source` is the solution part only. When creating, `submissionId` of a completed `run_code` submission of the same language and source makes its figures the solution's `lastRun`; a new language or source clears `lastRun` |
@@ -130,6 +156,22 @@ The intended way to write tests is: provide inputs and a reference solution
 with `add_test_cases`, then call `verify_test_cases` with
 `updateExpected: true` so that expected outputs come from actually running the
 solution rather than from the model's own arithmetic.
+
+A large test case — an input near the statement's bounds, up to
+`limits.maxLargeInputBytes` — is too big to pass as a tool argument. Give it
+as a **generator** instead of `stdin`: `{ "language": ..., "source": ... }`,
+a complete, deterministic program (a fixed seed, no clock) in one of the
+judge's languages that reads nothing and prints the case's stdin. The
+server runs it (10 seconds, 512 MiB), checks that it printed something, at
+most `limits.maxLargeInputBytes`, valid UTF-8 and not the input of another
+case, and stores the output as `stdin` with the generator; `expectedStdout`
+may be omitted. When a case is created with both `stdin` and a `generator`,
+both are stored as given and nothing runs: the server does not check that
+the input came from the generator. `update_test_case` refuses `stdin`
+together with a non-null `generator`. A generator that fails is an error on `generator`
+(`cases.<i>.generator` in `add_test_cases`) in plain words, and nothing in
+that call is stored: fix it and send the call again. Then verify as above.
+See "Generators" in `docs/api.md`.
 
 A problem can keep several saved solutions — other approaches, other
 languages, a brute force — of which at most one is the reference solution
@@ -158,8 +200,16 @@ and runners are written.
 | Prompt | Arguments | Purpose |
 | --- | --- | --- |
 | `draft_item` | `text`, `type?`, `style?` | Turn a rough or incomplete snippet into a complete item and save it, choosing a problem's interface |
-| `write_test_cases` | `itemId`, `count?` | Write a reference solution and a verified test set for a problem |
+| `write_test_cases` | `itemId`, `count?` | Write a reference solution and a verified test set for a problem. `count` defaults to the user's `generatedTestCases` preference |
 | `create_variant` | `itemId`, `mode?`, `instruction?`, `style?` | Derive a related new item and save it linked to the original |
+
+The prompts that ask for test cases (all three, for a problem) follow the
+user's test case preferences: they ask for `generatedTestCases` cases
+(`write_test_cases` takes `count` instead when given) and, when
+`largeTestCase` is on, for `largeTestCaseCount` more as generators, each
+aimed at a different way a solution of the wrong complexity fails at scale.
+Each ends by fetching the item again with `get_item` and re-reading it end
+to end before reporting.
 
 The prompts carry the same authoring conventions the app's built-in AI
 features use, so items come out consistent whichever route created them. The

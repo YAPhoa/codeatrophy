@@ -20,34 +20,70 @@ type TestCase struct {
 	IsSample       bool       `json:"isSample"`
 	Origin         TestOrigin `json:"origin"`
 	Verified       bool       `json:"verified"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	// Generator is the program that printed Stdin, for a large test case,
+	// or nil. Stdin is always stored too: nothing needs to run it again.
+	Generator *GeneratorSpec `json:"generator"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+}
+
+// GeneratorSpec is the program that builds a large test case's input: a
+// complete, deterministic program that reads nothing and prints the input.
+type GeneratorSpec struct {
+	Language string `json:"language"`
+	Source   string `json:"source"`
+}
+
+// Solution returns the generator as a program to validate or run.
+func (g GeneratorSpec) Solution() Solution { return Solution{Language: g.Language, Source: g.Source} }
+
+// GeneratorEqual reports whether two generators are the same program.
+func GeneratorEqual(a, b *GeneratorSpec) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// TestCaseEqual reports whether two test cases have the same fields.
+func TestCaseEqual(a, b *TestCase) bool {
+	x, y := *a, *b
+	x.Generator, y.Generator = nil, nil
+	return x == y && GeneratorEqual(a.Generator, b.Generator)
 }
 
 // TestCaseInput is the body of test case create and update requests.
 type TestCaseInput struct {
-	Name           Opt[string]     `json:"name"`
-	Stdin          Opt[string]     `json:"stdin"`
-	ExpectedStdout Opt[string]     `json:"expectedStdout"`
-	IsSample       Opt[bool]       `json:"isSample"`
-	Origin         Opt[TestOrigin] `json:"origin"`
-	Verified       Opt[bool]       `json:"verified"`
+	Name           Opt[string]        `json:"name"`
+	Stdin          Opt[string]        `json:"stdin"`
+	ExpectedStdout Opt[string]        `json:"expectedStdout"`
+	IsSample       Opt[bool]          `json:"isSample"`
+	Origin         Opt[TestOrigin]    `json:"origin"`
+	Verified       Opt[bool]          `json:"verified"`
+	Generator      Opt[GeneratorSpec] `json:"generator"`
 }
 
 // NewTestCaseFromInput builds a test case from create input, applying
-// defaults. expectedStdout is required.
+// defaults. expectedStdout is required, unless a generator is given (it is
+// then "" until the case is verified).
 func NewTestCaseFromInput(in TestCaseInput) (TestCase, FieldErrors) {
 	tc := TestCase{Origin: OriginManual}
 	errs := FieldErrors{}
-	if !in.ExpectedStdout.Set || in.ExpectedStdout.Null {
+	if (!in.ExpectedStdout.Set || in.ExpectedStdout.Null) && !in.Generator.HasValue() {
 		errs.Add("expectedStdout", "is required")
+	}
+	if in.ExpectedStdout.Set && in.ExpectedStdout.Null && in.Generator.HasValue() {
+		in.ExpectedStdout = Opt[string]{}
 	}
 	errs.Merge("", ApplyTestCaseInput(&tc, in))
 	return tc, errs
 }
 
 // ApplyTestCaseInput merges in onto tc. Changing stdin or expectedStdout
-// resets verified unless the same input sets it.
+// resets verified unless the same input sets it. A non-null generator is
+// stored as given (the caller runs it for the new stdin); null drops it and
+// keeps stdin, and setting stdin without a generator drops it too: the
+// stdin is no longer what the generator printed.
 func ApplyTestCaseInput(tc *TestCase, in TestCaseInput) FieldErrors {
 	errs := FieldErrors{}
 	str := func(name string, o Opt[string], dst *string) bool {
@@ -80,6 +116,14 @@ func ApplyTestCaseInput(tc *TestCase, in TestCaseInput) FieldErrors {
 			tc.Origin = in.Origin.Val
 		}
 	}
+	switch {
+	case in.Generator.HasValue():
+		g := in.Generator.Val
+		g.Source = NormalizeText(g.Source)
+		tc.Generator = &g
+	case in.Generator.Set, in.Stdin.HasValue():
+		tc.Generator = nil
+	}
 	if (c1 || c2) && !in.Verified.Set {
 		tc.Verified = false
 	}
@@ -109,4 +153,13 @@ func ValidateTestCase(tc *TestCase) FieldErrors {
 		errs.Add("origin", "must be manual, ai or import")
 	}
 	return errs
+}
+
+// ValidateGenerator checks a generator's language and size, returning a
+// message for the generator field or "".
+func ValidateGenerator(g GeneratorSpec, lim Limits) string {
+	if fe := ValidateSolution(g.Solution(), lim); len(fe) > 0 {
+		return "the generator is not usable: " + fe.First()
+	}
+	return ""
 }
