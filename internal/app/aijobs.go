@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"codeatrophy/internal/domain"
@@ -80,7 +82,24 @@ func (t task[T]) erase() aiTask {
 // jobTitle is a job's title from free text: its first characters on one
 // line.
 func jobTitle(s string) string {
-	return truncateRunes(oneLine(s), jobTitleChars)
+	return clipLabel(oneLine(s), jobTitleChars)
+}
+
+// clipLabel shortens a one-line label to at most n runes. A label that is
+// cut ends with "…", after the last whole word when one ends near the cut.
+func clipLabel(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := r[:n-1]
+	for i := len(cut) - 1; i >= len(cut)*2/3; i-- {
+		if unicode.IsSpace(cut[i]) {
+			cut = cut[:i]
+			break
+		}
+	}
+	return strings.TrimRightFunc(string(cut), func(c rune) bool { return unicode.IsSpace(c) || strings.ContainsRune(",;:-–—", c) }) + "…"
 }
 
 // JobError is the error of a failed job, in the shape of an HTTP error

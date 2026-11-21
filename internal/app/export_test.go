@@ -2,6 +2,9 @@ package app
 
 import "context"
 
+// ClipLabel exposes clipLabel to the tests.
+var ClipLabel = clipLabel
+
 // The generations run as AI jobs in production (StartAIJob, drafts). These
 // synchronous forms exist for the tests only: they validate a request and
 // run it in the caller, returning what the job would store as its result.

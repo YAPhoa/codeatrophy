@@ -160,7 +160,7 @@ func draftLabel(tx store.Tx, d store.Draft) string {
 	}
 	if d.Kind == DraftVariant && d.VariantOf != nil {
 		if it, err := tx.GetItem(*d.VariantOf); err == nil {
-			return truncateRunes("Variant of "+it.Title, domain.MaxTitleChars)
+			return clipLabel("Variant of "+it.Title, domain.MaxTitleChars)
 		}
 		return "Variant"
 	}

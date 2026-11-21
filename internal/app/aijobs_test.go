@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/app"
@@ -70,6 +71,31 @@ func (e *env) hold() (release chan struct{}, running *atomic.Int32) {
 
 // A job outlives the request that started it, and its result is the body
 // the synchronous endpoint used to answer with.
+func TestClipLabel(t *testing.T) {
+	trie := "208. Implement Trie (Prefix Tree) Medium Topics premium lock iconCompanies A trie is a tree"
+	for _, c := range []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"Two Sum", 80, "Two Sum"},
+		{strings.Repeat("x", 80), 80, strings.Repeat("x", 80)},
+		// Cut after the last whole word, marked as cut.
+		{trie, 80, "208. Implement Trie (Prefix Tree) Medium Topics premium lock iconCompanies A…"},
+		{"alpha beta, gamma delta", 18, "alpha beta…"},
+		// One long word is cut where it has to be.
+		{strings.Repeat("é", 100), 10, strings.Repeat("é", 9) + "…"},
+	} {
+		got := app.ClipLabel(c.in, c.n)
+		if got != c.want {
+			t.Errorf("ClipLabel(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
+		if n := utf8.RuneCountInString(got); n > c.n {
+			t.Errorf("ClipLabel(%q, %d) is %d runes long", c.in, c.n, n)
+		}
+	}
+}
+
 func TestAIJobRunsInTheBackground(t *testing.T) {
 	e := newEnv(t)
 	e.enableAI(t)

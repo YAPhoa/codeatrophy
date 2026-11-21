@@ -1176,7 +1176,7 @@ instead, and a proxy in front of the server must allow them as long:
 - `title` — a short label for lists, fixed by the server: the item's title;
   for a `code` request its `title` (or the start of its `body`); for a
   `draft` job the start of the input text, replaced by the drafted item's
-  title once it succeeds.
+  title once it succeeds. A start of text that is cut ends with "…".
 - `status`:
 
   | `status` | Meaning |
@@ -1763,8 +1763,8 @@ harder") is another generation of the same draft, with `previousDraft` and
   for a `capture` draft.
 - `title` — a label for lists: the `title` the client last set, else the
   title of the latest generation's draft, else the start of the request's
-  `text` (for a `capture` draft) or "Variant of …" with the original's title,
-  else "Untitled draft".
+  `text` (for a `capture` draft, ending with "…" when cut) or "Variant of
+  …" with the original's title, else "Untitled draft".
 - `state` — what the draft is waiting for, derived from the fields below in
   this order:
 
