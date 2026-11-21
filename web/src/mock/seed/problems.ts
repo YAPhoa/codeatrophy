@@ -1,7 +1,7 @@
 // The problems of the seed library. Statements live as Markdown files in
 // ./content, keyed by `key`.
 
-import type { Difficulty, HarnessCode, ItemStatus, TestOrigin } from '../../api/types';
+import type { ChangeSource, Difficulty, HarnessCode, ItemStatus, TestOrigin } from '../../api/types';
 import { MERGE_K_LISTS_HARNESS, MERGE_K_LISTS_REFERENCE, MERGE_K_LISTS_STARTER } from './mergeKLists';
 
 export interface SeedCase {
@@ -37,6 +37,9 @@ export interface SeedProblem {
   rawInput?: string;
   sourceUrl?: string;
   sourceNote?: string;
+  /** Who created it and who last changed it; the last change is the creation when only `createdBy` is given. Neither: `null`. */
+  createdBy?: ChangeSource;
+  lastUpdatedBy?: ChangeSource;
   /** `key` of the problem this one was derived from. */
   variantOf?: string;
   /** Languages that get starter code. */
@@ -283,6 +286,8 @@ main()
     updated: 12,
     revision: 2,
     sourceNote: 'Phone screen, second question',
+    createdBy: { via: 'mcp', client: 'claude-code', model: 'claude-opus-5-5' },
+    lastUpdatedBy: { via: 'http', client: null, model: null },
     languages: COMMON,
     reference: String.raw`import sys
 
@@ -372,6 +377,7 @@ main()
     status: 'in_progress',
     created: 47,
     updated: 9,
+    createdBy: { via: 'import', client: null, model: null },
     languages: COMMON,
     reference: String.raw`import sys
 
@@ -635,6 +641,7 @@ main()
     created: 8,
     updated: 2,
     revision: 2,
+    createdBy: { via: 'http', client: null, model: 'claude-opus-5-5' },
     rawInput:
       'LRU cache: get(key) and put(key, value) both O(1), capacity fixed, evict least recently used. they wanted the doubly linked list + hashmap version, not OrderedDict',
     languages: COMMON,

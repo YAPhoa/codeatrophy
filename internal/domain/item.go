@@ -144,6 +144,11 @@ type Item struct {
 	// VariantOrigin describes the item VariantOf names, nil when it is
 	// nil. It is filled on read and ignored on write.
 	VariantOrigin *LinkedItem `json:"variantOrigin"`
+	// CreatedBy records who created the item and LastUpdatedBy who made
+	// the change that last moved UpdatedAt; nil when unknown (as for items
+	// older than the record). Stores write CreatedBy on insert only.
+	CreatedBy     *ChangeSource `json:"createdBy"`
+	LastUpdatedBy *ChangeSource `json:"lastUpdatedBy"`
 }
 
 // Normalize replaces nil slices and maps with empty ones so that they encode
@@ -183,6 +188,8 @@ func (it Item) Clone() Item {
 	c.VariantOrigin = clonePtr(it.VariantOrigin)
 	c.LastVerdict = clonePtr(it.LastVerdict)
 	c.RawInput = clonePtr(it.RawInput)
+	c.CreatedBy = it.CreatedBy.Clone()
+	c.LastUpdatedBy = it.LastUpdatedBy.Clone()
 	c.Source = Source{URL: clonePtr(it.Source.URL), Note: clonePtr(it.Source.Note)}
 	if it.Problem != nil {
 		p := *it.Problem

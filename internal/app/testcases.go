@@ -107,7 +107,7 @@ func (a *App) AddTestCase(ctx context.Context, itemID string, in domain.TestCase
 		if err := tx.InsertTestCase(&out); err != nil {
 			return err
 		}
-		return a.testCasesChanged(tx, &it)
+		return a.testCasesChanged(ctx, tx, &it)
 	})
 	return out, err
 }
@@ -217,13 +217,13 @@ func (a *App) BulkTestCases(ctx context.Context, itemID string, in BulkTestCases
 			s := in.ReferenceSolution.Val
 			s.Source = domain.NormalizeText(s.Source)
 			next.Problem.ReferenceSolution = &s
-			if err := a.saveItem(tx, &it, &next); err != nil {
+			if err := a.saveItem(ctx, tx, &it, &next); err != nil {
 				return err
 			}
 			it = next
 		}
 		if len(cases) > 0 || (in.Replace && len(existing) > len(samples)) {
-			if err := a.testCasesChanged(tx, &it); err != nil {
+			if err := a.testCasesChanged(ctx, tx, &it); err != nil {
 				return err
 			}
 		}
@@ -301,7 +301,7 @@ func (a *App) UpdateTestCase(ctx context.Context, id string, in domain.TestCaseI
 			return err
 		}
 		out = tc
-		return a.testCasesChanged(tx, &it)
+		return a.testCasesChanged(ctx, tx, &it)
 	})
 	return out, err
 }
@@ -331,7 +331,7 @@ func (a *App) DeleteTestCase(ctx context.Context, id string) error {
 		if err := tx.SetTestCasePositions(tc.ItemID, ids); err != nil {
 			return err
 		}
-		return a.testCasesChanged(tx, &it)
+		return a.testCasesChanged(ctx, tx, &it)
 	})
 }
 
@@ -372,7 +372,7 @@ func (a *App) ReorderTestCases(ctx context.Context, itemID string, ids []string)
 			if err := tx.SetTestCasePositions(itemID, ids); err != nil {
 				return err
 			}
-			if err := a.testCasesChanged(tx, &it); err != nil {
+			if err := a.testCasesChanged(ctx, tx, &it); err != nil {
 				return err
 			}
 		}

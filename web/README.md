@@ -167,7 +167,7 @@ third-party origin.
 
 | Spec | Covers |
 | --- | --- |
-| `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; a bundle exported and imported back; a server that refuses requests |
+| `smoke` | Capture → draft → revise → save; writing by hand without AI; the solve workspace, its runner rows, folded regions, completion and history; solutions and the reference; preferences; large test cases; "Verify all"; Settings pages and AI providers; the AI activity log; variants; editing after a change elsewhere; who created and last changed an item; a bundle exported and imported back; a server that refuses requests |
 | `jobs` | AI jobs and drafts: leaving a running job, the AI jobs in the sidebar's footer, on the rail and behind a narrow window's menu, Drafts, cancelling, failures, a server restart, results that wait for their page, a draft changed elsewhere or refused, a variant draft |
 | `capture` | The capture text stays in view on the way to a new draft |
 | `submissions` | A past submission's details in the Submissions tab: its address, Back, a link to one gone, Show more, "Open in editor" and when it asks first, a narrow window |

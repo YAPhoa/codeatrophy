@@ -2,7 +2,7 @@
 // every state of completeness, long-form readings, nested collections and a
 // submission history.
 
-import type { Submission, SubmissionMode, SubmissionResult, Verdict } from '../../api/types';
+import type { ChangeSource, Submission, SubmissionMode, SubmissionResult, Verdict } from '../../api/types';
 import type { MockDb, StoredItem } from '../db';
 import { DEFAULT_PROBLEM } from '../db';
 import { finish } from '../handlers/submissions';
@@ -539,6 +539,8 @@ int main() {
   },
 ];
 
+const copySource = (s: ChangeSource | undefined): ChangeSource | null => (s ? { ...s } : null);
+
 function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, collections: Map<string, string[]>): void {
   const id = itemId(p.n);
   const variantOf = p.variantOf ? SEED_PROBLEMS.find((x) => x.key === p.variantOf) : undefined;
@@ -562,6 +564,8 @@ function addProblem(db: MockDb, p: SeedProblem, at: (days: number) => string, co
     revision: p.revision ?? 1,
     createdAt: at(p.created),
     updatedAt: at(p.updated),
+    createdBy: copySource(p.createdBy),
+    lastUpdatedBy: copySource(p.lastUpdatedBy ?? p.createdBy),
     seq: db.nextSeq(),
   };
   db.items.set(id, item);
@@ -676,6 +680,8 @@ export function seedDatabase(db: MockDb): void {
       revision: r.revision ?? 1,
       createdAt: at(r.created),
       updatedAt: at(r.updated),
+      createdBy: copySource(r.createdBy),
+      lastUpdatedBy: copySource(r.lastUpdatedBy ?? r.createdBy),
       seq: db.nextSeq(),
     });
     for (const key of r.collections) members.get(key)?.push(id);

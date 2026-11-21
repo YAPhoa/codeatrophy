@@ -249,6 +249,25 @@ export interface Item extends ItemSummary {
   problem: ProblemSpec | null;
   /** What `variantOf` points at, alive or not; `null` exactly when `variantOf` is. */
   variantOrigin: LinkedItem | null;
+  /** Who created the item; `null` (or missing) for items older than the record. Never sent by the client. */
+  createdBy?: ChangeSource | null;
+  /** Who last changed its content; `null` (or missing) as for `createdBy`. Never sent by the client. */
+  lastUpdatedBy?: ChangeSource | null;
+}
+
+/** How a change reached the server. */
+export type ChangeVia = 'http' | 'mcp' | 'import';
+
+/**
+ * Who made a change to an item. `client` and `model` are reported by the
+ * client (at most 200 characters): plain text, never markup.
+ */
+export interface ChangeSource {
+  via: ChangeVia;
+  /** The MCP client's name; `null` for `http` and `import`. */
+  client: string | null;
+  /** The model that made the change, when known (an AI draft saved in the UI is `http` with its model). */
+  model: string | null;
 }
 
 /**

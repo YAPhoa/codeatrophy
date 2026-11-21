@@ -70,6 +70,8 @@ func New(opts Options) *Server {
 func (s *Server) handle(pattern string, h func(w http.ResponseWriter, r *http.Request) error) {
 	method, path, _ := strings.Cut(pattern, " ")
 	s.api.HandleFunc(method+" "+Prefix+path, func(w http.ResponseWriter, r *http.Request) {
+		// Changes made through the API are recorded as made over HTTP.
+		r = r.WithContext(app.WithChangeSource(r.Context(), domain.ViaHTTP, "", ""))
 		if err := h(w, r); err != nil {
 			s.writeError(w, r, err)
 		}

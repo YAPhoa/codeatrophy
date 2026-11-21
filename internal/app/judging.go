@@ -227,7 +227,7 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 		if cur.Status == domain.StatusTodo {
 			next := cur.Clone()
 			next.Status = domain.StatusInProgress
-			return a.saveItem(tx, &cur, &next)
+			return a.saveItem(ctx, tx, &cur, &next)
 		}
 		return nil
 	})
@@ -363,7 +363,7 @@ func (a *App) judge(id string) {
 			if cur.Status != domain.StatusDone {
 				next := cur.Clone()
 				next.Status = domain.StatusDone
-				return a.saveItem(tx, &cur, &next)
+				return a.saveItem(context.Background(), tx, &cur, &next)
 			}
 		}
 		return nil
@@ -593,7 +593,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		if err != nil {
 			return notFoundAs(err, "item")
 		}
-		changed := false
+		changed, rewrote := false, false
 		if cur.Problem == nil || !domain.RefEqual(cur.Problem.ReferenceSolution, &ref) {
 			return nil // the reference solution changed meanwhile
 		}
@@ -614,6 +614,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 			switch {
 			case fixable:
 				tc.ExpectedStdout, tc.Verified = r.ActualStdout, true
+				rewrote = true
 			case r.OK && r.Matches:
 				if tc.Verified {
 					continue
@@ -631,8 +632,14 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 			}
 			changed = true
 		}
-		if changed {
-			return a.testCasesChanged(tx, &cur)
+		switch {
+		case rewrote:
+			return a.testCasesChanged(ctx, tx, &cur)
+		case changed:
+			// Only verified flags changed: updatedAt moves, but who last
+			// changed the item's content stays as it was.
+			cur.UpdatedAt = a.clock()
+			return tx.UpdateItem(&cur)
 		}
 		return nil
 	})

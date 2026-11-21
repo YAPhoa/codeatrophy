@@ -16,8 +16,9 @@ import type {
   TestCaseInput,
   TestOrigin,
 } from '../../api/types';
+import type { ChangeSource } from '../../api/types';
 import type { MockDb, StoredItem } from '../db';
-import { atMostChars, byteLength, charCount, DEFAULT_PROBLEM, LIMITS, normaliseTags, normaliseText, tagProblem } from '../db';
+import { BY_HTTP, atMostChars, byteLength, charCount, DEFAULT_PROBLEM, LIMITS, normaliseTags, normaliseText, tagProblem } from '../db';
 import type { Handler, Req } from '../http';
 import {
   badRequest,
@@ -494,7 +495,8 @@ function listItems(db: MockDb, req: Req) {
 
 // ---- Create, update, delete ---------------------------------------------------
 
-export function createItem(db: MockDb, req: Req) {
+/** `by` is who it is created by: the HTTP API, with the model of the generation for a saved draft. */
+export function createItem(db: MockDb, req: Req, by: ChangeSource = BY_HTTP) {
   const raw = objectBody(req);
   const v = new Validator();
   if (!TYPES.includes(raw.type as ItemType)) v.add('type', 'must be problem or reading');
@@ -534,6 +536,8 @@ export function createItem(db: MockDb, req: Req) {
     revision: 1,
     createdAt: now,
     updatedAt: now,
+    createdBy: { ...by },
+    lastUpdatedBy: { ...by },
     seq: db.nextSeq(),
   };
   db.items.set(item.id, item);

@@ -54,6 +54,13 @@ func TestCopyRoundTrip(t *testing.T) {
 				}
 			}
 			storetest.SameDump(t, "after the first copy", want, storetest.Dump(t, mid))
+			// Who created and changed an item is copied (the columns are in
+			// store.Tables).
+			tracked := storetest.Read(t, mid, func(tx store.Tx) (domain.Item, error) { return tx.GetItem(storetest.TrackedID) })
+			if c, u := tracked.CreatedBy, tracked.LastUpdatedBy; c == nil || c.Via != domain.ViaMCP || c.Client == nil ||
+				c.Model == nil || u == nil || u.Via != domain.ViaHTTP || u.Model == nil {
+				t.Errorf("the tracked item after the copy: created by %+v, last updated by %+v", c, u)
+			}
 			back := teststore.OpenSQLite(t)
 			if _, err := dbcopy.Copy(ctx, mid, back, dbcopy.Options{}); err != nil {
 				t.Fatal(err)

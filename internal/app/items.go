@@ -205,7 +205,7 @@ func (a *App) CreateItem(ctx context.Context, in domain.ItemInput) (domain.Item,
 	}
 	var out domain.Item
 	err = a.store.Write(ctx, func(tx store.Tx) (err error) {
-		out, err = a.insertNewItem(tx, n)
+		out, err = a.insertNewItem(ctx, tx, n)
 		return err
 	})
 	return out, err
@@ -299,10 +299,11 @@ func (a *App) newItem(in domain.ItemInput) (newItemRecords, error) {
 	return newItemRecords{item: it, cases: cases, collIDs: collIDs}, nil
 }
 
-// insertNewItem writes a new item built by newItem and returns it as
-// stored.
-func (a *App) insertNewItem(tx store.Tx, n newItemRecords) (domain.Item, error) {
+// insertNewItem writes a new item built by newItem, recording who created
+// it, and returns it as stored.
+func (a *App) insertNewItem(ctx context.Context, tx store.Tx, n newItemRecords) (domain.Item, error) {
 	it := n.item
+	it.CreatedBy, it.LastUpdatedBy = changedBy(ctx), changedBy(ctx)
 	if err := checkVariantOf(tx, it.ID, it.VariantOf); err != nil {
 		return domain.Item{}, err
 	}
@@ -381,18 +382,19 @@ func checkRevision(expected domain.Opt[int], it *domain.Item) error {
 		map[string]any{"revision": it.Revision})
 }
 
-// saveItem writes an updated item. A content change increases the revision
-// and moves updatedAt; a change to personal state only (status, favorite,
-// notes, raw input) changes neither; an unchanged item is not written.
-func (a *App) saveItem(tx store.Tx, before, after *domain.Item) error {
-	contentChanged := !domain.ContentEqual(before, after)
-	if !contentChanged && domain.PersonalEqual(before, after) {
+// saveItem writes an updated item. A content change increases the revision,
+// moves updatedAt and records who made it; a change to personal state only
+// (status, favorite, notes, raw input) changes none of them; an unchanged
+// item is not written.
+func (a *App) saveItem(ctx context.Context, tx store.Tx, before, after *domain.Item) error {
+	changed := !domain.ContentEqual(before, after)
+	if !changed && domain.PersonalEqual(before, after) {
 		return nil
 	}
-	after.Revision, after.UpdatedAt = before.Revision, before.UpdatedAt
-	if contentChanged {
+	after.Revision, after.UpdatedAt, after.LastUpdatedBy = before.Revision, before.UpdatedAt, before.LastUpdatedBy.Clone()
+	if changed {
 		after.Revision = before.Revision + 1
-		after.UpdatedAt = a.clock()
+		a.contentChanged(ctx, after)
 	}
 	// The reference solution is a view of a saved solution; persist a
 	// change to it there.
@@ -405,9 +407,9 @@ func (a *App) saveItem(tx store.Tx, before, after *domain.Item) error {
 }
 
 // testCasesChanged records a change to the item's test cases: updatedAt
-// moves, the revision does not.
-func (a *App) testCasesChanged(tx store.Tx, it *domain.Item) error {
-	it.UpdatedAt = a.clock()
+// moves and who made the change is recorded; the revision does not move.
+func (a *App) testCasesChanged(ctx context.Context, tx store.Tx, it *domain.Item) error {
+	a.contentChanged(ctx, it)
 	return tx.UpdateItem(it)
 }
 
@@ -461,7 +463,7 @@ func (a *App) UpdateItem(ctx context.Context, id string, in domain.ItemInput) (d
 				return err
 			}
 		}
-		if err := a.saveItem(tx, &cur, &next); err != nil {
+		if err := a.saveItem(ctx, tx, &cur, &next); err != nil {
 			return err
 		}
 		out, err = tx.GetItem(id)
@@ -533,7 +535,7 @@ func (a *App) EditItemText(ctx context.Context, id string, in EditTextInput) (do
 		} else {
 			next.Notes = text
 		}
-		if err := a.saveItem(tx, &cur, &next); err != nil {
+		if err := a.saveItem(ctx, tx, &cur, &next); err != nil {
 			return err
 		}
 		out, err = tx.GetItem(id)
@@ -660,7 +662,7 @@ func (a *App) BulkItems(ctx context.Context, in BulkInput) (BulkResult, error) {
 			case "setFavorite":
 				next.Favorite = *in.Favorite
 			}
-			if err := a.saveItem(tx, &cur, &next); err != nil {
+			if err := a.saveItem(ctx, tx, &cur, &next); err != nil {
 				return err
 			}
 		}
@@ -710,7 +712,7 @@ func (a *App) RenameTag(ctx context.Context, oldName, newName string) (domain.Ta
 					}
 				}
 				next.Tags = domain.NormalizeTags(next.Tags)
-				if err := a.saveItem(tx, &cur, &next); err != nil {
+				if err := a.saveItem(ctx, tx, &cur, &next); err != nil {
 					return err
 				}
 			}
@@ -746,7 +748,7 @@ func (a *App) DeleteTag(ctx context.Context, name string) error {
 			}
 			next := cur.Clone()
 			next.Tags = slices.DeleteFunc(next.Tags, func(t string) bool { return t == name })
-			if err := a.saveItem(tx, &cur, &next); err != nil {
+			if err := a.saveItem(ctx, tx, &cur, &next); err != nil {
 				return err
 			}
 		}

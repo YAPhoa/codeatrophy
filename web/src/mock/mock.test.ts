@@ -4201,6 +4201,75 @@ describe('export and import', () => {
   });
 });
 
+describe('who created and changed an item', () => {
+  const byHttp = { via: 'http', client: null, model: null };
+  const byImport = { via: 'import', client: null, model: null };
+
+  it('seeds a few items with a record and leaves the rest without', async () => {
+    expect(await api.items.get(seedIds.items.mergeIntervals)).toMatchObject({
+      createdBy: { via: 'mcp', client: 'claude-code', model: 'claude-opus-5-5' },
+      lastUpdatedBy: byHttp,
+    });
+    expect(await api.items.get(seedIds.items.coinChange)).toMatchObject({ createdBy: byImport, lastUpdatedBy: byImport });
+    expect(await api.items.get(seedIds.items.twoSum)).toMatchObject({ createdBy: null, lastUpdatedBy: null });
+    // Only a whole item carries them.
+    expect((await api.items.list({ limit: 1 })).items[0]).not.toHaveProperty('createdBy');
+  });
+
+  it('records the HTTP API on create, and on every change that moves updatedAt', async () => {
+    const item = await api.items.create({ type: 'problem', title: 'Fresh' });
+    expect(item).toMatchObject({ createdBy: byHttp, lastUpdatedBy: byHttp });
+
+    const id = seedIds.items.twoSum;
+    // Personal state is no one's change.
+    expect(await api.items.update(id, { favorite: true })).toMatchObject({ createdBy: null, lastUpdatedBy: null });
+    await api.testCases.create(id, { expectedStdout: '1\n' });
+    expect(await api.items.get(id)).toMatchObject({ createdBy: null, lastUpdatedBy: byHttp });
+
+    server.externalEdit(seedIds.items.lruCache);
+    expect(await api.items.get(seedIds.items.lruCache)).toMatchObject({
+      createdBy: { via: 'http', client: null, model: 'claude-opus-5-5' },
+      lastUpdatedBy: { via: 'mcp', client: 'claude-code', model: 'claude-opus-5-5' },
+    });
+  });
+
+  it('keeps the last change through a verification that only flips verified marks', async () => {
+    const id = seedIds.items.mergeIntervals;
+    const mcp = { via: 'mcp' as const, client: 'claude-code', model: null };
+    server.db.getItem(id).lastUpdatedBy = mcp;
+    await api.testCases.verify(id, false);
+    expect((await api.items.get(id)).lastUpdatedBy).toEqual(mcp);
+    // Replacing an expected output is a change.
+    await api.testCases.verify(id, true);
+    expect((await api.items.get(id)).lastUpdatedBy).toEqual(byHttp);
+  });
+
+  it("gives an item saved from a draft the generation's model", async () => {
+    const draft = await api.drafts.create({ kind: 'capture', generate: { text: 'two sum', styleId: null } });
+    await finished(draft.job!.id);
+    const ready = await api.drafts.get(draft.id);
+    const model = ready.generation!.usage.model;
+    expect(model).not.toBe('');
+    const item = await api.drafts.save(ready.id, { item: { type: 'problem', title: 'Saved draft' }, expectedRevision: ready.revision });
+    expect(item).toMatchObject({ createdBy: { via: 'http', client: null, model }, lastUpdatedBy: { via: 'http', client: null, model } });
+  });
+
+  it('records an import on the items it creates and overwrites', async () => {
+    const bundle = await exportAll();
+    await api.items.update(seedIds.items.mergeIntervals, { summary: 'changed here' });
+    await api.bundle.import(bundle, 'overwrite');
+    expect(await api.items.get(seedIds.items.mergeIntervals)).toMatchObject({
+      createdBy: { via: 'mcp', client: 'claude-code', model: 'claude-opus-5-5' },
+      lastUpdatedBy: byImport,
+    });
+    // A duplicate is made only of an item that differs from the bundle's.
+    await api.items.update(seedIds.items.mergeIntervals, { summary: 'changed again' });
+    await api.bundle.import(bundle, 'duplicate');
+    const copy = (await api.items.list({ q: 'Merge Intervals', limit: 50 })).items.find((i) => i.id !== seedIds.items.mergeIntervals && i.title === 'Merge Intervals');
+    expect(await api.items.get(copy!.id)).toMatchObject({ createdBy: byImport, lastUpdatedBy: byImport });
+  });
+});
+
 describe('routing', () => {
   it('answers unknown routes with not_found', async () => {
     const res = await server.fetch('/api/v1/nope');

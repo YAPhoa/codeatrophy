@@ -1448,6 +1448,20 @@ test('item bar: the favorite button says what it does, and the menu keeps only e
   await expect(page.getByRole('menuitem')).toHaveText(['Edit details…', 'Export this item…', 'Delete']);
 });
 
+test('item: the statement says who created it and who changed it last, and nothing when that is not known', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Merge Intervals', exact: true }).click();
+  const facts = page.locator('.statement-facts');
+  const line = facts.locator('.change-source');
+  await expect(line).toHaveText('Created by claude-opus-5-5 via claude-code · updated by you');
+  await expect(line.locator('.change-source-value').first()).toHaveAttribute('title', 'claude-opus-5-5');
+
+  await page.goBack();
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  await expect(facts).toContainText('Time ');
+  await expect(facts.locator('.change-source')).toHaveCount(0);
+});
+
 test('large test cases: a draft kept from before cases carried their generators still shows them', async ({ page }) => {
   await open(page, '/settings/preferences');
   await page.getByRole('checkbox', { name: 'Generate large test cases by default' }).check();

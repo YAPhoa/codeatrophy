@@ -66,6 +66,7 @@ A problem is not finished until it has tests whose expected outputs came from ru
 ## Changing what is already there
 
 - Read first (`get_item`), then change with the `revision` you read as `expectedRevision`. If the call reports a conflict, the user or another session edited the item meanwhile: read it again and reapply your change — do not overwrite.
+- On every tool that writes an item (create, update, edit, test cases, solutions, verify), pass your model id as `model` (e.g. `claude-opus-5-5`). The library records which client and model made each change; it is optional and never makes a call fail.
 - For a small fix in a long statement use `edit_item_text`; resending the whole body invites accidental changes elsewhere.
 - After changing a statement's rules or constraints, the tests may no longer be right. Re-verify, and say what changed.
 - Deleting is permanent and takes test cases, solutions and submission history with it. Delete only what the user named, and confirm before any bulk delete.

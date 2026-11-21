@@ -12,7 +12,9 @@ the same in both.
 
 - **Shareable by default.** A bundle holds content only. Personal state
   (status, favorites, notes), submissions, raw AI input and instance settings
-  are never written to it.
+  are never written to it, and neither is who created or last changed an
+  item (`createdBy`, `lastUpdatedBy` in the HTTP API), which is local to the
+  instance: an imported item records the import instead.
 - **Readable and hand-editable.** Plain JSON, Markdown and source files. A
   bundle can be unzipped, edited, kept in a git repository and zipped again.
 - **Idempotent.** Items and collections keep their ids, so importing the same

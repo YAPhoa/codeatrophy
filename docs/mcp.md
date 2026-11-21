@@ -73,6 +73,17 @@ expires; open sessions are unaffected. A request body may be at most
   changed since, the call fails with a conflict and the current revision, and
   nothing is written. Re-read and retry. Test-case changes do not change the
   item's revision (see `revision` in `docs/api.md`).
+- Items record who created them and who made their last content change
+  (`createdBy` and `lastUpdatedBy`; see `Item` in `docs/api.md`). A change
+  made over MCP is recorded with `via: "mcp"`, the client's name from the
+  initialize handshake, and the model the call reports. Every tool that can
+  change an item's content takes an optional `model` string for this:
+  `create_item`, `update_item`, `edit_item_text`, `bulk_update_items`,
+  `rename_tag`, `delete_tag`, `add_test_cases`, `update_test_case`,
+  `delete_test_case`, `verify_test_cases`, `save_solution` and
+  `delete_solution`. Pass your model id (e.g. `claude-opus-5-5`). It is for
+  tracking only, not verified, and never makes a call fail: a missing,
+  empty or non-string value is recorded as unknown.
 - Failures are reported as tool errors (`isError: true`) with the same `code`
   and `message` the HTTP API would return.
 - Input schemas carry the bounds the server checks as `maxLength` (in
@@ -98,7 +109,7 @@ expires; open sessions are unaffected. A request body may be at most
 | --- | --- |
 | `get_overview` | Library statistics, the collection tree, the tag list (with item counts; a tag no item carries any more has 0), which languages the judge offers, the user's test case preferences and the limits of items and test cases (below). A good first call |
 | `search_items` | Filter and full-text search; same filters as `GET /items`. Returns summaries |
-| `get_item` | One item in full, including a problem's `interface` and `harness`, with its `links` and, for a variant, `item.variantOrigin` (see [Links](#links)). `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
+| `get_item` | One item in full, including a problem's `interface` and `harness`, its `createdBy` and `lastUpdatedBy` (see [Conventions](#conventions)), with its `links` and, for a variant, `item.variantOrigin` (see [Links](#links)). `include` selects optional parts: `testCases`, `solutions`, `submissions` (the 10 most recent submits; runs are not kept as history) |
 | `list_test_cases` | Test cases of a problem |
 | `list_solutions` | Saved solutions of a problem, the reference solution first |
 | `get_submission` | A submission with per-case results |

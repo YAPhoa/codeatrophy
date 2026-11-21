@@ -25,8 +25,9 @@ func (a *App) ListSolutions(ctx context.Context, itemID string) (List[domain.Ite
 
 // solutionsChanged records a change to an item's solutions made in tx. When
 // the reference-solution view (language and source) changed, the revision
-// increases; updatedAt moves in every case.
-func (a *App) solutionsChanged(tx store.Tx, it *domain.Item, before *domain.Solution) error {
+// increases; updatedAt moves, and who made the change is recorded, in every
+// case.
+func (a *App) solutionsChanged(ctx context.Context, tx store.Tx, it *domain.Item, before *domain.Solution) error {
 	sols, err := tx.ListSolutions(it.ID)
 	if err != nil {
 		return err
@@ -34,7 +35,7 @@ func (a *App) solutionsChanged(tx store.Tx, it *domain.Item, before *domain.Solu
 	if !domain.RefEqual(before, domain.RefOf(sols)) {
 		it.Revision++
 	}
-	it.UpdatedAt = a.clock()
+	a.contentChanged(ctx, it)
 	return tx.UpdateItem(it)
 }
 
@@ -89,7 +90,7 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 		if err := tx.InsertSolution(&s); err != nil {
 			return err
 		}
-		return a.solutionsChanged(tx, &it, before)
+		return a.solutionsChanged(ctx, tx, &it, before)
 	})
 	return s, err
 }
@@ -133,7 +134,7 @@ func (a *App) UpdateSolution(ctx context.Context, id string, in domain.ItemSolut
 			return err
 		}
 		out = s
-		return a.solutionsChanged(tx, &it, before)
+		return a.solutionsChanged(ctx, tx, &it, before)
 	})
 	return out, err
 }
@@ -154,7 +155,7 @@ func (a *App) DeleteSolution(ctx context.Context, id string) error {
 		if err := tx.DeleteSolution(id); err != nil {
 			return err
 		}
-		return a.solutionsChanged(tx, &it, before)
+		return a.solutionsChanged(ctx, tx, &it, before)
 	})
 }
 

@@ -19,7 +19,8 @@ var FixtureSecrets = func() *secrets.Box { b, _ := secrets.NewBox(bytes.Repeat([
 
 // Populate fills db with a library that uses every table: an AI provider
 // with an encrypted key chosen as the default, edited and deleted built-in
-// presets plus one of the user's, items with tags, collections (nested,
+// presets plus one of the user's, items with tags (and one that records who
+// created and changed it), collections (nested,
 // with positions), a variant link, links between items (to a deleted item
 // too), test cases, solutions, working copies, and submissions with
 // results, and text a backend could mangle.
@@ -108,6 +109,10 @@ func Populate(t *testing.T, db store.Store) {
 			"cpp":    {Prefix: "#include <bits/stdc++.h>\n", Suffix: ""},
 		}
 		if err := tx.InsertItem(&fn); err != nil {
+			return err
+		}
+		// An item that records who created it and who last changed it.
+		if err := insertTracked(tx); err != nil {
 			return err
 		}
 		// Links, one of them to an item that is then deleted (which leaves
@@ -232,6 +237,23 @@ func Populate(t *testing.T, db store.Store) {
 	})
 }
 
+// TrackedID is the item of Populate that records who created it (over MCP,
+// with a client and a model) and who last changed it (over HTTP).
+const TrackedID = "tracked"
+
+func insertTracked(tx store.Tx) error {
+	client, model := "claude-code é 🙂", "claude-opus-5-5"
+	it := Item(TrackedID, "Tracked reading", domain.TypeReading)
+	it.CreatedBy = &domain.ChangeSource{Via: domain.ViaMCP, Client: &client, Model: &model}
+	it.LastUpdatedBy = it.CreatedBy
+	if err := tx.InsertItem(&it); err != nil {
+		return err
+	}
+	it.CreatedBy = &domain.ChangeSource{Via: domain.ViaImport} // not written by an update
+	it.LastUpdatedBy, it.UpdatedAt = &domain.ChangeSource{Via: domain.ViaHTTP, Model: &model}, now.Add(time.Hour)
+	return tx.UpdateItem(&it)
+}
+
 // Dump is the complete contents of a database, table by table, as text.
 func Dump(t *testing.T, b store.Bulk) map[string][]string {
 	t.Helper()
@@ -269,11 +291,13 @@ func SameDump(t *testing.T, what string, want, got map[string][]string) {
 // cannot hold, for tests that take its database back to one: the last runs
 // of solutions (version 11), AI jobs and drafts (version 12), test case
 // generators (version 13), links and the record of a deleted item
-// (version 14; the item is created again, which removes its record), and
-// working copies (version 16).
+// (version 14; the item is created again, which removes its record),
+// working copies (version 16) and who created and changed an item (version
+// 17).
 func ClearNewerData(t *testing.T, db store.Store) {
 	t.Helper()
 	ClearWorkingCopies(t, db)
+	ClearProvenance(t, db)
 	Write(t, db, func(tx store.Tx) error {
 		links, err := tx.ItemLinks("origin")
 		if err != nil {
@@ -339,5 +363,21 @@ func ClearWorkingCopies(t *testing.T, db store.Store) {
 			}
 		}
 		return nil
+	})
+}
+
+// ClearProvenance replaces the item of Populate that records who created
+// and changed it with one that does not, which schema versions before 17
+// cannot hold. The store never rewrites who created an item, so the item
+// is deleted and created again (which also removes the record of its
+// deletion).
+func ClearProvenance(t *testing.T, db store.Store) {
+	t.Helper()
+	Write(t, db, func(tx store.Tx) error {
+		if _, err := tx.DeleteItem(TrackedID, now); err != nil {
+			return err
+		}
+		it := Item(TrackedID, "Tracked reading", domain.TypeReading)
+		return tx.InsertItem(&it)
 	})
 }

@@ -567,7 +567,9 @@ type DraftSaveInput struct {
 }
 
 // SaveDraft creates the item from the draft's form and deletes the draft,
-// in one transaction. A generation still running is cancelled.
+// in one transaction. A generation still running is cancelled. The item's
+// change source has the model of the draft's latest generation when the
+// form was built from one.
 func (a *App) SaveDraft(ctx context.Context, id string, in DraftSaveInput) (domain.Item, error) {
 	var d store.Draft
 	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = tx.GetDraft(id); return notFoundAs(err, "draft") }); err != nil {
@@ -594,7 +596,9 @@ func (a *App) SaveDraft(ctx context.Context, id string, in DraftSaveInput) (doma
 		if err := checkDraftRevision(cur, in.ExpectedRevision); err != nil {
 			return err
 		}
-		if out, err = a.insertNewItem(tx, n); err != nil {
+		// The item is recorded as made with the model of the generation
+		// its content was built from; one written by hand has none.
+		if out, err = a.insertNewItem(withModel(ctx, draftModel(cur)), tx, n); err != nil {
 			return err
 		}
 		if cancelled, err = a.endDraft(tx, cur); err != nil {

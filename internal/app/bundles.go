@@ -444,6 +444,7 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 		var linkVariants []domain.Item // items whose variantOf is set after all inserts
 		insert := func(it bundle.Item, id string) error {
 			d := a.toDomain(it, id, now)
+			d.CreatedBy, d.LastUpdatedBy = importSource(), importSource()
 			variant := d.VariantOf
 			d.VariantOf = nil
 			if err := tx.InsertItem(&d); err != nil {
@@ -708,6 +709,8 @@ func (a *App) overwrite(tx store.Tx, p itemPlan, now time.Time, links *[]domain.
 	next.Status, next.Favorite, next.Notes, next.RawInput = local.Status, local.Favorite, local.Notes, local.RawInput
 	next.CreatedAt = local.CreatedAt
 	next.Revision = local.Revision
+	// A changed item is overwritten, which moves updatedAt.
+	next.CreatedBy, next.LastUpdatedBy = local.CreatedBy, importSource()
 	if overwriteChangesContent(p) {
 		next.Revision++
 	}
@@ -767,6 +770,9 @@ func (a *App) insertBundleSolutions(tx store.Tx, itemID string, sols []bundle.So
 	}
 	return nil
 }
+
+// importSource records a change made by importing a bundle.
+func importSource() *domain.ChangeSource { return &domain.ChangeSource{Via: domain.ViaImport} }
 
 // overwriteChangesContent reports whether overwriting with the bundle item
 // changes the local item's own content (and so its revision): any changed

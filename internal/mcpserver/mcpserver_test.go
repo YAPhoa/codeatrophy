@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -799,6 +800,54 @@ func TestCollectionTagAndTestCaseTools(t *testing.T) {
 	}
 }
 
+// A change made over MCP records the client's name from the handshake and
+// the model the tool call reports; a model of the wrong type or an empty
+// one is unknown, never an error. The write tools offer the argument.
+func TestChangeSource(t *testing.T) {
+	f := newFixture(t, "")
+	s := f.connect(t, "")
+	it, isErr := call(t, s, "create_item", map[string]any{"type": "reading", "title": "R", "model": " claude-opus-5-5\n"})
+	if isErr {
+		t.Fatal(it)
+	}
+	id := it["id"].(string)
+	got, _ := call(t, s, "get_item", map[string]any{"id": id})
+	item := got["item"].(map[string]any)
+	want := map[string]any{"via": "mcp", "client": "test", "model": "claude-opus-5-5"}
+	if fmt.Sprint(item["createdBy"]) != fmt.Sprint(want) || fmt.Sprint(item["lastUpdatedBy"]) != fmt.Sprint(want) {
+		t.Errorf("created: %v / %v", item["createdBy"], item["lastUpdatedBy"])
+	}
+	for i, model := range []any{7, "  ", nil} {
+		r, isErr := call(t, s, "update_item", map[string]any{"id": id, "title": fmt.Sprint("R", i), "model": model})
+		if isErr {
+			t.Fatalf("model %v: %v", model, r)
+		}
+		if by := fmt.Sprint(r["lastUpdatedBy"]); by != fmt.Sprint(map[string]any{"via": "mcp", "client": "test", "model": nil}) {
+			t.Errorf("model %v: last updated by %s", model, by)
+		}
+		if fmt.Sprint(r["createdBy"]) != fmt.Sprint(want) {
+			t.Errorf("model %v: created by %v", model, r["createdBy"])
+		}
+	}
+	res, err := s.ListTools(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked := map[string]bool{"create_item": true, "update_item": true, "edit_item_text": true, "bulk_update_items": true,
+		"rename_tag": true, "delete_tag": true, "add_test_cases": true, "update_test_case": true, "delete_test_case": true,
+		"verify_test_cases": true, "save_solution": true, "delete_solution": true}
+	for _, tool := range res.Tools {
+		b, _ := json.Marshal(tool.InputSchema)
+		var schema struct {
+			Properties map[string]any `json:"properties"`
+		}
+		_ = json.Unmarshal(b, &schema)
+		if _, ok := schema.Properties["model"]; ok != tracked[tool.Name] {
+			t.Errorf("%s: model argument %v", tool.Name, ok)
+		}
+	}
+}
+
 // Arguments that do not decode are reported as the HTTP API reports a body
 // that does not: a wrong type names the field, anything else is bad_request.
 func TestArgumentDecoding(t *testing.T) {
@@ -842,6 +891,9 @@ func TestSchemaPropertiesAreDecoded(t *testing.T) {
 		probes := wrongTyped(schema, "")
 		total += len(probes)
 		for _, p := range probes {
+			if p.path == "model" {
+				continue // tracking only: never refused (see TestChangeSource)
+			}
 			r, isErr := call(t, s, tool.Name, p.args)
 			e, _ := r["error"].(map[string]any)
 			fields, _ := e["fields"].(map[string]any)

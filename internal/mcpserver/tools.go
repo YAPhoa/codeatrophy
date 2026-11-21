@@ -38,12 +38,44 @@ func (t *tools) add(s *mcp.Server, name, title, desc string, schema map[string]a
 			if req.Params != nil {
 				raw = req.Params.Arguments
 			}
+			ctx = app.WithChangeSource(ctx, domain.ViaMCP, clientName(req), modelArg(raw))
 			v, err := fn(ctx, raw)
 			if err != nil {
 				return toolError(err), nil
 			}
 			return result(v), nil
 		})
+}
+
+// clientName is the name the client gave in the initialize handshake, or
+// "".
+func clientName(req *mcp.CallToolRequest) string {
+	if info := req.ClientInfo(); info != nil {
+		return info.Name
+	}
+	return ""
+}
+
+// modelArg is the optional model argument of a tool call, or "" when it is
+// missing or not a string. It is never an error.
+func modelArg(raw json.RawMessage) string {
+	var in struct {
+		Model json.RawMessage `json:"model"`
+	}
+	var model string
+	if json.Unmarshal(raw, &in) == nil && json.Unmarshal(in.Model, &model) == nil {
+		return model
+	}
+	return ""
+}
+
+// tracked adds the optional model argument to the schema of a tool that
+// changes an item's content.
+func tracked(schema map[string]any) map[string]any {
+	// No maxLength: a long value is cut by the server, never refused.
+	schema["properties"].(map[string]any)["model"] = str(
+		"The model making this change, e.g. claude-opus-5-5; optional, for tracking.")
+	return schema
 }
 
 type idArg struct {
@@ -72,7 +104,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "get_item", "Get item",
-		"One item in full, including its body, revision and, for a problem, its interface (program or function) and harness, with its links (the items linked to it; available: false for one that has been deleted) and, for a variant, item.variantOrigin (the item it was derived from, which may be unavailable too). include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
+		"One item in full, including its body, revision, createdBy and lastUpdatedBy (who created it and who made its last content change: via http, mcp or import, with the client and model reported, or null when unknown) and, for a problem, its interface (program or function) and harness, with its links (the items linked to it; available: false for one that has been deleted) and, for a variant, item.variantOrigin (the item it was derived from, which may be unavailable too). include selects optional parts: testCases, solutions, submissions (the 10 most recent submits; runs are not kept as history).",
 		object(props{
 			"id":      str("Item id"),
 			"include": arrayOf(enumStr("", "testCases", "solutions", "submissions"), "Optional parts to include"),
@@ -165,7 +197,7 @@ func (t *tools) register(s *mcp.Server) {
 	createProps["testCases"] = arrayOf(testCaseSchema(), "Test cases to create with the item (problems only)")
 	t.add(s, "create_item", "Create item",
 		"Create a problem or reading. May include tags, collectionIds, variantOf and test cases in the same call. A solution-only problem sets problem.interface to function, with starterCode (the stubs) and a harness entry per language. Returns the item with its revision.",
-		object(createProps, "type", "title"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		tracked(object(createProps, "type", "title")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in domain.ItemInput
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
@@ -178,7 +210,7 @@ func (t *tools) register(s *mcp.Server) {
 	updateProps["expectedRevision"] = expectedRevision
 	t.add(s, "update_item", "Update item",
 		"Partial update of an item (merge semantics: omitted fields are unchanged; arrays replace; null clears a nullable field; problem and source merge field by field; problem.starterCode and problem.harness replace all entries). Setting problem.interface to program on a problem with a harness needs harness: {} in the same call. Pass expectedRevision.",
-		object(updateProps, "id"), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		tracked(object(updateProps, "id")), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var id idArg
 			var in domain.ItemInput
 			if err := decodeArgs(raw, &id); err != nil {
@@ -192,7 +224,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "edit_item_text", "Edit item text",
 		"Exact-match text replacements inside body or notes, for small changes to long text. Each oldText must occur exactly once at the point it is applied; otherwise nothing is written.",
-		object(props{
+		tracked(object(props{
 			"id":    str("Item id"),
 			"field": enumStr("Which text to edit", "body", "notes"),
 			"edits": arrayOf(object(props{
@@ -200,7 +232,7 @@ func (t *tools) register(s *mcp.Server) {
 				"newText": str("Replacement text"),
 			}, "oldText", "newText"), "Edits, applied in order"),
 			"expectedRevision": expectedRevision,
-		}, "id", "field", "edits"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		}, "id", "field", "edits")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var id idArg
 			var in app.EditTextInput
 			if err := decodeArgs(raw, &id); err != nil {
@@ -227,14 +259,14 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "bulk_update_items", "Bulk update items",
 		"Apply one action to many items: addTags, removeTags, setStatus, setFavorite, addToCollection, removeFromCollection or delete. Unknown ids are ignored.",
-		object(props{
+		tracked(object(props{
 			"ids":          arrayOf(str("Item id"), "Items to change"),
 			"action":       enumStr("Action", "delete", "addTags", "removeTags", "setStatus", "setFavorite", "addToCollection", "removeFromCollection"),
 			"tags":         arrayOf(maxLen(str("Tag"), domain.MaxTagChars), "For addTags and removeTags"),
 			"status":       enumStr("For setStatus", "todo", "in_progress", "done"),
 			"favorite":     boolean("For setFavorite"),
 			"collectionId": str("For addToCollection and removeFromCollection"),
-		}, "ids", "action"), destructive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		}, "ids", "action")), destructive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in app.BulkInput
 			if err := decodeArgs(raw, &in); err != nil {
 				return nil, err
@@ -370,7 +402,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "rename_tag", "Rename tag", "Rename a tag on every item, merging with an existing tag of the new name.",
-		object(props{"name": str("Current tag name"), "newName": maxLen(str("New tag name"), domain.MaxTagChars)}, "name", "newName"), idempotent,
+		tracked(object(props{"name": str("Current tag name"), "newName": maxLen(str("New tag name"), domain.MaxTagChars)}, "name", "newName")), idempotent,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				Name    string `json:"name"`
@@ -383,7 +415,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "delete_tag", "Delete tag", "Remove a tag from every item and delete it, so that it is no longer listed.",
-		object(props{"name": str("Tag name")}, "name"), destructive,
+		tracked(object(props{"name": str("Tag name")}, "name")), destructive,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				Name string `json:"name"`
@@ -400,13 +432,13 @@ func (t *tools) register(s *mcp.Server) {
 	// Test cases and execution.
 	t.add(s, "add_test_cases", "Add test cases",
 		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Test-case changes do not change the item revision. A large case is given as a generator instead of stdin: the server runs it, before storing anything, and the case's stdin is what it printed. A case given both stdin and a generator is stored as given without running anything; the server does not check that the input came from the generator. Then call verify_test_cases with updateExpected: true so expected outputs come from running the solution.",
-		object(props{
+		tracked(object(props{
 			"itemId":            str("Problem id"),
 			"cases":             arrayOf(testCaseSchema(), "Test cases to add"),
 			"replace":           boolean("Replace the existing test cases; sample cases are kept"),
 			"referenceSolution": map[string]any{"anyOf": []any{solutionSchema(), map[string]any{"type": "null"}}},
 			"expectedRevision":  expectedRevision,
-		}, "itemId", "cases"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		}, "itemId", "cases")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID string `json:"itemId"`
 				app.BulkTestCasesInput
@@ -419,7 +451,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "update_test_case", "Update test case",
 		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it. A generator runs and what it prints replaces stdin; generator: null drops the generator and keeps stdin; setting stdin without a generator drops the generator too. Giving stdin and a non-null generator together is refused here.",
-		object(props{
+		tracked(object(props{
 			"id":             str("Test case id"),
 			"name":           maxLen(str("Name"), domain.MaxTestCaseNameChars),
 			"stdin":          str("Standard input"),
@@ -427,7 +459,7 @@ func (t *tools) register(s *mcp.Server) {
 			"isSample":       boolean("Sample flag"),
 			"verified":       boolean("Verified flag"),
 			"generator":      map[string]any{"anyOf": []any{generatorSchema(), map[string]any{"type": "null"}}, "description": generatorDesc + ". null drops the generator and keeps stdin"},
-		}, "id"), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		}, "id")), idempotent, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ID string `json:"id"`
 				domain.TestCaseInput
@@ -439,7 +471,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "delete_test_case", "Delete test case", "Delete one test case.",
-		object(props{"id": str("Test case id")}, "id"), destructive,
+		tracked(object(props{"id": str("Test case id")}, "id")), destructive,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in idArg
 			if err := decodeArgs(raw, &in); err != nil {
@@ -453,11 +485,11 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "verify_test_cases", "Verify test cases",
 		"Run a saved solution on every test case and report mismatches. With the reference solution (the default), cases are marked verified when the output matches and unverified otherwise; with updateExpected: true, the actual output replaces the expected output of mismatching cases. Any other solutionId only checks that solution and leaves the cases alone. Either way the run becomes the solution's lastRun, unless the engine failed on a case. For a function problem the solution runs inside its language's harness, and a language without one is rejected. Needs a judge engine.",
-		object(props{
+		tracked(object(props{
 			"itemId":         str("Problem id"),
 			"solutionId":     str("Solution to run; omit for the reference solution"),
 			"updateExpected": boolean("Replace expected outputs with the actual output (reference solution only)"),
-		}, "itemId"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		}, "itemId")), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID         string `json:"itemId"`
 				UpdateExpected bool   `json:"updateExpected"`
@@ -471,7 +503,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "save_solution", "Save solution",
 		"Create a saved solution on a problem (give itemId), or change one (give its id; omitted fields are kept). isReference: true makes it the reference solution used to compute and verify expected outputs, clearing the flag on the others. Changing which solution is the reference, or the reference's language or source, is item content: pass expectedRevision then. A solution reports its last run on the test cases as lastRun; changing its language or source clears it. When creating one from code you ran with run_code, pass that submission's id as submissionId to keep its figures as lastRun.",
-		object(props{
+		tracked(object(props{
 			"itemId":           str("Problem id, to create a solution"),
 			"id":               str("Solution id, to change an existing solution"),
 			"name":             maxLen(str("Short single-line name, e.g. the approach"), domain.MaxSolutionNameChars),
@@ -481,7 +513,7 @@ func (t *tools) register(s *mcp.Server) {
 			"isReference":      boolean("Make this the reference solution"),
 			"expectedRevision": expectedRevision,
 			"submissionId":     str("When creating: a completed submission of this problem with the same language and source, whose figures become lastRun; ignored otherwise"),
-		}), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		})), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				ItemID string `json:"itemId"`
 				ID     string `json:"id"`
@@ -503,7 +535,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	t.add(s, "delete_solution", "Delete solution",
 		"Delete one saved solution. Deleting the reference solution leaves the problem without one.",
-		object(props{"id": str("Solution id")}, "id"), destructive,
+		tracked(object(props{"id": str("Solution id")}, "id")), destructive,
 		func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in idArg
 			if err := decodeArgs(raw, &in); err != nil {

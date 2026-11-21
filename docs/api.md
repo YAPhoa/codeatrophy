@@ -345,13 +345,40 @@ are left out.
     "harness": {},
     "referenceSolution": { "id": "...", "language": "python", "source": "..." }
   },
-  "variantOrigin": null
+  "variantOrigin": null,
+  "createdBy": { "via": "mcp", "client": "claude-code", "model": "claude-opus-5-5" },
+  "lastUpdatedBy": { "via": "http", "client": null, "model": null }
 }
 ```
 
 - `variantOrigin` is `null` when `variantOf` is, and otherwise the
   `LinkedItem` (see [Links](#links)) of the item `variantOf` names, with
   `linkedAt` `null`. It is computed on read; a client sends `variantOf`.
+- `createdBy` and `lastUpdatedBy` (on `Item` only, not `ItemSummary`) say
+  who created the item and who made the change that last moved `updatedAt`,
+  for tracking only. Each is a `ChangeSource` or `null` when unknown (items
+  from before the record existed); a record is the whole object or `null`.
+  They are set by the server and never taken from a request body.
+  - `via` — `"http"` (this API), `"mcp"` (the [MCP server](mcp.md)) or
+    `"import"` (a [bundle import](#import-and-export)).
+  - `client` — over MCP, the client name from the MCP handshake; otherwise
+    `null`.
+  - `model` — over MCP, the tool call's optional `model` argument; for an
+    item saved from a [draft](#post-draftsidsave), the model of the draft's
+    latest generation when the form was built from it (`basedOn` > 0);
+    otherwise `null`.
+  - `client` and `model` are reported, not verified. The server makes them
+    one line (control characters and runs of white space become one space),
+    trims them, cuts them to 200 characters and reads an empty one as `null`;
+    they never make a request fail.
+  - `createdBy` is set on create and never changes; `lastUpdatedBy` starts
+    equal to it and changes whenever `updatedAt` moves, with one exception:
+    a `testcases/verify` run that only changes `verified` flags moves
+    `updatedAt` but leaves `lastUpdatedBy` (one that rewrites an expected
+    output sets it). Personal state, collection membership and links change
+    neither.
+  - An import sets both to `{ "via": "import" }` on a new item; overwriting a
+    changed item sets `lastUpdatedBy` to it and keeps `createdBy`.
 
 - `problem.referenceSolution` is a view of the item's saved
   [solution](#solutions) that is marked as the reference, or `null` when none
@@ -1969,7 +1996,9 @@ one transaction: either both happen or neither does. For a `variant` draft,
 `item.variantOf` defaults to the draft's `variantOf`. A generation still
 running is cancelled. `expectedRevision` is optional and checked as for
 `PATCH`. Validation errors are those of `POST /items`, field names
-unchanged. Returns `201` with the `Item`.
+unchanged. Returns `201` with the `Item`, whose `createdBy` carries the
+model of the draft's latest generation when `basedOn` > 0 (see
+[`Item`](#shapes)).
 
 ### `DELETE /drafts/{id}`
 

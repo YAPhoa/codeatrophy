@@ -33,6 +33,7 @@ func Run(t *testing.T, open Opener) {
 	}{
 		{"ItemRoundTrip", testItemRoundTrip},
 		{"FunctionProblemRoundTrip", testFunctionProblemRoundTrip},
+		{"ItemProvenance", testItemProvenance},
 		{"SearchAndFilters", testSearchAndFilters},
 		{"SearchRules", testSearchRules},
 		{"TitleOrder", testTitleOrder},

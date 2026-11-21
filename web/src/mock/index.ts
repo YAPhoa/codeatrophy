@@ -229,7 +229,7 @@ export function createMockServer(options: MockOptions = {}): MockServer {
       const item = db.getItem(itemId);
       if (!item.title.endsWith(' (edited elsewhere)')) item.title = `${item.title} (edited elsewhere)`.slice(0, 200);
       item.body = `${item.body.trimEnd()}\n\n> Added by a simulated external edit at revision ${item.revision + 1}.\n`;
-      db.touch(item);
+      db.touch(item, { via: 'mcp', client: 'claude-code', model: 'claude-opus-5-5' });
     },
   };
 }

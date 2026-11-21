@@ -68,6 +68,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0014Links", testLinksMigration},
 		{"0015BuiltinPresets", testBuiltinPresetsMigration},
 		{"0016WorkingCopies", testWorkingCopiesMigration},
+		{"0017Provenance", testProvenanceMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -422,7 +423,8 @@ func testBuiltinPresetsMigration(t *testing.T, h MigrationHarness) {
 	// The fixture keeps the default untouched, edits "Contest style",
 	// deletes "Study notes" and adds a preset of the user's.
 	t.Run("Library", func(t *testing.T) {
-		want, db := h.rerun(t, 15, func(db MigrationDB) { Populate(t, db); ClearWorkingCopies(t, db) }, asSeeded, allButText)
+		want, db := h.rerun(t, 15, func(db MigrationDB) { Populate(t, db); ClearWorkingCopies(t, db); ClearProvenance(t, db) },
+			asSeeded, allButText)
 		SameDump(t, "after migration 15", want, allButText(t, db))
 		texts(t, db, map[string]string{"Interview practice": builtin["Interview practice"],
 			"Contest style": "My own contest rules.", "Mine": "Short."})
@@ -466,6 +468,7 @@ func testWorkingCopiesMigration(t *testing.T, h MigrationHarness) {
 	want, db := h.rerun(t, 16, func(db MigrationDB) {
 		Populate(t, db)
 		ClearWorkingCopies(t, db)
+		ClearProvenance(t, db)
 	}, func(db MigrationDB) {
 		if err := h.Exec(db, `SELECT COUNT(*) FROM working_copies`); err == nil {
 			t.Error("version 15 has a working_copies table")
@@ -486,6 +489,51 @@ func testWorkingCopiesMigration(t *testing.T, h MigrationHarness) {
 	h.rejects(t, db, map[string]string{
 		"a working copy of no item": `INSERT INTO working_copies (item_id, language, source, updated_at, write_seq) VALUES ('nobody', 'go', '', 0, 1)`,
 	})
+}
+
+// Migration 17 records who created an item and who last changed it: a
+// database at version 16 keeps every row, its items record nobody, and
+// afterwards an item keeps who created it and who last changed it.
+func testProvenanceMigration(t *testing.T, h MigrationHarness) {
+	want, db := h.rerun(t, 17, func(db MigrationDB) {
+		Populate(t, db)
+		ClearProvenance(t, db)
+	}, func(db MigrationDB) {
+		if err := h.Exec(db, `SELECT created_via FROM items`); err == nil {
+			t.Error("version 16 has the provenance columns")
+		}
+	}, Dump)
+	SameDump(t, "after migration 17", want, Dump(t, db))
+	for _, id := range []string{"origin", "variant", TrackedID} {
+		if it := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem(id) }); it.CreatedBy != nil || it.LastUpdatedBy != nil {
+			t.Errorf("%s after migrating: created by %+v, last updated by %+v", id, it.CreatedBy, it.LastUpdatedBy)
+		}
+	}
+	Write(t, db, func(tx store.Tx) error {
+		if _, err := tx.DeleteItem(TrackedID, now); err != nil {
+			return err
+		}
+		return insertTracked(tx)
+	})
+	it := Read(t, db, func(tx store.Tx) (domain.Item, error) { return tx.GetItem(TrackedID) })
+	if got := sourceText(it.CreatedBy) + " / " + sourceText(it.LastUpdatedBy); got != "mcp claude-code é 🙂 claude-opus-5-5 / http - claude-opus-5-5" {
+		t.Errorf("after migrating: %s", got)
+	}
+}
+
+// sourceText shows a change source as "via client model", "-" for a
+// missing one, or "nobody".
+func sourceText(c *domain.ChangeSource) string {
+	if c == nil {
+		return "nobody"
+	}
+	opt := func(p *string) string {
+		if p == nil {
+			return "-"
+		}
+		return *p
+	}
+	return c.Via + " " + opt(c.Client) + " " + opt(c.Model)
 }
 
 // DumpWithout is Dump without some columns, by table.

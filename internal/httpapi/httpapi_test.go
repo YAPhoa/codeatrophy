@@ -286,6 +286,21 @@ func TestItemsLifecycle(t *testing.T) {
 	c.expect("DELETE", api+"/items/"+id, "", 404)
 }
 
+// An item changed through the API records it as made over HTTP, whatever
+// the body claims; summaries do not carry the record.
+func TestItemChangeSource(t *testing.T) {
+	c := newServer(t)
+	it := c.expect("POST", api+"/items", `{"type":"reading","title":"R","createdBy":{"via":"mcp","client":"x","model":"y"}}`, 201).json(t)
+	want := map[string]any{"via": "http", "client": nil, "model": nil}
+	if fmt.Sprint(it["createdBy"]) != fmt.Sprint(want) || fmt.Sprint(it["lastUpdatedBy"]) != fmt.Sprint(want) {
+		t.Errorf("created: %v / %v", it["createdBy"], it["lastUpdatedBy"])
+	}
+	list := c.expect("GET", api+"/items", "", 200).json(t)["items"].([]any)[0].(map[string]any)
+	if _, ok := list["createdBy"]; ok {
+		t.Errorf("a summary carries createdBy: %v", list)
+	}
+}
+
 // The link endpoints, and the shapes of a link, a variant's origin and an
 // item's link count, also once the items they name are deleted.
 func TestItemLinksEndpoints(t *testing.T) {

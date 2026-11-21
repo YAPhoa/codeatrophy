@@ -200,6 +200,8 @@ async function verify(db: MockDb, req: Req) {
   const behaviour = detectBehaviour(reference.source, item.problem!.starterCode[reference.language], assemble(harness, reference.source).program);
   const limits = { timeLimitMs: item.problem!.timeLimitMs, memoryLimitKb: item.problem!.memoryLimitKb };
   let casesChanged = false;
+  // Replacing an expected output is a change to the cases; flipping "verified" marks is not anyone's change.
+  let outputsReplaced = false;
   const results: VerifyResult[] = cases.map((tc, i) => {
     const usage = resourceUsage(reference.language, hash32(`${tc.id}:verify`));
     // A solution that does not build, or an engine that fails, fails every case, and nothing is measured.
@@ -243,6 +245,7 @@ async function verify(db: MockDb, req: Req) {
       if (actual === right) db.truth.delete(tc.id);
       else db.truth.set(tc.id, right);
       casesChanged = true;
+      outputsReplaced = true;
     } else if (tc.verified) {
       tc.verified = false;
       casesChanged = true;
@@ -258,7 +261,7 @@ async function verify(db: MockDb, req: Req) {
       memoryKb: usage.memoryKb,
     };
   });
-  if (casesChanged) db.touchCases(item);
+  if (casesChanged) db.touchCases(item, outputsReplaced ? undefined : null);
   // Every run is the solution's last run, unless there was nothing to run or the judge failed on a case.
   if (results.length > 0 && !results.some((r) => r.verdict === 'internal_error')) {
     reference.lastRun = {

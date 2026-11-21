@@ -2758,6 +2758,18 @@ fieldset.stack legend {
   gap: var(--space-1);
 }
 
+/* Who created and last changed the item: models and client names are cut short, in full on hover. */
+.change-source {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.change-source-value {
+  display: inline-block;
+  max-width: 28ch;
+  vertical-align: bottom;
+}
+
 .related {
   margin-top: 28px;
   padding-top: var(--space-3);

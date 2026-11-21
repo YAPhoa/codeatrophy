@@ -1,7 +1,7 @@
 // The readings of the seed library. Bodies live as Markdown files in
 // ./content, keyed by `key`.
 
-import type { Difficulty, ItemStatus } from '../../api/types';
+import type { ChangeSource, Difficulty, ItemStatus } from '../../api/types';
 
 export interface SeedReading {
   key: string;
@@ -19,6 +19,9 @@ export interface SeedReading {
   notes?: string;
   sourceUrl?: string;
   sourceNote?: string;
+  /** Who created it and who last changed it; the last change is the creation when only `createdBy` is given. Neither: `null`. */
+  createdBy?: ChangeSource;
+  lastUpdatedBy?: ChangeSource;
   collections: string[];
 }
 
@@ -51,6 +54,7 @@ export const SEED_READINGS: SeedReading[] = [
     updated: 7,
     revision: 6,
     notes: '- Stopped at "Concurrency and crash safety"\n- Compare with the LSM notes once those exist',
+    createdBy: { via: 'mcp', client: 'claude-desktop', model: null },
     collections: ['databases'],
   },
   {

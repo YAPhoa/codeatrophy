@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { BookOpen, CheckCircle2, Circle, CircleDot, Code2, FolderPlus, Folders, Star } from 'lucide-react';
-import type { Collection, Difficulty, ItemStatus, ItemType, Verdict } from '../../api/types';
+import type { ChangeSource, Collection, Difficulty, ItemStatus, ItemType, Verdict } from '../../api/types';
 import { ITEM_STATUSES } from '../../api/types';
 import { useQuickUpdate } from '../../api/queries';
 import { DIFFICULTY_LABEL, STATUS_LABEL, VERDICT_BRIEF, VERDICT_LABEL, verdictTone } from '../../lib/format';
+import { changeSourceLine } from '../../lib/changeSource';
 import { buildTree, flattenTree } from '../../lib/tree';
 import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx, type ButtonSize } from '../../ui/Button';
@@ -35,6 +36,25 @@ export function DifficultyBadge({ difficulty }: { difficulty: Difficulty | null 
       <span className={`difficulty-dot is-${difficulty}`} aria-hidden="true" />
       {DIFFICULTY_LABEL[difficulty]}
     </Badge>
+  );
+}
+
+/** Who created the item and who last changed it, in one muted line; nothing when there is nothing to say. */
+export function ChangeSourceLine({ createdBy, lastUpdatedBy, className }: { createdBy?: ChangeSource | null; lastUpdatedBy?: ChangeSource | null; className?: string }) {
+  const parts = changeSourceLine(createdBy, lastUpdatedBy);
+  if (parts.length === 0) return null;
+  return (
+    <span className={cx('change-source', className)}>
+      {parts.map((p, i) =>
+        p.value ? (
+          <span key={i} className="change-source-value truncate" title={p.text}>
+            {p.text}
+          </span>
+        ) : (
+          p.text
+        ),
+      )}
+    </span>
   );
 }
 

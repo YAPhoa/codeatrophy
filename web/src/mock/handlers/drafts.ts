@@ -3,7 +3,7 @@
 
 import type { AiJobError, Draft, DraftKind, DraftResponse, DraftState, DraftSummary } from '../../api/types';
 import type { MockDb } from '../db';
-import { atMostChars, charCount, LIMITS } from '../db';
+import { BY_HTTP, atMostChars, charCount, LIMITS } from '../db';
 import type { Handler, Req } from '../http';
 import { accepted, conflict, created, enumParam, invalid, isRecord, noContent, notFound, objectBody, ok, Validator } from '../http';
 import { isActive, type JobRunner, type StoredJob } from '../jobs';
@@ -290,7 +290,9 @@ function saveDraft(db: MockDb, store: DraftStore, jobs: JobRunner, req: Req) {
   if (!isRecord(raw.item)) throw invalid('item', 'is required');
   const item = draft.kind === 'variant' && raw.item.variantOf == null ? { ...raw.item, variantOf: draft.variantOf } : raw.item;
   // Validated and created exactly as `POST /items` does; nothing changes when it fails.
-  const reply = createItem(db, { ...req, body: item });
+  // An item saved from a generation is the model's, even if edited before saving.
+  const model = draft.generation?.usage.model || null;
+  const reply = createItem(db, { ...req, body: item }, { ...BY_HTTP, model });
   const job = store.jobOf(draft);
   if (job) jobs.cancel(job);
   store.drafts.splice(store.drafts.indexOf(draft), 1);

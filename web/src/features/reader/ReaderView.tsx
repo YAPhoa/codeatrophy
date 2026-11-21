@@ -15,7 +15,7 @@ import { MenuButton, Popover } from '../../ui/Popover';
 import { Callout } from '../../ui/misc';
 import { revealTarget } from '../../ui/revealTarget';
 import { useCollectionActions } from '../collections/CollectionActions';
-import { CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl, TagChips } from '../item/controls';
+import { ChangeSourceLine, CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl, TagChips } from '../item/controls';
 import { libraryHref, useItemActions } from '../item/itemActions';
 import { Notes } from '../item/Notes';
 import { Related } from '../item/Related';
@@ -249,6 +249,7 @@ export function ReaderView({ item }: { item: Item }) {
                     </a>
                   )}
                   {item.source.note && <span>{item.source.note}</span>}
+                  <ChangeSourceLine createdBy={item.createdBy} lastUpdatedBy={item.lastUpdatedBy} />
                 </div>
                 {item.tags.length > 0 && <TagChips tags={item.tags} />}
               </header>

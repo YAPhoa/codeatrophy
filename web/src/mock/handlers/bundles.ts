@@ -4,7 +4,7 @@ import type { ImportItemState, ImportPreview, ImportResult, ImportStrategy } fro
 import type { BundleCollection, BundleItem, ParsedBundle } from '../bundle';
 import { buildBundleZip, BundleError, contentHash, parseBundleZip } from '../bundle';
 import type { MockDb, StoredCollection, StoredItem } from '../db';
-import { atMostChars, charCount, DEFAULT_PROBLEM, LIMITS, normaliseTags } from '../db';
+import { BY_IMPORT, atMostChars, charCount, DEFAULT_PROBLEM, LIMITS, normaliseTags } from '../db';
 import type { Handler, Req } from '../http';
 import { badRequest, invalid, isStringArray, objectBody, ok, tooLarge } from '../http';
 import { sleep, slugify, uuid } from '../util';
@@ -271,6 +271,8 @@ function createFromBundle(db: MockDb, incoming: BundleItem, id: string): StoredI
     revision: 1,
     createdAt: incoming.createdAt ?? now,
     updatedAt: now,
+    createdBy: { ...BY_IMPORT },
+    lastUpdatedBy: { ...BY_IMPORT },
     seq: db.nextSeq(),
   };
   db.items.set(id, item);
@@ -306,7 +308,7 @@ function overwrite(db: MockDb, local: StoredItem, incoming: BundleItem): void {
     c.position = incoming.testCases.length + i;
     db.testCases.push(c);
   });
-  db.touch(local);
+  db.touch(local, BY_IMPORT);
 }
 
 async function importBundle(db: MockDb, req: Req) {

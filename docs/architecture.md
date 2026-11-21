@@ -113,6 +113,23 @@ on; the service rejects the write with a conflict if the item has moved on.
 The check is optional so simple clients keep working, but the UI and the MCP
 tools both use it.
 
+### Provenance
+
+Every item records who created it and who made its last content change,
+for tracking only. Each adapter puts a change source in the request's
+context (`app.WithChangeSource`), and the services' write paths read it
+wherever `updatedAt` moves, so both transports share one rule. `via` comes
+from the transport: the HTTP adapter, the MCP adapter, or the bundle import
+service. Over MCP, the client name from the initialize handshake and the
+model a tool call reports are kept as the caller gave them, after
+sanitising, and are not verified. For its own AI work the server knows the
+model: an item saved from a draft records the model of the generation its
+form was built from. No AI job writes to an item directly (their results
+are reviewed and saved by a client), so jobs carry no change source. A
+change with no source in its context, such as one made by a background
+worker, is recorded as unknown. The record is local to the instance and is
+not exported.
+
 ## Storage
 
 The library lives in one of two databases behind the `store` interface:

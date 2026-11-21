@@ -26,7 +26,7 @@ import { Select } from '../../ui/Select';
 import { SplitPane } from '../../ui/SplitPane';
 import { Callout, ErrorCallout, PageLoading, Tabs, tabPanelProps } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
-import { TagChips } from '../item/controls';
+import { ChangeSourceLine, TagChips } from '../item/controls';
 import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
 import { Related, Variants } from '../item/Related';
@@ -563,6 +563,7 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
           )}
           {item.source.note && <span className="muted">· {item.source.note}</span>}
         </div>
+        <ChangeSourceLine createdBy={item.createdBy} lastUpdatedBy={item.lastUpdatedBy} className="muted" />
       </div>
       <Related item={item} />
     </div>

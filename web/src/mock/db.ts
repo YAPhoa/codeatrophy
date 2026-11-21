@@ -1,6 +1,7 @@
 // The mock's in-memory state and the derived views the API returns.
 
 import type {
+  ChangeSource,
   AiEffort,
   AiLogDetail,
   AiLogEntry,
@@ -97,9 +98,16 @@ export interface StoredItem {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  /** Who created the item and who last moved `updatedAt`; `null` for items older than the record. */
+  createdBy: ChangeSource | null;
+  lastUpdatedBy: ChangeSource | null;
   /** Monotonic counter that breaks ties between equal timestamps. */
   seq: number;
 }
+
+/** A change made through the HTTP API, by hand or with no model to name. */
+export const BY_HTTP: ChangeSource = { via: 'http', client: null, model: null };
+export const BY_IMPORT: ChangeSource = { via: 'import', client: null, model: null };
 
 /** A link made by hand between two items; it goes both ways. */
 export interface StoredLink {
@@ -505,19 +513,23 @@ export class MockDb {
    * variant link, anything under `problem`): the revision goes up by one and
    * the modification time moves.
    */
-  touch(item: StoredItem): void {
+  touch(item: StoredItem, by: ChangeSource = BY_HTTP): void {
     item.revision += 1;
     item.updatedAt = this.now();
+    item.lastUpdatedBy = { ...by };
     item.seq = this.nextSeq();
   }
 
   /**
    * Record a change to the item's test cases, or to its saved solutions
    * other than the reference. They are content for the purpose of
-   * `updatedAt`, but they are outside the revision.
+   * `updatedAt`, but they are outside the revision. `by` is `null` for a
+   * change that does not count as anyone's (verification that only flips
+   * "verified" marks): `lastUpdatedBy` stays.
    */
-  touchCases(item: StoredItem): void {
+  touchCases(item: StoredItem, by: ChangeSource | null = BY_HTTP): void {
     item.updatedAt = this.now();
+    if (by) item.lastUpdatedBy = { ...by };
     item.seq = this.nextSeq();
   }
 
@@ -694,6 +706,8 @@ export class MockDb {
         ? { ...structuredClone(item.problem), referenceSolution: this.referenceView(item.id) }
         : null,
       variantOrigin: item.variantOf === null ? null : this.linkedItem(item.variantOf),
+      createdBy: item.createdBy && { ...item.createdBy },
+      lastUpdatedBy: item.lastUpdatedBy && { ...item.lastUpdatedBy },
     };
   }
 

@@ -15,7 +15,8 @@ import (
 
 const itemColumns = `i.seq, i.id, i.type, i.title, i.summary, i.body, i.difficulty, i.status, i.favorite, i.notes,
 	i.raw_input, i.source_url, i.source_note, i.variant_of, i.revision, i.time_limit_ms, i.memory_limit_kb,
-	i.compare_mode, i.starter_code, i.problem_interface, i.harness, i.created_at, i.updated_at`
+	i.compare_mode, i.starter_code, i.problem_interface, i.harness, i.created_at, i.updated_at, i.created_via,
+	i.created_client, i.created_model, i.updated_via, i.updated_client, i.updated_model`
 
 type itemRow struct {
 	seq  int64
@@ -29,16 +30,19 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 		difficulty, rawInput, srcURL, srcNote sql.NullString
 		variantOf, compareMode, starter       sql.NullString
 		iface, harness                        sql.NullString
+		by                                    [6]sql.NullString
 		timeLimit, memLimit                   sql.NullInt64
 		favorite                              int
 		created, updated                      int64
 	)
 	err := sc.Scan(&r.seq, &it.ID, &it.Type, &it.Title, &it.Summary, &it.Body, &difficulty, &it.Status, &favorite,
 		&it.Notes, &rawInput, &srcURL, &srcNote, &variantOf, &it.Revision, &timeLimit, &memLimit, &compareMode,
-		&starter, &iface, &harness, &created, &updated)
+		&starter, &iface, &harness, &created, &updated, &by[0], &by[1], &by[2], &by[3], &by[4], &by[5])
 	if err != nil {
 		return r, err
 	}
+	it.CreatedBy = changeSource(by[0], by[1], by[2])
+	it.LastUpdatedBy = changeSource(by[3], by[4], by[5])
 	if difficulty.Valid {
 		d := domain.Difficulty(difficulty.String)
 		it.Difficulty = &d
@@ -142,6 +146,24 @@ func (t *tx) ExistingItemIDs(ids []string) (map[string]bool, error) {
 	return out, nil
 }
 
+// sourceArgs are the via, client and model columns of a change source, all
+// NULL for an unknown one.
+func sourceArgs(c *domain.ChangeSource) []any {
+	if c == nil {
+		return []any{nil, nil, nil}
+	}
+	return []any{c.Via, nullStr(c.Client), nullStr(c.Model)}
+}
+
+// changeSource reads a change source from its columns: nil when via is
+// NULL, whatever the others hold.
+func changeSource(via, client, model sql.NullString) *domain.ChangeSource {
+	if !via.Valid {
+		return nil
+	}
+	return &domain.ChangeSource{Via: via.String, Client: strPtr(client), Model: strPtr(model)}
+}
+
 func itemArgs(it *domain.Item) []any {
 	var difficulty, timeLimit, memLimit, compareMode, starter, iface, harness any
 	if it.Difficulty != nil {
@@ -175,10 +197,12 @@ func itemArgs(it *domain.Item) []any {
 
 func (t *tx) InsertItem(it *domain.Item) error {
 	args := append([]any{it.ID}, itemArgs(it)...)
+	args = append(append(args, sourceArgs(it.CreatedBy)...), sourceArgs(it.LastUpdatedBy)...)
 	res, err := t.exec(`INSERT INTO items (id, type, title, summary, body, difficulty, status, favorite, notes,
 		raw_input, source_url, source_note, variant_of, revision, time_limit_ms, memory_limit_kb, compare_mode,
-		starter_code, created_at, updated_at, problem_interface, harness)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+		starter_code, created_at, updated_at, problem_interface, harness, created_via, created_client, created_model,
+		updated_via, updated_client, updated_model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 	if err != nil {
 		return err
 	}
@@ -196,11 +220,12 @@ func (t *tx) InsertItem(it *domain.Item) error {
 }
 
 func (t *tx) UpdateItem(it *domain.Item) error {
-	args := append(itemArgs(it)[1:], it.ID) // type is immutable
+	// The type is immutable, and so is who created the item.
+	args := append(append(itemArgs(it)[1:], sourceArgs(it.LastUpdatedBy)...), it.ID)
 	res, err := t.exec(`UPDATE items SET title = ?, summary = ?, body = ?, difficulty = ?, status = ?, favorite = ?,
 		notes = ?, raw_input = ?, source_url = ?, source_note = ?, variant_of = ?, revision = ?, time_limit_ms = ?,
 		memory_limit_kb = ?, compare_mode = ?, starter_code = ?, created_at = ?, updated_at = ?, problem_interface = ?,
-		harness = ? WHERE id = ?`, args...)
+		harness = ?, updated_via = ?, updated_client = ?, updated_model = ? WHERE id = ?`, args...)
 	if err != nil {
 		return err
 	}
