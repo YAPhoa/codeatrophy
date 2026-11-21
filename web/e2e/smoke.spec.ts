@@ -473,13 +473,23 @@ test('preferences: hidden test cases and editor options follow the settings', as
   await page.getByRole('button', { name: /^Tests/ }).click();
   await expect(page.getByText(/^\d+ test cases · \d+ samples? · \d+ hidden$/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reveal all' })).toBeVisible();
-  // A revealed case can be hidden again: a Hide button takes the place of its "hidden" tag.
+  // A revealed case keeps its chip in the Hidden row, crossed out, and goes by its number.
   const caseList = page.locator('.tcases');
-  const revealOne = caseList.getByRole('button', { name: /^Reveal case \d+$/ }).first();
+  const hiddenRow = caseList.getByRole('group', { name: 'Hidden cases' });
+  const revealOne = hiddenRow.getByRole('button', { name: /^Reveal case \d+$/ }).first();
   const n = (await revealOne.getAttribute('aria-label'))!.replace('Reveal case ', '');
   await revealOne.click();
-  await caseList.getByRole('button', { name: `Hide case ${n}` }).click();
-  await expect(caseList.getByRole('button', { name: `Reveal case ${n}` })).toBeVisible();
+  await expect(hiddenRow.getByRole('button', { name: `Hide case ${n}`, exact: true })).toHaveClass(/is-revealed/);
+  await expect(caseList.locator('.tcase-name', { hasText: new RegExp(`^Example ${n}$`) })).toBeVisible();
+  await expect(hiddenRow.getByRole('button', { name: 'Hide all (1)' })).toBeVisible();
+  // A Hide button takes the place of its "hidden" tag.
+  await caseList.locator('.tcase').getByRole('button', { name: `Hide case ${n}`, exact: true }).click();
+  await expect(hiddenRow.getByRole('button', { name: `Reveal case ${n}`, exact: true })).toBeVisible();
+  await expect(hiddenRow.getByRole('button', { name: /^Hide all/ })).toHaveCount(0);
+  // The crossed-out chip hides its case again too.
+  await hiddenRow.getByRole('button', { name: `Reveal case ${n}`, exact: true }).click();
+  await hiddenRow.getByRole('button', { name: `Hide case ${n}`, exact: true }).click();
+  await expect(caseList.locator('.tcase-name', { hasText: new RegExp(`^Example ${n}$`) })).toHaveCount(0);
   const editorLine = page.locator('.editor-host .cm-line').first();
   await expect(editorLine).toHaveCSS('font-size', '14px');
 

@@ -145,6 +145,23 @@
   color: var(--text);
 }
 
+/* A revealed case: its chip stays, crossed out, and hides the case again. */
+.tcase-chip.is-revealed {
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 0.75px),
+    var(--text-3) calc(50% - 0.75px),
+    var(--text-3) calc(50% + 0.75px),
+    transparent calc(50% + 0.75px)
+  );
+  color: var(--text-3);
+}
+
+.tcase-chip.is-revealed:hover {
+  background-color: var(--surface-3);
+  color: var(--text-2);
+}
+
 .tcase-list {
   display: flex;
   flex-direction: column;
