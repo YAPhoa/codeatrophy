@@ -2,10 +2,12 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { SortOrder } from '../api/types';
 import type { RememberedSort } from './filters';
 import { readString, remove, writeJson } from './storage';
+import { TAG_SORTS, type RememberedTagSort } from './tagList';
 
 // The library's remembered sorts (filters.ts, "The remembered sort"), kept
-// in this browser under one key, by scope (`sortScope`):
-//   { "view:problem": { "sort": "title", "order": null, "at": 1763750000000 }, "collection:<id>": … }
+// in this browser under one key, by scope (`sortScope`), with the Tags
+// page's (tagList.ts) as the scope `tags`:
+//   { "view:problem": { "sort": "title", "order": null, "at": 1763750000000 }, "collection:<id>": …, "tags": … }
 // `at` is the last visit to the scope's view, in ms. An entry lasts 30 days
 // from it, so the sorts of collections no longer opened go on their own;
 // anything expired, unreadable or invalid is ignored, and dropped at the
@@ -30,8 +32,11 @@ const SORTS: readonly string[] = ['updated', 'created', 'title', 'difficulty', '
 
 const SCOPE = /^(view:(all|problem|reading|favorite)|collection:.+)$/;
 
+const TAGS = 'tags';
+
 /** The sorts a scope can remember, or `null` for a scope not in use. */
 function sortsOf(scope: string): readonly string[] | null {
+  if (scope === TAGS) return TAG_SORTS;
   return SCOPE.test(scope) ? SORTS : null;
 }
 
@@ -100,6 +105,17 @@ export function rememberSort(scope: string, sort: RememberedSort | null, now = D
   writeStored(scope, sort, now);
 }
 
+/** The sort remembered for the Tags page, or `null`. */
+export function readRememberedTagSort(now = Date.now()): RememberedTagSort | null {
+  // The scope holds only the tags' sorts (`sortsOf`).
+  return readStored(TAGS, now) as RememberedTagSort | null;
+}
+
+/** Remember the Tags page's sort, or forget it (`null`). */
+export function rememberTagSort(sort: RememberedTagSort | null, now = Date.now()): void {
+  writeStored(TAGS, sort, now);
+}
+
 /** A visit to a scope's view: its entry's 30 days start again, and expired ones go. */
 export function touchRememberedSort(scope: string, now = Date.now()): void {
   const { entries, stale } = load(now);
@@ -133,4 +149,10 @@ function useStored(scope: string): Stored | null {
 export function useRememberedSort(scope: string): RememberedSort | null {
   // See readRememberedSort.
   return useStored(scope) as RememberedSort | null;
+}
+
+/** The sort remembered for the Tags page; opening the page counts as a visit. */
+export function useRememberedTagSort(): RememberedTagSort | null {
+  // See readRememberedTagSort.
+  return useStored(TAGS) as RememberedTagSort | null;
 }

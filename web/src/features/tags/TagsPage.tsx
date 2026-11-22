@@ -4,13 +4,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Merge, Pencil, Tags, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { invalidateLibrary, useLimits, useTags } from '../../api/queries';
-import type { Tag } from '../../api/types';
+import type { SortOrder, Tag } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { tagProblem } from '../../lib/itemForm';
 import { plural } from '../../lib/format';
-import { naturalTagOrder, nextTagOrder, setHideEmptyTags, sortTags, tagDirectionText, TAG_SORTS, useHideEmptyTags, type TagOrder, type TagSort } from '../../lib/tagList';
-import { useUrlChoice, useUrlText } from '../../lib/urlState';
+import { rememberTagSort, useRememberedTagSort } from '../../lib/sortStore';
+import { naturalTagOrder, nextTagOrder, setHideEmptyTags, shownTagOrder, sortTags, tagDirectionText, tagSortChange, TAG_SORTS, useHideEmptyTags, type TagSort } from '../../lib/tagList';
+import { useUrlState, useUrlText } from '../../lib/urlState';
 import { Button, cx, IconButton, LinkButton } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Checkbox, SelectField, TextField } from '../../ui/Field';
@@ -22,8 +23,11 @@ type Editing = { kind: 'rename'; tag: Tag } | { kind: 'merge'; tag: Tag } | null
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '-');
 
-/** `order=` in the URL: left out for a column's natural direction. */
-const ORDER_PARAMS = ['', 'asc', 'desc'] as const;
+// `sort=` and `order=` as the URL has them, `null` when left out: a URL
+// that names either shows its own sort rather than the remembered one.
+const parseSortParam = (raw: string | null): TagSort | null => ((TAG_SORTS as readonly string[]).includes(raw ?? '') ? (raw as TagSort) : null);
+const parseOrderParam = (raw: string | null): SortOrder | null => (raw === 'asc' || raw === 'desc' ? raw : null);
+const formatParam = (value: string | null): string | null => value;
 
 const COLUMN_LABEL: Record<TagSort, string> = { name: 'Tag', items: 'Items' };
 
@@ -40,9 +44,10 @@ export default function TagsPage() {
   const tags = useTags();
   const limits = useLimits();
   const [filter, setFilter] = useUrlText('q');
-  const [sort, setSort] = useUrlChoice('sort', TAG_SORTS, 'name');
-  const [orderParam, setOrderParam] = useUrlChoice('order', ORDER_PARAMS, '');
-  const order = useMemo<TagOrder>(() => ({ sort, order: orderParam || naturalTagOrder(sort) }), [sort, orderParam]);
+  const [sortParam, setSortParam] = useUrlState('sort', parseSortParam, formatParam);
+  const [orderParam, setOrderParam] = useUrlState('order', parseOrderParam, formatParam);
+  const remembered = useRememberedTagSort();
+  const order = useMemo(() => shownTagOrder({ sort: sortParam, order: orderParam }, remembered), [sortParam, orderParam, remembered]);
   const hideEmptyPref = useHideEmptyTags();
   const [editing, setEditing] = useState<Editing>(null);
   const [value, setValue] = useState('');
@@ -59,9 +64,10 @@ export default function TagsPage() {
   const shown = useMemo(() => sortTags(hideEmpty ? matching.filter((t) => t.count > 0) : matching, order), [matching, hideEmpty, order]);
 
   const sortBy = (column: TagSort) => {
-    const next = nextTagOrder(order, column);
-    setSort(next.sort);
-    setOrderParam(next.order === naturalTagOrder(next.sort) ? '' : next.order);
+    const change = tagSortChange(nextTagOrder(order, column));
+    rememberTagSort(change.remember);
+    setSortParam(change.url.sort);
+    setOrderParam(change.url.order);
   };
   const head = (column: TagSort) => {
     const active = order.sort === column;

@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { choose, mockApi, mockItem, open } from './support';
 
 // The Tags page lists every tag with its item count, sorted from the column
-// heads (the sort in the URL). A tag outlives its last item, as an empty tag;
+// heads (the sort in the URL, and the last one chosen remembered in this
+// browser for a URL that names none). A tag outlives its last item, as an empty tag;
 // empty tags are hidden unless "Hide empty tags" is unticked, which is kept
 // per browser. Deleting a tag removes it for good. The seed library has two
 // empty tags, backtracking and trie.
@@ -10,6 +11,9 @@ import { choose, mockApi, mockItem, open } from './support';
 const names = (page: Page) => page.locator('.tags-table tbody tr td:first-child');
 const counts = (page: Page) => page.locator('.tags-table tbody tr td.num');
 const hideEmpty = (page: Page) => page.getByRole('checkbox', { name: 'Hide empty tags' });
+const nav = (page: Page) => page.getByRole('complementary', { name: 'Navigation' });
+const heading = (page: Page) => page.getByRole('heading', { level: 1 });
+const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('codeatrophy:librarySort') ?? 'null') as Record<string, { sort: string; order: string | null }> | null);
 
 /** Run `change`, which may change the mock library through its API, before the Tags page first loads its tags. */
 async function beforeTagsLoad(page: Page, change: () => Promise<void>) {
@@ -74,6 +78,65 @@ test('tags: the caption, and sorting from the heads in a cycle kept in the URL',
   await tag.click();
   await expect(page).not.toHaveURL(/sort=|order=/);
   await expect(names(page).first()).toHaveText('algorithms');
+});
+
+test('tags: the sort last chosen is there again on return and after a reload, and a link that names one shows its own', async ({ page }) => {
+  await open(page, '/tags');
+  const tag = page.getByRole('button', { name: /^Sort by tag/ });
+  const items = page.getByRole('button', { name: /^Sort by items/ });
+  const byItems = async () => {
+    await expect(heading(page)).toHaveText('Tags');
+    await expect(items).toHaveAttribute('aria-pressed', 'true');
+    await expect(items).toHaveAccessibleName('Sort by items, most first');
+    await expect(names(page).first()).toHaveText('array');
+  };
+  const byName = async () => {
+    await expect(heading(page)).toHaveText('Tags');
+    await expect(tag).toHaveAttribute('aria-pressed', 'true');
+    await expect(tag).toHaveAccessibleName('Sort by tag, A to Z');
+    await expect(names(page).first()).toHaveText('algorithms');
+  };
+  /** To Problems and back to Tags by the sidebar, whose links name no sort. */
+  const awayAndBack = async () => {
+    await nav(page).getByRole('link', { name: /^Problems/ }).click();
+    await expect(heading(page)).toContainText('Problems');
+    await nav(page).getByRole('link', { name: /^Tags/ }).click();
+    await expect(heading(page)).toHaveText('Tags');
+  };
+
+  await items.click();
+  await byItems();
+  await expect(page).toHaveURL(/[?&]sort=items(&|$)/);
+  expect(await stored(page)).toEqual({ tags: expect.objectContaining({ sort: 'items', order: null }) });
+
+  // Back by the sidebar: the remembered sort, which stays out of the URL.
+  await awayAndBack();
+  await byItems();
+  await expect(page).not.toHaveURL(/sort=|order=/);
+
+  // A link that names a sort shows it, and leaves the remembered one alone.
+  await open(page, '/tags?sort=name');
+  await byName();
+  await expect(page).toHaveURL(/[?&]sort=name(&|$)/);
+  expect(await stored(page)).toEqual({ tags: expect.objectContaining({ sort: 'items', order: null }) });
+  await awayAndBack();
+  await byItems();
+
+  // Back and Forward step between the two.
+  await page.goBack();
+  await expect(heading(page)).toContainText('Problems');
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]sort=name(&|$)/);
+  await byName();
+  await page.goForward();
+  await expect(heading(page)).toContainText('Problems');
+  await page.goForward();
+  await expect(page).not.toHaveURL(/sort=|order=/);
+  await byItems();
+
+  await page.reload();
+  await byItems();
+  await expect(page).not.toHaveURL(/sort=|order=/);
 });
 
 test('tags: empty tags are hidden until "Hide empty tags" is unticked, which is remembered', async ({ page }) => {

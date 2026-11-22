@@ -291,10 +291,11 @@ A few conventions worth knowing:
 - **Preferences live on the server** (`/settings/preferences`), so they follow
   the user between browsers; only the theme, Reduce motion, the reading text
   size and the reader's text width (`src/lib/textWidth.ts`, also switched from the reader's
-  bar) are local, with the library's page size and its sort. The sort is
-  remembered for each view of the sidebar and each collection apart, for 30
-  days from the last visit (`src/lib/sortStore.ts`); a URL that names a sort
-  wins, and a search sorts by relevance. `usePreferences()`
+  bar) are local, with the library's page size and its sort, and the Tags
+  page's. The sort is remembered for each view of the sidebar, each
+  collection and the Tags page apart, for 30 days from the last visit
+  (`src/lib/sortStore.ts`); a URL that names a sort wins, and a search sorts
+  by relevance. `usePreferences()`
   returns them, with the defaults until they have loaded. Every CodeMirror
   editor goes through `src/ui/CodeEditor.tsx`, which applies the editor
   preferences itself — callers pass nothing.

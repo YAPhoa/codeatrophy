@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installLocalStorage, removeLocalStorage } from '../test/fakeStorage';
-import { SORT_TTL_MS, readRememberedSort, rememberSort, touchRememberedSort } from './sortStore';
+import { SORT_TTL_MS, readRememberedSort, readRememberedTagSort, rememberSort, rememberTagSort, touchRememberedSort } from './sortStore';
 
 const KEY = 'codeatrophy:librarySort';
 const DAY = 24 * 60 * 60 * 1000;
@@ -121,5 +121,72 @@ describe('the remembered library sort', () => {
     });
     rememberSort('view:all', { sort: 'difficulty', order: null });
     expect(readRememberedSort('view:all')).toBeNull();
+  });
+
+  describe('of the Tags page', () => {
+    it('is kept beside the library\'s, each scope with its own', () => {
+      rememberSort('view:all', { sort: 'title', order: null });
+      rememberTagSort({ sort: 'items', order: 'asc' });
+      expect(readRememberedTagSort()).toEqual({ sort: 'items', order: 'asc' });
+      expect(readRememberedSort('view:all')).toEqual({ sort: 'title', order: null });
+      expect(stored(storage)).toEqual({
+        'view:all': { sort: 'title', order: null, at: Date.now() },
+        tags: { sort: 'items', order: 'asc', at: Date.now() },
+      });
+      rememberTagSort(null);
+      expect(readRememberedTagSort()).toBeNull();
+      expect(stored(storage)).toEqual({ 'view:all': { sort: 'title', order: null, at: Date.now() } });
+    });
+
+    it('lasts 30 days from the last visit', () => {
+      rememberTagSort({ sort: 'name', order: 'desc' });
+      vi.advanceTimersByTime(20 * DAY);
+      touchRememberedSort('tags');
+      vi.advanceTimersByTime(20 * DAY);
+      expect(readRememberedTagSort()).toEqual({ sort: 'name', order: 'desc' });
+      vi.advanceTimersByTime(SORT_TTL_MS - 20 * DAY + 1);
+      expect(readRememberedTagSort()).toBeNull();
+      touchRememberedSort('tags');
+      expect(storage.getItem(KEY)).toBeNull();
+    });
+
+    it('holds only the tags\' sorts, and a library scope only the library\'s', () => {
+      const now = Date.now();
+      storage.setItem(
+        KEY,
+        JSON.stringify({
+          'view:all': { sort: 'items', order: null, at: now },
+          'view:problem': { sort: 'title', order: null, at: now },
+          'collection:c': { sort: 'name', order: 'desc', at: now },
+          tags: { sort: 'title', order: null, at: now },
+        }),
+      );
+      expect(readRememberedTagSort()).toBeNull();
+      expect(readRememberedSort('view:all')).toBeNull();
+      expect(readRememberedSort('collection:c')).toBeNull();
+      expect(readRememberedSort('tags')).toBeNull();
+      touchRememberedSort('tags');
+      expect(stored(storage)).toEqual({ 'view:problem': { sort: 'title', order: null, at: now } });
+
+      storage.setItem(KEY, JSON.stringify({ tags: { sort: 'items', order: 'sideways', at: now } }));
+      expect(readRememberedTagSort()).toBeNull();
+      storage.setItem(KEY, JSON.stringify({ tags: { sort: 'items', order: null, at: 'today' } }));
+      expect(readRememberedTagSort()).toBeNull();
+    });
+
+    it('does nothing, and throws nothing, without storage or when it throws', () => {
+      vi.spyOn(storage, 'getItem').mockImplementation(() => {
+        throw new DOMException('blocked', 'SecurityError');
+      });
+      vi.spyOn(storage, 'setItem').mockImplementation(() => {
+        throw new DOMException('blocked', 'SecurityError');
+      });
+      expect(() => rememberTagSort({ sort: 'items', order: null })).not.toThrow();
+      expect(readRememberedTagSort()).toBeNull();
+      removeLocalStorage();
+      expect(() => rememberTagSort({ sort: 'items', order: null })).not.toThrow();
+      expect(readRememberedTagSort()).toBeNull();
+      expect(() => touchRememberedSort('tags')).not.toThrow();
+    });
   });
 });
