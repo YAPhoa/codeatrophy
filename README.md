@@ -1,4 +1,11 @@
-# Codeatrophy
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <img src="docs/images/logo-light.svg" alt="" width="128" height="128">
+  </picture>
+</p>
+
+<h1 align="center">Codeatrophy</h1>
 
 Codeatrophy is a self-hosted, AI-assisted library for coding challenges and
 technical readings. Instead of letting AI do all the coding while your skills
