@@ -141,6 +141,7 @@
   --danger: #be2330;
   --danger-hover: #a01c28;
   --danger-soft: #fce8e7;
+  --on-danger: #ffffff;
   /* At least 3:1 on --surface, on a hovered row (--surface-3) and on a selected one. */
   --star: #a87300;
   /* A link to an item that is no longer in the library, red as on a wiki:
@@ -154,6 +155,10 @@
 
   --shadow-pop: 0 6px 24px rgb(20 22 30 / 14%), 0 1px 3px rgb(20 22 30 / 10%);
   --shadow-dialog: 0 18px 60px rgb(20 22 30 / 26%);
+  /* The sign-in card, faint enough for both themes. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 4%), 0 8px 24px rgb(0 0 0 / 6%);
+  /* The lit top edge of frosted glass, in both themes. */
+  --glass-edge: rgb(255 255 255 / 10%);
   --overlay: rgb(24 26 32 / 42%);
 
   /* Selected text, on the page and in the editor. The code colours are in
@@ -207,6 +212,7 @@
   --danger: #f6746c;
   --danger-hover: #ff8f88;
   --danger-soft: #3a1a1b;
+  --on-danger: #1a0707;
   --star: #e6b23c;
   --link-dead: #fd7865;
 
