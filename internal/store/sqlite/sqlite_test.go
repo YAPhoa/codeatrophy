@@ -3,13 +3,16 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"codeatrophy/internal/domain"
@@ -58,15 +61,35 @@ func clearStylePresets(t *testing.T, db *DB) {
 	}
 }
 
-// undoLatestMigration takes the database back to the version before the
-// latest migration.
-func undoLatestMigration(t *testing.T, db *DB) { undoMigrationsFrom(t, db, store.SchemaVersion) }
-
 // undoMigrationsFrom takes the database back to the version before from.
 func undoMigrationsFrom(t *testing.T, db *DB, from int) {
 	t.Helper()
 	sqlitetest.UndoMigrationsFrom(t, db.writer, from)
 }
+
+// addMigration adds a migration after the latest one, as a later release
+// would, until the test ends.
+func addMigration(t *testing.T, name, query string) {
+	t.Helper()
+	fsys := fstest.MapFS{"migrations/" + name: {Data: []byte(query)}}
+	entries, err := fs.ReadDir(embeddedMigrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := fs.ReadFile(embeddedMigrations, "migrations/"+e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		fsys["migrations/"+e.Name()] = &fstest.MapFile{Data: b}
+	}
+	embedded := migrationFS
+	migrationFS = fsys
+	t.Cleanup(func() { migrationFS = embedded })
+}
+
+// laterMigration is the name of the migration addMigration adds.
+var laterMigration = fmt.Sprintf("%04d_later.sql", store.SchemaVersion+1)
 
 // The built-in presets are seeded once, and only into an empty table.
 func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
@@ -130,11 +153,11 @@ func TestBuiltinStylePresetsAreRefreshed(t *testing.T) {
 // text of every built-in preset and the refreshing one both texts.
 func checkPresetMigrations(t *testing.T, seeding, refreshing string) {
 	t.Helper()
-	seed, err := migrationFS.ReadFile("migrations/" + seeding)
+	seed, err := embeddedMigrations.ReadFile("migrations/" + seeding)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refresh, err := migrationFS.ReadFile("migrations/" + refreshing)
+	refresh, err := embeddedMigrations.ReadFile("migrations/" + refreshing)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,13 +231,17 @@ func TestBackupBeforeMigrating(t *testing.T) {
 	if len(backups()) != 0 {
 		t.Fatal("a new database was backed up")
 	}
+	addMigration(t, laterMigration, `CREATE TABLE later (x INTEGER);`)
 	for i := range keepBackups + 2 {
-		// Pretend the latest migration has not run yet.
-		undoLatestMigration(t, db)
 		if i == 0 {
-			write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "at v4") })
+			write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "at the old version") })
 		}
 		if err := db.migrate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// Undo the later migration, for the next round to apply it again.
+		if _, err := db.writer.Exec(`DROP TABLE later; DELETE FROM schema_migrations WHERE version = ?`,
+			store.SchemaVersion+1); err != nil {
 			t.Fatal(err)
 		}
 		if i < keepBackups+1 {
@@ -230,22 +257,23 @@ func TestBackupBeforeMigrating(t *testing.T) {
 		t.Fatalf("backups: %v", got)
 	}
 	for _, b := range got {
-		if !strings.Contains(filepath.Base(b), fmt.Sprintf(".backup-v%d-", store.SchemaVersion-1)) {
+		if !strings.Contains(filepath.Base(b), fmt.Sprintf(".backup-v%d-", store.SchemaVersion)) {
 			t.Errorf("backup name %s", b)
 		}
 	}
 	// A backup is a complete database at the old version.
 	st, err := Inspect(context.Background(), got[0])
-	if err != nil || st.Version != store.SchemaVersion-1 {
+	if err != nil || st.Version != store.SchemaVersion {
 		t.Fatalf("backup: %+v %v", st, err)
 	}
-	b, err := Open(context.Background(), got[0])
+	b, err := sql.Open("sqlite", "file:"+got[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	if v := read(t, b, func(tx store.Tx) (string, error) { v, _, err := tx.GetSetting("k"); return v, err }); v != "at v4" {
-		t.Errorf("backup holds %q", v)
+	var v string
+	if err := b.QueryRow(`SELECT value FROM settings WHERE key = 'k'`).Scan(&v); err != nil || v != "at the old version" {
+		t.Errorf("backup holds %q (%v)", v, err)
 	}
 }
 
@@ -289,7 +317,7 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	path := filepath.Join(dir, "codeatrophy.db")
 	var mn *store.MigrationNeededError
 	_, err := OpenWith(ctx, path, Options{NoMigrate: true})
-	if !errors.As(err, &mn) || mn.Version != 0 || mn.Expected != store.SchemaVersion || len(mn.Pending) != store.SchemaVersion {
+	if !errors.As(err, &mn) || mn.Version != 0 || mn.Expected != store.SchemaVersion || len(mn.Pending) != len(MigrationVersions()) {
 		t.Fatalf("a missing database: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -299,12 +327,12 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	undoLatestMigration(t, db)
 	db.Close()
+	addMigration(t, laterMigration, `CREATE TABLE later (x INTEGER);`)
 	before, _ := os.ReadFile(path)
 	_, err = OpenWith(ctx, path, Options{NoMigrate: true})
-	if !errors.As(err, &mn) || mn.Version != store.SchemaVersion-1 || len(mn.Pending) != 1 ||
-		!strings.Contains(err.Error(), fmt.Sprintf("expects version %d", store.SchemaVersion)) {
+	if !errors.As(err, &mn) || mn.Version != store.SchemaVersion || len(mn.Pending) != 1 ||
+		!strings.Contains(err.Error(), fmt.Sprintf("expects version %d", store.SchemaVersion+1)) {
 		t.Fatalf("a database one version behind: %v", err)
 	}
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {

@@ -25,7 +25,11 @@ import (
 )
 
 //go:embed migrations/*.sql
-var migrationFS embed.FS
+var embeddedMigrations embed.FS
+
+// migrationFS holds the migrations in its directory "migrations"; tests
+// replace it to add one after the latest.
+var migrationFS fs.FS = embeddedMigrations
 
 // DB is a SQLite-backed store.Store.
 type DB struct {
@@ -194,7 +198,7 @@ func loadMigrations() ([]migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad migration name %q", name)
 		}
-		b, err := migrationFS.ReadFile("migrations/" + name)
+		b, err := fs.ReadFile(migrationFS, "migrations/"+name)
 		if err != nil {
 			return nil, err
 		}

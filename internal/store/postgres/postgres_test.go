@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"codeatrophy/internal/store"
@@ -109,11 +111,11 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 // The migrations hold the seeded text of every built-in preset, and the
 // refreshing one the current text too.
 func TestBuiltinStylePresetMigrations(t *testing.T) {
-	seed, err := migrationFS.ReadFile("migrations/0005_initial_schema.sql")
+	seed, err := embeddedMigrations.ReadFile("migrations/0005_initial_schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	refresh, err := migrationFS.ReadFile("migrations/0015_refresh_builtin_style_presets.sql")
+	refresh, err := embeddedMigrations.ReadFile("migrations/0015_refresh_builtin_style_presets.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,18 +212,22 @@ func TestOpenWithoutMigrating(t *testing.T) {
 		t.Errorf("the empty database was changed: %+v %v", st, err)
 	}
 	db := open(t, url, nil)
-	if _, err := db.pool.Exec(`DELETE FROM schema_migrations WHERE version = $1`, store.SchemaVersion); err != nil {
-		t.Fatal(err)
-	}
-	_, err = Open(ctx, url, Options{NoMigrate: true})
-	if !errors.As(err, &mn) || mn.Version != store.SchemaVersion-1 || len(mn.Pending) != 1 {
-		t.Fatalf("a database one version behind: %v", err)
-	}
-	if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion-1 {
-		t.Errorf("the version moved to %d", v)
-	}
-	if _, err := db.pool.Exec(`INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, 'x', 0), (999, 'future', 0)`,
-		store.SchemaVersion); err != nil {
+	t.Run("Behind", func(t *testing.T) {
+		addMigration(t, laterMigration, `CREATE TABLE later (x integer);`)
+		_, err := Open(ctx, url, Options{NoMigrate: true})
+		if !errors.As(err, &mn) || mn.Version != store.SchemaVersion || mn.Expected != store.SchemaVersion+1 ||
+			len(mn.Pending) != 1 {
+			t.Fatalf("a database one version behind: %v", err)
+		}
+		var later bool
+		if err := db.pool.QueryRow(`SELECT to_regclass('later') IS NOT NULL`).Scan(&later); err != nil || later {
+			t.Errorf("the later migration ran: %v %v", later, err)
+		}
+		if v, _ := db.SchemaVersion(ctx); v != store.SchemaVersion {
+			t.Errorf("the version moved to %d", v)
+		}
+	})
+	if _, err := db.pool.Exec(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (999, 'future', 0)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(ctx, url, Options{NoMigrate: true}); !errors.Is(err, store.ErrNewerSchema) {
@@ -236,6 +242,30 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	}
 	cur.Close()
 }
+
+// addMigration adds a migration after the latest one, as a later release
+// would, until the test ends.
+func addMigration(t *testing.T, name, query string) {
+	t.Helper()
+	fsys := fstest.MapFS{"migrations/" + name: {Data: []byte(query)}}
+	entries, err := fs.ReadDir(embeddedMigrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := fs.ReadFile(embeddedMigrations, "migrations/"+e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		fsys["migrations/"+e.Name()] = &fstest.MapFile{Data: b}
+	}
+	embedded := migrationFS
+	migrationFS = fsys
+	t.Cleanup(func() { migrationFS = embedded })
+}
+
+// laterMigration is the name of the migration addMigration adds.
+var laterMigration = fmt.Sprintf("%04d_later.sql", store.SchemaVersion+1)
 
 // downMigrations undo a migration, so that tests can run it again on a
 // database that already holds data.
