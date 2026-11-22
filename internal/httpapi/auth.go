@@ -22,9 +22,10 @@ const DeviceCookie = "codeatrophy_device"
 const deviceCookiePath = Prefix + "/auth"
 
 // publicPaths are the API paths reachable without a session when sign-in
-// is on: what the sign-in page needs, and the health check.
+// is on: what the sign-in page needs, and the health checks.
 var publicPaths = map[string]bool{
 	Prefix + "/health":       true,
+	Prefix + "/health/ready": true,
 	Prefix + "/auth/session": true,
 	Prefix + "/auth/login":   true,
 	Prefix + "/auth/setup":   true,
@@ -183,6 +184,12 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 // request itself.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
 	if !s.app.AuthEnabled() {
+		// The health checks act for no account: finding one reads the
+		// database, which /health does not need and /health/ready reports
+		// on rather than fails with.
+		if r.URL.Path == Prefix+"/health" || r.URL.Path == Prefix+"/health/ready" {
+			return r, true
+		}
 		account, err := s.app.DefaultAccount(r.Context())
 		if err != nil {
 			s.writeError(w, r, err)
@@ -222,6 +229,18 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Reques
 
 func (s *Server) getHealth(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return nil
+}
+
+// getReady answers 503 while the database is down; the judge's state is
+// reported but never makes it unavailable.
+func (s *Server) getReady(w http.ResponseWriter, r *http.Request) error {
+	rd := s.app.Ready(r.Context())
+	status := http.StatusOK
+	if rd.Database != "ok" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, rd)
 	return nil
 }
 

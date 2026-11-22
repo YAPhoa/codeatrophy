@@ -115,7 +115,7 @@ func (c *authClient) login() *http.Response {
 func TestAuthRequiredForTheAPI(t *testing.T) {
 	c := newAuthServer(t)
 	// Signed out: the API answers 401, except what the sign-in page and the
-	// health check need. The UI's files are public.
+	// health checks need. The UI's files are public.
 	_, body := c.expect("GET", api+"/items", "", 401)
 	if !strings.Contains(body, `"code":"unauthorized"`) {
 		t.Errorf("401 body: %s", body)
@@ -123,6 +123,7 @@ func TestAuthRequiredForTheAPI(t *testing.T) {
 	c.expect("GET", api+"/meta", "", 401)
 	c.expect("GET", api+"/no-such-endpoint", "", 401)
 	c.expect("GET", api+"/health", "", 200)
+	c.expect("GET", api+"/health/ready", "", 200)
 	_, body = c.expect("GET", api+"/auth/session", "", 200)
 	if !strings.Contains(body, `"enabled":true`) || !strings.Contains(body, `"user":null`) || !strings.Contains(body, `"setupRequired":false`) {
 		t.Errorf("session signed out: %s", body)

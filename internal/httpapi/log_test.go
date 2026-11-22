@@ -98,12 +98,13 @@ func TestRequestLogLevels(t *testing.T) {
 	h, logs = newLoggedServer(t, func(o *httpapi.Options) { o.AccessLog = true })
 	serve(h, httpapi.Prefix+"/meta?token=secret-value", "192.0.2.1:1234", "")
 	serve(h, httpapi.Prefix+"/health", "192.0.2.1:1234", "")
+	serve(h, httpapi.Prefix+"/health/ready", "192.0.2.1:1234", "")
 	serve(h, httpapi.Prefix+"/nowhere", "192.0.2.1:1234", "")
 	recs = logs.records(t, "request")
-	if len(recs) != 3 {
+	if len(recs) != 4 {
 		t.Fatalf("records: %v", recs)
 	}
-	meta, health, missing := recs[0], recs[1], recs[2]
+	meta, health, ready, missing := recs[0], recs[1], recs[2], recs[3]
 	if meta["level"] != "INFO" || meta["method"] != "GET" || meta["path"] != httpapi.Prefix+"/meta" ||
 		meta["status"] != float64(200) || meta["client"] != "192.0.2.1" || meta["bytes"].(float64) <= 0 ||
 		meta["duration"] == nil {
@@ -114,6 +115,9 @@ func TestRequestLogLevels(t *testing.T) {
 	}
 	if health["level"] != "DEBUG" {
 		t.Errorf("the health check is logged at %v", health["level"])
+	}
+	if ready["level"] != "DEBUG" || ready["status"] != float64(200) {
+		t.Errorf("the readiness check: %v", ready)
 	}
 	if missing["level"] != "INFO" || missing["status"] != float64(404) {
 		t.Errorf("not found: %v", missing)

@@ -959,7 +959,10 @@ preferences belong to an account:
 
 The UI's static files stay public; `GET /api/v1/auth/session` tells the UI
 whether to show the sign-in page. `GET /api/v1/health` needs no session, for
-the container health check.
+the container health check, nor does `GET /api/v1/health/ready`, for uptime
+monitors: it reads the database (2-second timeout) and reports the judge
+from the cached probe, and answers `503` only while the database is down
+(`App.Ready`).
 
 ### Request checks
 
@@ -1026,10 +1029,11 @@ The server logs with `log/slog` to standard error, as text or JSON
   duration and client address (the one sign-in limits use, so behind a
   trusted proxy the client's own). It is at debug, or at info with
   `CODEATROPHY_ACCESS_LOG=on`; a server error is at warn either way, and
-  the health check stays at debug. A request that sends `X-Forwarded-For`
-  from a peer that is not a trusted proxy gets one warning per peer (for
-  up to 16 peers), the usual sign of a proxy missing from
-  `CODEATROPHY_TRUSTED_PROXIES`.
+  the health checks stay at debug (a readiness `503` too: the database
+  going down and coming back is logged once each instead). A request that
+  sends `X-Forwarded-For` from a peer that is not a trusted proxy gets one
+  warning per peer (for up to 16 peers), the usual sign of a proxy missing
+  from `CODEATROPHY_TRUSTED_PROXIES`.
 - **Account events,** at info, logged by the application services so
   every adapter shares them: sign-in (with client and browser), a failed
   one, sign-out, a refused one over the failure limit (warn), password

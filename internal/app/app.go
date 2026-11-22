@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,6 +117,10 @@ type App struct {
 	judgeHealthy bool
 	judgeLangs   []judge.Language
 	judgeChecked time.Time
+
+	// dbDown is whether the last readiness check found the database down,
+	// so that only a change is logged (see Ready).
+	dbDown atomic.Bool
 }
 
 // New builds the application. Call Start to run background work.

@@ -87,10 +87,10 @@ are served for any host. With sign-in on, the stricter cross-origin check of
 
 Sign-in is on unless the server runs with `CODEATROPHY_AUTH=off`. While it
 is on, every endpoint under `/api/v1` answers `401 unauthorized` to a
-request without a valid session, except `GET /health` and the endpoints
-under `/auth/` that the sign-in page needs (`GET /auth/session`,
-`POST /auth/login`, `POST /auth/setup`, `POST /auth/logout`). The UI's static
-files are public. The MCP endpoint takes a bearer token instead, which it then
+request without a valid session, except the health checks (`GET /health`,
+`GET /health/ready`) and the endpoints under `/auth/` that the sign-in page
+needs (`GET /auth/session`, `POST /auth/login`, `POST /auth/setup`,
+`POST /auth/logout`). The UI's static files are public. The MCP endpoint takes a bearer token instead, which it then
 requires: an account's own MCP token (see [MCP tokens](#mcp-tokens)) or
 `CODEATROPHY_MCP_TOKEN`.
 
@@ -174,6 +174,34 @@ Language ids are canonical lower-case strings owned by the app: `c`, `cpp`,
 
 `200` with `{ "status": "ok" }` while the server is up. It needs no session
 and reads nothing; the container health check uses it.
+
+### `GET /health/ready`
+
+Whether the server can serve the library, for uptime monitors and
+orchestrators. It needs no session (and with sign-in off acts for no
+account). `200` while the database answers a read within 2 seconds:
+
+```json
+{ "status": "ok", "database": "ok", "judge": "ok" }
+```
+
+`503` while it does not:
+
+```json
+{ "status": "unavailable", "database": "down", "judge": "ok" }
+```
+
+- `judge` is `ok`, `down` or `none` (no engine configured), from the
+  server's periodic probe of the engine; the check sends the engine no
+  request. It never makes the answer `503`: the library works without a
+  judge. Until the first probe after start finishes (at most 10 seconds)
+  it is `down`.
+- The body never carries an error. The server logs the database going
+  down (at warn) and coming back (at info) once each, not at every check,
+  and logs the check's requests at debug only, `503` included.
+- Like the rest of the API it answers only to an allowed `Host` (see
+  [Host and origin checks](#host-and-origin-checks)): a monitor that
+  reaches the server by a LAN address needs it listed.
 
 ### `GET /auth/session`
 

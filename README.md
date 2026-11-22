@@ -117,7 +117,9 @@ back.
 ## Signing in
 
 Sign-in is on by default. The web UI shows a sign-in page, and every API
-request needs a session, except the health check (`/api/v1/health`).
+request needs a session, except the health checks (`/api/v1/health` and
+`/api/v1/health/ready`). Uptime monitors should poll `/api/v1/health/ready`,
+which also checks the database.
 
 - **First account.** While no account exists, the sign-in page offers to
   create one with an email and password. Whoever gets there first creates

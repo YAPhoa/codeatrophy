@@ -105,6 +105,7 @@ func (s *Server) handle(pattern string, h func(w http.ResponseWriter, r *http.Re
 
 func (s *Server) routes() {
 	s.handle("GET /health", s.getHealth)
+	s.handle("GET /health/ready", s.getReady)
 	s.handle("GET /auth/session", s.getAuthSession)
 	s.handle("POST /auth/login", s.login)
 	s.handle("POST /auth/setup", s.setup)
@@ -252,12 +253,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// The path only: a query string may carry something secret.
 		level := slog.LevelDebug
+		healthCheck := r.URL.Path == Prefix+"/health" || r.URL.Path == Prefix+"/health/ready"
 		switch {
+		case healthCheck && rec.status == http.StatusServiceUnavailable:
+			// Not ready: the readiness check logs when that starts and
+			// ends, not at every poll.
 		case rec.status >= 500:
 			level = slog.LevelWarn
-		case s.accessLog && r.URL.Path != Prefix+"/health":
-			// The health check is polled (Docker's healthcheck): it stays
-			// at debug.
+		case s.accessLog && !healthCheck:
+			// Health checks are polled (Docker's healthcheck, uptime
+			// monitors): they stay at debug.
 			level = slog.LevelInfo
 		}
 		s.log.Log(r.Context(), level, "request", "method", r.Method, "path", r.URL.Path, "status", rec.status,
