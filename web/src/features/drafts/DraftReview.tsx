@@ -16,7 +16,7 @@ import { ReviewScreen } from '../capture/ReviewScreen';
 import { resolveStyleChoice, type StyleChoice } from '../capture/StylePicker';
 import { useSaveDraft } from '../capture/useSaveDraft';
 import type { DraftContent } from './draftContent';
-import type { ServerDraft } from './useServerDraft';
+import { changedElsewhere, type ServerDraft } from './useServerDraft';
 
 /** What a revision request is built from; the page adds what its kind of draft asks for. */
 export interface RevisionAsk {
@@ -92,7 +92,9 @@ export function DraftReview(props: DraftReviewProps) {
 
   const create = useCallback(
     async (input: ItemInput) => {
-      const expectedRevision = await sd.settle();
+      const { revision: expectedRevision, reloaded } = await sd.settle();
+      // Reloaded while what was unsaved here was saved: `input` is out of date.
+      if (reloaded) throw changedElsewhere('Check it, then save again.');
       try {
         const item = await api.drafts.save(id, { item: input, ...(expectedRevision !== null ? { expectedRevision } : {}) });
         sd.forget();
@@ -100,7 +102,7 @@ export function DraftReview(props: DraftReviewProps) {
       } catch (e) {
         if (isApiError(e) && e.isRevisionConflict) {
           await sd.reload();
-          throw new ApiError(409, 'conflict', 'The draft changed elsewhere and was reloaded. Check it, then save again.');
+          throw changedElsewhere('Check it, then save again.');
         }
         throw e;
       }

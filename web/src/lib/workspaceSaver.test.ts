@@ -18,6 +18,8 @@ function setup() {
   const stored = new Map<string, string>();
   /** The base each stored edit was written with. */
   const bases = new Map<string, string | null | undefined>();
+  /** The code of the save under way each stored edit was written with. */
+  const sendings = new Map<string, string | undefined>();
   let written = 0;
   const saved: WorkingCopy[] = [];
   const removed: string[] = [];
@@ -33,13 +35,15 @@ function setup() {
         }),
     },
     {
-      write: (language, source, base) => {
+      write: (language, source, base, sending) => {
         stored.set(language, source);
         bases.set(language, base);
+        sendings.set(language, sending);
       },
       clear: (language) => {
         stored.delete(language);
         bases.delete(language);
+        sendings.delete(language);
       },
     },
     { saved: (copy) => void saved.push(copy), removed: (language) => void removed.push(language) },
@@ -53,7 +57,7 @@ function setup() {
     else call.reject(outcome);
     await flush();
   };
-  return { saver, calls, stored, bases, saved, removed, open, answer };
+  return { saver, calls, stored, bases, sendings, saved, removed, open, answer };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -210,6 +214,29 @@ describe('WorkspaceSaver', () => {
     // v2 is kept here for the next opening rather than raced against v1.
     expect(t.open()).toHaveLength(1);
     expect(t.stored.get('python')).toBe('v2');
+    // With v1, so that it still wins there if v1 lands after the page is gone.
+    expect(t.sendings.get('python')).toBe('v1');
+  });
+
+  it('keeps an edit with the code of the save under way as it was made, until that save is over', async () => {
+    const t = setup();
+    t.saver.seed([]);
+    t.saver.edit('python', 'v1');
+    expect(t.sendings.get('python')).toBeUndefined();
+    void t.saver.send('python');
+    t.saver.edit('python', 'v2');
+    expect([t.stored.get('python'), t.bases.get('python'), t.sendings.get('python')]).toEqual(['v2', null, 'v1']);
+    await t.answer(0);
+    // v1 landed: v2 is based on it, and nothing is under way.
+    expect([t.stored.get('python'), t.bases.get('python'), t.sendings.get('python')]).toEqual(['v2', 't1', undefined]);
+    void t.saver.send('python');
+    t.saver.reset('python', '# starter');
+    expect([t.stored.get('python'), t.sendings.get('python')]).toEqual(['# starter', 'v2']);
+    // A save that fails may have landed all the same: what is kept stays as it was.
+    await t.answer(1, down);
+    expect(t.sendings.get('python')).toBe('v2');
+    t.saver.edit('python', 'v3');
+    expect(t.sendings.get('python')).toBeUndefined();
   });
 
   it('forgets the edits of an item that is gone', async () => {

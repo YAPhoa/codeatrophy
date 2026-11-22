@@ -3,10 +3,12 @@
 // a safety net and a few conveniences, in localStorage:
 //
 // - `unsaved:<itemId>:<language>`: an edit the server has not confirmed yet,
-//   as JSON `{ "source": "…", "base": "<updatedAt>" | null }`: its code, and
-//   the `updatedAt` of the server copy it was based on (`null` for none;
-//   left out when not known). Removed once a save of it succeeds. When the
-//   problem opens, `openWorkspace` decides whether it still wins.
+//   as JSON `{ "source": "…", "base": "<updatedAt>" | null, "sending": "…" }`:
+//   its code, the `updatedAt` of the server copy it was based on (`null` for
+//   none; left out when not known), and the code of a save that was under
+//   way as it was made (left out when none was). Removed once a save of it
+//   succeeds. When the problem opens, `openWorkspace` decides whether it
+//   still wins.
 // - `code:<itemId>:<language>`: code kept by older versions, which kept it
 //   only here. Uploaded once where the server has no copy, then removed.
 // - `lang:<itemId>`, `lang:last`: the language last chosen on a problem and
@@ -43,6 +45,8 @@ export interface UnsavedEdit {
   source: string;
   /** The `updatedAt` of the server copy the edit was based on, `null` when there was none; absent when not known. */
   base?: string | null;
+  /** The code of a save under way as the edit was made, which may have landed since; absent when none was. */
+  sending?: string;
 }
 
 /** This browser's edits of a problem that the server has not confirmed, by language. Entries of another shape are ignored. */
@@ -52,15 +56,19 @@ export function readUnsaved(itemId: string): Record<string, UnsavedEdit> {
   for (const key of keysStartingWith(prefix)) {
     const entry = readJson<unknown>(key, null);
     if (typeof entry !== 'object' || entry === null) continue;
-    const { source, base } = entry as Record<string, unknown>;
+    const { source, base, sending } = entry as Record<string, unknown>;
     if (typeof source !== 'string') continue;
-    out[key.slice(prefix.length)] = typeof base === 'string' || base === null ? { source, base } : { source };
+    out[key.slice(prefix.length)] = {
+      source,
+      ...(typeof base === 'string' || base === null ? { base } : {}),
+      ...(typeof sending === 'string' ? { sending } : {}),
+    };
   }
   return out;
 }
 
-export function writeUnsaved(itemId: string, language: string, source: string, base: string | null | undefined): void {
-  writeJson(unsavedPrefix(itemId) + language, base === undefined ? { source } : { source, base });
+export function writeUnsaved(itemId: string, language: string, source: string, base: string | null | undefined, sending?: string): void {
+  writeJson(unsavedPrefix(itemId) + language, { source, ...(base !== undefined ? { base } : {}), ...(sending !== undefined ? { sending } : {}) });
 }
 
 export function clearUnsaved(itemId: string, language: string): void {
@@ -117,11 +125,14 @@ export interface OpenedWorkspace {
  * none). Only the server's own times are compared, never this browser's
  * clock: the edit wins while the server copy is the one it was based on
  * (same `updatedAt`, or none then and none now) or when that is not known.
+ * It also wins when the server copy is the code of the save that was under
+ * way as the edit was made: that save landed, and the edit came after it.
  * A copy written since, from another device or tab, wins over it. Times are
  * whole seconds, so a copy written in the same second as the base looks
  * unchanged, and the edit wins.
  */
 export function unsavedWins(edit: UnsavedEdit, copy: WorkingCopy | undefined): boolean {
+  if (edit.sending !== undefined && copy?.source === edit.sending) return true;
   return edit.base === undefined || edit.base === (copy?.updatedAt ?? null);
 }
 

@@ -14,10 +14,12 @@ export interface WorkspaceTransport {
 /**
  * Where edits wait, in this browser, until the server has confirmed them,
  * each with `base`: the `updatedAt` of the server copy it was based on,
- * `null` for none, `undefined` when not known.
+ * `null` for none, `undefined` when not known; and `sending`: the code of a
+ * save under way as the edit was made, which may land after the page is
+ * gone, `undefined` for none.
  */
 export interface UnsavedStore {
-  write(language: string, source: string, base: string | null | undefined): void;
+  write(language: string, source: string, base: string | null | undefined, sending?: string): void;
   clear(language: string): void;
 }
 
@@ -37,6 +39,8 @@ interface Lane {
   wanted: string | null | undefined;
   /** For a reset: the code the editor went back to, written instead if the delete fails. */
   fallback: string;
+  /** The code of the write under way, if one is. */
+  sending: string | undefined;
   /** The requests under way, at most one. */
   running: Promise<void> | null;
   /** Asked to send again while a request was under way. */
@@ -60,7 +64,10 @@ function isGone(error: unknown): boolean {
  *   version that succeeds meanwhile moves the time it is based on.
  * - Each language has at most one request in flight. What is edited
  *   meanwhile waits, and only its latest version is sent next, so an older
- *   save can never land after a newer one from this tab.
+ *   save can never land after a newer one from this tab. An edit made
+ *   meanwhile is kept with the code under way, so that it still wins at the
+ *   next opening if that save lands after the page is gone (a tab closed
+ *   with it in flight).
  * - Code already on the server as it is is not sent again; a reset's delete
  *   always is, in case what this tab knows is out of date.
  */
@@ -116,7 +123,7 @@ export class WorkspaceSaver {
   edit(language: string, source: string): void {
     const lane = this.lane(language);
     lane.wanted = source;
-    this.store.write(language, source, lane.base);
+    this.store.write(language, source, lane.base, lane.sending);
   }
 
   /**
@@ -129,7 +136,7 @@ export class WorkspaceSaver {
     const lane = this.lane(language);
     lane.wanted = null;
     lane.fallback = fallback;
-    this.store.write(language, fallback, lane.base);
+    this.store.write(language, fallback, lane.base, lane.sending);
   }
 
   /** Whether `language` has something the server has not confirmed. */
@@ -167,7 +174,7 @@ export class WorkspaceSaver {
     let lane = this.lanes.get(language);
     if (!lane) {
       const none = this.seeded ? null : undefined;
-      lane = { confirmed: none, base: none, wanted: undefined, fallback: '', running: null, again: false, error: null };
+      lane = { confirmed: none, base: none, wanted: undefined, fallback: '', sending: undefined, running: null, again: false, error: null };
       this.lanes.set(language, lane);
     }
     return lane;
@@ -201,7 +208,10 @@ export class WorkspaceSaver {
             lane.base = null;
             this.events.removed?.(language);
           } else {
-            const copy = await this.transport.put(language, want, keepalive);
+            lane.sending = want;
+            const copy = await this.transport.put(language, want, keepalive).finally(() => {
+              lane.sending = undefined;
+            });
             lane.confirmed = want;
             lane.base = copy.updatedAt;
             this.events.saved?.(copy);

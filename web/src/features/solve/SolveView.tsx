@@ -41,9 +41,9 @@ import { useSubmissionRunner } from './useSubmissionRunner';
 import { workspaceSaver } from './workingCopies';
 
 /** Edits are kept in this browser this long after typing stops (ms)… */
-const KEEP_LOCALLY_AFTER_MS = 300;
+const KEEP_LOCALLY_AFTER_MS = 600;
 /** …and sent to the server this long after (ms). Leaving the page, the problem or the language sends at once. */
-const SAVE_AFTER_MS = 1000;
+const SAVE_AFTER_MS = 2000;
 
 /** The statement's widest (`.statement`, 820px) plus its pane's padding and a scrollbar: the divider stops there. */
 const STATEMENT_PANE_MAX = 880;

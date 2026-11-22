@@ -179,7 +179,7 @@ test('workspace: a save that fails says so, keeps the edit through a reload, and
   await expect(saveStatus(page)).toHaveText('');
   await expect.poll(() => unsaved(page)).toEqual([]);
   // Past the save delay: nothing more was sent.
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(2200);
   const puts = await page.evaluate(
     (from) => (window as unknown as { __codeatrophyMock: { requests: string[] } }).__codeatrophyMock.requests.slice(from).filter((r) => r.startsWith('PUT')),
     before,

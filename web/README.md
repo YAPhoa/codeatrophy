@@ -327,15 +327,17 @@ A few conventions worth knowing:
 - **The code being written lives on the server.** The solve editor keeps one
   working copy per problem and language (`docs/api.md`, "Working copies"):
   the page waits for them, so the editor appears once with the right code,
-  in the language of the newest copy. An edit is sent a second after typing
+  in the language of the newest copy. An edit is sent two seconds after typing
   stops, and at once on switching language, leaving the problem or the page
   (`features/solve/workingCopies.ts`, `src/lib/workspaceSaver.ts`): one
   request at a time per language, the latest edit next. Until the server
   confirms it, the edit is also kept in `localStorage`
-  (`unsaved:<item>:<language>`: its source and the `updatedAt` of the
-  server copy it was based on). One still there when the problem opens wins
-  and is sent while the server copy is still that one; a copy written since,
-  from another device or tab, wins over it. Only the server's times are
+  (`unsaved:<item>:<language>`: its source, the `updatedAt` of the
+  server copy it was based on, and the code of a save under way as it was
+  made). One still there when the problem opens wins and is sent while the
+  server copy is still that one, or is that save's code (it landed after
+  the tab closed); a copy written since, from another device or tab, wins
+  over it. Only the server's times are
   compared, never the browser's clock. While saving fails
   the toolbar says "Not saved", and the edit is tried again on the next one
   and when the browser is back online. Code that older versions kept only

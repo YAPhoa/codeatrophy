@@ -25,6 +25,10 @@ describe('codeStore', () => {
     clearUnsaved('i1', 'cpp');
     expect(readUnsaved('i1')).toEqual({ go: { source: '', base: null } });
     expect(readUnsaved('i10')).toEqual({ python: { source: 'print(10)', base: null } });
+    // With the code of a save that was under way as it was made.
+    writeUnsaved('i1', 'rust', 'v2', null, 'v1');
+    expect(globalThis.localStorage.getItem('codeatrophy:unsaved:i1:rust')).toBe('{"source":"v2","base":null,"sending":"v1"}');
+    expect(readUnsaved('i1').rust).toEqual({ source: 'v2', base: null, sending: 'v1' });
   });
 
   it('ignores unsaved entries of another shape', () => {
@@ -32,6 +36,8 @@ describe('codeStore', () => {
     globalThis.localStorage.setItem('codeatrophy:unsaved:i1:go', '{"base":null}');
     globalThis.localStorage.setItem('codeatrophy:unsaved:i1:cpp', '{"source":"x","base":7}');
     expect(readUnsaved('i1')).toEqual({ cpp: { source: 'x' } });
+    globalThis.localStorage.setItem('codeatrophy:unsaved:i1:cpp', '{"source":"x","base":null,"sending":7}');
+    expect(readUnsaved('i1')).toEqual({ cpp: { source: 'x', base: null } });
   });
 
   it('reads and clears the code older versions kept, per item', () => {
@@ -139,6 +145,16 @@ describe('openWorkspace', () => {
     expect(openWorkspace([at('python', 'desktop', LATER)], { python: edit('laptop', null) }, {}).drop).toEqual(['python']);
     // Deleted since: a reset elsewhere.
     expect(openWorkspace([], { python: edit('laptop', THEN) }, {})).toEqual({ sources: {}, recent: [], send: {}, drop: ['python'] });
+  });
+
+  it('lets an unsaved edit win over the copy of the save that was under way as it was made', () => {
+    // The tab closed with v1 in flight and v2 waiting; v1 landed after.
+    const opened = openWorkspace([at('python', 'v1', LATER)], { python: { source: 'v2', base: THEN, sending: 'v1' } }, {});
+    expect(opened).toEqual({ sources: { python: 'v2' }, recent: ['python'], send: { python: 'v2' }, drop: [] });
+    // It did not land: the copy is still the one the edit was based on.
+    expect(openWorkspace([at('python', 'v0', THEN)], { python: { source: 'v2', base: THEN, sending: 'v1' } }, {}).send).toEqual({ python: 'v2' });
+    // Written since, from elsewhere: that copy wins.
+    expect(openWorkspace([at('python', 'desktop', LATER)], { python: { source: 'v2', base: THEN, sending: 'v1' } }, {}).drop).toEqual(['python']);
   });
 
   it('lets an unsaved edit win when what it was based on is not known', () => {

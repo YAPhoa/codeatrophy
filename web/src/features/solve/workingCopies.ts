@@ -26,7 +26,7 @@ export function workspaceSaver(qc: QueryClient, itemId: string): WorkspaceSaver 
         remove: (language) => api.workspace.remove(itemId, language),
       },
       {
-        write: (language, source, base) => writeUnsaved(itemId, language, source, base),
+        write: (language, source, base, sending) => writeUnsaved(itemId, language, source, base, sending),
         clear: (language) => clearUnsaved(itemId, language),
       },
       {
