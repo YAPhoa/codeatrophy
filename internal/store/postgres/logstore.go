@@ -61,40 +61,36 @@ func (t *tx) InsertAILogEntry(e store.AILogEntry, b store.AILogBody) error {
 }
 
 func (t *tx) ListAILog(f store.AILogFilter) ([]store.AILogEntry, int, error) {
-	var args []any
-	arg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	where := []string{"user_id = " + arg(f.UserID)}
+	var p params
+	where := []string{"user_id = " + p.add(f.UserID)}
 	if f.ProviderID != "" {
-		where = append(where, "provider_id = "+arg(f.ProviderID))
+		where = append(where, "provider_id = "+p.add(f.ProviderID))
 	}
 	if f.Operation != "" {
-		where = append(where, "operation = "+arg(f.Operation))
+		where = append(where, "operation = "+p.add(f.Operation))
 	}
 	if f.Status != "" {
-		where = append(where, "status = "+arg(f.Status))
+		where = append(where, "status = "+p.add(f.Status))
 	}
 	var total int
-	if err := t.queryRow(`SELECT COUNT(*) FROM ai_log WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+	if err := t.queryRow(`SELECT COUNT(*) FROM ai_log WHERE `+strings.Join(where, " AND "), p.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if c := f.Before; c != nil {
 		at := toUnix(c.CreatedAt)
-		where = append(where, "(created_at < "+arg(at)+" OR (created_at = "+arg(at)+" AND id < "+arg(c.ID)+"))")
+		where = append(where, "(created_at < "+p.add(at)+" OR (created_at = "+p.add(at)+" AND id < "+p.add(c.ID)+"))")
 	}
 	q := `SELECT ` + aiLogColumns + ` FROM ai_log WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at DESC, id DESC`
 	if f.Limit > 0 {
-		q += " LIMIT " + arg(f.Limit)
+		q += " LIMIT " + p.add(f.Limit)
 	} else if f.Offset > 0 {
 		q += " LIMIT ALL"
 	}
 	if f.Offset > 0 {
-		q += " OFFSET " + arg(f.Offset)
+		q += " OFFSET " + p.add(f.Offset)
 	}
 	out := []store.AILogEntry{}
-	err := t.eachRow(q, args, func(rows *sql.Rows) error {
+	err := t.eachRow(q, p.args, func(rows *sql.Rows) error {
 		e, err := scanAILogEntry(rows)
 		out = append(out, e)
 		return err
