@@ -111,6 +111,9 @@ func LoadKey(envValue, dataDir string) ([]byte, string, error) {
 	path := filepath.Join(dataDir, KeyFileName)
 	data, err := os.ReadFile(path)
 	if err == nil {
+		if strings.TrimSpace(string(data)) == "" {
+			return nil, "", fmt.Errorf("%s is empty, probably from a first start that was interrupted: restore it from a backup, or, with none, delete it and start again (a new key is made, and stored AI provider API keys must be entered again)", path)
+		}
 		k, err := ParseKey(string(data))
 		if err != nil {
 			return nil, "", fmt.Errorf("%s: %w", path, err)
@@ -124,19 +127,70 @@ func LoadKey(envValue, dataDir string) ([]byte, string, error) {
 	if _, err := rand.Read(k); err != nil {
 		return nil, "", err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := writeKeyFile(path, hex.EncodeToString(k)+"\n"); err != nil {
 		if errors.Is(err, os.ErrExist) {
+			// Another process made it first: use theirs.
 			return LoadKey("", dataDir)
 		}
 		return nil, "", fmt.Errorf("creating secret key file: %w", err)
 	}
-	if _, err := f.WriteString(hex.EncodeToString(k) + "\n"); err != nil {
-		f.Close()
-		return nil, "", err
-	}
-	if err := f.Close(); err != nil {
-		return nil, "", err
-	}
 	return k, path + " (generated)", nil
+}
+
+// writeKeyFile creates path holding content, mode 0600, so that a crash or
+// power cut leaves either no file or the whole of it: content is written
+// and synced to a temporary file, which is then linked into place (failing
+// with os.ErrExist when path exists) and the directory synced. Where the
+// file system cannot link, path is created exclusively and synced instead.
+func writeKeyFile(path, content string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+KeyFileName+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := writeSynced(tmp, content); err != nil {
+		return err
+	}
+	if err := os.Link(tmp.Name(), path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return err
+		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		if err := writeSynced(f, content); err != nil {
+			os.Remove(path)
+			return err
+		}
+	}
+	return syncDir(dir)
+}
+
+// writeSynced writes content to f, syncs it to disk and closes it.
+func writeSynced(f *os.File, content string) error {
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir makes a new entry in dir durable. Some systems cannot sync a
+// directory; the file itself is synced already, so that is not an error.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil && !errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, os.ErrInvalid) {
+		return err
+	}
+	return nil
 }

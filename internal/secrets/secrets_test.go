@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -106,6 +108,65 @@ func TestLoadKeyRejectsCorruptKeyFile(t *testing.T) {
 		}
 		if got, _ := os.ReadFile(path); string(got) != content {
 			t.Errorf("%q: corrupt key file was rewritten to %q", content, got)
+		}
+	}
+}
+
+func TestLoadKeyEmptyKeyFileSaysHowToRecover(t *testing.T) {
+	for _, content := range []string{"", "\n", "  \n"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, KeyFileName), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := LoadKey("", dir)
+		if err == nil || !strings.Contains(err.Error(), "is empty") || !strings.Contains(err.Error(), "delete it") {
+			t.Errorf("%q: got %v, want an error saying how to recover", content, err)
+		}
+	}
+}
+
+func TestWriteKeyFileLeavesNoTemporaryFileAndKeepsAnExistingOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, KeyFileName)
+	if err := writeKeyFile(path, "first\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeKeyFile(path, "second\n"); !errors.Is(err, os.ErrExist) {
+		t.Errorf("writing over an existing key file: got %v, want os.ErrExist", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "first\n" {
+		t.Errorf("key file = %q, want the first write", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != KeyFileName {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("data directory holds %v, want only %s", names, KeyFileName)
+	}
+}
+
+func TestLoadKeyConcurrentFirstStartsAgree(t *testing.T) {
+	dir := t.TempDir()
+	const n = 8
+	keys := make([][]byte, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			keys[i], _, errs[i] = LoadKey("", dir)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || !bytes.Equal(keys[i], keys[0]) {
+			t.Fatalf("start %d: %x, %v; want every start to use the same key", i, keys[i], errs[i])
 		}
 	}
 }
