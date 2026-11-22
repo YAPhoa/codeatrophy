@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <!-- No color-scheme meta: the root's color-scheme (below and in tokens.css)
+         follows the app's theme. With the meta, a frame an extension injects
+         with a scheme the browser does not know (`auto`) takes the OS setting,
+         and Firefox paints its light page in that dark frame as a white box. -->
     <!-- The page background of each theme; lib/theme.ts keeps it in step with the theme in use. -->
     <meta name="theme-color" content="#f3f6f4" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)" />
