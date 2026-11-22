@@ -72,6 +72,7 @@ browser tab (they are kept in `sessionStorage`); `?mock=default` clears them.
 | `forbidden` | Every request, reads included, answers `403 forbidden`: the server does not recognise the host it is addressed by, so the app cannot even start |
 | `forbidden-writes` | Only state-changing requests answer `403 forbidden`, as when a reverse proxy hides the page's origin |
 | `show-tests` | The "Hide test cases by default" preference starts switched off |
+| `signed-in` | Sign-in is on and `me@example.com` (password `correct horse`) is signed in: Settings › Account (with two other browsers’ sessions) and the MCP tokens work, signing out shows the sign-in page, and the MCP endpoint requires a token |
 | `workspace-fail` | Writes of working copies answer `500`, as when the server cannot be reached; `__codeatrophyMock.db.workspaceWritesFail = false` in the console lets them through again |
 | `empty` | Start with an empty library and no style presets |
 | `no-styles` | Seed library, but no style presets |

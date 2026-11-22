@@ -47,7 +47,7 @@ import { RailTip, RailTipLabel } from '../ui/RailTip';
 import { MenuButton } from '../ui/Popover';
 import { Kbd, Spinner } from '../ui/misc';
 import { DraftsPage, SettingsPage, TagsPage } from './screens';
-import { useAuth } from './AuthGate';
+import { useAuth, useSignOut } from './AuthGate';
 import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
@@ -303,6 +303,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const actions = useCollectionActions();
   const theme = useThemePreference();
   const auth = useAuth();
+  const signOut = useSignOut();
   const footRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readJson<string[]>('sidebar:collapsed', [])));
 
@@ -360,7 +361,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const signOutLabel = auth.session?.user ? `Sign out (${auth.session.user.email})` : null;
   // In the rail it carries the rail's label instead of a title, like the controls around it.
   const signOutButton = (rail: boolean) =>
-    signOutLabel ? <IconButton label={signOutLabel} noTitle={rail} size="sm" icon={<LogOut size={16} />} onClick={() => void auth.signOut()} /> : null;
+    signOutLabel ? <IconButton label={signOutLabel} noTitle={rail} size="sm" icon={<LogOut size={16} />} onClick={() => void signOut()} /> : null;
   const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is off';
   const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
 

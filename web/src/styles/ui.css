@@ -119,6 +119,18 @@
   border-color: var(--danger-hover);
 }
 
+/* Tinted, like .btn-soft, for an action that ends something but is not destructive. */
+.btn-danger-soft {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.btn-danger-soft:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--danger) 16%, var(--danger-soft));
+  border-color: var(--danger);
+}
+
 .btn.is-active {
   background: var(--accent-soft);
   border-color: var(--accent);

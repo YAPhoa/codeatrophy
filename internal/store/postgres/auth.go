@@ -112,31 +112,58 @@ func (t *tx) ClaimUnowned(userID string) error {
 	return err
 }
 
+const sessionColumns = `id, user_id, created_at, expires_at, user_agent, last_used_at`
+
+func scanSession(row interface{ Scan(...any) error }) (store.Session, error) {
+	var (
+		s                      store.Session
+		created, expires, used int64
+	)
+	if err := row.Scan(&s.ID, &s.UserID, &created, &expires, &s.UserAgent, &used); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return s, store.ErrNotFound
+		}
+		return s, err
+	}
+	s.CreatedAt, s.ExpiresAt, s.LastUsedAt = fromUnix(created), fromUnix(expires), fromUnix(used)
+	return s, nil
+}
+
 func (t *tx) InsertSession(s *store.Session) error {
-	_, err := t.exec(`INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)`,
-		s.ID, s.UserID, toUnix(s.CreatedAt), toUnix(s.ExpiresAt))
+	_, err := t.exec(`INSERT INTO sessions (`+sessionColumns+`) VALUES ($1, $2, $3, $4, $5, $6)`,
+		s.ID, s.UserID, toUnix(s.CreatedAt), toUnix(s.ExpiresAt), s.UserAgent, toUnix(s.LastUsedAt))
 	return err
 }
 
 func (t *tx) GetSession(id string) (store.Session, error) {
-	var (
-		s                store.Session
-		created, expires int64
-	)
-	err := t.queryRow(`SELECT id, user_id, created_at, expires_at FROM sessions WHERE id = $1`, id).
-		Scan(&s.ID, &s.UserID, &created, &expires)
-	if errors.Is(err, sql.ErrNoRows) {
-		return s, store.ErrNotFound
-	}
-	if err != nil {
-		return s, err
-	}
-	s.CreatedAt, s.ExpiresAt = fromUnix(created), fromUnix(expires)
-	return s, nil
+	return scanSession(t.queryRow(`SELECT `+sessionColumns+` FROM sessions WHERE id = $1`, id))
 }
 
-func (t *tx) ExtendSession(id string, expiresAt time.Time) error {
-	_, err := t.exec(`UPDATE sessions SET expires_at = $1 WHERE id = $2`, toUnix(expiresAt), id)
+func (t *tx) ListUserSessions(userID string) ([]store.Session, error) {
+	rows, err := t.query(`SELECT `+sessionColumns+` FROM sessions WHERE user_id = $1
+		ORDER BY last_used_at DESC, created_at DESC, id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []store.Session{}
+	for rows.Next() {
+		s, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (t *tx) ExtendSession(id string, usedAt, expiresAt time.Time) error {
+	_, err := t.exec(`UPDATE sessions SET last_used_at = $1, expires_at = $2 WHERE id = $3`, toUnix(usedAt), toUnix(expiresAt), id)
+	return err
+}
+
+func (t *tx) SetSessionUserAgent(id, userAgent string) error {
+	_, err := t.exec(`UPDATE sessions SET user_agent = $1 WHERE id = $2 AND user_agent = ''`, userAgent, id)
 	return err
 }
 

@@ -101,6 +101,78 @@ afterEach(() => {
   setTransport(() => Promise.reject(new Error('no transport')));
 });
 
+describe('sign-in', () => {
+  it('is off by default', async () => {
+    expect(await api.auth.session()).toEqual({ enabled: false, setupRequired: false, user: null });
+    expect((await failure(api.auth.login({ email: 'me@example.com', password: 'correct horse' }))).status).toBe(400);
+    expect((await failure(api.auth.changePassword({ newPassword: 'battery staple' }))).status).toBe(401);
+    expect((await failure(api.auth.mcpTokens.list())).status).toBe(401);
+    expect((await failure(api.auth.sessions.list())).status).toBe(401);
+  });
+
+  it('under signed-in, lists and ends sessions', async () => {
+    start(optionsFromFlags(['signed-in', 'instant']));
+    const { items } = await api.auth.sessions.list();
+    expect(items.map((s) => [s.browser, s.current])).toEqual([
+      ['Firefox on Linux', true],
+      ['Chrome on macOS', false],
+      ['Safari on iPhone', false],
+    ]);
+    expect((await failure(api.auth.sessions.end('nope'))).status).toBe(404);
+    await api.auth.sessions.end(items[2]!.id);
+    expect((await api.auth.sessions.list()).items.map((s) => s.browser)).toEqual(['Firefox on Linux', 'Chrome on macOS']);
+    await api.auth.sessions.endOthers();
+    expect((await api.auth.sessions.list()).items.map((s) => s.id)).toEqual([items[0]!.id]);
+    // Ending this browser's session signs it out; signing in starts a new one.
+    await api.auth.sessions.end(items[0]!.id);
+    expect((await api.auth.session()).user).toBeNull();
+    expect((await failure(api.auth.sessions.list())).status).toBe(401);
+    await api.auth.login({ email: 'me@example.com', password: 'correct horse' });
+    const after = (await api.auth.sessions.list()).items;
+    expect(after).toHaveLength(1);
+    expect(after[0]!.current).toBe(true);
+    expect(after[0]!.id).not.toBe(items[0]!.id);
+  });
+
+  it('under signed-in, a password change ends the other sessions', async () => {
+    start(optionsFromFlags(['signed-in', 'instant']));
+    await api.auth.changePassword({ newPassword: 'battery staple' });
+    expect((await api.auth.sessions.list()).items.map((s) => s.current)).toEqual([true]);
+  });
+
+  it('under signed-in, changes the password without the current one', async () => {
+    start(optionsFromFlags(['signed-in', 'instant']));
+    expect((await api.auth.session()).user?.email).toBe('me@example.com');
+    expect((await api.meta()).mcp.authRequired).toBe(true);
+    const short = await failure(api.auth.changePassword({ newPassword: 'short' }));
+    expect(short.status).toBe(422);
+    expect(short.fields).toHaveProperty('newPassword');
+    expect((await failure(api.auth.changePassword({ newPassword: 'x'.repeat(73) }))).fields).toHaveProperty('newPassword');
+    await api.auth.changePassword({ newPassword: 'battery staple' });
+
+    await api.auth.logout();
+    expect((await api.auth.session()).user).toBeNull();
+    expect((await failure(api.auth.mcpTokens.list())).status).toBe(401);
+    expect((await failure(api.auth.login({ email: 'me@example.com', password: 'correct horse' }))).status).toBe(401);
+    expect((await api.auth.login({ email: 'Me@Example.com', password: 'battery staple' })).user?.email).toBe('me@example.com');
+  });
+
+  it('under signed-in, makes, lists and revokes MCP tokens', async () => {
+    start(optionsFromFlags(['signed-in', 'instant']));
+    expect((await failure(api.auth.mcpTokens.create('  '))).fields).toHaveProperty('name');
+    const a = await api.auth.mcpTokens.create('Laptop');
+    const b = await api.auth.mcpTokens.create('Desktop');
+    expect(a.token).toMatch(/^cat_[A-Za-z0-9_-]{43}$/);
+    expect(a.hint).toBe(a.token.slice(-4));
+    const { items } = await api.auth.mcpTokens.list();
+    expect(items.map((t) => t.name)).toEqual(['Desktop', 'Laptop']);
+    expect(items[0]).toEqual({ id: b.id, name: 'Desktop', hint: b.hint, createdAt: b.createdAt, lastUsedAt: null });
+    await api.auth.mcpTokens.revoke(a.id);
+    expect((await api.auth.mcpTokens.list()).items.map((t) => t.id)).toEqual([b.id]);
+    expect((await failure(api.auth.mcpTokens.revoke(a.id))).status).toBe(404);
+  });
+});
+
 describe('meta and stats', () => {
   it('reports capabilities for the default scenario', async () => {
     const meta = await api.meta();

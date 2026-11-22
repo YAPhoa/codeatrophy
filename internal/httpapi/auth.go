@@ -176,6 +176,12 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Reques
 	if sess.Extended {
 		setSessionCookie(w, r, sessionToken(r), sess.ExpiresAt)
 	}
+	if sess.UserAgentUnknown {
+		// Once per such session: the next check finds it recorded.
+		if err := s.app.NoteUserAgent(r.Context(), sessionToken(r), r.UserAgent()); err != nil {
+			s.log.Warn("could not record a session's browser", "err", err)
+		}
+	}
 	return r.WithContext(app.WithAccount(r.Context(), sess.User.ID)), true
 }
 
@@ -208,7 +214,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	out, err := s.app.Login(r.Context(), in, s.loginClient(r))
+	out, err := s.app.Login(r.Context(), in, s.loginClient(r), r.UserAgent())
 	if err != nil {
 		return err
 	}
@@ -221,7 +227,7 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	out, err := s.app.Setup(r.Context(), in)
+	out, err := s.app.Setup(r.Context(), in, r.UserAgent())
 	if err != nil {
 		return err
 	}
@@ -244,6 +250,37 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := s.app.ChangePassword(r.Context(), sessionToken(r), in); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) error {
+	ss, err := s.app.ListSessions(r.Context(), sessionToken(r))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": ss})
+	return nil
+}
+
+// endSession ends one of the account's sessions; ending the request's own
+// is a sign-out, which clears the cookie as logout does.
+func (s *Server) endSession(w http.ResponseWriter, r *http.Request) error {
+	current, err := s.app.EndSession(r.Context(), sessionToken(r), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	if current {
+		clearSessionCookie(w, r)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) endOtherSessions(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.EndOtherSessions(r.Context(), sessionToken(r)); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -1210,7 +1210,7 @@ func TestRequireToken(t *testing.T) {
 		if tc.code == 401 && rec.Code != 401 || tc.code != 401 && rec.Code == 401 {
 			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
 		}
-		if tc.name == "no token" && !strings.Contains(rec.Body.String(), "Settings > Account") {
+		if tc.name == "no token" && !strings.Contains(rec.Body.String(), "Settings > MCP server") {
 			t.Errorf("no token: %s", rec.Body.String())
 		}
 	}

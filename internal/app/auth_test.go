@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/secrets"
@@ -73,7 +74,7 @@ func TestAuthOff(t *testing.T) {
 	if err != nil || st.Enabled || st.SetupRequired || st.User != nil {
 		t.Fatalf("status %+v, %v", st, err)
 	}
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, app.LoginClient{Addr: "c"}); code(err) != app.CodeBadRequest {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, app.LoginClient{Addr: "c"}, ""); code(err) != app.CodeBadRequest {
 		t.Errorf("login with sign-in off: %v", err)
 	}
 }
@@ -86,18 +87,18 @@ func TestAuthSetupAndLogin(t *testing.T) {
 	}
 
 	in := app.SetupInput{Email: " Me@Example.COM ", Password: "short"}
-	if _, err := e.app.Setup(e.ctx, in); code(err) != app.CodeValidation || !strings.Contains(err.Error(), "at least 8") {
+	if _, err := e.app.Setup(e.ctx, in, ""); code(err) != app.CodeValidation || !strings.Contains(err.Error(), "at least 8") {
 		t.Fatalf("short password: %v", err)
 	}
 	in.Password = "correct horse"
-	si, err := e.app.Setup(e.ctx, in)
+	si, err := e.app.Setup(e.ctx, in, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if si.User.Email != "me@example.com" || si.Token == "" || !si.ExpiresAt.Equal(e.clock.Add(48*time.Hour)) {
 		t.Errorf("setup: %+v", si)
 	}
-	if _, err := e.app.Setup(e.ctx, in); code(err) != app.CodeConflict {
+	if _, err := e.app.Setup(e.ctx, in, ""); code(err) != app.CodeConflict {
 		t.Errorf("second setup: %v", err)
 	}
 
@@ -121,13 +122,13 @@ func TestAuthSetupAndLogin(t *testing.T) {
 
 	// Sign in: the email is case-insensitive; wrong passwords and unknown
 	// accounts get the same answer.
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, app.LoginClient{Addr: "c2"}); code(err) != app.CodeUnauthorized {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, app.LoginClient{Addr: "c2"}, ""); code(err) != app.CodeUnauthorized {
 		t.Errorf("wrong password: %v", err)
 	}
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "nobody@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"}); code(err) != app.CodeUnauthorized {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "nobody@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"}, ""); code(err) != app.CodeUnauthorized {
 		t.Errorf("unknown account: %v", err)
 	}
-	si2, err := e.app.Login(e.ctx, app.LoginInput{Email: "ME@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"})
+	si2, err := e.app.Login(e.ctx, app.LoginInput{Email: "ME@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestAuthSessionExpiry(t *testing.T) {
 	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
 		t.Fatal(err)
 	}
-	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"})
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +189,12 @@ func TestAuthRateLimit(t *testing.T) {
 	}
 	bad := app.LoginInput{Email: "me@example.com", Password: "wrong password"}
 	for range 10 {
-		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "attacker"}); code(err) != app.CodeUnauthorized {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "attacker"}, ""); code(err) != app.CodeUnauthorized {
 			t.Fatalf("failure: %v", err)
 		}
 	}
 	good := app.LoginInput{Email: "me@example.com", Password: "correct horse"}
-	_, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"})
+	_, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"}, "")
 	if code(err) != app.CodeRateLimited {
 		t.Fatalf("11th attempt: %v", err)
 	}
@@ -201,11 +202,11 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Errorf("retry after %v", ae.RetryAfter)
 	}
 	// Another client is not held back, and the limit lifts with time.
-	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "owner"}); err != nil {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "owner"}, ""); err != nil {
 		t.Errorf("other client: %v", err)
 	}
 	*e.clock = e.clock.Add(15*time.Minute + time.Second)
-	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"}); err != nil {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"}, ""); err != nil {
 		t.Errorf("after the window: %v", err)
 	}
 }
@@ -222,27 +223,27 @@ func TestAuthRateLimitKnownBrowser(t *testing.T) {
 	}
 	good := app.LoginInput{Email: "me@example.com", Password: "correct horse"}
 	bad := app.LoginInput{Email: "me@example.com", Password: "wrong password"}
-	first, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"})
+	first, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Device == "" {
 		t.Fatal("no device issued")
 	}
-	other, err := e.app.Login(e.ctx, app.LoginInput{Email: "other@example.com", Password: "correct horse"}, app.LoginClient{Addr: "proxy"})
+	other, err := e.app.Login(e.ctx, app.LoginInput{Email: "other@example.com", Password: "correct horse"}, app.LoginClient{Addr: "proxy"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 10 {
-		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "proxy"}); code(err) != app.CodeUnauthorized {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "proxy"}, ""); code(err) != app.CodeUnauthorized {
 			t.Fatalf("failure: %v", err)
 		}
 	}
-	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"}); code(err) != app.CodeRateLimited {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"}, ""); code(err) != app.CodeRateLimited {
 		t.Fatalf("new browser at the limited address: %v", err)
 	}
 	// The browser that signed in before gets in.
-	again, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: first.Device})
+	again, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: first.Device}, "")
 	if err != nil {
 		t.Fatalf("known browser: %v", err)
 	}
@@ -252,47 +253,21 @@ func TestAuthRateLimitKnownBrowser(t *testing.T) {
 	// A device of another account, or a made-up one, is no way around the
 	// limit.
 	for name, device := range map[string]string{"other account": other.Device, "made up": "bm90LWEtZGV2aWNl", "sealed elsewhere": "djE6AAAA"} {
-		if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: device}); code(err) != app.CodeRateLimited {
+		if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: device}, ""); code(err) != app.CodeRateLimited {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	// A known browser has its own limit.
 	for range 10 {
-		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "elsewhere", Device: first.Device}); code(err) != app.CodeUnauthorized {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "elsewhere", Device: first.Device}, ""); code(err) != app.CodeUnauthorized {
 			t.Fatalf("known browser failure: %v", err)
 		}
 	}
-	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere", Device: first.Device}); code(err) != app.CodeRateLimited {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere", Device: first.Device}, ""); code(err) != app.CodeRateLimited {
 		t.Errorf("known browser over its limit: %v", err)
 	}
-	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere"}); err != nil {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere"}, ""); err != nil {
 		t.Errorf("the address is not limited by the browser's failures: %v", err)
-	}
-}
-
-// Wrong current passwords in a password change are limited per account,
-// not per address, so they neither count toward nor wait on sign-in
-// failures from the same proxy.
-func TestAuthChangePasswordLimit(t *testing.T) {
-	e := newAuthEnv(t, true)
-	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
-		t.Fatal(err)
-	}
-	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "proxy"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 10 {
-		_, _ = e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, app.LoginClient{Addr: "proxy"})
-	}
-	wrong := app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"}
-	for range 10 {
-		if err := e.app.ChangePassword(e.ctx, si.Token, wrong); code(err) != app.CodeValidation {
-			t.Fatalf("wrong current password: %v", err)
-		}
-	}
-	if err := e.app.ChangePassword(e.ctx, si.Token, wrong); code(err) != app.CodeRateLimited {
-		t.Errorf("11th wrong current password: %v", err)
 	}
 }
 
@@ -302,15 +277,21 @@ func TestAuthChangePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := func(pw string) (app.SignIn, error) {
-		return e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: pw}, app.LoginClient{Addr: "c"})
+		return e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: pw}, app.LoginClient{Addr: "c"}, "")
 	}
 	a, _ := login("correct horse")
 	b, _ := login("correct horse")
-	err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"})
-	if code(err) != app.CodeValidation {
-		t.Fatalf("wrong current password: %v", err)
+	if err := e.app.ChangePassword(e.ctx, "", app.PasswordChange{NewPassword: "battery staple"}); code(err) != app.CodeUnauthorized {
+		t.Fatalf("without a session: %v", err)
 	}
-	if err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "correct horse", NewPassword: "battery staple"}); err != nil {
+	for _, pw := range []string{"short", strings.Repeat("x", app.MaxPasswordBytes+1)} {
+		err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{NewPassword: pw})
+		if ae := app.AsError(err); ae == nil || ae.Code != app.CodeValidation || ae.Fields["newPassword"] == nil {
+			t.Fatalf("new password of %d bytes: %v", len(pw), err)
+		}
+	}
+	// The session alone authorizes the change: no current password.
+	if err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{NewPassword: "battery staple"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.app.Authenticate(e.ctx, a.Token); err != nil {
@@ -341,7 +322,7 @@ func TestAuthAccounts(t *testing.T) {
 	if _, err := e.app.CreateUser(e.ctx, "a@example.com", "correct horse"); code(err) != app.CodeConflict {
 		t.Errorf("duplicate: %v", err)
 	}
-	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"})
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +357,7 @@ func TestMCPTokens(t *testing.T) {
 		}
 	}
 	login := func(email string) string {
-		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, app.LoginClient{Addr: "c"})
+		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, app.LoginClient{Addr: "c"}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -465,5 +446,178 @@ func TestDefaultAccountIsTheFirstMadeInTheSameSecond(t *testing.T) {
 	}
 	if id, err := e.app.DefaultAccount(e.ctx); err != nil || id != first {
 		t.Errorf("default account %q, want the first made, %q (err %v)", id, first, err)
+	}
+}
+
+func TestAuthSessions(t *testing.T) {
+	e := newAuthEnv(t, true)
+	for _, email := range []string{"me@example.com", "you@example.com"} {
+		if _, err := e.app.CreateUser(e.ctx, email, "correct horse"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firefox := "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+	chrome := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+	login := func(email, ua string) string {
+		t.Helper()
+		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, app.LoginClient{Addr: "c"}, ua)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return si.Token
+	}
+	start := *e.clock
+	laptop := login("me@example.com", firefox)
+	*e.clock = e.clock.Add(time.Minute)
+	desk := login("me@example.com", chrome)
+	*e.clock = e.clock.Add(time.Minute)
+	old := login("me@example.com", "")
+	you := login("you@example.com", firefox)
+
+	// Used again after the refresh period: the laptop's last use moves.
+	*e.clock = e.clock.Add(2 * time.Hour)
+	if _, err := e.app.Authenticate(e.ctx, laptop); err != nil {
+		t.Fatal(err)
+	}
+	list, err := e.app.ListSessions(e.ctx, desk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	for _, s := range list {
+		got += fmt.Sprintf("%s current=%v created=%s used=%s; ", s.Browser, s.Current,
+			s.CreatedAt.Sub(start), s.LastUsedAt.Sub(start))
+	}
+	// Listing with desk used desk too, after the refresh period.
+	if want := "Chrome on macOS current=true created=1m0s used=2h2m0s; " +
+		"Firefox on Linux current=false created=0s used=2h2m0s; " +
+		"Unknown browser current=false created=2m0s used=2m0s; "; got != want {
+		t.Errorf("sessions:\n got %s\nwant %s", got, want)
+	}
+	for _, s := range list {
+		if len(s.ID) != 16 || strings.Contains(laptop+desk+old, s.ID) {
+			t.Errorf("session id %q", s.ID)
+		}
+	}
+	idOf := func(token, browser string) string {
+		t.Helper()
+		l, err := e.app.ListSessions(e.ctx, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range l {
+			if s.Browser == browser {
+				return s.ID
+			}
+		}
+		t.Fatalf("no %s session", browser)
+		return ""
+	}
+	if l, _ := e.app.ListSessions(e.ctx, you); len(l) != 1 || !l[0].Current {
+		t.Errorf("another account's sessions: %+v", l)
+	}
+
+	// Another account's session and unknown ids are not found.
+	if _, err := e.app.EndSession(e.ctx, you, idOf(desk, "Unknown browser")); code(err) != app.CodeNotFound {
+		t.Errorf("ended by another account: %v", err)
+	}
+	for _, id := range []string{"", "nope", list[0].ID[:15]} {
+		if _, err := e.app.EndSession(e.ctx, desk, id); code(err) != app.CodeNotFound {
+			t.Errorf("unknown id %q: %v", id, err)
+		}
+	}
+	// Ending another session of the account.
+	if cur, err := e.app.EndSession(e.ctx, desk, idOf(desk, "Unknown browser")); err != nil || cur {
+		t.Fatalf("end old: %v, %v", cur, err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, old); code(err) != app.CodeUnauthorized {
+		t.Errorf("ended session: %v", err)
+	}
+	// Ending the others keeps this one and other accounts'.
+	if err := e.app.EndOtherSessions(e.ctx, desk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, laptop); code(err) != app.CodeUnauthorized {
+		t.Errorf("other session after end-others: %v", err)
+	}
+	for _, tk := range []string{desk, you} {
+		if _, err := e.app.Authenticate(e.ctx, tk); err != nil {
+			t.Errorf("after end-others: %v", err)
+		}
+	}
+	// Ending its own session signs it out.
+	if cur, err := e.app.EndSession(e.ctx, desk, idOf(desk, "Chrome on macOS")); err != nil || !cur {
+		t.Fatalf("end own: %v, %v", cur, err)
+	}
+	if _, err := e.app.ListSessions(e.ctx, desk); code(err) != app.CodeUnauthorized {
+		t.Errorf("after ending its own session: %v", err)
+	}
+
+	// Expired sessions are not listed, nor can they be ended.
+	login("you@example.com", chrome)
+	*e.clock = e.clock.Add(47 * time.Hour)
+	if _, err := e.app.Authenticate(e.ctx, you); err != nil {
+		t.Fatal(err)
+	}
+	*e.clock = e.clock.Add(2 * time.Hour)
+	if l, _ := e.app.ListSessions(e.ctx, you); len(l) != 1 || l[0].Browser != "Firefox on Linux" {
+		t.Errorf("with an expired session: %+v", l)
+	}
+}
+
+func TestAuthSessionUserAgentIsBounded(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	ua := "Firefox/1 \x00\n" + strings.Repeat("é", 300)
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"}, ua); err != nil {
+		t.Fatal(err)
+	}
+	var ss []store.Session
+	_ = e.db.Read(e.ctx, func(tx store.Tx) error {
+		u, err := tx.GetUserByEmail("me@example.com")
+		if err == nil {
+			ss, err = tx.ListUserSessions(u.ID)
+		}
+		return err
+	})
+	if len(ss) != 1 {
+		t.Fatalf("sessions: %+v", ss)
+	}
+	got := ss[0].UserAgent
+	if len(got) > 256 || len(got) < 250 || !utf8.ValidString(got) || !strings.HasPrefix(got, "Firefox/1 é") {
+		t.Errorf("stored user agent (%d bytes): %q", len(got), got)
+	}
+}
+
+func TestAuthSessionUserAgentFilledIn(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	// A session that began before the User-Agent was recorded.
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.app.Authenticate(e.ctx, si.Token)
+	if err != nil || !s.UserAgentUnknown {
+		t.Fatalf("blank session: %+v, %v", s, err)
+	}
+	fedora := "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0"
+	if err := e.app.NoteUserAgent(e.ctx, si.Token, fedora); err != nil {
+		t.Fatal(err)
+	}
+	// Recorded once: a later browser does not replace it.
+	if err := e.app.NoteUserAgent(e.ctx, si.Token, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/142.0.0.0 Safari/537.36"); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := e.app.Authenticate(e.ctx, si.Token); err != nil || s.UserAgentUnknown {
+		t.Fatalf("after noting: %+v, %v", s, err)
+	}
+	list, err := e.app.ListSessions(e.ctx, si.Token)
+	if err != nil || len(list) != 1 || list[0].Browser != "Firefox on Fedora" {
+		t.Errorf("sessions: %+v, %v", list, err)
 	}
 }

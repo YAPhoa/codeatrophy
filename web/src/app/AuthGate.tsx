@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { Field } from '../ui/Field';
 import { Logo } from '../ui/Logo';
 import { Callout } from '../ui/misc';
+import { useConfirm } from '../ui/Dialog';
 import { useDocumentTitle } from './useDocumentTitle';
 
 const SESSION_KEY = ['auth', 'session'] as const;
@@ -25,6 +26,25 @@ const AuthContext = createContext<AuthValue>({
 /** Who is signed in, and a way to sign out. */
 export function useAuth(): AuthValue {
   return useContext(AuthContext);
+}
+
+/**
+ * Signing out as the buttons do it: asks first, then signs out. Resolves to
+ * whether it signed out.
+ */
+export function useSignOut(): () => Promise<boolean> {
+  const { signOut } = useAuth();
+  const confirm = useConfirm();
+  return useCallback(async () => {
+    const ok = await confirm({
+      title: 'Sign out of this browser?',
+      body: 'You’ll stay signed in on your other browsers and devices.',
+      confirmLabel: 'Sign out',
+      danger: true,
+    });
+    if (ok) await signOut();
+    return ok;
+  }, [confirm, signOut]);
 }
 
 /** Drops every cached answer but the session, so nothing of one sign-in shows in the next. */

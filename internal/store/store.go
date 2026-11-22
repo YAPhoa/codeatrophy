@@ -247,11 +247,15 @@ type User struct {
 
 // Session is a signed-in browser session. ID is the SHA-256 hash (hex) of
 // the token in the browser's cookie; the token itself is never stored.
+// UserAgent is the browser's User-Agent when the session started ("" when
+// unknown). LastUsedAt moves with the expiry (see ExtendSession).
 type Session struct {
-	ID        string
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	ID         string
+	UserID     string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	UserAgent  string
+	LastUsedAt time.Time
 }
 
 // MCPToken is a bearer token an account made for MCP clients. ID is the
@@ -473,13 +477,19 @@ type Tx interface {
 	DeleteUser(id string) (bool, error)
 	ClaimUnowned(userID string) error
 
-	// Sessions. GetSession returns a session whatever its expiry; callers
-	// compare ExpiresAt. DeleteUserSessions removes every session of a user
-	// but except (which may be ""). DeleteExpiredSessions removes those
-	// that expired before the time.
+	// Sessions. GetSession and ListUserSessions return sessions whatever
+	// their expiry; callers compare ExpiresAt. ListUserSessions orders a
+	// user's sessions by last use, newest first. ExtendSession records a use
+	// at usedAt and sets the expiry. DeleteUserSessions removes every
+	// session of a user but except (which may be ""). DeleteExpiredSessions
+	// removes those that expired before the time.
 	InsertSession(s *Session) error
 	GetSession(id string) (Session, error)
-	ExtendSession(id string, expiresAt time.Time) error
+	ListUserSessions(userID string) ([]Session, error)
+	ExtendSession(id string, usedAt, expiresAt time.Time) error
+	// SetSessionUserAgent records the User-Agent of a session that has none
+	// (one from before they were recorded); it leaves a recorded one alone.
+	SetSessionUserAgent(id, userAgent string) error
 	DeleteSession(id string) error
 	DeleteUserSessions(userID, except string) error
 	DeleteExpiredSessions(before time.Time) error

@@ -149,7 +149,7 @@ request needs a session, except the health check (`/api/v1/health`).
   startup.
 - **MCP.** Assistants cannot sign in with a password, so while sign-in is on
   `/mcp` needs a bearer token: make one per machine or assistant under
-  Settings → Account → MCP tokens (shown once, with the command that
+  Settings → MCP server → Tokens (shown once, with the command that
   connects Claude Code), and revoke it there. `CODEATROPHY_MCP_TOKEN` adds a
   server-wide token for unattended setups. With sign-in off that is the only
   token, and optional.
@@ -174,7 +174,7 @@ claude mcp add --transport http codeatrophy http://localhost:8080/mcp
 
 Clients that only speak stdio can bridge with
 `npx mcp-remote http://localhost:8080/mcp`. While sign-in is on, make a
-token under Settings → Account → MCP tokens; the UI shows the command with
+token under Settings → MCP server → Tokens; the UI shows the command with
 the token filled in, such as
 `claude mcp add --transport http codeatrophy http://localhost:8080/mcp --header "Authorization: Bearer cat_..."`.
 

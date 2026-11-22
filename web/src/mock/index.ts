@@ -8,6 +8,7 @@
 import { setTransport } from '../api/client';
 import type { MockOptions, StoredWorkingCopy } from './db';
 import { MockDb } from './db';
+import { authRoutes } from './handlers/auth';
 import { aiRoutes } from './handlers/ai';
 import { bundleRoutes } from './handlers/bundles';
 import { DraftStore, draftRoutes, type StoredDraft } from './handlers/drafts';
@@ -119,6 +120,7 @@ export function createMockServer(options: MockOptions = {}): MockServer {
   jobs.onFinish = (job) => drafts.finished(job);
 
   const routes = [
+    ...authRoutes(db),
     ...itemRoutes(db),
     ...testCaseRoutes(db),
     ...workspaceRoutes(db),
@@ -248,6 +250,7 @@ const FLAGS = [
   'no-styles',
   'show-tests',
   'workspace-fail',
+  'signed-in',
   'fast',
   'slow',
   'instant',
@@ -272,6 +275,7 @@ export function optionsFromFlags(flags: readonly string[]): MockOptions {
     forbidden: has('forbidden') ? 'host' : has('forbidden-writes') ? 'origin' : false,
     hideTestCases: !has('show-tests'),
     workspaceWritesFail: has('workspace-fail'),
+    auth: has('signed-in') ? 'on' : 'off',
   };
 }
 

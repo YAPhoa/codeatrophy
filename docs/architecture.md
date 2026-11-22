@@ -889,7 +889,18 @@ of the routes; the `codeatrophy user` command uses the same services.
   `SameSite=Strict` cookie; the store keeps only its SHA-256 hash
   (`sessions`), so a database leak yields no usable cookie. A session lasts
   `CODEATROPHY_SESSION_TTL` from its last use; the expiry is pushed back at
-  most once an hour per session, to keep reads from writing.
+  most once an hour per session, to keep reads from writing, and that same
+  write records the session's last use. A session also keeps the
+  `User-Agent` it signed in with (truncated to 256 bytes; a session from
+  before they were recorded takes the one of its next request, once), so
+  the account page can list the account's live sessions as "Firefox on
+  Linux" ("on Fedora" or "on Ubuntu" when the browser names its
+  distribution)
+  (`internal/useragent`) with when each signed in and was last used, and
+  end one or all of the others. The API names a session by an id derived
+  from the stored hash (the first 8 bytes of SHA-256 over it, hex), which
+  needs no column of its own and can neither be used as a cookie nor to
+  look a session up in the store.
 - **Failed sign-ins.** Counted in memory, 10 per 15 minutes, per client
   address, or per known browser. Behind a reverse proxy every client has
   the proxy's address, so one shared count would let anyone keep everyone
@@ -899,8 +910,7 @@ of the routes; the `codeatrophy user` command uses the same services.
   and a random id sealed with the secret key (`secrets.Box`, bound to its
   use), whose attempts on that account count on their own. Neither needs a
   table: the counts reset on restart and the device is checked by
-  decrypting it. Wrong current passwords in a password change count per
-  account.
+  decrypting it.
 - **CSRF.** With a cookie the browser authenticates on its own, so
   state-changing requests also pass Go's `http.CrossOriginProtection`
   (`Sec-Fetch-Site`, else `Origin` against `Host`). Unlike the host-based

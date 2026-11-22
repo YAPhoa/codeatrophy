@@ -51,7 +51,7 @@ reports the current state (the item revision conflict described under
 | 409 | `conflict` | Request conflicts with current state (e.g. a collection cycle) |
 | 413 | `too_large` | Body or upload exceeds a limit |
 | 422 | `validation_failed` | Well-formed but invalid |
-| 429 | `rate_limited` | Too many failed sign-in attempts from this client or browser, or wrong current passwords for this account; the `Retry-After` header gives the seconds to wait |
+| 429 | `rate_limited` | Too many failed sign-in attempts from this client or browser; the `Retry-After` header gives the seconds to wait |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
 | 503 | `ai_unavailable` | AI features are switched off, or no default AI provider is chosen, or it is not ready |
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
@@ -228,16 +228,43 @@ Ends the cookie's session, if any, and clears the cookie. `204`.
 
 ### `POST /auth/password`
 
-Changes the signed-in account's password:
-`{ "currentPassword": "...", "newPassword": "..." }`. `204`, and every other
-session of the account ends. A wrong current password is
-`422 validation_failed` on `currentPassword`; 10 of these in 15 minutes per
-account make further changes `429 rate_limited`, apart from sign-in failures;
-a new password outside 8 characters to 72 bytes is `422` on `newPassword`.
+Changes the signed-in account's password: `{ "newPassword": "..." }`. The
+session is enough; the current password is not asked for (a
+`currentPassword` sent by an older client is ignored). `204`, and every
+other session of the account ends. A new password outside 8 characters to
+72 bytes is `422 validation_failed` on `newPassword`.
 
 Other accounts are managed on the server with `codeatrophy user`
 (`list`, `add`, `password`, `delete`); accounts share one library and keep
 their own [personal data](#personal-data).
+
+### Sessions
+
+The signed-in account's browser sessions. A session keeps the browser's
+`User-Agent` from when it signed in (at most 256 bytes) and when it was last
+used, recorded with the hourly push of its expiry (see [Sign-in](#sign-in)),
+so `lastUsedAt` is accurate to about an hour; the current session's is the
+time of the request.
+
+```json
+{ "id": "9c41e0d27b5a8f13", "browser": "Firefox on Linux", "createdAt": "2026-11-22T04:00:00Z", "lastUsedAt": "2026-11-22T09:12:00Z", "current": true }
+```
+
+`id` identifies the session in this API; it is neither the cookie's token
+nor its hash. `browser` is a short description derived from the
+`User-Agent` ("Chrome on macOS", "Safari on iPhone"; "Unknown browser" when
+it names no known browser). `current` marks the session of the request. All
+three endpoints need a session and act on the signed-in account's sessions
+only. With sign-in off no browser signs in, so they answer
+`401 unauthorized`, as the MCP token endpoints do.
+
+- `GET /auth/sessions` — `{ "items": [...] }`, the live (unexpired)
+  sessions, last used first, so the current one first.
+- `DELETE /auth/sessions/{id}` — ends the session. `204`; `404` when the
+  account has no live session with that id. Ending the current session signs
+  out as `POST /auth/logout` does, clearing the cookie.
+- `POST /auth/sessions/end-others` — ends every session of the account
+  except the current one. `204`.
 
 ### MCP tokens
 

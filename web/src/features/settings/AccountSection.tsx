@@ -1,22 +1,21 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, LogOut, Plus } from 'lucide-react';
+import { LogOut, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { api, isApiError } from '../../api/client';
-import { useAuth } from '../../app/AuthGate';
-import { Button } from '../../ui/Button';
-import { Field } from '../../ui/Field';
-import { Callout, ErrorCallout } from '../../ui/misc';
-import { useConfirm } from '../../ui/Dialog';
+import type { BrowserSession } from '../../api/types';
+import { useAuth, useSignOut } from '../../app/AuthGate';
 import { absoluteTime, relativeTime } from '../../lib/format';
-import { mcpConnection, mcpUrl } from '../../lib/mcp';
-import { useMeta } from '../../api/queries';
-import type { McpTokenCreated } from '../../api/types';
-import { CopyRow } from './ServiceSections';
+import { Button } from '../../ui/Button';
+import { useConfirm } from '../../ui/Dialog';
+import { Field } from '../../ui/Field';
+import { Badge, Callout, ErrorCallout } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 
-/** Settings › Account: who is signed in, changing the password, signing out. */
+const SESSIONS_KEY = ['auth', 'sessions'] as const;
+
+/** Settings › Account: who is signed in, changing the password, the account's sessions. */
 export function AccountSection() {
-  const { session, signOut } = useAuth();
+  const { session } = useAuth();
   return (
     <section className="settings-section" aria-labelledby="account-title">
       <h1 id="account-title" className="page-title">
@@ -28,40 +27,160 @@ export function AccountSection() {
         </Callout>
       ) : (
         <>
-          <p className="settings-lead">
-            Signed in as <strong>{session.user.email}</strong>. A sign-in lasts until you have not used the app here for a while, or until you sign out.
-          </p>
-          <p className="settings-lead">
-            Other accounts on this server share the library. Your progress (status, favorites, notes), collections, code, submissions, drafts, AI jobs and log, and preferences are yours alone.
-          </p>
-          <div className="account-row">
-            <Button icon={<LogOut size={16} />} onClick={() => void signOut()}>
-              Sign out
-            </Button>
+          <div className="card card-pad prefs-group account-who" role="group" aria-label="Signed in">
+            <p>
+              Signed in as <strong>{session.user.email}</strong>.
+            </p>
+            <p className="field-hint">
+              Everyone on this server shares the library. Your progress, notes, collections, code, submissions, drafts, AI history and preferences are yours alone.
+            </p>
           </div>
-          <h2 className="prefs-group-title">MCP tokens</h2>
-          <McpTokens />
-          <h2 className="prefs-group-title">Change password</h2>
           <PasswordForm />
+          <Sessions />
+          <SignOut />
         </>
       )}
     </section>
   );
 }
 
+/** Signs this browser out, after asking (`useSignOut`). */
+function SignOut() {
+  const signOut = useSignOut();
+  return (
+    <div className="card card-pad prefs-group" role="group" aria-labelledby="account-signout-title">
+      <div className="prefs-row account-signout">
+        <div className="prefs-row-text">
+          <div id="account-signout-title" className="prefs-row-label">
+            Sign out
+          </div>
+          <div className="field-hint">Sign out from this browser.</div>
+        </div>
+        <Button variant="danger-soft" icon={<LogOut size={16} />} onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SessionIcon({ browser }: { browser: string }) {
+  const Icon = / on (iPhone|iPod|Android)$/.test(browser) ? Smartphone : / on iPad$/.test(browser) ? Tablet : Monitor;
+  return <Icon size={16} aria-hidden="true" className="mcp-token-icon" />;
+}
+
+function When({ iso }: { iso: string }) {
+  return (
+    <time dateTime={iso} title={absoluteTime(iso)}>
+      {relativeTime(iso)}
+    </time>
+  );
+}
+
+/** The browsers signed in to the account; the others can be revoked from here. */
+function Sessions() {
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const sessions = useQuery({ queryKey: SESSIONS_KEY, queryFn: ({ signal }) => api.auth.sessions.list(signal) });
+  const refresh = () => void qc.invalidateQueries({ queryKey: SESSIONS_KEY });
+
+  const end = useMutation({
+    mutationFn: (s: BrowserSession) => api.auth.sessions.end(s.id),
+    onSuccess: (_, s) => {
+      toast.success(`Signed out ${s.browser}`);
+      refresh();
+    },
+    onError: (err) => {
+      toast.error(err);
+      refresh();
+    },
+  });
+  const endOthers = useMutation({
+    mutationFn: () => api.auth.sessions.endOthers(),
+    onSuccess: () => {
+      toast.success('Other browsers signed out');
+      refresh();
+    },
+    onError: (err) => toast.error(err),
+  });
+
+  const items = sessions.data?.items ?? [];
+  return (
+    <div className="card card-pad prefs-group" role="group" aria-labelledby="account-sessions-title">
+      <div className="account-sessions-head">
+        <h2 id="account-sessions-title" className="prefs-group-title">
+          Sessions
+        </h2>
+        {items.length > 1 && (
+          <Button
+            size="sm"
+            busy={endOthers.isPending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Sign out other browsers?',
+                body: 'They will need the password to sign in again.',
+                confirmLabel: 'Sign out',
+                danger: true,
+              });
+              if (ok) endOthers.mutate();
+            }}
+          >
+            Sign out other browsers
+          </Button>
+        )}
+      </div>
+      {sessions.isError ? (
+        <ErrorCallout error={sessions.error} onRetry={() => void sessions.refetch()} />
+      ) : items.length > 0 ? (
+        <ul className="mcp-token-list" aria-label="Sessions">
+          {items.map((s) => (
+            <li key={s.id} className="mcp-token">
+              <SessionIcon browser={s.browser} />
+              <div className="mcp-token-main">
+                <div className="mcp-token-name account-session-name">
+                  {s.browser}
+                  {s.current && <Badge tone="accent">This browser</Badge>}
+                </div>
+                <div className="mcp-token-meta">
+                  signed in <When iso={s.createdAt} /> · active <When iso={s.lastUsedAt} />
+                </div>
+              </div>
+              {/* This browser is signed out with the Sign out button below, never revoked from the list. */}
+              {!s.current && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  busy={end.isPending && end.variables?.id === s.id}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Revoke ${s.browser}?`,
+                      body: 'That browser will need the password to sign in again.',
+                      confirmLabel: 'Revoke',
+                      danger: true,
+                    });
+                    if (ok) end.mutate(s);
+                  }}
+                >
+                  Revoke
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function PasswordForm() {
+  const qc = useQueryClient();
   const toast = useToast();
   const email = useAuth().session?.user?.email ?? '';
-  const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
-  const [errors, setErrors] = useState<{
-    current?: string;
-    next?: string;
-    confirm?: string;
-    form?: string;
-  }>({});
+  const [errors, setErrors] = useState<{ next?: string; confirm?: string; form?: string }>({});
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -72,26 +191,17 @@ function PasswordForm() {
     }
     setBusy(true);
     try {
-      await api.auth.changePassword({
-        currentPassword: current,
-        newPassword: next,
-      });
-      setCurrent('');
+      await api.auth.changePassword({ newPassword: next });
       setNext('');
       setConfirm('');
+      void qc.invalidateQueries({ queryKey: SESSIONS_KEY });
       toast.success('Password changed. Other browsers signed in to this account were signed out.');
     } catch (err) {
-      if (isApiError(err) && err.code === 'validation_failed') {
-        const f = err.fields;
-        const sentence = (v: unknown) => (v === undefined ? undefined : String(v).charAt(0).toUpperCase() + String(v).slice(1) + '.');
-        setErrors({
-          current: sentence(f.currentPassword),
-          next: sentence(f.newPassword),
-        });
+      if (isApiError(err) && err.code === 'validation_failed' && err.fields.newPassword !== undefined) {
+        const problem = String(err.fields.newPassword);
+        setErrors({ next: problem.charAt(0).toUpperCase() + problem.slice(1) + '.' });
       } else {
-        setErrors({
-          form: isApiError(err) ? err.message : 'The password could not be changed.',
-        });
+        setErrors({ form: isApiError(err) ? err.message : 'The password could not be changed.' });
       }
     } finally {
       setBusy(false);
@@ -99,7 +209,10 @@ function PasswordForm() {
   };
 
   return (
-    <form className="card card-pad account-card" onSubmit={submit} noValidate>
+    <form className="card card-pad prefs-group" onSubmit={submit} noValidate aria-labelledby="account-password-title">
+      <h2 id="account-password-title" className="prefs-group-title">
+        Change password
+      </h2>
       {/* Lets a password manager tie the new password to the account. */}
       <input type="email" autoComplete="username" value={email} readOnly hidden />
       {errors.form && (
@@ -107,162 +220,19 @@ function PasswordForm() {
           {errors.form}
         </Callout>
       )}
-      <Field label="Current password" error={errors.current}>
-        {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />}
-      </Field>
-      <Field label="New password" error={errors.next} hint="At least 8 characters.">
-        {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />}
-      </Field>
-      <Field label="Repeat the new password" error={errors.confirm}>
-        {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />}
-      </Field>
+      <div className="account-fields">
+        <Field label="New password" error={errors.next} hint="At least 8 characters.">
+          {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />}
+        </Field>
+        <Field label="Repeat the new password" error={errors.confirm}>
+          {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />}
+        </Field>
+      </div>
       <div>
-        <Button type="submit" variant="primary" busy={busy} disabled={!current || !next || !confirm}>
+        <Button type="submit" variant="primary" busy={busy} disabled={!next || !confirm}>
           Change password
         </Button>
       </div>
     </form>
-  );
-}
-
-const TOKENS_KEY = ['auth', 'mcp-tokens'] as const;
-
-/**
- * The account's tokens for MCP clients: make one per client, see when each
- * was last used, revoke one. A new token is shown once, with the command
- * that connects Claude Code using it.
- */
-function McpTokens() {
-  const qc = useQueryClient();
-  const confirm = useConfirm();
-  const toast = useToast();
-  const meta = useMeta().data;
-  const tokens = useQuery({ queryKey: TOKENS_KEY, queryFn: ({ signal }) => api.auth.mcpTokens.list(signal) });
-  const [name, setName] = useState('');
-  const [nameError, setNameError] = useState<string | null>(null);
-  const [made, setMade] = useState<McpTokenCreated | null>(null);
-
-  const create = useMutation({
-    mutationFn: (n: string) => api.auth.mcpTokens.create(n),
-    onSuccess: (t) => {
-      setMade(t);
-      setName('');
-      void qc.invalidateQueries({ queryKey: TOKENS_KEY });
-    },
-    onError: (err) => {
-      if (isApiError(err) && err.code === 'validation_failed' && err.fields.name !== undefined) {
-        setNameError(`Name ${String(err.fields.name)}.`);
-      } else {
-        toast.error(err);
-      }
-    },
-  });
-  const revoke = useMutation({
-    mutationFn: (id: string) => api.auth.mcpTokens.revoke(id),
-    onSuccess: (_, id) => {
-      if (made?.id === id) setMade(null);
-      toast.success('Token revoked');
-      void qc.invalidateQueries({ queryKey: TOKENS_KEY });
-    },
-    onError: (err) => toast.error(err),
-  });
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    setNameError(null);
-    if (!name.trim()) {
-      setNameError('Give the token a name, such as the machine or assistant it is for.');
-      return;
-    }
-    create.mutate(name);
-  };
-
-  const url = meta ? mcpUrl(meta.mcp, window.location.origin) : `${window.location.origin}/mcp`;
-  const command = made ? mcpConnection(url, true).claudeCommand.replace('<your-token>', made.token) : '';
-
-  return (
-    <div className="card card-pad account-card account-tokens">
-      <p className="field-hint account-tokens-lead">
-        An AI assistant connected over MCP signs in with a token instead of a password. Make one for each machine or assistant, so that you can revoke it alone. A token can do anything you can.
-      </p>
-      {made && (
-        <Callout tone="ok" title={`Token “${made.name}” created`} role="status">
-          <p>Copy it now: it is not shown again.</p>
-          <div className="stack account-token-copy">
-            <CopyRow label="Token" value={made.token} />
-            <CopyRow label="Connect Claude Code" value={command} />
-          </div>
-        </Callout>
-      )}
-      <form className="account-token-form" onSubmit={submit} noValidate>
-        <Field label="New token name" error={nameError} hideLabel>
-          {(p) => (
-            <input
-              {...p}
-              className="input"
-              placeholder="Name, e.g. Laptop – Claude Code"
-              maxLength={60}
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setNameError(null);
-              }}
-            />
-          )}
-        </Field>
-        <Button type="submit" icon={<Plus size={16} />} busy={create.isPending}>
-          Create token
-        </Button>
-      </form>
-      {tokens.isError ? (
-        <ErrorCallout error={tokens.error} onRetry={() => void tokens.refetch()} />
-      ) : tokens.data && tokens.data.items.length > 0 ? (
-        <ul className="account-token-list">
-          {tokens.data.items.map((t) => (
-            <li key={t.id} className="account-token">
-              <KeyRound size={16} aria-hidden="true" className="account-token-icon" />
-              <div className="account-token-main">
-                <div className="account-token-name">{t.name}</div>
-                <div className="account-token-meta">
-                  <code translate="no">cat_…{t.hint}</code> · created{' '}
-                  <time dateTime={t.createdAt} title={absoluteTime(t.createdAt)}>
-                    {relativeTime(t.createdAt)}
-                  </time>{' '}
-                  ·{' '}
-                  {t.lastUsedAt ? (
-                    <>
-                      last used{' '}
-                      <time dateTime={t.lastUsedAt} title={absoluteTime(t.lastUsedAt)}>
-                        {relativeTime(t.lastUsedAt)}
-                      </time>
-                    </>
-                  ) : (
-                    'never used'
-                  )}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                busy={revoke.isPending && revoke.variables === t.id}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: `Revoke the token “${t.name}”?`,
-                    body: 'Assistants that use it lose access at once. This cannot be undone; make a new token to connect them again.',
-                    confirmLabel: 'Revoke token',
-                    danger: true,
-                  });
-                  if (ok) revoke.mutate(t.id);
-                }}
-              >
-                Revoke
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : tokens.data ? (
-        <p className="field-hint">No tokens yet.</p>
-      ) : null}
-    </div>
   );
 }

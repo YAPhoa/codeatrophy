@@ -1320,9 +1320,22 @@ export interface LoginRequest {
 
 export type SetupRequest = LoginRequest;
 
+/** `POST /auth/password`: the signed-in session is enough, so only the new password is sent. */
 export interface PasswordChangeRequest {
-  currentPassword: string;
   newPassword: string;
+}
+
+/** `GET /auth/sessions`: a browser signed in to the account. */
+export interface BrowserSession {
+  /** Names the session in the API; it is not the cookie. */
+  id: string;
+  /** A short description from the User-Agent, such as "Firefox on Linux" or "Unknown browser". */
+  browser: string;
+  createdAt: string;
+  /** Accurate to about an hour; the current session's is the time of the request. */
+  lastUsedAt: string;
+  /** The session of this browser. */
+  current: boolean;
 }
 
 /** A token an account made for its MCP clients; the token itself is shown only when it is made. */

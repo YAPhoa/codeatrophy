@@ -71,6 +71,34 @@ export interface MockOptions {
    * `MockDb.workspaceWritesFail` switches it while the mock runs.
    */
   workspaceWritesFail?: boolean;
+  /**
+   * `off`: sign-in is turned off, as with `CODEATROPHY_AUTH=off` (the
+   * default); `on`: sign-in is on and `MOCK_ACCOUNT` is signed in, which also
+   * makes the MCP endpoint require a token.
+   */
+  auth?: 'off' | 'on';
+}
+
+/** The account signed in under `auth: 'on'`, and its password at start. */
+export const MOCK_ACCOUNT = { email: 'me@example.com', password: 'correct horse' } as const;
+
+/** A browser session of the account as the mock keeps it; `current` is this browser's. */
+export interface StoredSession {
+  id: string;
+  browser: string;
+  createdAt: string;
+  lastUsedAt: string;
+  current: boolean;
+}
+
+/** An account MCP token as the mock keeps it. */
+export interface StoredMcpToken {
+  id: string;
+  name: string;
+  hint: string;
+  token: string;
+  createdAt: string;
+  lastUsedAt: string | null;
 }
 
 /**
@@ -338,6 +366,22 @@ export class MockDb {
   links: StoredLink[] = [];
   /** One per problem and language; in no particular order. */
   workingCopies: StoredWorkingCopy[] = [];
+  /**
+   * Sign-in under `auth: 'on'`: whether the browser is signed in, the
+   * password, the account's MCP tokens (newest first) and its sessions: this
+   * browser's while signed in, and two other browsers'.
+   */
+  account = {
+    signedIn: true,
+    password: MOCK_ACCOUNT.password as string,
+    createdAt: '2026-11-01T09:00:00Z',
+    mcpTokens: [] as StoredMcpToken[],
+    sessions: [
+      { id: 'a1f0c2d3e4b5a697', browser: 'Firefox on Linux', createdAt: this.ago(3 * 86400), lastUsedAt: this.now(), current: true },
+      { id: 'b2e1d3c4f5a6b708', browser: 'Chrome on macOS', createdAt: this.ago(9 * 86400), lastUsedAt: this.ago(5 * 3600), current: false },
+      { id: 'c3d2e4f5a6b7c819', browser: 'Safari on iPhone', createdAt: this.ago(20 * 86400), lastUsedAt: this.ago(2 * 86400), current: false },
+    ] as StoredSession[],
+  };
   /** Whether working copy writes fail (see `MockOptions.workspaceWritesFail`). */
   workspaceWritesFail: boolean;
   /** Called whenever the working copies change, so a page can keep them across a reload. */
@@ -386,6 +430,7 @@ export class MockDb {
       forbidden: options.forbidden ?? false,
       hideTestCases: options.hideTestCases ?? true,
       workspaceWritesFail: options.workspaceWritesFail ?? false,
+      auth: options.auth ?? 'off',
     };
     this.workspaceWritesFail = this.options.workspaceWritesFail;
     this.preferences = { ...structuredClone(DEFAULT_PREFERENCES), hideTestCases: this.options.hideTestCases };
@@ -980,7 +1025,7 @@ export class MockDb {
         enabled: this.options.mcp !== 'off',
         path: '/mcp',
         url: this.options.publicUrl ? PUBLIC_MCP_URL : null,
-        authRequired: this.options.mcp === 'token',
+        authRequired: this.options.mcp === 'token' || this.options.auth === 'on',
       },
       limits: structuredClone(LIMITS),
     };

@@ -1,7 +1,8 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { Link, type LinkProps } from 'react-router';
 
-export type ButtonVariant = 'default' | 'primary' | 'soft' | 'ghost' | 'danger';
+/** `danger-soft` is a tinted danger button, for an action to make obvious without a solid red block. */
+export type ButtonVariant = 'default' | 'primary' | 'soft' | 'ghost' | 'danger' | 'danger-soft';
 export type ButtonSize = 'sm' | 'md';
 
 interface CommonProps {

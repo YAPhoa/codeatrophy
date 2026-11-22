@@ -59,7 +59,8 @@ func testUsersAndSessions(t *testing.T, db store.Store) {
 	}
 
 	sess := func(id, user string, expires time.Time) store.Session {
-		return store.Session{ID: id, UserID: user, CreatedAt: now, ExpiresAt: expires}
+		return store.Session{ID: id, UserID: user, CreatedAt: now, ExpiresAt: expires,
+			UserAgent: "Mozilla/5.0 (" + id + ") Firefox/140.0 é", LastUsedAt: now}
 	}
 	Write(t, db, func(tx store.Tx) error {
 		for _, s := range []store.Session{sess("a", "u1", later), sess("b", "u1", later), sess("c", "u1", now), sess("d", "u2", later)} {
@@ -75,9 +76,46 @@ func testUsersAndSessions(t *testing.T, db store.Store) {
 	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("a") }); s != sess("a", "u1", later) {
 		t.Errorf("session: %+v", s)
 	}
-	Write(t, db, func(tx store.Tx) error { return tx.ExtendSession("a", later.Add(time.Hour)) })
-	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("a") }); !s.ExpiresAt.Equal(later.Add(time.Hour)) {
+	Write(t, db, func(tx store.Tx) error { return tx.ExtendSession("b", later, later.Add(time.Hour)) })
+	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("b") }); !s.ExpiresAt.Equal(later.Add(time.Hour)) ||
+		!s.LastUsedAt.Equal(later) || !s.CreatedAt.Equal(now) || s.UserAgent != sess("b", "u1", later).UserAgent {
 		t.Errorf("extended: %+v", s)
+	}
+	// A missing User-Agent is filled in once; a recorded one stays.
+	Write(t, db, func(tx store.Tx) error {
+		if err := tx.InsertSession(&store.Session{ID: "blank", UserID: "u1", CreatedAt: now, ExpiresAt: later, LastUsedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.SetSessionUserAgent("blank", "first"); err != nil {
+			return err
+		}
+		if err := tx.SetSessionUserAgent("blank", "second"); err != nil {
+			return err
+		}
+		return tx.SetSessionUserAgent("b", "replaced")
+	})
+	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("blank") }); s.UserAgent != "first" {
+		t.Errorf("filled in user agent = %q, want first", s.UserAgent)
+	}
+	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("b") }); s.UserAgent != sess("b", "u1", later).UserAgent {
+		t.Errorf("recorded user agent replaced: %q", s.UserAgent)
+	}
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteSession("blank") })
+	// A user's sessions, last used first, whatever their expiry.
+	listed := func(user string) (ids string) {
+		for _, s := range Read(t, db, func(tx store.Tx) ([]store.Session, error) { return tx.ListUserSessions(user) }) {
+			ids += s.ID
+		}
+		return ids
+	}
+	if got := listed("u1"); got != "bac" {
+		t.Errorf("sessions of u1: %q", got)
+	}
+	if got := listed("u2"); got != "d" {
+		t.Errorf("sessions of u2: %q", got)
+	}
+	if got := listed("nobody"); got != "" {
+		t.Errorf("sessions of nobody: %q", got)
 	}
 	exists := func(id string) bool {
 		err := db.Read(ctx, func(tx store.Tx) error { _, err := tx.GetSession(id); return err })
@@ -216,4 +254,48 @@ func testMCPTokensMigration(t *testing.T, h MigrationHarness) {
 	h.rejects(t, db, map[string]string{
 		"a token of no user": `INSERT INTO mcp_tokens (id, user_id, name, hint, created_at) VALUES ('x', 'nobody', 'n', 'h', 0)`,
 	})
+}
+
+// Migration 22 adds a session's User-Agent and last use: sessions that
+// exist keep every column, with no User-Agent and last used when they
+// started, and new ones store both.
+func testSessionDetailsMigration(t *testing.T, h MigrationHarness) {
+	skip := map[string][]string{"sessions": {"user_agent", "last_used_at"}}
+	want, db := h.rerun(t, 22, func(db MigrationDB) {
+		Populate(t, db)
+		Write(t, db, func(tx store.Tx) error {
+			u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
+			if err := tx.InsertUser(&u); err != nil {
+				return err
+			}
+			for i, id := range []string{"s1", "s2"} {
+				at := now.Add(time.Duration(i) * time.Hour)
+				s := store.Session{ID: id, UserID: "u", CreatedAt: at, ExpiresAt: at.Add(24 * time.Hour),
+					UserAgent: "Firefox", LastUsedAt: at.Add(5 * time.Hour)}
+				if err := tx.InsertSession(&s); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}, func(db MigrationDB) {
+		if err := h.Exec(db, `SELECT user_agent FROM sessions`); err == nil {
+			t.Error("version 21 has sessions.user_agent")
+		}
+	}, func(t *testing.T, b store.Bulk) map[string][]string { return DumpWithout(t, b, skip) })
+	SameDump(t, "after migration 22", want, DumpWithout(t, db, skip))
+	for i, id := range []string{"s1", "s2"} {
+		s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession(id) })
+		if at := now.Add(time.Duration(i) * time.Hour); s.UserAgent != "" || !s.LastUsedAt.Equal(at) || !s.CreatedAt.Equal(at) {
+			t.Errorf("%s after migrating: %+v", id, s)
+		}
+	}
+	Write(t, db, func(tx store.Tx) error {
+		return tx.InsertSession(&store.Session{ID: "s3", UserID: "u", CreatedAt: now, ExpiresAt: now,
+			UserAgent: "Chrome", LastUsedAt: now.Add(time.Minute)})
+	})
+	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("s3") }); s.UserAgent != "Chrome" ||
+		!s.LastUsedAt.Equal(now.Add(time.Minute)) {
+		t.Errorf("new session: %+v", s)
+	}
 }

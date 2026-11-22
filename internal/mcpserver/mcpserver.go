@@ -209,7 +209,7 @@ func Handler(opts Options) *Endpoint {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
 				msg := "unauthorized"
 				if !ok && opts.RequireToken {
-					msg = "the MCP endpoint needs a bearer token: create one in the web UI under Settings > Account " +
+					msg = "the MCP endpoint needs a bearer token: create one in the web UI under Settings > MCP server " +
 						"and send it as \"Authorization: Bearer <token>\""
 				}
 				http.Error(w, msg, http.StatusUnauthorized)

@@ -111,6 +111,11 @@ type Session struct {
 	// Extended is true when this check pushed the expiry back, so the
 	// client's cookie should be renewed.
 	Extended bool
+	// UserAgentUnknown is true for a session with no User-Agent recorded
+	// (one that began before they were); NoteUserAgent fills it in.
+	UserAgentUnknown bool
+	// id is the session's id in the store.
+	id string
 }
 
 // LoginInput is a sign-in attempt.
@@ -125,10 +130,10 @@ type SetupInput struct {
 	Password string `json:"password"`
 }
 
-// PasswordChange changes the signed-in account's password.
+// PasswordChange changes the signed-in account's password. The session
+// alone authorizes it: the current password is not asked for.
 type PasswordChange struct {
-	CurrentPassword string `json:"currentPassword"`
-	NewPassword     string `json:"newPassword"`
+	NewPassword string `json:"newPassword"`
 }
 
 // authState is the mutable part of sign-in kept in memory.
@@ -190,7 +195,8 @@ func (a *App) checkSetupAtStart(ctx context.Context) error {
 
 // Setup creates the first account and signs it in. It fails once any
 // account exists.
-func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
+// userAgent is the browser's User-Agent header, kept with the session.
+func (a *App) Setup(ctx context.Context, in SetupInput, userAgent string) (SignIn, error) {
 	if !a.authOpts.Enabled {
 		return SignIn{}, errBadRequest("sign-in is turned off on this server")
 	}
@@ -216,7 +222,7 @@ func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
 		if err := insertUser(tx, &u); err != nil {
 			return err
 		}
-		out, err = a.newSession(tx, u, now)
+		out, err = a.newSession(tx, u, now, userAgent)
 		return err
 	})
 	if err != nil {
@@ -237,8 +243,9 @@ var dummyHash = sync.OnceValue(func() []byte {
 // Login checks an email and password and starts a session. client says
 // where the attempt comes from, for limiting failed attempts: they are
 // counted per address, or per browser for one that has signed in to the
-// account before (see LoginClient).
-func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient) (SignIn, error) {
+// account before (see LoginClient). userAgent is the browser's User-Agent
+// header, kept with the session.
+func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient, userAgent string) (SignIn, error) {
 	if !a.authOpts.Enabled {
 		return SignIn{}, errBadRequest("sign-in is turned off on this server")
 	}
@@ -281,7 +288,7 @@ func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient) (Sig
 		if err := tx.DeleteExpiredSessions(now); err != nil {
 			return err
 		}
-		out, err = a.newSession(tx, u, now)
+		out, err = a.newSession(tx, u, now, userAgent)
 		return err
 	})
 	if err != nil {
@@ -333,13 +340,14 @@ func (a *App) openDevice(device string) (account, id string) {
 	return account, id
 }
 
-func (a *App) newSession(tx store.Tx, u store.User, now time.Time) (SignIn, error) {
+func (a *App) newSession(tx store.Tx, u store.User, now time.Time, userAgent string) (SignIn, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return SignIn{}, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(b)
-	s := store.Session{ID: sessionID(token), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(a.authOpts.SessionTTL)}
+	s := store.Session{ID: sessionID(token), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(a.authOpts.SessionTTL),
+		UserAgent: cleanUserAgent(userAgent), LastUsedAt: now}
 	if err := tx.InsertSession(&s); err != nil {
 		return SignIn{}, err
 	}
@@ -356,7 +364,8 @@ func authUser(u store.User) AuthUser {
 }
 
 // Authenticate returns the account a session token belongs to. A session
-// in use has its expiry pushed back (at most once per sessionRefresh).
+// in use has its expiry pushed back (at most once per sessionRefresh), in
+// the same write that records when it was last used.
 func (a *App) Authenticate(ctx context.Context, token string) (Session, error) {
 	if token == "" || len(token) > 256 {
 		return Session{}, errUnauthorized("sign in to continue")
@@ -381,16 +390,27 @@ func (a *App) Authenticate(ctx context.Context, token string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	out := Session{User: authUser(u), ExpiresAt: s.ExpiresAt}
+	out := Session{User: authUser(u), ExpiresAt: s.ExpiresAt, UserAgentUnknown: s.UserAgent == "", id: id}
 	ttl := a.authOpts.SessionTTL
 	if s.ExpiresAt.Before(now.Add(ttl - sessionRefresh)) {
 		exp := now.Add(ttl)
-		if err := a.store.Write(ctx, func(tx store.Tx) error { return tx.ExtendSession(id, exp) }); err != nil {
+		if err := a.store.Write(ctx, func(tx store.Tx) error { return tx.ExtendSession(id, now, exp) }); err != nil {
 			return Session{}, err
 		}
 		out.ExpiresAt, out.Extended = exp, true
 	}
 	return out, nil
+}
+
+// NoteUserAgent records the User-Agent of the session of a token when it
+// has none yet, so a session from before they were recorded is named on
+// the account page from its next request on. An empty one changes nothing.
+func (a *App) NoteUserAgent(ctx context.Context, token, userAgent string) error {
+	ua := cleanUserAgent(userAgent)
+	if token == "" || ua == "" {
+		return nil
+	}
+	return a.store.Write(ctx, func(tx store.Tx) error { return tx.SetSessionUserAgent(sessionID(token), ua) })
 }
 
 // Logout ends the session of a token. An unknown token is no error.
@@ -401,26 +421,12 @@ func (a *App) Logout(ctx context.Context, token string) error {
 	return a.store.Write(ctx, func(tx store.Tx) error { return tx.DeleteSession(sessionID(token)) })
 }
 
-// ChangePassword changes the password of the account signed in with token,
-// after checking its current password, and ends its other sessions. Wrong
-// current passwords are limited per account, as for sign-in, but apart
-// from it: only someone signed in to the account can make them.
+// ChangePassword changes the password of the account signed in with token
+// and ends its other sessions.
 func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChange) error {
 	s, err := a.Authenticate(ctx, token)
 	if err != nil {
 		return err
-	}
-	bucket := "account:" + s.User.ID
-	if err := a.checkLoginRate(bucket); err != nil {
-		return err
-	}
-	var u store.User
-	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { u, err = tx.GetUser(s.User.ID); return }); err != nil {
-		return err
-	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.CurrentPassword)) != nil {
-		a.recordLoginFailure(bucket)
-		return errField("currentPassword", "is incorrect")
 	}
 	if err := validatePassword("newPassword", in.NewPassword); err != nil {
 		return err
@@ -430,10 +436,10 @@ func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChang
 		return err
 	}
 	return a.store.Write(ctx, func(tx store.Tx) error {
-		if err := tx.UpdateUserPassword(u.ID, hash, a.now().UTC()); err != nil {
+		if err := tx.UpdateUserPassword(s.User.ID, hash, a.now().UTC()); err != nil {
 			return err
 		}
-		return tx.DeleteUserSessions(u.ID, sessionID(token))
+		return tx.DeleteUserSessions(s.User.ID, sessionID(token))
 	})
 }
 
@@ -563,9 +569,8 @@ func hashPassword(pw string) (string, error) {
 	return string(h), err
 }
 
-// Rate limiting of failed attempts, in memory, per bucket: "addr:" and
-// a client address, "device:" and a device id, or "account:" and an
-// account id.
+// Rate limiting of failed sign-ins, in memory, per bucket: "addr:" and
+// a client address, or "device:" and a device id.
 
 func (a *App) checkLoginRate(client string) error {
 	a.authState.mu.Lock()

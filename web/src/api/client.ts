@@ -5,6 +5,7 @@
 
 import type {
   AuthSession,
+  BrowserSession,
   McpToken,
   McpTokenCreated,
   LoginRequest,
@@ -272,8 +273,15 @@ export const api = {
     /** Creates the first account and signs it in; refused once any account exists. */
     setup: (body: SetupRequest) => request<AuthSession>('POST', '/auth/setup', { body }),
     logout: () => request<void>('POST', '/auth/logout'),
-    /** Ends every other session of the account. */
+    /** Needs no current password; ends every other session of the account. */
     changePassword: (body: PasswordChangeRequest) => request<void>('POST', '/auth/password', { body }),
+    /** The signed-in account's live sessions, last used first (so this browser's first). */
+    sessions: {
+      list: (signal?: AbortSignal) => request<List<BrowserSession>>('GET', '/auth/sessions', { signal }),
+      /** Ending this browser's own session signs it out. */
+      end: (id: string) => request<void>('DELETE', `/auth/sessions/${enc(id)}`),
+      endOthers: () => request<void>('POST', '/auth/sessions/end-others'),
+    },
     /** The signed-in account's MCP tokens, newest first. */
     mcpTokens: {
       list: (signal?: AbortSignal) => request<List<McpToken>>('GET', '/auth/mcp-tokens', { signal }),

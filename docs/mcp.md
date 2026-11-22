@@ -54,7 +54,7 @@ sign-in is on (`CODEATROPHY_AUTH`, on by default) every request needs
 `Authorization: Bearer <token>`, and is refused with `401` otherwise. The
 token is one of:
 
-- **An account's token.** In the web UI, Settings → Account → MCP tokens
+- **An account's token.** In the web UI, Settings → MCP server → Tokens
   makes a token (`cat_...`) for the signed-in account, shows it once with the
   command that connects Claude Code, lists when each was last used, and
   revokes them. Make one per machine or assistant. See "MCP tokens" in

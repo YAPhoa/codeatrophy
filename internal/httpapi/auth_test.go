@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -270,13 +271,14 @@ func TestAuthCrossSiteRequestsAreRefused(t *testing.T) {
 
 func TestAuthChangePassword(t *testing.T) {
 	c := newAuthServer(t)
-	c.expect("POST", api+"/auth/password", `{"currentPassword":"correct horse","newPassword":"battery staple"}`, 401)
+	c.expect("POST", api+"/auth/password", `{"newPassword":"battery staple"}`, 401)
 	c.login()
-	_, body := c.expect("POST", api+"/auth/password", `{"currentPassword":"nope nope","newPassword":"battery staple"}`, 422)
-	if !strings.Contains(body, "currentPassword") {
-		t.Errorf("wrong current password: %s", body)
+	_, body := c.expect("POST", api+"/auth/password", `{"newPassword":"short"}`, 422)
+	if !strings.Contains(body, "newPassword") {
+		t.Errorf("short new password: %s", body)
 	}
-	c.expect("POST", api+"/auth/password", `{"currentPassword":"correct horse","newPassword":"battery staple"}`, 204)
+	// No current password is needed; one sent by an older client is ignored.
+	c.expect("POST", api+"/auth/password", `{"currentPassword":"not it","newPassword":"battery staple"}`, 204)
 	c.expect("GET", api+"/items", "", 200)
 	c.expect("POST", api+"/auth/logout", "", 204)
 	c.expect("POST", api+"/auth/login", `{"email":"me@example.com","password":"battery staple"}`, 200)
@@ -308,6 +310,88 @@ func TestAuthMCPTokens(t *testing.T) {
 	id = id[:strings.Index(id, `"`)]
 	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 204)
 	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 404)
+}
+
+func TestAuthSessions(t *testing.T) {
+	c := newAuthServer(t)
+	c.expect("GET", api+"/auth/sessions", "", 401)
+	c.expect("POST", api+"/auth/sessions/end-others", "", 401)
+	c.expect("DELETE", api+"/auth/sessions/x", "", 401)
+	firefox := "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+	c.expect("POST", api+"/auth/login", `{"email":"me@example.com","password":"correct horse"}`, 200, "User-Agent", firefox)
+	jar, _ := cookiejar.New(nil)
+	other := &authClient{t: t, app: c.app, srv: c.srv, hc: &http.Client{Jar: jar}}
+	other.expect("POST", api+"/auth/login", `{"email":"me@example.com","password":"correct horse"}`, 200, "User-Agent", "")
+	you := c.as("you@example.com")
+
+	type sessions struct {
+		Items []struct {
+			ID, Browser           string
+			CreatedAt, LastUsedAt time.Time
+			Current               bool
+		}
+	}
+	list := func(c *authClient) sessions {
+		t.Helper()
+		var out sessions
+		_, body := c.expect("GET", api+"/auth/sessions", "", 200)
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	l := list(c)
+	if len(l.Items) != 2 || !l.Items[0].Current || l.Items[0].Browser != "Firefox on Linux" ||
+		l.Items[1].Current || l.Items[1].Browser != "Unknown browser" || l.Items[1].CreatedAt.IsZero() || l.Items[1].LastUsedAt.IsZero() {
+		t.Fatalf("sessions: %+v", l)
+	}
+	_, raw := c.expect("GET", api+"/auth/sessions", "", 200)
+	if strings.Contains(raw, "Mozilla") || strings.Contains(raw, "userAgent") {
+		t.Errorf("the list shows the User-Agent: %s", raw)
+	}
+	// Another account's session is not found; neither is an unknown one.
+	you.expect("DELETE", api+"/auth/sessions/"+l.Items[1].ID, "", 404)
+	c.expect("DELETE", api+"/auth/sessions/nope", "", 404)
+	// Ending another session of the account.
+	c.expect("DELETE", api+"/auth/sessions/"+l.Items[1].ID, "", 204)
+	other.expect("GET", api+"/items", "", 401)
+	c.expect("GET", api+"/items", "", 200)
+
+	// Ending the others keeps this one and other accounts'.
+	other.login()
+	c.expect("POST", api+"/auth/sessions/end-others", "", 204)
+	other.expect("GET", api+"/items", "", 401)
+	you.expect("GET", api+"/items", "", 200)
+	if l := list(c); len(l.Items) != 1 || !l.Items[0].Current {
+		t.Errorf("after end-others: %+v", l)
+	}
+
+	// Ending its own session signs out and clears the cookie.
+	res, _ := c.expect("DELETE", api+"/auth/sessions/"+l.Items[0].ID, "", 204)
+	cleared := false
+	for _, ck := range res.Cookies() {
+		if ck.Name == httpapi.SessionCookie && ck.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("ending the current session left the cookie")
+	}
+	c.expect("GET", api+"/items", "", 401)
+
+	// Cross-site requests are refused, as for the other endpoints.
+	c.login()
+	c.expect("POST", api+"/auth/sessions/end-others", "", 403, "Sec-Fetch-Site", "cross-site")
+}
+
+// With sign-in off there is no session to list or end: the endpoints answer
+// 401, as the other session endpoints do.
+func TestAuthOffSessions(t *testing.T) {
+	c := newServer(t)
+	c.expect("GET", api+"/auth/sessions", "", 401)
+	c.expect("POST", api+"/auth/sessions/end-others", "", 401)
+	c.expect("DELETE", api+"/auth/sessions/x", "", 401)
+	c.expect("GET", api+"/auth/mcp-tokens", "", 401)
 }
 
 // Each account has its own status, favorite, notes, working copies,

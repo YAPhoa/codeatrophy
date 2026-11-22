@@ -22,7 +22,6 @@ import { BY_HTTP, atMostChars, byteLength, charCount, DEFAULT_PROBLEM, LIMITS, n
 import type { Handler, Req } from '../http';
 import {
   badRequest,
-  HttpError,
   boolParam,
   conflict,
   created,
@@ -789,16 +788,7 @@ function stats(db: MockDb) {
 export function itemRoutes(db: MockDb): [string, string, Handler][] {
   return [
     ['GET', '/meta', () => ok(db.meta())],
-    // The mock runs as a server with sign-in turned off.
     ['GET', '/health', () => ok({ status: 'ok' })],
-    ['GET', '/auth/session', () => ok({ enabled: false, setupRequired: false, user: null })],
-    ['POST', '/auth/login', () => Promise.reject(badRequest('sign-in is turned off on this server'))],
-    ['POST', '/auth/setup', () => Promise.reject(badRequest('sign-in is turned off on this server'))],
-    ['POST', '/auth/logout', () => noContent()],
-    ['POST', '/auth/password', () => Promise.reject(new HttpError(401, 'unauthorized', 'sign in to continue'))],
-    ['GET', '/auth/mcp-tokens', () => Promise.reject(new HttpError(401, 'unauthorized', 'sign in to continue'))],
-    ['POST', '/auth/mcp-tokens', () => Promise.reject(new HttpError(401, 'unauthorized', 'sign in to continue'))],
-    ['DELETE', '/auth/mcp-tokens/:id', () => Promise.reject(new HttpError(401, 'unauthorized', 'sign in to continue'))],
     ['GET', '/stats', () => stats(db)],
     ['GET', '/items', (req) => listItems(db, req)],
     ['POST', '/items', (req) => createItem(db, req)],
