@@ -18,7 +18,8 @@ var ErrOlderSchema = errors.New("this database was last used by a Codeatrophy ol
 	"upgrade it with Codeatrophy 1.0.0 first, then with this version")
 
 // BaselineVersion is the schema version of Codeatrophy 1.0.0, the oldest
-// this server migrates a database from.
+// this server migrates a database from. Each backend's first migration has
+// this number and builds that whole schema at once.
 const BaselineVersion = 22
 
 // TooOld reports whether a database at the schema version is one this
@@ -218,10 +219,10 @@ type BuiltinStylePreset struct {
 }
 
 // BuiltinStylePresets are the presets a new database holds once every
-// migration of its backend has run, in insertion order: migration 5 seeds
-// them and migration 15 refreshes the text of each one still as seeded. The
-// migrations hold their own copy of the text (a migration never changes
-// once released); tests check that the copies agree.
+// migration of its backend has run, in insertion order: the baseline
+// migration seeds them. It holds its own copy of the text (a migration
+// never changes once released); a test checks that a new database holds
+// this text.
 var BuiltinStylePresets = []BuiltinStylePreset{
 	{Name: "Interview practice", IsDefault: true,
 		Instructions: `Write the statement the way an interviewer would pose it: two or three short paragraphs in plain language, with no back-story. Name the inputs and say exactly what to return or print. Give two or three small examples, each followed by one or two sentences explaining why that output is correct. Keep the constraints to a short list, chosen so that the intended time complexity matters. Under Notes, add a "Follow-up" line that asks for a better complexity or a harder twist without giving the approach away, then one collapsed "Hint" that points toward the approach without naming it. For a reading: close with "Likely questions", three questions an interviewer might ask, each with its answer collapsed. Starter code in Python and Java.`},

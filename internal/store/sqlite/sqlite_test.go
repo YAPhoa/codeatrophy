@@ -359,3 +359,37 @@ func TestOlderSchemaIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A database the migrations before the baseline brought to the schema of
+// 1.0.0 records their versions, 1 to 22. It opens with nothing applied and
+// its record unchanged, migrating or not, as one the baseline built does.
+func TestDatabaseUpgradedTo100OpensUnchanged(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codeatrophy.db")
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	setVersion(t, path, store.BaselineVersion)
+	for _, opts := range []Options{{}, {NoMigrate: true}} {
+		var logs bytes.Buffer
+		opts.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		db, err := OpenWith(ctx, path, opts)
+		if err != nil {
+			t.Fatalf("NoMigrate %v: %v", opts.NoMigrate, err)
+		}
+		var n, last int
+		if err := db.writer.QueryRow(`SELECT COUNT(*), MAX(version) FROM schema_migrations`).Scan(&n, &last); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+		if n != store.BaselineVersion || last != store.BaselineVersion || logs.Len() != 0 {
+			t.Errorf("NoMigrate %v: %d migrations recorded, the latest %d; logged: %s", opts.NoMigrate, n, last, logs.String())
+		}
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "*.backup-v*")); len(m) != 0 {
+		t.Errorf("a backup was written: %v", m)
+	}
+}

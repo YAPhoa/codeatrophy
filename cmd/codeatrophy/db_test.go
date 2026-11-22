@@ -33,7 +33,7 @@ func TestDBMigrateOutput(t *testing.T) {
 			}
 			got := out.String()
 			for _, want := range []string{"schema version 0, this server's version " + latest, "Pending: ",
-				"_problem_interface", "The database is at schema version " + latest} {
+				"0022_v1.0.0.sql", "The database is at schema version " + latest} {
 				if !strings.Contains(got, want) {
 					t.Errorf("missing %q in:\n%s", want, got)
 				}
@@ -128,7 +128,9 @@ func TestDBMigrateRefusesAPre100Database(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version > 10`); err != nil {
+	if _, err := raw.ExecContext(ctx, `DELETE FROM schema_migrations;
+		INSERT INTO schema_migrations (version, name, applied_at)
+		WITH RECURSIVE v(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM v WHERE i < 10) SELECT i, 'old', 0 FROM v`); err != nil {
 		t.Fatal(err)
 	}
 	raw.Close()

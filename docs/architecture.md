@@ -209,21 +209,23 @@ application service that both transports call.
 Each backend has its own embedded, numbered, forward-only migrations and a
 `schema_migrations` record, and applies pending ones at startup, each in its
 own transaction, logging each one. The numbers are *logical schema versions*
-shared by both backends: PostgreSQL starts from one consolidated migration
-(`0005_initial_schema.sql`) that yields the schema SQLite reaches with
-0001–0005, including the built-in style presets seeded the same way (only
-into an empty table, only once). Migration 0015 refreshes the text of each
-built-in preset whose name and text are still exactly as seeded.
+shared by both backends. Each backend starts from one baseline,
+`0022_v1.0.0.sql`, that builds the whole schema of Codeatrophy 1.0.0
+(version 22, `store.BaselineVersion`) at once, with the built-in style
+presets. It replaced the migrations that built that schema step by step
+until 1.0.0 (0001–0022 on SQLite, 0005–0022 on PostgreSQL), and a database
+they built is recorded at 22 already, so nothing is applied to it.
 
 The rule for every later schema change: **add one migration per backend with
 the same new number**, bump `store.SchemaVersion`, and update `store.Tables`
 if tables or columns change. A test fails when the two backends' latest
-versions differ or a number is missing on one side, and another when a
+versions differ, a number is missing on one side or either does not start
+from the baseline, and another when a
 backend's tables differ from `store.Tables`.
 
 SQLite cannot drop a constraint, so a change to one rebuilds the table. A
-SQLite migration that rebuilds a table other tables refer to (as 0014 does
-with `items`) starts with the line `-- foreign_keys=off`: the runner then
+SQLite migration that rebuilds a table other tables refer to (such as
+`items`) starts with the line `-- foreign_keys=off`: the runner then
 applies it with foreign key enforcement off, as SQLite's documented
 procedure asks, so that dropping the old table deletes no rows that refer to
 it, and commits only if `PRAGMA foreign_key_check` then finds every

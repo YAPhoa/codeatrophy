@@ -293,6 +293,37 @@ func TestOlderSchemaIsRefused(t *testing.T) {
 	}
 }
 
+// A database the migrations before the baseline brought to the schema of
+// 1.0.0 records their versions, 5 to 22. It opens with nothing applied and
+// its record unchanged, migrating or not, as one the baseline built does.
+func TestDatabaseUpgradedTo100OpensUnchanged(t *testing.T) {
+	ctx := context.Background()
+	url := pgtest.URL(t)
+	db := open(t, url, nil)
+	if _, err := db.pool.Exec(`DELETE FROM schema_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(`INSERT INTO schema_migrations (version, name, applied_at)
+		SELECT i, lpad(i::text, 4, '0') || '_old.sql', 0 FROM generate_series(5, $1::integer) AS i`, store.BaselineVersion); err != nil {
+		t.Fatal(err)
+	}
+	for _, noMigrate := range []bool{false, true} {
+		var logs bytes.Buffer
+		cur, err := Open(ctx, url, Options{NoMigrate: noMigrate, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+		if err != nil {
+			t.Fatalf("NoMigrate %v: %v", noMigrate, err)
+		}
+		cur.Close()
+		var n, first, last int
+		if err := db.pool.QueryRow(`SELECT COUNT(*), MIN(version), MAX(version) FROM schema_migrations`).Scan(&n, &first, &last); err != nil {
+			t.Fatal(err)
+		}
+		if n != store.BaselineVersion-4 || first != 5 || last != store.BaselineVersion || logs.Len() != 0 {
+			t.Errorf("NoMigrate %v: %d migrations recorded, %d to %d; logged: %s", noMigrate, n, first, last, logs.String())
+		}
+	}
+}
+
 // appendSetting adds s to the comma-separated setting "order": a
 // read-modify-write that loses entries unless writers run one at a time.
 func appendSetting(tx store.Tx, s string) error {

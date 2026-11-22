@@ -136,7 +136,9 @@ func TestImportOfAPre100SQLiteDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`DELETE FROM schema_migrations WHERE version > 10`); err != nil {
+	if _, err := raw.Exec(`DELETE FROM schema_migrations;
+		INSERT INTO schema_migrations (version, name, applied_at)
+		WITH RECURSIVE v(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM v WHERE i < 10) SELECT i, 'old', 0 FROM v`); err != nil {
 		t.Fatal(err)
 	}
 	raw.Close()
