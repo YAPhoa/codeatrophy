@@ -1,13 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mockApi, open, TWO_SUM_TEXT } from './support';
+import { mockApi, open, SEED, TWO_SUM_TEXT } from './support';
 
 // AI generations run as jobs on the server: leaving a screen never stops
 // one, the AI jobs in the sidebar's footer follow them, and new items in
 // progress are drafts on the server, listed under Drafts. With `?mock=default`
 // a generation takes a few seconds, time enough to leave its screen first.
 
-const TWO_SUM = '11111111-1111-4111-8111-000000000001';
-const COIN_CHANGE = '11111111-1111-4111-8111-000000000008';
+const TWO_SUM = SEED.twoSum;
+const COIN_CHANGE = SEED.coinChange;
 
 const jobsWindow = (page: Page) => page.getByRole('region', { name: 'AI jobs' });
 /** The footer's jobs entry, named for what it counts ("AI jobs: 1 running"). */

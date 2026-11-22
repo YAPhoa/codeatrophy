@@ -166,6 +166,15 @@ export async function choose(select: Locator, option: string | RegExp): Promise<
   await list.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
 }
 
+/** Ids of the seed's items that more than one spec opens (`seedIds` in src/mock/seed/index.ts). */
+export const SEED = {
+  twoSum: '11111111-1111-4111-8111-000000000001',
+  twoSumSorted: '11111111-1111-4111-8111-000000000002',
+  coinChange: '11111111-1111-4111-8111-000000000008',
+  capTheorem: '11111111-1111-4111-8111-000000000019',
+  raftLeaderElection: '11111111-1111-4111-8111-000000000024',
+} as const;
+
 /** Rough text the mock drafts as Two Sum. */
 export const TWO_SUM_TEXT = 'two sum — array of ints and a target, return the two indices that add up to it. O(n)?';
 

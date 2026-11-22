@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, TWO_SUM_TEXT } from './support';
+import { open, SEED, TWO_SUM_TEXT } from './support';
 
 test('capture: drafting with AI keeps the text in view on the way to the draft', async ({ page }) => {
   await open(page, '/new');
@@ -27,7 +27,7 @@ test('capture: drafting with AI keeps the text in view on the way to the draft',
 });
 
 test('generate tests: the model choice is there from the first frame, not added under it', async ({ page }) => {
-  await open(page, '/items/11111111-1111-4111-8111-000000000001/tests', 'default');
+  await open(page, `/items/${SEED.twoSum}/tests`, 'default');
   await page.getByRole('heading', { name: 'Test cases' }).waitFor();
   // Every frame, from the click until the page settles: whether its form has the model choice yet.
   await page.evaluate(() => {

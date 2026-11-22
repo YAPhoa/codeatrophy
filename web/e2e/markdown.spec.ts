@@ -1,11 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { codeColours, codeRoleBackground, open } from './support';
+import { codeColours, codeRoleBackground, open, SEED } from './support';
 
 // Mermaid diagrams and images embedded as data URLs in rendered Markdown. The
 // seed's "Untrusted Markdown" reading has a diagram that draws, one that does
 // not parse, and an SVG image as a data URL with a script inside.
 const UNTRUSTED = '/items/11111111-1111-4111-8111-000000000023';
-const RAFT = '/items/11111111-1111-4111-8111-000000000024';
+const RAFT = `/items/${SEED.raftLeaderElection}`;
 const B_TREES = '/items/11111111-1111-4111-8111-000000000018';
 
 const noDialogs = (page: Page) =>

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mockApi, open } from './support';
+import { mockApi, open, SEED } from './support';
 
 // "Generate code" on the edit page of a problem: the AI writes the code of
 // the languages the tabs list, from the form as it stands, into the form.
@@ -7,7 +7,7 @@ import { mockApi, open } from './support';
 // program with the generic starter code in five languages; "Merge k Sorted
 // Lists" is "solution only", with stubs and runners of its own.
 
-const COIN_CHANGE = '11111111-1111-4111-8111-000000000008';
+const COIN_CHANGE = SEED.coinChange;
 const MERGE_K_LISTS = '11111111-1111-4111-8111-000000000025';
 
 const codeSection = (page: Page) => page.getByRole('region', { name: 'What you write' });

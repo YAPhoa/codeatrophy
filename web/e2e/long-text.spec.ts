@@ -1,13 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, writeCode } from './support';
+import { open, SEED, writeCode } from './support';
 
 // Values at the longest the limits allow, with nothing to break a line at (a
 // pasted URL, a slug): every screen that shows one keeps it inside its box,
 // by wrapping it, or by cutting it with an ellipsis and a tooltip.
 
-const TWO_SUM = '11111111-1111-4111-8111-000000000001';
-const TWO_SUM_SORTED = '11111111-1111-4111-8111-000000000002';
-const CAP = '11111111-1111-4111-8111-000000000019';
+const TWO_SUM = SEED.twoSum;
+const TWO_SUM_SORTED = SEED.twoSumSorted;
+const CAP = SEED.capTheorem;
 const GONE = '11111111-1111-4111-8111-000000000099';
 const INTERVIEW = '22222222-2222-4222-8222-000000000001';
 const ARRAYS = '22222222-2222-4222-8222-000000000002';

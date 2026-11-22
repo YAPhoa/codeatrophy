@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { choose, codeColours, codeRoleBackground, mockApi, open, openList, TWO_SUM_TEXT, writeCode } from './support';
+import { choose, codeColours, codeRoleBackground, mockApi, open, openList, SEED, TWO_SUM_TEXT, writeCode } from './support';
 
 // A short smoke suite over the flows the product stands on. It runs
 // against the API mock, whose state lives in the page: every test starts from
@@ -175,7 +175,7 @@ test('solve: the lines that read the input open folded, and unfold in place', as
 
 test('solve: code takes the colours of the code theme\'s roles, and the editor its background, in light and in dark', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
-  await open(page, '/items/11111111-1111-4111-8111-000000000001');
+  await open(page, `/items/${SEED.twoSum}`);
   const editor = page.locator('.editor-host');
   await writeCode(
     page,

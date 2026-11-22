@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { open, SEED } from './support';
 
 // Related items: links made by hand between any two items, under a reading's
 // text and a problem's statement. A link to an item that is deleted stays,
 // shown red. The seed has no links.
-const CAP = '/items/11111111-1111-4111-8111-000000000019';
-const TWO_SUM = '/items/11111111-1111-4111-8111-000000000001';
-const TWO_SUM_SORTED = '/items/11111111-1111-4111-8111-000000000002';
+const CAP = `/items/${SEED.capTheorem}`;
+const TWO_SUM = `/items/${SEED.twoSum}`;
+const TWO_SUM_SORTED = `/items/${SEED.twoSumSorted}`;
 
 const section = (page: Page) => page.getByRole('region', { name: 'Related items' });
 

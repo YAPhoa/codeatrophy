@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { choose, mockApi, open, writeCode } from './support';
+import { choose, mockApi, open, SEED, writeCode } from './support';
 
 // A past submission opens in the Submissions tab, in place of the list; the
 // drawer's Result tab keeps to this visit's latest run.
 
-const TWO_SUM = '11111111-1111-4111-8111-000000000001';
+const TWO_SUM = SEED.twoSum;
 /** The seed's accepted Python submission of Two Sum: there after a reload too, which resets the mock. */
 const TWO_SUM_ACCEPTED = '44444444-4444-4444-8444-000000000002';
 

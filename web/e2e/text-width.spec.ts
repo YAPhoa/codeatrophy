@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { open, SEED } from './support';
 
 // The "Text width" preference: the reader's quick switch and the Settings
 // control edit the same per-browser choice. The seed's Raft reading has an
 // outline and a diagram.
-const RAFT = '/items/11111111-1111-4111-8111-000000000024';
+const RAFT = `/items/${SEED.raftLeaderElection}`;
 
 const columnWidth = (page: Page) => page.locator('.reader-article').evaluate((el) => Math.round(el.getBoundingClientRect().width));
 

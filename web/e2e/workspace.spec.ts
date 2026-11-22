@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { choose, mockApi, mockRequests, open, writeCode } from './support';
+import { choose, mockApi, mockRequests, open, SEED, writeCode } from './support';
 
 // The code written on a problem is kept on the server as one working copy
 // per language. The mock keeps them across a reload, as the server does.
 
-const TWO_SUM = '11111111-1111-4111-8111-000000000001';
+const TWO_SUM = SEED.twoSum;
 
 const editor = (page: Page) => page.locator('.editor-host .cm-content');
 const languageSelect = (page: Page) => page.getByRole('combobox', { name: 'Language' });
