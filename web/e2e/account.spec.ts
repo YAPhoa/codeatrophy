@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open } from './support';
+import { mockRequests, open } from './support';
 
 // Settings › Account and the MCP tokens on Settings › MCP server, with sign-in
 // on and the mock's account signed in (`?mock=signed-in`).
@@ -10,15 +10,13 @@ const EMAIL = 'me@example.com';
 /** The parts of the page's API mock (`window.__codeatrophyMock`) the tests read. */
 interface Mock {
   db: { account: { password: string; mcpTokens: { token: string }[] } };
-  requests: string[];
 }
 type MockWindow = { __codeatrophyMock: Mock };
 
 const signInPage = (page: Page) => page.getByRole('heading', { level: 1, name: 'Sign in' });
 const sessionList = (page: Page) => page.getByRole('region', { name: 'Account' }).getByRole('list', { name: 'Sessions' });
 const sessionRow = (page: Page, text: string) => sessionList(page).getByRole('listitem').filter({ hasText: text });
-const mockRequests = (page: Page, pattern: RegExp) =>
-  page.evaluate((source) => (window as unknown as MockWindow).__codeatrophyMock.requests.filter((r) => new RegExp(source).test(r)).length, pattern.source);
+const requestCount = async (page: Page, pattern: RegExp) => (await mockRequests(page)).filter((r) => pattern.test(r)).length;
 
 test('the Account page is three cards: who is signed in, the password, the sessions', async ({ page }) => {
   await open(page, '/settings/account', SIGNED_IN);
@@ -76,7 +74,7 @@ test('signing out this browser from the Account page asks first', async ({ page 
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(section.getByText(`Signed in as ${EMAIL}.`)).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as MockWindow).__codeatrophyMock.requests.filter((r) => r === 'POST /auth/logout').length)).toBe(0);
+  expect(await requestCount(page, /^POST \/auth\/logout$/)).toBe(0);
 
   // Confirming signs out.
   await button.click();
@@ -113,7 +111,7 @@ test('revoking another browser asks first', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(row).toBeVisible();
-  expect(await mockRequests(page, /^DELETE \/auth\/sessions\//)).toBe(0);
+  expect(await requestCount(page, /^DELETE \/auth\/sessions\//)).toBe(0);
 
   await row.getByRole('button', { name: 'Revoke' }).click();
   await dialog.getByRole('button', { name: 'Revoke' }).click();

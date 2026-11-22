@@ -196,6 +196,11 @@ export async function mockApi<T = unknown>(page: Page, path: string, init?: { me
   ) as Promise<T>;
 }
 
+/** The requests the page's mock has answered (`GET /items/…`), in order, from the `from`th on. */
+export async function mockRequests(page: Page, from = 0): Promise<string[]> {
+  return page.evaluate((from) => (window as unknown as { __codeatrophyMock: { requests: string[] } }).__codeatrophyMock.requests.slice(from), from);
+}
+
 /** The seeded item titled `title`, as the mock's API lists it. */
 export async function mockItem(page: Page, title: string): Promise<{ id: string; title: string; tags: string[]; revision: number }> {
   const { items } = await mockApi<{ items: { id: string; title: string; tags: string[]; revision: number }[] }>(page, `/items?limit=200&q=${encodeURIComponent(title)}`);

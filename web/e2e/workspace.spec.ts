@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { choose, mockApi, open, writeCode } from './support';
+import { choose, mockApi, mockRequests, open, writeCode } from './support';
 
 // The code written on a problem is kept on the server as one working copy
 // per language. The mock keeps them across a reload, as the server does.
@@ -120,7 +120,7 @@ test('workspace: code an older version kept in this browser is uploaded once whe
   await choose(languageSelect(page), /^Go/);
   await expect(editor(page)).toHaveText('package main // from before');
   // Uploaded once: nothing more goes up for it.
-  const puts = await page.evaluate(() => (window as unknown as { __codeatrophyMock: { requests: string[] } }).__codeatrophyMock.requests.filter((r) => r.startsWith('PUT') && r.endsWith('/workspace/go')));
+  const puts = (await mockRequests(page)).filter((r) => r.startsWith('PUT') && r.endsWith('/workspace/go'));
   expect(puts).toHaveLength(1);
   expect(await unsaved(page)).toEqual([]);
 });
@@ -180,9 +180,6 @@ test('workspace: a save that fails says so, keeps the edit through a reload, and
   await expect.poll(() => unsaved(page)).toEqual([]);
   // Past the save delay: nothing more was sent.
   await page.waitForTimeout(2200);
-  const puts = await page.evaluate(
-    (from) => (window as unknown as { __codeatrophyMock: { requests: string[] } }).__codeatrophyMock.requests.slice(from).filter((r) => r.startsWith('PUT')),
-    before,
-  );
+  const puts = (await mockRequests(page, before)).filter((r) => r.startsWith('PUT'));
   expect(puts).toEqual([`PUT /items/${TWO_SUM}/workspace/python`]);
 });

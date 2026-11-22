@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loadingRecord, open, recordLoading, reduceMotion } from './support';
+import { loadingRecord, mockRequests, open, recordLoading, reduceMotion } from './support';
 
 // A load that is quick shows nothing as loading: the screen simply fades in.
 // Only a slow one shows an indicator, and only once 400ms have passed.
@@ -43,7 +43,13 @@ test('loading: resting on a row loads the item, so opening it shows no loading s
   await open(page, '/');
   await expect(twoSum(page)).toBeVisible();
   const id = (await twoSum(page).getAttribute('href'))!.split('/').pop()!;
-  const requests = () => page.evaluate(() => (window as unknown as { __codeatrophyMock: { requests: string[] } }).__codeatrophyMock.requests.splice(0));
+  // The requests answered since the last call.
+  let seen = 0;
+  const requests = async () => {
+    const fresh = await mockRequests(page, seen);
+    seen += fresh.length;
+    return fresh;
+  };
   const detail = (list: string[]) => list.filter((r) => /^GET \/items\/[^/?]+(\/testcases)?$/.test(r));
   await page.waitForTimeout(300);
   await requests();
