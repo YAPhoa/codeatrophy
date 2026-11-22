@@ -447,3 +447,16 @@ func TestSummary(t *testing.T) {
 		t.Errorf("empty summary: %q", got)
 	}
 }
+
+// Every table of the schema is counted in words of its own, not by its
+// table name.
+func TestSummaryNamesEveryTable(t *testing.T) {
+	for _, tb := range store.Tables {
+		if got := dbcopy.Summary([]store.TableCount{{Table: tb.Name, Rows: 1}}); got == "1 "+tb.Name {
+			t.Errorf("%s has no words of its own: %q", tb.Name, got)
+		}
+	}
+	if got := dbcopy.Summary([]store.TableCount{{Table: "users", Rows: 2}}); got != "2 accounts" {
+		t.Errorf("users: %q", got)
+	}
+}

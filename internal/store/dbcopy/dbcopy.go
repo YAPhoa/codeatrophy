@@ -160,6 +160,9 @@ func Empty(ctx context.Context, b store.Bulk) (bool, error) {
 func Summary(counts []store.TableCount) string {
 	names := map[string][2]string{
 		"settings":           {"setting", "settings"},
+		"users":              {"account", "accounts"},
+		"sessions":           {"session", "sessions"},
+		"mcp_tokens":         {"MCP token", "MCP tokens"},
 		"ai_providers":       {"AI provider", "AI providers"},
 		"ai_usage":           {"day of AI usage", "days of AI usage"},
 		"ai_log":             {"AI log entry", "AI log entries"},
@@ -169,6 +172,7 @@ func Summary(counts []store.TableCount) string {
 		"drafts":             {"draft", "drafts"},
 		"style_presets":      {"style preset", "style presets"},
 		"items":              {"item", "items"},
+		"item_states":        {"item state", "item states"},
 		"item_links":         {"item link", "item links"},
 		"deleted_items":      {"deleted item", "deleted items"},
 		"tags":               {"tag", "tags"},
