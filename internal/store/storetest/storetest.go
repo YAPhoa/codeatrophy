@@ -1621,16 +1621,16 @@ func testStylePresetConstraints(t *testing.T, db store.Store) {
 		p.IsDefault, p.UpdatedAt = true, now.Add(time.Minute)
 		return tx.UpdateStylePreset(&p)
 	})
-	for i := 3; i <= 20; i++ {
+	for i := 3; i <= domain.MaxStylePresets; i++ {
 		if err := insert(fmt.Sprint("q", i), fmt.Sprint("name ", i), false); err != nil {
 			t.Fatalf("preset %d: %v", i, err)
 		}
 	}
-	if err := insert("q21", "one too many", false); err == nil {
-		t.Error("the database should reject a 21st preset")
+	if err := insert("q-extra", "one too many", false); err == nil {
+		t.Errorf("the database should reject preset %d", domain.MaxStylePresets+1)
 	}
 	list := Read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() })
-	if len(list) != 20 || list[0].ID != "p4" || list[1].Name != "LeetCode" || list[2].Name != "name 10" ||
+	if len(list) != domain.MaxStylePresets || list[0].ID != "p4" || list[1].Name != "LeetCode" || list[2].Name != "name 10" ||
 		!list[0].UpdatedAt.Equal(now.Add(time.Minute)) {
 		t.Errorf("list: %d presets, first %+v", len(list), list[0])
 	}
