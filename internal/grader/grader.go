@@ -98,6 +98,13 @@ func (e Execution) CompileFailed() bool {
 	return e.Err == nil && e.Result.Status == judge.StatusCompileError
 }
 
+// EngineFailed reports whether the engine itself failed on the execution:
+// it could not be reached, or it reported an internal error (Judge0's
+// status 13). Either way the execution says nothing about the program.
+func (e Execution) EngineFailed() bool {
+	return e.Err != nil || e.Result.Status == judge.StatusInternalError
+}
+
 // RunAll executes the program once per input. The first input runs alone so
 // that a compile error is detected once; in that case every execution
 // reports the compile error and the remaining inputs are not run. After the

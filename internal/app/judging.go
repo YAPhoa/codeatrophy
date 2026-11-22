@@ -559,7 +559,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	if len(execs) > 0 {
 		allFailed := true
 		for _, e := range execs {
-			if !engineFailed(e) {
+			if !e.EngineFailed() {
 				allFailed = false
 				break
 			}
@@ -583,7 +583,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		switch {
 		case e.CompileFailed():
 			r.Stderr = domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
-		case engineFailed(e):
+		case e.EngineFailed():
 			r.Stderr = grader.ErrorMessage(e)
 		case !r.OK && r.Stderr == "":
 			r.Stderr = e.Result.Message
@@ -612,7 +612,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		}
 		for i, c := range cases {
 			r := resp.Results[i]
-			if engineFailed(execs[i]) {
+			if execs[i].EngineFailed() {
 				continue // the engine failed; that says nothing about the case
 			}
 			tc, err := tx.GetTestCase(c.ID)
@@ -654,13 +654,6 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		return nil
 	})
 	return resp, err
-}
-
-// engineFailed reports whether the engine itself failed on an execution:
-// it could not be reached, or it reported an internal error (Judge0's
-// status 13). Either way the execution says nothing about the program.
-func engineFailed(e grader.Execution) bool {
-	return e.Err != nil || e.Result.Status == judge.StatusInternalError
 }
 
 // recordLastRun stores run as the last run of the solution that ran, unless
