@@ -5,6 +5,8 @@
 
 import type {
   AuthSession,
+  McpToken,
+  McpTokenCreated,
   LoginRequest,
   PasswordChangeRequest,
   SetupRequest,
@@ -272,6 +274,13 @@ export const api = {
     logout: () => request<void>('POST', '/auth/logout'),
     /** Ends every other session of the account. */
     changePassword: (body: PasswordChangeRequest) => request<void>('POST', '/auth/password', { body }),
+    /** The signed-in account's MCP tokens, newest first. */
+    mcpTokens: {
+      list: (signal?: AbortSignal) => request<List<McpToken>>('GET', '/auth/mcp-tokens', { signal }),
+      /** The answer is the only time the token is shown. */
+      create: (name: string) => request<McpTokenCreated>('POST', '/auth/mcp-tokens', { body: { name } }),
+      revoke: (id: string) => request<void>('DELETE', `/auth/mcp-tokens/${enc(id)}`),
+    },
   },
   meta: (signal?: AbortSignal) => request<Meta>('GET', '/meta', { signal }),
   stats: (signal?: AbortSignal) => request<Stats>('GET', '/stats', { signal }),

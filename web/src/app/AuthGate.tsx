@@ -1,33 +1,15 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
-import {
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
-import { LogIn } from "lucide-react";
-import {
-  SIGNED_OUT_EVENT,
-  api,
-  isApiError,
-  type ApiError,
-} from "../api/client";
-import type { AuthSession } from "../api/types";
-import { Button } from "../ui/Button";
-import { Field } from "../ui/Field";
-import { Logo } from "../ui/Logo";
-import { Callout } from "../ui/misc";
-import { useDocumentTitle } from "./useDocumentTitle";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { LogIn } from 'lucide-react';
+import { SIGNED_OUT_EVENT, api, isApiError, type ApiError } from '../api/client';
+import type { AuthSession } from '../api/types';
+import { Button } from '../ui/Button';
+import { Field } from '../ui/Field';
+import { Logo } from '../ui/Logo';
+import { Callout } from '../ui/misc';
+import { useDocumentTitle } from './useDocumentTitle';
 
-const SESSION_KEY = ["auth", "session"] as const;
+const SESSION_KEY = ['auth', 'session'] as const;
 
 interface AuthValue {
   /** The session as the server reported it; null when it could not be read. */
@@ -67,9 +49,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onSignedOut = () => {
-      qc.setQueryData<AuthSession>(SESSION_KEY, (s) =>
-        s && s.enabled ? { ...s, user: null } : s,
-      );
+      qc.setQueryData<AuthSession>(SESSION_KEY, (s) => (s && s.enabled ? { ...s, user: null } : s));
     };
     window.addEventListener(SIGNED_OUT_EVENT, onSignedOut);
     return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut);
@@ -79,9 +59,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     try {
       await api.auth.logout();
     } finally {
-      qc.setQueryData<AuthSession>(SESSION_KEY, (s) =>
-        s ? { ...s, user: null } : s,
-      );
+      qc.setQueryData<AuthSession>(SESSION_KEY, (s) => (s ? { ...s, user: null } : s));
       forgetLibrary(qc);
     }
   }, [qc]);
@@ -105,26 +83,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-type FieldErrors = Partial<
-  Record<"email" | "password" | "confirm" | "setupCode", string>
->;
+type FieldErrors = Partial<Record<'email' | 'password' | 'confirm' | 'setupCode', string>>;
 
 /** The server's per-field messages, worded for the form ("is required" → "Required."). */
 function fieldErrors(err: ApiError): FieldErrors {
   const out: FieldErrors = {};
   for (const [field, msg] of Object.entries(err.fields)) {
     const text = String(msg);
-    const sentence = text.charAt(0).toUpperCase() + text.slice(1) + ".";
-    if (field === "email" || field === "password" || field === "setupCode")
-      out[field] = sentence;
+    const sentence = text.charAt(0).toUpperCase() + text.slice(1) + '.';
+    if (field === 'email' || field === 'password' || field === 'setupCode') out[field] = sentence;
   }
   return out;
 }
 
 function capitalise(s: string): string {
-  return s
-    ? s.charAt(0).toUpperCase() + s.slice(1) + (/[.!?]$/.test(s) ? "" : ".")
-    : s;
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) + (/[.!?]$/.test(s) ? '' : '.') : s;
 }
 
 /**
@@ -132,18 +105,12 @@ function capitalise(s: string): string {
  * account exists it creates the first one instead, which needs the setup code
  * the server logs.
  */
-export function SignInPage({
-  setup,
-  onSignedIn,
-}: {
-  setup: boolean;
-  onSignedIn: (s: AuthSession) => void;
-}) {
-  useDocumentTitle(setup ? "Create your account" : "Sign in");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [setupCode, setSetupCode] = useState("");
+export function SignInPage({ setup, onSignedIn }: { setup: boolean; onSignedIn: (s: AuthSession) => void }) {
+  useDocumentTitle(setup ? 'Create your account' : 'Sign in');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [setupCode, setSetupCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<FieldErrors>({});
@@ -153,34 +120,32 @@ export function SignInPage({
     setError(null);
     setFields({});
     if (setup && password !== confirm) {
-      setFields({ confirm: "The passwords differ." });
+      setFields({ confirm: 'The passwords differ.' });
       return;
     }
     setBusy(true);
     try {
-      const next = setup
-        ? await api.auth.setup({ email, password, setupCode })
-        : await api.auth.login({ email, password });
+      const next = setup ? await api.auth.setup({ email, password, setupCode }) : await api.auth.login({ email, password });
       onSignedIn(next);
     } catch (err) {
       setBusy(false);
       if (!isApiError(err)) {
-        setError("Something went wrong. Try again.");
+        setError('Something went wrong. Try again.');
         return;
       }
-      if (err.code === "validation_failed") {
+      if (err.code === 'validation_failed') {
         const fe = fieldErrors(err);
         setFields(fe);
         if (Object.keys(fe).length === 0) setError(capitalise(err.message));
         return;
       }
-      if (err.code === "conflict") {
+      if (err.code === 'conflict') {
         // Someone created the first account meanwhile: sign in instead.
         setError(capitalise(err.message));
         return;
       }
       setError(capitalise(err.message));
-      if (err.code === "unauthorized") setPassword("");
+      if (err.code === 'unauthorized') setPassword('');
     }
   };
 
@@ -194,14 +159,10 @@ export function SignInPage({
           </span>
         </div>
         <form className="card signin-card" onSubmit={submit} noValidate>
-          <h1 className="signin-title">
-            {setup ? "Create your account" : "Sign in"}
-          </h1>
+          <h1 className="signin-title">{setup ? 'Create your account' : 'Sign in'}</h1>
           {setup && (
             <p className="signin-lead">
-              No account exists yet. Paste the setup code from the server log
-              (look for <code translate="no">setupCode</code>) and choose the
-              email and password you will sign in with.
+              No account exists yet. Paste the setup code from the server log (look for <code translate="no">setupCode</code>) and choose the email and password you will sign in with.
             </p>
           )}
           {error && (
@@ -232,7 +193,7 @@ export function SignInPage({
                 {...p}
                 className="input"
                 type="email"
-                autoComplete={setup ? "email" : "username"}
+                autoComplete={setup ? 'email' : 'username'}
                 spellCheck={false}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -241,52 +202,23 @@ export function SignInPage({
               />
             )}
           </Field>
-          <Field
-            label="Password"
-            error={fields.password}
-            hint={setup ? "At least 8 characters." : undefined}
-          >
+          <Field label="Password" error={fields.password} hint={setup ? 'At least 8 characters.' : undefined}>
             {(p) => (
-              <input
-                {...p}
-                className="input"
-                type="password"
-                autoComplete={setup ? "new-password" : "current-password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <input {...p} className="input" type="password" autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} required />
             )}
           </Field>
           {setup && (
             <Field label="Repeat the password" error={fields.confirm}>
-              {(p) => (
-                <input
-                  {...p}
-                  className="input"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  required
-                />
-              )}
+              {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />}
             </Field>
           )}
-          <Button
-            type="submit"
-            variant="primary"
-            className="signin-submit"
-            icon={<LogIn size={16} />}
-            busy={busy}
-          >
-            {setup ? "Create account" : "Sign in"}
+          <Button type="submit" variant="primary" className="signin-submit" icon={<LogIn size={16} />} busy={busy}>
+            {setup ? 'Create account' : 'Sign in'}
           </Button>
         </form>
         {!setup && (
           <p className="signin-foot">
-            Forgot your password? Reset it on the server with{" "}
-            <code translate="no">codeatrophy user password &lt;email&gt;</code>.
+            Forgot your password? Reset it on the server with <code translate="no">codeatrophy user password &lt;email&gt;</code>.
           </p>
         )}
       </div>

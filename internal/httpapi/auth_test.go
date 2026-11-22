@@ -200,3 +200,21 @@ func TestAuthOffLeavesTheAPIOpen(t *testing.T) {
 	c.expect("POST", api+"/auth/login", `{"email":"me@example.com","password":"correct horse"}`, 400)
 	c.expect("GET", api+"/health", "", 200)
 }
+
+func TestAuthMCPTokens(t *testing.T) {
+	c := newAuthServer(t)
+	c.expect("GET", api+"/auth/mcp-tokens", "", 401)
+	c.login()
+	_, body := c.expect("POST", api+"/auth/mcp-tokens", `{"name":"Laptop"}`, 201)
+	if !strings.Contains(body, `"token":"cat_`) || !strings.Contains(body, `"name":"Laptop"`) {
+		t.Fatalf("created: %s", body)
+	}
+	_, list := c.expect("GET", api+"/auth/mcp-tokens", "", 200)
+	if strings.Contains(list, `"token"`) || !strings.Contains(list, `"hint"`) {
+		t.Errorf("the list shows the token: %s", list)
+	}
+	id := list[strings.Index(list, `"id":"`)+6:]
+	id = id[:strings.Index(id, `"`)]
+	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 204)
+	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 404)
+}

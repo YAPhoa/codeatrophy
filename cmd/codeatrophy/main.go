@@ -182,14 +182,18 @@ func serve() error {
 
 	hosts := cfg.HostAllowList()
 	var mcpHandler http.Handler
-	if cfg.MCP.Enabled && cfg.Auth && cfg.MCP.Token == "" {
-		log.Warn("the MCP endpoint refuses every request: sign-in is on and CODEATROPHY_MCP_TOKEN is not set")
-	}
 	if cfg.MCP.Enabled {
 		mcpOrigins := append(append([]string{}, cfg.AllowedOrigins...), cfg.MCP.AllowedOrigins...)
 		mcpHandler = mcpserver.Handler(mcpserver.Options{
 			App: a, Logger: log, Token: cfg.MCP.Token, RequireToken: cfg.Auth, MaxSessions: cfg.MCP.MaxSessions,
-			PrettyJSON:    cfg.MCP.PrettyJSON,
+			PrettyJSON: cfg.MCP.PrettyJSON,
+			CheckToken: func(ctx context.Context, token string) error {
+				if !cfg.Auth {
+					return errors.New("sign-in is off")
+				}
+				_, err := a.AuthenticateMCPToken(ctx, token)
+				return err
+			},
 			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})
 	}

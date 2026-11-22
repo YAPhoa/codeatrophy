@@ -245,6 +245,18 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
+// MCPToken is a bearer token an account made for MCP clients. ID is the
+// SHA-256 hash (hex) of the token; the token itself is never stored. Hint
+// is the token's last characters, to tell tokens apart in a list.
+type MCPToken struct {
+	ID         string
+	UserID     string
+	Name       string
+	Hint       string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+}
+
 // Store gives transactional access to the library.
 type Store interface {
 	// Read runs fn in a read-only transaction with a consistent snapshot.
@@ -445,6 +457,14 @@ type Tx interface {
 	DeleteSession(id string) error
 	DeleteUserSessions(userID, except string) error
 	DeleteExpiredSessions(before time.Time) error
+
+	// MCP tokens, per user, newest first. DeleteMCPToken removes a token
+	// of that user only, reporting whether there was one.
+	ListMCPTokens(userID string) ([]MCPToken, error)
+	GetMCPToken(id string) (MCPToken, error)
+	InsertMCPToken(t *MCPToken) error
+	TouchMCPToken(id string, at time.Time) error
+	DeleteMCPToken(userID, id string) (bool, error)
 
 	// Settings are opaque key/value pairs.
 	GetSetting(key string) (string, bool, error)

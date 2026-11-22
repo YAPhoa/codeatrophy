@@ -93,7 +93,7 @@ Everything is configured with environment variables, all documented in
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
 | `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](#signing-in)) |
 | `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
-| `CODEATROPHY_MCP_TOKEN` | unset | Bearer token for `/mcp`; required while sign-in is on |
+| `CODEATROPHY_MCP_TOKEN` | unset | Server-wide bearer token for `/mcp`, besides the per-account tokens made in the UI |
 
 AI providers are normally set up in the UI under Settings. You can keep
 several, such as a work key, a personal one and a local model server, and
@@ -147,8 +147,11 @@ request needs a session, except the health check (`/api/v1/health`).
   already authenticates. Anyone who can reach the port can then use the app,
   as before sign-in existed. The server logs a warning at startup.
 - **MCP.** Assistants cannot sign in with a password, so while sign-in is on
-  `/mcp` requires `CODEATROPHY_MCP_TOKEN` and refuses every request until it
-  is set. With sign-in off the token stays optional.
+  `/mcp` needs a bearer token: make one per machine or assistant under
+  Settings → Account → MCP tokens (shown once, with the command that
+  connects Claude Code), and revoke it there. `CODEATROPHY_MCP_TOKEN` adds a
+  server-wide token for unattended setups. With sign-in off that is the only
+  token, and optional.
 
 Passwords are stored as bcrypt hashes. The session cookie is `HttpOnly` and
 `SameSite=Strict`, and `Secure` over HTTPS (also behind a proxy that sends
@@ -166,10 +169,10 @@ claude mcp add --transport http codeatrophy http://localhost:8080/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8080/mcp`. While sign-in is on, set
-`CODEATROPHY_MCP_TOKEN` on the server (`openssl rand -hex 32` makes one) and
-configure the client to send `Authorization: Bearer <token>`, for example
-`claude mcp add --transport http codeatrophy http://localhost:8080/mcp --header "Authorization: Bearer <token>"`.
+`npx mcp-remote http://localhost:8080/mcp`. While sign-in is on, make a
+token under Settings → Account → MCP tokens; the UI shows the command with
+the token filled in, such as
+`claude mcp add --transport http codeatrophy http://localhost:8080/mcp --header "Authorization: Bearer cat_..."`.
 
 Over MCP the connected assistant does the writing; the server stores items,
 searches, and runs code to verify test cases. No AI provider needs to be

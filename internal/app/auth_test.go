@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -285,5 +286,82 @@ func TestAuthAccounts(t *testing.T) {
 	st, err := e.app.GetAuthStatus(e.ctx, "")
 	if err != nil || !st.SetupRequired {
 		t.Errorf("after deleting the last account: %+v, %v", st, err)
+	}
+}
+
+func TestMCPTokens(t *testing.T) {
+	e := newAuthEnv(t, true)
+	for _, email := range []string{"me@example.com", "you@example.com"} {
+		if _, err := e.app.CreateUser(e.ctx, email, "correct horse"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	login := func(email string) string {
+		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return si.Token
+	}
+	me, you := login("me@example.com"), login("you@example.com")
+
+	if _, err := e.app.CreateMCPToken(e.ctx, me, app.MCPTokenInput{Name: "  "}); code(err) != app.CodeValidation {
+		t.Errorf("blank name: %v", err)
+	}
+	if _, err := e.app.CreateMCPToken(e.ctx, me, app.MCPTokenInput{Name: "a\nb"}); code(err) != app.CodeValidation {
+		t.Errorf("two lines: %v", err)
+	}
+	if _, err := e.app.CreateMCPToken(e.ctx, "", app.MCPTokenInput{Name: "x"}); code(err) != app.CodeUnauthorized {
+		t.Errorf("signed out: %v", err)
+	}
+	made, err := e.app.CreateMCPToken(e.ctx, me, app.MCPTokenInput{Name: " Laptop "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(made.Token, app.MCPTokenPrefix) || made.Name != "Laptop" || made.Hint != made.Token[len(made.Token)-4:] || made.LastUsedAt != nil {
+		t.Errorf("made: %+v", made)
+	}
+	u, err := e.app.AuthenticateMCPToken(e.ctx, made.Token)
+	if err != nil || u.Email != "me@example.com" {
+		t.Fatalf("authenticate: %+v, %v", u, err)
+	}
+	for _, bad := range []string{"", "cat_nope", made.Token[len(app.MCPTokenPrefix):]} {
+		if _, err := e.app.AuthenticateMCPToken(e.ctx, bad); code(err) != app.CodeUnauthorized {
+			t.Errorf("token %q: %v", bad, err)
+		}
+	}
+	list, err := e.app.ListMCPTokens(e.ctx, me)
+	if err != nil || len(list) != 1 || list[0].ID != made.ID || list[0].LastUsedAt == nil {
+		t.Fatalf("list: %+v, %v", list, err)
+	}
+	if l, _ := e.app.ListMCPTokens(e.ctx, you); len(l) != 0 {
+		t.Errorf("another account sees my tokens: %+v", l)
+	}
+	// Only the owner revokes a token, and a revoked token stops working.
+	if err := e.app.DeleteMCPToken(e.ctx, you, made.ID); code(err) != app.CodeNotFound {
+		t.Errorf("revoked by another account: %v", err)
+	}
+	if err := e.app.DeleteMCPToken(e.ctx, me, made.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.AuthenticateMCPToken(e.ctx, made.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("revoked token: %v", err)
+	}
+	// An account holds a bounded number.
+	for i := range app.MaxMCPTokens {
+		if _, err := e.app.CreateMCPToken(e.ctx, me, app.MCPTokenInput{Name: fmt.Sprint("t", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.app.CreateMCPToken(e.ctx, me, app.MCPTokenInput{Name: "one more"}); code(err) != app.CodeConflict {
+		t.Errorf("over the limit: %v", err)
+	}
+	// A deleted account's tokens stop working.
+	last, _ := e.app.CreateMCPToken(e.ctx, you, app.MCPTokenInput{Name: "x"})
+	if err := e.app.DeleteUser(e.ctx, "you@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.AuthenticateMCPToken(e.ctx, last.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("token of a deleted account: %v", err)
 	}
 }

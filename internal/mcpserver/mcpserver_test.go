@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -1179,12 +1180,38 @@ func TestLimitsInOverviewAndSchemas(t *testing.T) {
 	}
 }
 
-// With sign-in on, an MCP endpoint without a token refuses every request.
-func TestRequireTokenWithoutToken(t *testing.T) {
-	h := mcpserver.Handler(mcpserver.Options{App: app.New(app.Options{Store: teststore.Open(t)}), RequireToken: true})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/mcp", strings.NewReader(`{}`)))
-	if rec.Code != 401 || !strings.Contains(rec.Body.String(), "CODEATROPHY_MCP_TOKEN") {
-		t.Errorf("%d %s", rec.Code, rec.Body.String())
+// With sign-in on, the endpoint needs a bearer token: the configured one
+// or an account's, which CheckToken accepts.
+func TestRequireToken(t *testing.T) {
+	a := app.New(app.Options{Store: teststore.Open(t)})
+	check := func(_ context.Context, tok string) error {
+		if tok == "cat_good" {
+			return nil
+		}
+		return errors.New("unknown")
+	}
+	for _, tc := range []struct {
+		name, configured, auth string
+		code                   int
+	}{
+		{"no token", "", "", 401},
+		{"an account token", "", "Bearer cat_good", 0},
+		{"an unknown token", "", "Bearer cat_bad", 401},
+		{"the configured token", "env-token", "Bearer env-token", 0},
+		{"an account token besides the configured one", "env-token", "Bearer cat_good", 0},
+	} {
+		h := mcpserver.Handler(mcpserver.Options{App: a, Token: tc.configured, RequireToken: true, CheckToken: check})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{}`))
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		h.ServeHTTP(rec, req)
+		if tc.code == 401 && rec.Code != 401 || tc.code != 401 && rec.Code == 401 {
+			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if tc.name == "no token" && !strings.Contains(rec.Body.String(), "Settings > Account") {
+			t.Errorf("no token: %s", rec.Body.String())
+		}
 	}
 }

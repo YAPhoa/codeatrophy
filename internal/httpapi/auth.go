@@ -165,3 +165,33 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) error {
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
+
+func (s *Server) listMCPTokens(w http.ResponseWriter, r *http.Request) error {
+	ts, err := s.app.ListMCPTokens(r.Context(), sessionToken(r))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": ts})
+	return nil
+}
+
+func (s *Server) createMCPToken(w http.ResponseWriter, r *http.Request) error {
+	var in app.MCPTokenInput
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	t, err := s.app.CreateMCPToken(r.Context(), sessionToken(r), in)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, t)
+	return nil
+}
+
+func (s *Server) deleteMCPToken(w http.ResponseWriter, r *http.Request) error {
+	if err := s.app.DeleteMCPToken(r.Context(), sessionToken(r), r.PathValue("id")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}

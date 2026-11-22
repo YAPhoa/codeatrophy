@@ -93,6 +93,9 @@ func (s *Server) routes() {
 	s.handle("POST /auth/setup", s.setup)
 	s.handle("POST /auth/logout", s.logout)
 	s.handle("POST /auth/password", s.changePassword)
+	s.handle("GET /auth/mcp-tokens", s.listMCPTokens)
+	s.handle("POST /auth/mcp-tokens", s.createMCPToken)
+	s.handle("DELETE /auth/mcp-tokens/{id}", s.deleteMCPToken)
 
 	s.handle("GET /meta", s.getMeta)
 	s.handle("GET /stats", s.getStats)

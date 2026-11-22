@@ -30,10 +30,13 @@ type Options struct {
 	Logger *slog.Logger
 	// Token, when non-empty, must be sent as a bearer token.
 	Token string
-	// RequireToken refuses every request while Token is empty. It is set
-	// when sign-in is on, so that the MCP endpoint is never the one open
+	// RequireToken requires a bearer token even while Token is empty. It is
+	// set when sign-in is on, so that the MCP endpoint is never the one open
 	// way into an instance that otherwise asks for a password.
 	RequireToken bool
+	// CheckToken, when set, accepts the tokens accounts make for their MCP
+	// clients (besides Token). It returns an error for any other token.
+	CheckToken func(ctx context.Context, token string) error
 	// OriginAllowed decides whether a request's Origin header is acceptable.
 	OriginAllowed func(*http.Request) bool
 	// MaxSessions caps concurrent sessions (default DefaultMaxSessions).
@@ -123,17 +126,16 @@ func Handler(opts Options) http.Handler {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
 		}
-		if opts.Token == "" && opts.RequireToken {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
-			http.Error(w, "the MCP endpoint needs a token while sign-in is on: set CODEATROPHY_MCP_TOKEN on the server "+
-				"and send it as \"Authorization: Bearer <token>\"", http.StatusUnauthorized)
-			return
-		}
-		if opts.Token != "" {
+		if opts.Token != "" || opts.RequireToken {
 			got, ok := bearerToken(r.Header.Get("Authorization"))
-			if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(opts.Token)) != 1 {
+			if !ok || !tokenAccepted(r.Context(), opts, got) {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				msg := "unauthorized"
+				if !ok && opts.RequireToken {
+					msg = "the MCP endpoint needs a bearer token: create one in the web UI under Settings > Account " +
+						"and send it as \"Authorization: Bearer <token>\""
+				}
+				http.Error(w, msg, http.StatusUnauthorized)
 				return
 			}
 		}
@@ -144,6 +146,15 @@ func Handler(opts Options) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// tokenAccepted reports whether a bearer token is the configured one or an
+// account's token.
+func tokenAccepted(ctx context.Context, opts Options, got string) bool {
+	if opts.Token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(opts.Token)) == 1 {
+		return true
+	}
+	return opts.CheckToken != nil && got != "" && opts.CheckToken(ctx, got) == nil
 }
 
 // bearerToken is the token of an Authorization header in the Bearer

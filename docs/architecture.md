@@ -864,8 +864,12 @@ of the routes; the `codeatrophy user` command uses the same services.
   (`Sec-Fetch-Site`, else `Origin` against `Host`). Unlike the host-based
   origin check below, it tells apart another port of the same host.
 - **MCP.** MCP clients cannot sign in with a password, so while sign-in is
-  on `/mcp` requires `CODEATROPHY_MCP_TOKEN` and refuses every request
-  without it; the endpoint is never the one open door.
+  on `/mcp` requires a bearer token and is never the one open door. Each
+  account makes its own tokens (`mcp_tokens`, stored as SHA-256 hashes like
+  sessions, revoked with the account), and `CODEATROPHY_MCP_TOKEN` adds a
+  server-wide one. The MCP adapter asks the services whether a token is an
+  account's; it does not yet scope what that account may do, since every
+  account shares the library.
 
 The UI's static files stay public; `GET /api/v1/auth/session` tells the UI
 whether to show the sign-in page. `GET /api/v1/health` needs no session, for

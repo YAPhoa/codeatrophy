@@ -24,7 +24,7 @@ Clients that only speak stdio can bridge with
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `CODEATROPHY_MCP_ENABLED` | `true` | Set `false` to remove the endpoint |
-| `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` (the scheme name in any case). Required while sign-in is on (`CODEATROPHY_AUTH`, on by default): without it every request is refused with `401` |
+| `CODEATROPHY_MCP_TOKEN` | unset | A server-wide token: when set, requests must send `Authorization: Bearer <token>` (the scheme name in any case), this one or an account's token |
 | `CODEATROPHY_MCP_ALLOWED_ORIGINS` | unset | Extra `Origin` values to accept, comma-separated |
 | `CODEATROPHY_MCP_MAX_SESSIONS` | `100` | Most sessions open at once |
 | `CODEATROPHY_MCP_PRETTY_JSON` | `false` | Set `true` to indent the JSON of tool results, for reading them yourself; compact JSON costs a model fewer tokens |
@@ -45,11 +45,26 @@ origin checks" in `docs/api.md`), the Host check first:
   compared with that configured set, never with the request's own `Host`.
 
 `GET /api/v1/meta` reports the full endpoint URL as `mcp.url` when
-`CODEATROPHY_PUBLIC_URL` is set. Browser sign-in does not apply to MCP
-clients, which cannot enter a password; the token is their sign-in. So while
-sign-in is on the endpoint needs the token, and only with
-`CODEATROPHY_AUTH=off` may it run without one, which is fine only while it is
-reachable from the local machine alone.
+`CODEATROPHY_PUBLIC_URL` is set.
+
+### Tokens
+
+MCP clients cannot enter a password, so a token is their sign-in. While
+sign-in is on (`CODEATROPHY_AUTH`, on by default) every request needs
+`Authorization: Bearer <token>`, and is refused with `401` otherwise. The
+token is one of:
+
+- **An account's token.** In the web UI, Settings → Account → MCP tokens
+  makes a token (`cat_...`) for the signed-in account, shows it once with the
+  command that connects Claude Code, lists when each was last used, and
+  revokes them. Make one per machine or assistant. See "MCP tokens" in
+  `docs/api.md`.
+- **`CODEATROPHY_MCP_TOKEN`**, a server-wide token from the configuration,
+  for unattended setups.
+
+With `CODEATROPHY_AUTH=off` there are no accounts to make tokens:
+`CODEATROPHY_MCP_TOKEN` is then the only token, and optional, which is fine
+only while the endpoint is reachable from the local machine alone.
 
 Sessions that have been idle for 30 minutes are closed; a client then starts
 a new one. When `CODEATROPHY_MCP_MAX_SESSIONS` sessions are open, a request

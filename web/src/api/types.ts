@@ -1326,3 +1326,17 @@ export interface PasswordChangeRequest {
   currentPassword: string;
   newPassword: string;
 }
+
+/** A token an account made for its MCP clients; the token itself is shown only when it is made. */
+export interface McpToken {
+  id: string;
+  name: string;
+  /** The token's last four characters, to tell tokens apart. */
+  hint: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface McpTokenCreated extends McpToken {
+  token: string;
+}

@@ -90,8 +90,9 @@ is on, every endpoint under `/api/v1` answers `401 unauthorized` to a
 request without a valid session, except `GET /health` and the endpoints
 under `/auth/` that the sign-in page needs (`GET /auth/session`,
 `POST /auth/login`, `POST /auth/setup`, `POST /auth/logout`). The UI's static
-files are public; the MCP endpoint has its own bearer token
-(`CODEATROPHY_MCP_TOKEN`), which it then requires.
+files are public. The MCP endpoint takes a bearer token instead, which it then
+requires: an account's own MCP token (see [MCP tokens](#mcp-tokens)) or
+`CODEATROPHY_MCP_TOKEN`.
 
 A session is a random token in the `codeatrophy_session` cookie
 (`HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` when the request
@@ -201,6 +202,31 @@ a new password outside 8 characters to 72 bytes is `422` on `newPassword`.
 
 Other accounts are managed on the server with `codeatrophy user`
 (`list`, `add`, `password`, `delete`); every account sees the same library.
+
+### MCP tokens
+
+Each account makes its own bearer tokens for its MCP clients. A token is
+`cat_` followed by 43 URL-safe characters; the server keeps only its SHA-256
+hash, so it is in a response only once, when it is made. While sign-in is on
+the MCP endpoint accepts these tokens (and `CODEATROPHY_MCP_TOKEN`, when
+set). A token stops working when it is revoked or its account is deleted.
+
+```json
+{ "id": "3f2a9c...", "name": "Laptop – Claude Code", "hint": "Xy3Q", "createdAt": "2026-11-22T04:00:00Z", "lastUsedAt": null }
+```
+
+`id` identifies the token in this API (it is not the token), `hint` is the
+token's last four characters, and `lastUsedAt` is when an MCP request last
+used it, updated at most once an hour (`null` if never). All three endpoints
+need a session and act on the signed-in account's tokens only.
+
+- `GET /auth/mcp-tokens` — `{ "items": [...] }`, newest first.
+- `POST /auth/mcp-tokens` — `{ "name": "..." }` (1–60 characters, one
+  line; `422 validation_failed` on `name`). `201` with the token above plus
+  `"token": "cat_..."`. An account holds at most 20 tokens; one more is
+  `409 conflict`.
+- `DELETE /auth/mcp-tokens/{id}` — revokes the token. `204`; `404` when the
+  account has no token with that id.
 
 ## Meta
 
@@ -324,8 +350,8 @@ to show.
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`. `mcp.authRequired` is `true` when
   the endpoint asks for a bearer token: when `CODEATROPHY_MCP_TOKEN` is set,
-  and always while sign-in is on (without a token it then refuses every
-  request).
+  and always while sign-in is on (an account's [MCP token](#mcp-tokens) or
+  `CODEATROPHY_MCP_TOKEN`).
 - `ai.enabled` is `true` when AI features are switched on and a default
   provider is chosen and `ready` (see [AI settings](#ai-settings)); `providerId`, `providerName`, `kind` and
   `model` then describe it, `model` being the one in effect. When `false`,

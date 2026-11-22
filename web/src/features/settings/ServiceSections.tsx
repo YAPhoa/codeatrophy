@@ -55,7 +55,7 @@ export function JudgeSection({ meta }: { meta: Meta }) {
   );
 }
 
-function CopyRow({ label, value }: { label: string; value: string }) {
+export function CopyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="copy-row">
       <div className="copy-label">{label}</div>
@@ -98,8 +98,8 @@ export function McpSection({ meta }: { meta: Meta }) {
           )}
           {mcp.authRequired ? (
             <p className="field-hint">
-              This server requires a bearer token. Replace <code translate="no">&lt;your-token&gt;</code> with the value of <code translate="no">CODEATROPHY_MCP_TOKEN</code> from the server’s configuration; the token is not shown
-              here.
+              This server requires a bearer token. Make one under <Link to="/settings/account">Account</Link>, which shows these commands with the token filled in, or replace{' '}
+              <code translate="no">&lt;your-token&gt;</code> with the value of <code translate="no">CODEATROPHY_MCP_TOKEN</code> from the server’s configuration.
             </p>
           ) : (
             <p className="field-hint">

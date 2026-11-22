@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -129,5 +130,87 @@ func testAuthMigration(t *testing.T, h MigrationHarness) {
 	})
 	h.rejects(t, db, map[string]string{
 		"a session of no user": `INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('x', 'nobody', 0, 0)`,
+	})
+}
+
+// MCP tokens belong to one user, go with it, and are deleted only by it.
+func testMCPTokens(t *testing.T, db store.Store) {
+	ctx := context.Background()
+	Write(t, db, func(tx store.Tx) error {
+		for _, id := range []string{"u1", "u2"} {
+			u := store.User{ID: id, Email: id + "@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
+			if err := tx.InsertUser(&u); err != nil {
+				return err
+			}
+		}
+		for i, tk := range []store.MCPToken{
+			{ID: "t1", UserID: "u1", Name: "Laptop", Hint: "ab12", CreatedAt: now},
+			{ID: "t2", UserID: "u1", Name: "Desktop", Hint: "cd34", CreatedAt: now.Add(time.Minute)},
+			{ID: "t3", UserID: "u2", Name: "Other", Hint: "ef56", CreatedAt: now},
+		} {
+			if err := tx.InsertMCPToken(&tk); err != nil {
+				return fmt.Errorf("token %d: %w", i, err)
+			}
+		}
+		return nil
+	})
+	if err := db.Write(ctx, func(tx store.Tx) error {
+		return tx.InsertMCPToken(&store.MCPToken{ID: "t4", UserID: "nobody", Name: "x", Hint: "x", CreatedAt: now})
+	}); err == nil {
+		t.Error("a token of no user was accepted")
+	}
+	if err := db.Write(ctx, func(tx store.Tx) error {
+		return tx.InsertMCPToken(&store.MCPToken{ID: "t5", UserID: "u1", Name: "", Hint: "x", CreatedAt: now})
+	}); err == nil {
+		t.Error("a token without a name was accepted")
+	}
+	l := Read(t, db, func(tx store.Tx) ([]store.MCPToken, error) { return tx.ListMCPTokens("u1") })
+	if len(l) != 2 || l[0].ID != "t2" || l[1].ID != "t1" || l[1].LastUsedAt != nil || l[1].Name != "Laptop" || l[1].Hint != "ab12" {
+		t.Errorf("list: %+v", l)
+	}
+	Write(t, db, func(tx store.Tx) error { return tx.TouchMCPToken("t1", now.Add(time.Hour)) })
+	if tk := Read(t, db, func(tx store.Tx) (store.MCPToken, error) { return tx.GetMCPToken("t1") }); tk.LastUsedAt == nil ||
+		!tk.LastUsedAt.Equal(now.Add(time.Hour)) || !tk.CreatedAt.Equal(now) {
+		t.Errorf("touched: %+v", tk)
+	}
+	if err := db.Read(ctx, func(tx store.Tx) error { _, err := tx.GetMCPToken("none"); return err }); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("missing token: %v", err)
+	}
+	del := func(user, id string) (ok bool) {
+		Write(t, db, func(tx store.Tx) (err error) { ok, err = tx.DeleteMCPToken(user, id); return })
+		return ok
+	}
+	if del("u2", "t1") {
+		t.Error("u2 deleted a token of u1")
+	}
+	if !del("u1", "t1") || del("u1", "t1") {
+		t.Error("DeleteMCPToken")
+	}
+	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteUser("u1"); return err })
+	if err := db.Read(ctx, func(tx store.Tx) error { _, err := tx.GetMCPToken("t2"); return err }); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a token outlived its user: %v", err)
+	}
+}
+
+// Migration 19 adds the MCP tokens: a database at version 18 keeps every
+// row, and afterwards tokens can be added.
+func testMCPTokensMigration(t *testing.T, h MigrationHarness) {
+	want, db := h.rerun(t, 19, func(db MigrationDB) {
+		Populate(t, db)
+		Write(t, db, func(tx store.Tx) error {
+			u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
+			return tx.InsertUser(&u)
+		})
+	}, func(db MigrationDB) {
+		if err := h.Exec(db, `SELECT COUNT(*) FROM mcp_tokens`); err == nil {
+			t.Error("version 18 has an mcp_tokens table")
+		}
+	}, Dump)
+	SameDump(t, "after migration 19", want, Dump(t, db))
+	Write(t, db, func(tx store.Tx) error {
+		return tx.InsertMCPToken(&store.MCPToken{ID: "t", UserID: "u", Name: "Laptop", Hint: "ab12", CreatedAt: now})
+	})
+	h.rejects(t, db, map[string]string{
+		"a token of no user": `INSERT INTO mcp_tokens (id, user_id, name, hint, created_at) VALUES ('x', 'nobody', 'n', 'h', 0)`,
 	})
 }
