@@ -1214,13 +1214,6 @@ a.pager-btn.is-current:hover {
   text-align: center;
 }
 
-.item-list-more {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-3);
-  border-top: 1px solid var(--border);
-}
-
 /* Narrow: the facts and tags move to a second, compact line under the
    title, so the title keeps the whole width of the first. */
 @media (max-width: 700px) {
@@ -1678,8 +1671,7 @@ a.pager-btn.is-current:hover {
   margin-top: var(--space-3);
 }
 
-.capture .callout,
-.review > .callout {
+.capture .callout {
   margin-top: var(--space-3);
 }
 
@@ -3875,14 +3867,6 @@ button.case-chip:hover {
   gap: var(--space-2);
 }
 
-.solution-card {
-  overflow: hidden;
-}
-
-.solution-card .editor-toolbar {
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-
 .solution-editor {
   height: 300px;
   resize: vertical;
@@ -3894,14 +3878,6 @@ button.case-chip:hover {
   height: 260px;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-}
-
-.verify-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
 }
 
 .tests .section > .callout {
