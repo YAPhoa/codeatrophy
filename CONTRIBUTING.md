@@ -74,12 +74,31 @@ any project; the second is what this one adds.
     affected, then what changed. Wrap at 72 columns. Refer to an earlier
     commit by its short hash. No line crediting a tool (`Co-Authored-By`,
     "Generated with").
-17. **Pushed history is not rewritten.** No force-push to `main`; a pushed
-    mistake is fixed, or reverted, with a new commit. If `main` is broken,
-    mending it comes before any other work.
+17. **Pushed history is not rewritten.** A pushed mistake is fixed, or
+    reverted, with a new commit. If `main` is broken, mending it comes
+    before any other work.
 18. **Nothing secret, personal or local is committed**: no `.env`, key,
     database file, real library content, private address, build output,
     editor or assistant settings, plans, task lists or notes.
+
+### Branches and pull requests
+
+19. **`main` is the only long-lived branch, and its history is a straight
+    line.** GitHub refuses a force-push, a deletion or a merge commit on it,
+    for everyone.
+20. **A branch is short-lived and does one thing.** Cut it from `main`, name
+    it for what it does (`session-cap-count`), bring it up to date by
+    rebasing, never by merging `main` into it, and delete it once merged.
+21. **A pull request is one change, or a series that builds one thing.** One
+    change is squashed into a single commit when merged, so the whole pull
+    request stays within rule 1. A series is merged by rebase, each commit
+    as it is, so each one follows these rules by itself.
+22. **The title and description are the commit message** (rules 15 and 16):
+    a squash uses them as written. The description also says which checks
+    you ran.
+23. **Only the maintainer merges**, after running the checks again, since
+    there is no CI. Expect to be asked to split a pull request that does
+    more than one thing.
 
 ### Exceptions
 
@@ -102,11 +121,16 @@ An exception that keeps coming back means the rule is wrong. Change it here.
   route, an MCP tool, a bundle field, a configuration variable, a dependency,
   or a part of the UI that every screen shares. Open an issue that says what
   the user will see, and wait for an answer before writing the code.
-- **Code from outside contributors cannot be merged yet.** Codeatrophy is
-  `AGPL-3.0-only` with a single copyright holder, and code from other people
-  is merged only under a contributor agreement, which does not exist yet.
-  Until it does, report bugs and propose changes in issues rather than in
-  pull requests.
+- **Pull requests are welcome**, from a branch of your fork. For anything on
+  the list above, the issue comes first.
+- **Terms for a contribution.** By opening a pull request you state that you
+  wrote the change or have the right to submit it, that it is licensed under
+  `AGPL-3.0-only` like the rest, and that you grant the copyright holder
+  named in `README.md` a perpetual, worldwide, royalty-free, irrevocable
+  licence to use it and to license it under other terms as well. That grant
+  keeps the whole project under one owner who can offer it under another
+  licence; a change that comes without it cannot be merged. On your first
+  pull request you are asked to confirm these terms in a comment.
 - **Security problems are reported privately**, through "Report a
   vulnerability" on the repository's Security tab, not in a public issue.
 
