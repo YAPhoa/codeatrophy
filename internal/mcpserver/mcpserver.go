@@ -418,17 +418,11 @@ func toolError(err error, pretty bool) *mcp.CallToolResult {
 	return res
 }
 
+// decodeArgs decodes a tool's arguments as the HTTP API decodes a body;
+// null arguments are {}.
 func decodeArgs(raw json.RawMessage, v any) error {
-	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		raw = []byte("{}")
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		raw = nil
 	}
-	if err := domain.DecodeJSON(raw, v); err != nil {
-		var te *domain.TypeError
-		if errors.As(err, &te) && te.Path != "" {
-			return &app.Error{Code: app.CodeValidation, Message: te.Error(),
-				Fields: map[string]any{te.Path: "must be " + te.Expected}}
-		}
-		return &app.Error{Code: app.CodeBadRequest, Message: "malformed arguments: " + err.Error()}
-	}
-	return nil
+	return app.DecodeInput(raw, v)
 }

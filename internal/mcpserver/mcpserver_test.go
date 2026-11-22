@@ -900,7 +900,8 @@ func TestChangeSource(t *testing.T) {
 }
 
 // Arguments that do not decode are reported as the HTTP API reports a body
-// that does not: a wrong type names the field, anything else is bad_request.
+// that does not, in the same words: a wrong type names the field, anything
+// else is bad_request.
 func TestArgumentDecoding(t *testing.T) {
 	f := newFixture(t, "")
 	s := f.connect(t, "")
@@ -912,7 +913,8 @@ func TestArgumentDecoding(t *testing.T) {
 	}
 	for _, raw := range []string{`[1]`, `"x"`, `7`} {
 		r, isErr := call(t, s, "get_item", json.RawMessage(raw))
-		if e, _ := r["error"].(map[string]any); !isErr || e["code"] != "bad_request" || e["fields"] != nil {
+		if e, _ := r["error"].(map[string]any); !isErr || e["code"] != "bad_request" || e["fields"] != nil ||
+			e["message"] != "the request body must be an object" {
 			t.Errorf("arguments %s: %v", raw, r)
 		}
 	}
