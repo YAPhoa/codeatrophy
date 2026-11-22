@@ -19,7 +19,10 @@ claude mcp add --transport http codeatrophy http://localhost:8484/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8484/mcp`.
+`npx mcp-remote http://localhost:8484/mcp`. While sign-in is on, make a
+token under Settings → MCP server → Tokens; the UI shows the command with
+the token filled in, such as
+`claude mcp add --transport http codeatrophy http://localhost:8484/mcp --header "Authorization: Bearer cat_..."`.
 
 | Variable | Default | Effect |
 | --- | --- | --- |

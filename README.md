@@ -114,25 +114,6 @@ built-in presets (Interview practice, the default; Contest style; Study
 notes), which you can edit or delete like your own; deleted ones do not come
 back.
 
-## Connecting an MCP client
-
-The MCP endpoint is `http://localhost:8484/mcp` (Streamable HTTP).
-
-```sh
-claude mcp add --transport http codeatrophy http://localhost:8484/mcp
-```
-
-Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8484/mcp`. While sign-in is on, make a
-token under Settings → MCP server → Tokens; the UI shows the command with
-the token filled in, such as
-`claude mcp add --transport http codeatrophy http://localhost:8484/mcp --header "Authorization: Bearer cat_..."`.
-
-Over MCP the connected assistant does the writing; the server stores items,
-searches, and runs code to verify test cases. No AI provider needs to be
-configured for this. See [`docs/mcp.md`](docs/mcp.md) for the tools and
-prompts.
-
 ## Development
 
 Layout: `cmd/` and `internal/` hold the Go server, `web/` the React UI,
