@@ -127,8 +127,14 @@ func TestListModelsFailures(t *testing.T) {
 			}
 			return `{"models":[` + strings.Join(models, ",") + `]}`
 		},
-		Key:         key,
-		New:         func(t *testing.T, base string) ai.ModelLister { return lister(t, base+"/v1beta") },
+		Key: key,
+		New: func(t *testing.T, base string, client *http.Client) ai.ModelLister {
+			p, err := New(ai.Config{BaseURL: base + "/v1beta", APIKey: key, HTTPClient: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return p.(ai.ModelLister)
+		},
 		Unreachable: "could not reach the Gemini API: ",
 		Cancelled:   "the request was cancelled",
 	})

@@ -310,13 +310,7 @@ func (p *Provider) mapError(err error) error {
 	return ai.Errorf(0, ai.Redact("could not reach the Anthropic API: "+rootCause(err), p.apiKey))
 }
 
-func rootCause(err error) string {
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		return ue.Err.Error()
-	}
-	return err.Error()
-}
+func rootCause(err error) string { return ai.TransportCause(err) }
 
 func (p *Provider) key() string { return p.baseURL + "\x00" + p.model }
 

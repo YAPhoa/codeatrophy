@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"codeatrophy/internal/ai"
@@ -27,8 +28,9 @@ type ModelListService struct {
 	// Key is the API key New configures; no error may contain it.
 	Key string
 	// New builds the provider's lister for a service at baseURL (the test
-	// server's URL, without a path), configured with Key.
-	New func(t *testing.T, baseURL string) ai.ModelLister
+	// server's URL, without a path), configured with Key and, unless nil,
+	// the HTTP client.
+	New func(t *testing.T, baseURL string, client *http.Client) ai.ModelLister
 	// Unreachable and Cancelled are what the errors for a service that
 	// cannot be reached and for a cancelled request say; "" checks only that
 	// the error is safe.
@@ -38,7 +40,9 @@ type ModelListService struct {
 // CheckModelLister checks what every ai.ModelLister reports the same way: a
 // rejected key, a service without a model list, another error status, a list
 // over the size or the entry bound, a cancelled request and an unreachable
-// service. Errors are *ai.Error, carry the upstream status (0 without one)
+// service; and, with the client of ai.NewHTTPClient, a redirect to another
+// origin (which must not receive the key) and an address the egress policy
+// refuses. Errors are *ai.Error, carry the upstream status (0 without one)
 // and never contain the key.
 func CheckModelLister(t *testing.T, s ModelListService) {
 	t.Helper()
@@ -67,7 +71,7 @@ func CheckModelLister(t *testing.T, s ModelListService) {
 		status, body = st, b
 		mu.Unlock()
 	}
-	l := s.New(t, srv.URL)
+	l := s.New(t, srv.URL, nil)
 	// failed checks that err is a safe *ai.Error with the status, whose
 	// message contains want.
 	failed := func(t *testing.T, err error, want string, wantStatus int) {
@@ -129,6 +133,39 @@ func CheckModelLister(t *testing.T, s ModelListService) {
 		cancel()
 		_, err := l.ListModels(ctx)
 		failed(t, err, s.Cancelled, 0)
+	})
+	t.Run("redirect to another origin", func(t *testing.T) {
+		var reached atomic.Int32
+		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reached.Add(1)
+			io.WriteString(w, s.Page([]string{"model-a"}))
+		}))
+		defer other.Close()
+		redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+		}))
+		defer redirecting.Close()
+		client, err := ai.NewHTTPClient(ai.EgressPolicy{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.New(t, redirecting.URL, client).ListModels(context.Background())
+		failed(t, err, "redirected to another origin", 0)
+		if n := reached.Load(); n != 0 {
+			t.Errorf("the other origin got %d requests, carrying the key", n)
+		}
+	})
+	t.Run("refused address", func(t *testing.T) {
+		client, err := ai.NewHTTPClient(ai.EgressPolicy{BlockPrivate: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		serve(http.StatusOK, s.Page([]string{"model-a"}))
+		_, err = s.New(t, srv.URL, client).ListModels(context.Background())
+		failed(t, err, s.Unreachable, 0)
+		if !strings.Contains(err.Error(), "127.0.0.1 is a loopback address, which AI providers may not connect to") {
+			t.Errorf("got %q, want the refusal", err)
+		}
 	})
 	t.Run("unreachable", func(t *testing.T) {
 		srv.Close()

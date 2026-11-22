@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"codeatrophy/internal/ai"
 	"codeatrophy/internal/domain"
 )
 
@@ -81,6 +82,8 @@ type AIConfig struct {
 	Timeout  time.Duration
 	// Workers is how many AI jobs run at once.
 	Workers int
+	// Egress limits the addresses providers may connect to.
+	Egress ai.EgressPolicy
 
 	AnthropicAPIKey  string
 	AnthropicModel   string
@@ -284,6 +287,13 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		OpenAIAPIKey:     get("CODEATROPHY_OPENAI_API_KEY", get("OPENAI_API_KEY", "")),
 		OpenAIModel:      get("CODEATROPHY_OPENAI_MODEL", ""),
 		OpenAIBaseURL:    get("CODEATROPHY_OPENAI_BASE_URL", ""),
+		Egress: ai.EgressPolicy{
+			BlockPrivate: getBool("CODEATROPHY_AI_BLOCK_PRIVATE", false),
+			Allow:        list("CODEATROPHY_AI_ALLOWED_HOSTS"),
+		},
+	}
+	if err := c.AI.Egress.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_AI_ALLOWED_HOSTS: %w", err))
 	}
 	switch c.AI.Provider {
 	case "", "none", "anthropic", "gemini", "openai_compatible":

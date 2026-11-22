@@ -263,12 +263,7 @@ func (p *Provider) transportError(err error, late string) error {
 	case errors.Is(err, context.Canceled):
 		return errCancelled()
 	}
-	cause := err.Error()
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		cause = ue.Err.Error()
-	}
-	return ai.Errorf(0, ai.Redact("could not reach the AI provider: "+cause, p.apiKey))
+	return ai.Errorf(0, ai.Redact("could not reach the AI provider: "+ai.TransportCause(err), p.apiKey))
 }
 
 // errCancelled is the error for a request its caller cancelled, worded as

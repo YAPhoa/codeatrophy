@@ -259,3 +259,27 @@ func TestAuth(t *testing.T) {
 		}
 	}
 }
+
+// AI providers may reach private addresses unless
+// CODEATROPHY_AI_BLOCK_PRIVATE is set; CODEATROPHY_AI_ALLOWED_HOSTS lists
+// exceptions, which must be names, addresses or CIDR prefixes.
+func TestAIEgress(t *testing.T) {
+	if c, err := LoadFrom(env(nil)); err != nil || c.AI.Egress.BlockPrivate || len(c.AI.Egress.Allow) != 0 {
+		t.Errorf("defaults: %+v %v", c.AI.Egress, err)
+	}
+	c, err := LoadFrom(env(map[string]string{
+		"CODEATROPHY_AI_BLOCK_PRIVATE": "true",
+		"CODEATROPHY_AI_ALLOWED_HOSTS": "ollama, 192.168.1.0/24 ,fd00::1",
+	}))
+	if err != nil || !c.AI.Egress.BlockPrivate || strings.Join(c.AI.Egress.Allow, ",") != "ollama,192.168.1.0/24,fd00::1" {
+		t.Errorf("set: %+v %v", c.AI.Egress, err)
+	}
+	for k, v := range map[string]string{
+		"CODEATROPHY_AI_BLOCK_PRIVATE": "sometimes",
+		"CODEATROPHY_AI_ALLOWED_HOSTS": "http://ollama:11434",
+	} {
+		if _, err := LoadFrom(env(map[string]string{k: v})); err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("%s=%s: %v", k, v, err)
+		}
+	}
+}

@@ -240,8 +240,8 @@ func TestListModelsFailures(t *testing.T) {
 			return `{"object":"list","data":[` + strings.Join(models, ",") + `]}`
 		},
 		Key: "sk-proj-listsecret",
-		New: func(t *testing.T, base string) ai.ModelLister {
-			p, err := New(ai.Config{BaseURL: base + "/v1", APIKey: "sk-proj-listsecret"})
+		New: func(t *testing.T, base string, client *http.Client) ai.ModelLister {
+			p, err := New(ai.Config{BaseURL: base + "/v1", APIKey: "sk-proj-listsecret", HTTPClient: client})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -770,7 +770,7 @@ func (a *App) modelOf(p provider) string {
 // providerConfig builds the configuration for constructing a provider for
 // requests bounded by timeout.
 func (a *App) providerConfig(p provider, timeout time.Duration) ai.Config {
-	return ai.Config{Model: a.modelOf(p), BaseURL: p.baseURL, APIKey: p.apiKey, Timeout: timeout}
+	return ai.Config{Model: a.modelOf(p), BaseURL: p.baseURL, APIKey: p.apiKey, Timeout: timeout, HTTPClient: a.client}
 }
 
 // activeAI constructs the provider for a request from the current settings,

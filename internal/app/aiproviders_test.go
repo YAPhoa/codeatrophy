@@ -3,7 +3,9 @@ package app_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -1396,5 +1398,37 @@ func TestAIProviderEffort(t *testing.T) {
 	}
 	if got := loggedEffort(res.Usage.LogID); got != "null" {
 		t.Errorf("logged effort with the default: %s", got)
+	}
+}
+
+// Providers are built with the client the server configured (its egress
+// policy), or by default one that refuses cloud metadata addresses.
+func TestAIProvidersGetTheEgressClient(t *testing.T) {
+	configured := &http.Client{}
+	for _, c := range []struct {
+		name string
+		opts []option
+		want func(*http.Client) bool
+	}{
+		{"configured", []option{func(o *app.Options) { o.ProviderClient = configured }}, func(got *http.Client) bool { return got == configured }},
+		{"default", nil, func(got *http.Client) bool {
+			if got == nil {
+				return false
+			}
+			_, err := got.Get("http://169.254.169.254/latest/meta-data/")
+			var ae *ai.AddressError
+			return errors.As(err, &ae)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, c.opts...)
+			p := e.addProvider(t, `{"name":"Local","kind":"openai_compatible","baseUrl":"http://localhost:11434/v1","model":"llama"}`)
+			e.setDefault(t, p.ID)
+			e.ai.Respond = func(ai.GenerateRequest) (any, error) { return draftJSON(), nil }
+			must(e.app.Draft(e.ctx, decodeInto[app.DraftInput](t, `{"text":"x"}`)))
+			if !c.want(e.lastConfig().HTTPClient) {
+				t.Errorf("provider client: %+v", e.lastConfig().HTTPClient)
+			}
+		})
 	}
 }

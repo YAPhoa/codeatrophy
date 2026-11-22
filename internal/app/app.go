@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -56,6 +57,9 @@ type Options struct {
 	Providers map[string]ai.Factory
 	// ProviderDefaults are the default model and base URL per provider.
 	ProviderDefaults map[string]ProviderDefaults
+	// ProviderClient is the HTTP client providers are constructed with;
+	// nil means one with the default ai.EgressPolicy.
+	ProviderClient   *http.Client
 	Secrets          *secrets.Box
 	AIEnv            AIEnv
 	Limits           domain.Limits
@@ -84,6 +88,7 @@ type App struct {
 	grader    *grader.Grader
 	providers map[string]ai.Factory
 	defaults  map[string]ProviderDefaults
+	client    *http.Client
 	secrets   *secrets.Box
 	aiEnv     AIEnv
 	limits    domain.Limits
@@ -120,6 +125,7 @@ func New(opts Options) *App {
 		engine:         opts.Engine,
 		providers:      opts.Providers,
 		defaults:       opts.ProviderDefaults,
+		client:         opts.ProviderClient,
 		secrets:        opts.Secrets,
 		aiEnv:          opts.AIEnv,
 		limits:         opts.Limits,
@@ -148,6 +154,9 @@ func New(opts Options) *App {
 	}
 	if a.log == nil {
 		a.log = slog.New(slog.DiscardHandler)
+	}
+	if a.client == nil {
+		a.client, _ = ai.NewHTTPClient(ai.EgressPolicy{}) // cannot fail without an allow list
 	}
 	if a.now == nil {
 		a.now = time.Now

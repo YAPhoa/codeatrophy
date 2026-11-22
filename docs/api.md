@@ -2372,6 +2372,15 @@ When `baseUrl` points at a different origin from the one the provider's key
 belongs to, that key is not used: only an `apiKey` given in the same request
 is sent, and with none the test is made without a key.
 
+The server does not connect to an address the egress policy refuses (cloud
+metadata and link-local addresses always; loopback and private ones with
+`CODEATROPHY_AI_BLOCK_PRIVATE`; see the README's Security section), and does
+not follow a redirect to another origin. Either is reported like an
+unreachable service, in `error` or `modelsError`, for example
+`could not reach the AI provider: 169.254.169.254 is a cloud metadata
+address, which AI providers may not connect to`. The same applies to every
+request a provider makes.
+
 The test does two things:
 
 1. It asks the service for its model list.

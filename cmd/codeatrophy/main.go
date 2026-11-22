@@ -129,6 +129,10 @@ func serve() error {
 		}
 	}
 
+	providerClient, err := ai.NewHTTPClient(cfg.AI.Egress)
+	if err != nil {
+		return fmt.Errorf("CODEATROPHY_AI_ALLOWED_HOSTS: %w", err)
+	}
 	anthropicModel := anthropic.DefaultModel
 	a := app.New(app.Options{
 		Store:  db,
@@ -143,7 +147,8 @@ func serve() error {
 			ai.ProviderGemini:           {BaseURL: gemini.DefaultBaseURL},
 			ai.ProviderOpenAICompatible: {BaseURL: openaicompat.DefaultBaseURL},
 		},
-		Secrets: box,
+		ProviderClient: providerClient,
+		Secrets:        box,
 		AIEnv: app.AIEnv{
 			Provider:         cfg.AI.Provider,
 			AnthropicAPIKey:  cfg.AI.AnthropicAPIKey,

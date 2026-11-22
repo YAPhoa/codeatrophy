@@ -743,7 +743,24 @@ without entering a new key deletes its saved key; an environment key belongs
 to the environment's (or default) base URL; and a connection test or model listing
 against another origin sends only a key given in that request. Without this, anyone able to change the settings —
 including a page that got past the request checks — could redirect the
-stored key to a server of their choosing.
+stored key to a server of their choosing. For the same reason providers do
+not follow a redirect to another origin: Go forwards custom headers such as
+`X-Api-Key` on redirects, so the key would go with it.
+
+Providers connect through one HTTP client (`ai.NewHTTPClient`) with an
+egress policy, because a base URL is chosen by whoever can edit the
+settings and the connection test shows part of the answer, which would
+otherwise let the server be used to fetch from addresses only it can reach
+(server-side request forgery). The policy is checked on the address actually
+dialled, after DNS resolution, so a name cannot be re-pointed between a
+check and the connection. Cloud metadata addresses (`169.254.169.254`,
+`fd00:ec2::254`, `100.100.100.200`) and link-local ranges are always refused;
+loopback and private ranges are allowed by default, since a local model
+server is the common self-hosted case, and refused with
+`CODEATROPHY_AI_BLOCK_PRIVATE`. `CODEATROPHY_AI_ALLOWED_HOSTS` lists host
+names (matched against the URL as written), addresses and CIDR prefixes
+that are exempt. Behind an HTTP proxy the proxy resolves names, so only base
+URLs given as IP addresses can be checked there.
 
 AI features can be switched off in the AI settings without forgetting the
 default provider. While they are, or with no default provider chosen, or one

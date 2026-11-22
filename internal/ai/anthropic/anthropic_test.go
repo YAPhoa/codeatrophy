@@ -492,8 +492,8 @@ func TestListModelsFailures(t *testing.T) {
 		// A 500 is retried once; at once, so that the test does not wait.
 		ErrorHeader: http.Header{"Retry-After-Ms": {"0"}},
 		Key:         testKey,
-		New: func(t *testing.T, base string) ai.ModelLister {
-			p, err := New(ai.Config{APIKey: testKey, BaseURL: base})
+		New: func(t *testing.T, base string, client *http.Client) ai.ModelLister {
+			p, err := New(ai.Config{APIKey: testKey, BaseURL: base, HTTPClient: client})
 			if err != nil {
 				t.Fatal(err)
 			}

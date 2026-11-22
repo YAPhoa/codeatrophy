@@ -84,6 +84,8 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_DB_AUTO_MIGRATE` | `on` | Apply schema migrations at startup; `off` leaves them to `db migrate` (see [Upgrading](#upgrading)) |
 | `CODEATROPHY_AI_PROVIDER` | unset | Initial default AI provider: the environment provider of `anthropic`, `gemini` or `openai_compatible` |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
+| `CODEATROPHY_AI_BLOCK_PRIVATE` | `false` | Also refuse loopback and private addresses as AI provider base URLs (see [Security](#security)) |
+| `CODEATROPHY_AI_ALLOWED_HOSTS` | unset | Host names, addresses or CIDR prefixes AI providers may reach whatever the rules say |
 | `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](#signing-in)) |
 | `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
 | `CODEATROPHY_MCP_TOKEN` | unset | Server-wide bearer token for `/mcp`, besides the per-account tokens made in the UI |
@@ -378,7 +380,19 @@ which an older Codeatrophy refuses to import; upgrade it first.
 - **API keys stay with their provider.** A stored key is bound to the origin
   of the base URL it was saved for. Pointing a provider at another base URL
   without entering a new key deletes the stored key, and a connection test
-  against another URL never sends a stored key.
+  against another URL never sends a stored key. A provider that redirects
+  to another origin is not followed, so the key does not travel with the
+  redirect.
+- **Addresses AI providers may reach.** A provider's base URL is chosen in
+  the settings, so the server refuses to connect to cloud metadata and
+  other link-local addresses (such as `169.254.169.254`, where a cloud VPS
+  hands out its credentials). Loopback and private addresses stay
+  reachable, so a model server on the same machine or your network
+  (Ollama, LM Studio) works without setup. When people you don't fully
+  trust have accounts, set `CODEATROPHY_AI_BLOCK_PRIVATE=true` to refuse
+  loopback and private addresses too, and list the model servers they may
+  use in `CODEATROPHY_AI_ALLOWED_HOSTS`, for example
+  `CODEATROPHY_AI_ALLOWED_HOSTS=ollama,192.168.1.30`.
 - **The judge runs untrusted code.** Judge0's sandbox (isolate) requires its
   worker container to run `privileged`. The Judge0 containers sit on an
   internal network without internet access, and submissions run without

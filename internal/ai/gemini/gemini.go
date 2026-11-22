@@ -196,12 +196,7 @@ func transportError(err error) error {
 	case errors.Is(err, context.Canceled):
 		return ai.Errorf(0, "the request was cancelled")
 	}
-	cause := err.Error()
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		cause = ue.Err.Error()
-	}
-	return ai.Errorf(0, "could not reach the Gemini API: "+cause)
+	return ai.Errorf(0, "could not reach the Gemini API: "+ai.TransportCause(err))
 }
 
 // statusError describes a response that is not a success. Google answers an
