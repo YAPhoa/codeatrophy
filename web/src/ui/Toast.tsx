@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { errorLine } from '../lib/errors';
 import { isAbort } from '../api/client';
-import { exitDuration } from '../lib/motion';
+import { exitDuration, movementDuration } from '../lib/motion';
 import { titleIfCut } from '../lib/titleIfCut';
 import { cx } from './Button';
 
@@ -67,8 +67,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     if (timer?.handle) window.clearTimeout(timer.handle);
     timers.current.delete(id);
     const remove = () => setToasts((list) => list.filter((t) => t.id !== id));
-    // The toast leaving, then its row closing, --duration-fast each; see ui.css.
-    const ms = exitDuration('--duration-fast') * 2;
+    // The toast fading out, then its row closing, --duration-fast each; see
+    // ui.css. With motion reduced the row closes at once, after the fade.
+    const ms = exitDuration('--duration-fast') + movementDuration('--duration-fast');
     if (ms === 0) {
       remove();
       return;

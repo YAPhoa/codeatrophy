@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
-import { Link, NavLink, useLocation, useParams } from 'react-router';
+import { Link, NavLink, useLocation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
@@ -36,13 +36,14 @@ import { useJobs } from '../features/jobs/JobsContext';
 import { JobsPopover } from '../features/jobs/JobsPopover';
 import { MOD } from '../lib/hotkeys';
 import { useIntent } from '../lib/intent';
-import { VIEW_PATHS, libraryRouteAt } from '../lib/libraryPaths';
+import { VIEW_PATHS, backViewAt, libraryRouteAt } from '../lib/libraryPaths';
 import { useNewItemHref } from '../lib/newItem';
-import { readJson, writeJson } from '../lib/storage';
+import { readJson, readString, writeJson } from '../lib/storage';
 import { setThemePreference, useThemePreference, type ThemePreference } from '../lib/theme';
 import { buildTree, siblingsOf, type CollectionNode } from '../lib/tree';
 import { IconSwap, MorphText, NumberChange } from '../ui/Animated';
 import { IconButton, LinkButton, cx } from '../ui/Button';
+import { RailTip, RailTipLabel } from '../ui/RailTip';
 import { MenuButton } from '../ui/Popover';
 import { Kbd, Spinner } from '../ui/misc';
 import { DraftsPage, SettingsPage, TagsPage } from './screens';
@@ -75,6 +76,11 @@ interface NavEntryProps {
   /** A count that asks for attention, in a filled circle; nothing at zero. */
   badge?: number;
   active: boolean;
+  /**
+   * Whether the active entry is the page on screen (`aria-current`), or only
+   * where an item page's Back leads, which is highlighted the same.
+   */
+  current?: boolean;
   /** Loads the screen the entry leads to, once the pointer or focus rests on it. */
   preload?: () => void;
 }
@@ -91,10 +97,10 @@ function NavBadge({ value, className }: { value: number; className?: string }) {
   );
 }
 
-function NavEntry({ to, icon, label, count, badge, active, preload }: NavEntryProps) {
+function NavEntry({ to, icon, label, count, badge, active, current = true, preload }: NavEntryProps) {
   const intent = useIntent(preload ?? nothing);
   return (
-    <Link to={to} className={cx('nav-item', active && 'is-active')} aria-current={active ? 'page' : undefined} {...(preload && intent)}>
+    <Link to={to} className={cx('nav-item', active && 'is-active')} aria-current={active && current ? 'page' : undefined} {...(preload && intent)}>
       <span className="nav-icon" aria-hidden="true">
         {icon}
       </span>
@@ -109,15 +115,17 @@ function NavEntry({ to, icon, label, count, badge, active, preload }: NavEntryPr
   );
 }
 
-/** One destination in the minimised navigation: an icon whose name is its tooltip and accessible name. */
-function RailEntry({ to, icon, label, badge, active, preload }: Omit<NavEntryProps, 'count'>) {
+/** One destination in the minimised navigation: an icon whose name is its label beside it and its accessible name. */
+function RailEntry({ to, icon, label, badge, active, current = true, preload }: Omit<NavEntryProps, 'count'>) {
   const intent = useIntent(preload ?? nothing);
   const named = badge ? `${label} (${badge})` : label;
   return (
-    <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active ? 'page' : undefined} aria-label={named} title={named} {...(preload && intent)}>
-      {icon}
-      {badge != null && <NavBadge value={badge} className="rail-badge" />}
-    </Link>
+    <RailTip label={named}>
+      <Link to={to} className={cx('rail-item', active && 'is-active')} aria-current={active && current ? 'page' : undefined} aria-label={named} {...(preload && intent)}>
+        {icon}
+        {badge != null && <NavBadge value={badge} className="rail-badge" />}
+      </Link>
+    </RailTip>
   );
 }
 
@@ -143,7 +151,6 @@ function JobsEntry({ rail, footRef }: { rail?: boolean; footRef: RefObject<HTMLD
     ref,
     type: 'button' as const,
     'aria-label': label,
-    title: label,
     'aria-expanded': open,
     'aria-controls': open ? id : undefined,
     onClick: () => setOpen(!open),
@@ -151,12 +158,14 @@ function JobsEntry({ rail, footRef }: { rail?: boolean; footRef: RefObject<HTMLD
   return (
     <>
       {rail ? (
-        <button {...trigger} className={cx('rail-item rail-jobs', seenEmpty && 'is-arriving', open && 'is-active')}>
-          {icon}
-          <NavBadge value={shown.length} className="rail-badge" />
-        </button>
+        <RailTip label={label}>
+          <button {...trigger} className={cx('rail-item rail-jobs', seenEmpty && 'is-arriving', open && 'is-active')}>
+            {icon}
+            <NavBadge value={shown.length} className="rail-badge" />
+          </button>
+        </RailTip>
       ) : (
-        <button {...trigger} className={cx('svc svc-jobs', seenEmpty && 'is-arriving', open && 'is-open')}>
+        <button {...trigger} title={label} className={cx('svc svc-jobs', seenEmpty && 'is-arriving', open && 'is-open')}>
           {icon}
           <span className="svc-jobs-text" aria-hidden="true">
             <MorphText text={running ? `${active} running` : `${shown.length} done`} />
@@ -286,7 +295,6 @@ const THEME_ICON: Record<ThemePreference, ReactNode> = {
 export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onOpenPalette, onOpenShortcuts }: SidebarProps) {
   const location = useLocation();
   const newHref = useNewItemHref();
-  const { collectionId } = useParams();
   const stats = useStats();
   const collections = useCollections();
   const drafts = useDrafts();
@@ -321,16 +329,23 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     });
 
   // The library's views are paths; a collection is highlighted in the tree.
-  const view = libraryRouteAt(location.pathname)?.view;
+  // On an item page, the view its Back leads to is highlighted, but is not
+  // the current page.
+  const here = libraryRouteAt(location.pathname);
+  const lit = here ?? backViewAt(location.pathname, readString('library:last'));
+  const view = lit?.view;
+  const current = here !== null;
+  const collectionId = lit?.collectionId ?? undefined;
   const s = stats.data;
 
   const judgeState = !meta.judge.enabled ? 'off' : meta.judge.healthy ? 'ok' : 'down';
 
-  const themeMenu = (
+  const themeMenu = (rail: boolean) => (
     <MenuButton
       variant="ghost"
       size="sm"
       label={`Theme: ${theme}`}
+      noTitle={rail}
       align="end"
       icon={THEME_ICON[theme]}
       items={(['system', 'light', 'dark'] as const).map((t) => ({
@@ -342,9 +357,10 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     />
   );
   const onSettings = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
-  const signOutButton = auth.session?.user ? (
-    <IconButton label={`Sign out (${auth.session.user.email})`} size="sm" icon={<LogOut size={16} />} onClick={() => void auth.signOut()} />
-  ) : null;
+  const signOutLabel = auth.session?.user ? `Sign out (${auth.session.user.email})` : null;
+  // In the rail it carries the rail's label instead of a title, like the controls around it.
+  const signOutButton = (rail: boolean) =>
+    signOutLabel ? <IconButton label={signOutLabel} noTitle={rail} size="sm" icon={<LogOut size={16} />} onClick={() => void auth.signOut()} /> : null;
   const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is off';
   const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
 
@@ -352,40 +368,55 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     // The rail keeps the destinations one click away; collections need the room of the full navigation.
     return (
       <aside className="sidebar is-rail" aria-label="Navigation">
-        <Link to="/" className="rail-brand" aria-label="Codeatrophy: all items" title="Codeatrophy">
-          <Logo size={32} className="brand-mark" />
-        </Link>
-        <IconButton label={`Expand navigation (${MOD}+B)`} size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
-        <Link to={newHref} className="rail-item rail-new" aria-label="New item" title="New item (C)">
-          <Plus size={16} />
-        </Link>
-        <button type="button" className="rail-item" onClick={onOpenPalette} aria-label="Search and commands" title={`Search and commands (${MOD}+K)`}>
-          <Search size={16} />
-        </button>
+        <RailTip label="Codeatrophy">
+          <Link to="/" className="rail-brand" aria-label="Codeatrophy: all items">
+            <Logo size={32} className="brand-mark" />
+          </Link>
+        </RailTip>
+        <RailTip label={`Expand navigation (${MOD}+B)`}>
+          <IconButton label={`Expand navigation (${MOD}+B)`} noTitle size="sm" icon={<PanelLeftOpen size={16} />} onClick={onToggleMinimised} />
+        </RailTip>
+        <RailTip label="New item (C)">
+          <Link to={newHref} className="rail-item rail-new" aria-label="New item">
+            <Plus size={16} />
+          </Link>
+        </RailTip>
+        <RailTip label={`Search and commands (${MOD}+K)`}>
+          <button type="button" className="rail-item" onClick={onOpenPalette} aria-label="Search and commands">
+            <Search size={16} />
+          </button>
+        </RailTip>
         <nav className="rail-nav" aria-label="Sections">
-          <RailEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" active={view === 'all'} />
-          <RailEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" active={view === 'problem'} />
-          <RailEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" active={view === 'reading'} />
-          <RailEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" active={view === 'favorite'} />
+          <RailEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" active={view === 'all'} current={current} />
+          <RailEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" active={view === 'problem'} current={current} />
+          <RailEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" active={view === 'reading'} current={current} />
+          <RailEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" active={view === 'favorite'} current={current} />
           <RailEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />
           <span className="rail-sep" aria-hidden="true" />
           <RailEntry to="/tags" icon={<Tags size={16} />} label="Tags" active={location.pathname === '/tags'} preload={TagsPage.preload} />
           <RailEntry to="/settings" icon={<Settings size={16} />} label="Settings" active={onSettings} preload={SettingsPage.preload} />
         </nav>
         <div className="rail-foot" ref={footRef}>
-          <Link to="/settings/ai" className="rail-svc" title={aiTitle} aria-label={aiTitle}>
-            <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
-            <span aria-hidden="true">AI</span>
-          </Link>
-          <Link to="/settings/judge" className="rail-svc" title={judgeTitle} aria-label={judgeTitle}>
-            <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
-            <span aria-hidden="true">Judge</span>
-          </Link>
+          <RailTip label={aiTitle}>
+            <Link to="/settings/ai" className="rail-svc" aria-label={aiTitle}>
+              <span className={cx('svc-dot', meta.ai.enabled ? 'is-ok' : 'is-off')} aria-hidden="true" />
+              <span aria-hidden="true">AI</span>
+            </Link>
+          </RailTip>
+          <RailTip label={judgeTitle}>
+            <Link to="/settings/judge" className="rail-svc" aria-label={judgeTitle}>
+              <span className={cx('svc-dot', `is-${judgeState}`)} aria-hidden="true" />
+              <span aria-hidden="true">Judge</span>
+            </Link>
+          </RailTip>
           <JobsEntry rail footRef={footRef} />
-          <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
-          {themeMenu}
-          {signOutButton}
+          <RailTip label="Keyboard shortcuts">
+            <IconButton label="Keyboard shortcuts" noTitle size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
+          </RailTip>
+          <RailTip label={`Theme: ${theme}`}>{themeMenu(true)}</RailTip>
+          {signOutLabel && <RailTip label={signOutLabel}>{signOutButton(true)}</RailTip>}
         </div>
+        <RailTipLabel />
       </aside>
     );
   }
@@ -417,16 +448,16 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
       <nav className="sidebar-scroll">
         <ul className="nav-group">
           <li>
-            <NavEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" count={s?.items.total} active={view === 'all'} />
+            <NavEntry to={VIEW_PATHS.all} icon={<Library size={16} />} label="All items" count={s?.items.total} active={view === 'all'} current={current} />
           </li>
           <li>
-            <NavEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" count={s?.items.byType.problem} active={view === 'problem'} />
+            <NavEntry to={VIEW_PATHS.problem} icon={<Code2 size={16} />} label="Problems" count={s?.items.byType.problem} active={view === 'problem'} current={current} />
           </li>
           <li>
-            <NavEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={view === 'reading'} />
+            <NavEntry to={VIEW_PATHS.reading} icon={<BookOpen size={16} />} label="Readings" count={s?.items.byType.reading} active={view === 'reading'} current={current} />
           </li>
           <li>
-            <NavEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={view === 'favorite'} />
+            <NavEntry to={VIEW_PATHS.favorite} icon={<Star size={16} />} label="Favorites" count={s?.items.favorites} active={view === 'favorite'} current={current} />
           </li>
           <li>
             <NavEntry to="/drafts" icon={<FilePen size={16} />} label="Drafts" badge={draftCount} active={onDrafts} preload={DraftsPage.preload} />
@@ -481,8 +512,8 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         <JobsEntry footRef={footRef} />
         <span className="spacer" />
         <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
-        {themeMenu}
-        {signOutButton}
+        {themeMenu(false)}
+        {signOutButton(false)}
       </div>
     </aside>
   );

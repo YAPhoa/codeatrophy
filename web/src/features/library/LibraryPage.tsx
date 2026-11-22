@@ -88,7 +88,7 @@ function SkeletonRows({ count, leaving }: { count: number; leaving?: boolean }) 
  * How the rows that replace the skeleton arrive: over it, with a cross-blur,
  * when it was on screen (`cross`); fading in on their own when it was still
  * hidden (`fade`). A reload keeps the app hidden until the first rows are in
- * (lib/boot.ts), and then they simply appear, as they do under reduced motion.
+ * (lib/boot.ts), and then they simply appear.
  */
 function useSkeletonReveal(pending: boolean, skeletonShown: boolean): 'cross' | 'fade' | null {
   const [state, setState] = useState<{ pending: boolean; seen: boolean; n: number; reveal: 'cross' | 'fade' | null }>({ pending, seen: false, n: 0, reveal: null });

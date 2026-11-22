@@ -202,19 +202,41 @@ textarea.mono {
   flex: 1 1 auto;
 }
 
-/* Reduced motion: transitions and one-shot animations jump to their end
-   state without waiting out a stagger delay, looping ones (spinners) stop
-   after a single pass instead of running forever at full speed, and smooth
-   scrolling (the reader's outline links) jumps. The generating panel's mark
-   has its own still state in features.css. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-delay: 0s !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+/* Reduced motion (the Reduce motion setting, lib/motion.ts): nothing moves,
+   and fades keep their durations. The movement tokens go neutral
+   (tokens.css), so entrances and exits that fade and move (popovers,
+   dialogs, toasts, tooltips, revealed rows) only fade; keyframes that move
+   by a fixed amount multiply it by --movement. What follows cuts what only
+   moves. Height tweens (Collapse, a toast's row) fade instead in ui.css, the
+   sidebar's slide gives way to a fade in layout.css, and script-timed moves
+   read movementDuration (lib/motion.ts). */
+
+/* Smooth scrolling (the reader's outline links) jumps. */
+:where(:root[data-motion='reduce']) * {
+  scroll-behavior: auto !important;
+}
+
+/* Transitions that only move: a chevron or disclosure arrow turning, a
+   progress bar's fill. They land at once. */
+:where(:root[data-motion='reduce']) :is(.item-expand-icon, .expand-chevron, .progress-fill, .cm-runner-chevron),
+:where(:root[data-motion='reduce']) .md .md-details-summary::before {
+  transition-duration: 0s !important;
+}
+
+/* Loops stop after a single pass, as a still frame, rather than running on:
+   spinners, loading placeholders and the editor's blinking cursor. The
+   generating panel's mark has its own still frame in features.css. */
+:where(:root[data-motion='reduce']) :is(.spinner, .spin, .skel, .cm-cursorLayer) {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* The one safety net: a diagram drawn from an item's Markdown (Mermaid) can
+   carry animations of its own that cannot be told apart, so they all land at
+   once. */
+:where(:root[data-motion='reduce']) .md-mermaid-svg :is(*, *::before, *::after) {
+  animation-duration: 0.001ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
 }

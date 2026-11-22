@@ -1222,6 +1222,13 @@ button.chip:hover {
   animation: toast-out var(--duration-fast) var(--ease-out) forwards;
 }
 
+/* With motion reduced the row opens and closes at once: the toast only fades
+   (its rise and sink are neutral then, tokens.css), and Toast.tsx removes it
+   as soon as it has faded. */
+:where(:root[data-motion='reduce']) :is(.toast-slot, .toast-slot.is-leaving) {
+  animation: none;
+}
+
 @keyframes toast-make-room {
   from {
     grid-template-rows: 0fr;
@@ -1957,6 +1964,16 @@ button.chip:hover {
   }
 }
 
+/* With motion reduced the height snaps: the row only fades in and out, over
+   the same time, so usePresence still keeps it for its exit. */
+:where(:root[data-motion='reduce']) .collapse.is-entering {
+  animation-name: fade-in;
+}
+
+:where(:root[data-motion='reduce']) .collapse.is-closing {
+  animation-name: fade-out;
+}
+
 /* Heavy content (Collapse's `heavy`): fades and settles in, transform and
    opacity only, and closes at once. */
 .collapse-fade {
@@ -2009,7 +2026,7 @@ details[open] > :not(summary) {
    path `stroke-dasharray: 12` along with the animation. */
 @keyframes check-draw {
   from {
-    stroke-dashoffset: -12;
+    stroke-dashoffset: calc(-12 * var(--movement));
   }
 }
 
@@ -2037,7 +2054,7 @@ details[open] > :not(summary) {
 @keyframes icon-swap-in {
   from {
     opacity: 0;
-    transform: scale(0.25);
+    transform: scale(calc(1 - 0.75 * var(--movement)));
     filter: blur(var(--blur-small));
   }
 }
@@ -2045,7 +2062,7 @@ details[open] > :not(summary) {
 @keyframes icon-swap-out {
   to {
     opacity: 0;
-    transform: scale(0.25);
+    transform: scale(calc(1 - 0.75 * var(--movement)));
     filter: blur(var(--blur-small));
   }
 }
@@ -2145,7 +2162,7 @@ details[open] > :not(summary) {
 @keyframes num-in {
   from {
     opacity: 0;
-    transform: translateY(calc(0.14em * var(--num-dir, 1)));
+    transform: translateY(calc(0.14em * var(--num-dir, 1) * var(--movement)));
     filter: blur(0.04em);
   }
 }
@@ -2153,7 +2170,7 @@ details[open] > :not(summary) {
 @keyframes num-out {
   to {
     opacity: 0;
-    transform: translateY(calc(-0.14em * var(--num-dir, 1)));
+    transform: translateY(calc(-0.14em * var(--num-dir, 1) * var(--movement)));
     filter: blur(0.04em);
   }
 }

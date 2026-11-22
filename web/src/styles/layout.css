@@ -6,33 +6,31 @@
    mounts, on opacity only: a page, a workspace's content under its bar, the
    reader. These are entrances (@starting-style), so they play when the
    element is inserted and never on a re-render, a filter or another
-   collection in the same screen. Nothing waits for them; under reduced
-   motion there is none. */
-@media (prefers-reduced-motion: no-preference) {
-  #root {
-    transition: opacity var(--duration-quick) var(--ease-out);
-  }
+   collection in the same screen. Nothing waits for them. They are fades, so
+   they play with motion reduced too. */
+#root {
+  transition: opacity var(--duration-quick) var(--ease-out);
+}
 
-  .shell,
-  .page,
-  .workspace > *,
-  .reader {
-    transition: opacity var(--duration-fast) var(--ease-out);
-  }
+.shell,
+.page,
+.workspace > *,
+.reader {
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
 
-  .shell {
-    transition-duration: var(--duration-quick);
-  }
+.shell {
+  transition-duration: var(--duration-quick);
+}
 
-  @starting-style {
-    /* A shell that arrives after the reveal (a slow start) fades in whole,
-       its page with it rather than after it. Going from one of a problem's
-       tabs to another (its bar `is-continued`), nothing fades: the content
-       swaps at once, as a fade from blank reads as a flicker. */
-    :root:not(.is-booting) .shell.is-arriving,
-    :root:not(.is-booting) .shell:not(.is-arriving) :is(.page:not(.workspace .page), .workspace:not(:has(> .is-continued)) > *, .reader) {
-      opacity: 0;
-    }
+@starting-style {
+  /* A shell that arrives after the reveal (a slow start) fades in whole,
+     its page with it rather than after it. Going from one of a problem's
+     tabs to another (its bar `is-continued`), nothing fades: the content
+     swaps at once, as a fade from blank reads as a flicker. */
+  :root:not(.is-booting) .shell.is-arriving,
+  :root:not(.is-booting) .shell:not(.is-arriving) :is(.page:not(.workspace .page), .workspace:not(:has(> .is-continued)) > *, .reader) {
+    opacity: 0;
   }
 }
 
@@ -90,7 +88,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-3) var(--space-1-5) var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-1-5) var(--space-2);
 }
 
 .brand {
@@ -129,15 +127,58 @@
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
 }
 
+/* Minimising or expanding (the button, or Ctrl+B) slides the sidebar's right
+   edge between the two widths; `is-sliding` is on the shell meanwhile
+   (Shell.tsx), and only then, so arriving at a page that remembers the other
+   width switches at once. The logo and the icons stay put, since the rail
+   has them where the full sidebar does. Collapsing, the rail is drawn at
+   once, held to its own width at the left of the shrinking column (its
+   padding is a percentage of the column); expanding, the full sidebar is
+   laid out at its full width and the moving edge uncovers it. */
+/* As a panel: it opens (expands) in --duration-slow and closes (minimises)
+   in --duration-medium. A transition takes the duration of the state it goes
+   to. */
+:where(:root:not([data-motion='reduce'])) .shell.is-sliding {
+  transition: grid-template-columns var(--duration-medium) var(--ease-out);
+}
+
+:where(:root:not([data-motion='reduce'])) .shell.is-sliding:not(.is-rail) {
+  transition-duration: var(--duration-slow);
+}
+
+.shell.is-sliding > .sidebar {
+  overflow: hidden;
+}
+
+.shell.is-sliding > .sidebar:not(.is-rail) > * {
+  min-width: calc(var(--sidebar-width) - 1px);
+}
+
+.shell.is-sliding > .sidebar.is-rail {
+  padding-right: calc(100% - var(--rail-width));
+}
+
+/* With motion reduced the width snaps, and what the sidebar now shows (the
+   rail or the full sidebar) fades in instead (`is-nav-fading`, Shell.tsx).
+   A rail control's wrapper draws no box, so its control fades. */
+.shell.is-nav-fading > .sidebar > :not(.rail-tip-anchor),
+.shell.is-nav-fading > .sidebar > .rail-tip-anchor > * {
+  animation: fade-in var(--duration-quick) var(--ease-out);
+}
+
+/* The 1px of left padding balances the right border, so the rail's controls
+   are centred on whole pixels: a 32px control at x 8 and its 16px icon at x
+   16, where the full sidebar has its logo and its view icons. Minimising
+   does not move them. */
 .sidebar.is-rail {
   align-items: center;
   gap: var(--space-0-5);
-  padding: var(--space-3) 0 var(--space-2);
+  padding: var(--space-3) 0 var(--space-2) 1px;
 }
 
 .rail-brand {
   display: inline-flex;
-  margin-bottom: var(--space-1-5);
+  margin-bottom: var(--space-3);
   border-radius: 6px;
 }
 
@@ -165,9 +206,11 @@
   color: var(--accent-text);
 }
 
-/* Looks like the soft button of the full sidebar's "New item". */
+/* Looks like the soft button of the full sidebar's "New item", spaced as a
+   block of its own: 14px above and 8px below with the rail's 2px gap. */
 .rail-new {
-  margin-top: var(--space-1-5);
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-1-5);
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--accent-text);
@@ -233,6 +276,87 @@
 
 .rail-jobs {
   color: var(--accent-text);
+}
+
+/* A rail control's name beside it, on hover and keyboard focus (RailTip). */
+.rail-tip-anchor {
+  display: contents;
+}
+
+/* The rail's one label (RailTip.tsx), as the app's tooltip moves (tokens.css):
+   the first waits --duration-micro, then fades and scales in over
+   --duration-quick; it goes in --duration-instant with no wait, and is then
+   hidden outright. Moving on to another control while it shows, it travels
+   there (translate, and its width for the new text) over --duration-quick,
+   and a label coming back as it fades out (`data-travel`) does not wait.
+   Under reduced motion every duration is nil (base.css), the wait stays. */
+.rail-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 300;
+  overflow: hidden;
+  padding: var(--space-1-5) 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  translate: var(--tip-x, 0px) var(--tip-y, 0px);
+  scale: var(--scale-tooltip);
+  transform-origin: left center;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--duration-instant) var(--ease-out),
+    scale var(--duration-instant) var(--ease-out),
+    visibility 0s linear var(--duration-instant),
+    translate var(--duration-quick) var(--ease-out),
+    width var(--duration-quick) var(--ease-out);
+}
+
+.rail-tip[data-show='true'] {
+  opacity: 1;
+  scale: 1;
+  visibility: visible;
+  transition:
+    opacity var(--duration-quick) var(--ease-out) var(--duration-micro),
+    scale var(--duration-quick) var(--ease-out) var(--duration-micro),
+    visibility 0s,
+    translate var(--duration-quick) var(--ease-out),
+    width var(--duration-quick) var(--ease-out);
+}
+
+.rail-tip[data-show='true'][data-travel] {
+  transition-delay: 0s;
+}
+
+.rail-tip-text {
+  display: inline-block;
+}
+
+/* With motion reduced it only fades, with the same wait: it neither scales
+   (--scale-tooltip is 1 then) nor travels, but is put beside the next
+   control at once. */
+:where(:root[data-motion='reduce']) .rail-tip {
+  transition:
+    opacity var(--duration-instant) var(--ease-out),
+    visibility 0s linear var(--duration-instant);
+}
+
+:where(:root[data-motion='reduce']) .rail-tip[data-show='true'] {
+  transition:
+    opacity var(--duration-quick) var(--ease-out) var(--duration-micro),
+    visibility 0s;
+}
+
+:where(:root[data-motion='reduce']) .rail-tip[data-show='true'][data-travel] {
+  transition-delay: 0s;
 }
 
 /* Inset to line up with the navigation's icons below (8px of scroll padding
@@ -876,6 +1000,23 @@ button.nav-twisty:hover {
     visibility: visible;
     transition:
       transform var(--duration-slow) var(--ease-out),
+      visibility 0s;
+  }
+
+  /* With motion reduced the drawer fades in and out in place rather than
+     sliding. */
+  :where(:root[data-motion='reduce']) .sidebar {
+    transform: none;
+    opacity: 0;
+    transition:
+      opacity var(--duration-medium) var(--ease-out),
+      visibility 0s linear var(--duration-medium);
+  }
+
+  :where(:root[data-motion='reduce']) .sidebar.is-open {
+    opacity: 1;
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
       visibility 0s;
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { exitDuration, token, useChangeCount } from '../lib/motion';
+import { exitDuration, movementDuration, token, useChangeCount } from '../lib/motion';
 import { cx } from './Button';
 
 // Small pieces that animate a change in place. Each plays only when what it
@@ -84,10 +84,11 @@ export function MorphText({ text }: { text: string }) {
     const next = swap?.lastElementChild;
     if (!swap || !out || !next || typeof swap.animate !== 'function') return;
     const fade = exitDuration('--duration-quick');
-    const resize = exitDuration('--duration-fast');
+    // The width eases only while motion is not reduced; the cross-fade plays either way.
+    const resize = movementDuration('--duration-fast');
     const easing = token('--ease-out') || 'ease-out';
     const blur = `blur(${token('--blur-small') || '2px'})`;
-    swap.animate([{ width: `${out.getBoundingClientRect().width}px` }, { width: `${next.getBoundingClientRect().width}px` }], { duration: resize, easing });
+    if (resize > 0) swap.animate([{ width: `${out.getBoundingClientRect().width}px` }, { width: `${next.getBoundingClientRect().width}px` }], { duration: resize, easing });
     out.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: blur }], { duration: fade, easing, fill: 'forwards' });
     next.animate([{ opacity: 0, filter: blur }, { opacity: 1, filter: 'blur(0)' }], { duration: fade, easing });
     const t = window.setTimeout(() => setState((s) => (s.n === n ? { ...s, from: null } : s)), Math.max(fade, resize));

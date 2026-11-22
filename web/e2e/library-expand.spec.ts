@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { mockApi, mockItem, open, row } from './support';
+import { mockApi, mockItem, open, reduceMotion, row } from './support';
 
 // A library row's line shows the title, as many tags as fit and the facts in
 // columns, named in the list's head; it opens, from its chevron or a click
@@ -574,13 +574,21 @@ test('library details: in a collection in manual order, the chevron comes before
   await expect(moved.getByRole('button', { name: 'Hide details' })).toBeVisible();
 });
 
-test('library details: under reduced motion they close at once', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
+test('library details: with motion reduced they fade in and out, at their full height', async ({ page }) => {
+  await reduceMotion(page);
   await open(page, '/');
   const r = row(page, LONGEST);
   await r.getByRole('button', { name: 'Show details' }).click();
   const details = await detailsOf(page, LONGEST);
   await expect(details).toBeVisible();
+  const collapse = page.locator('li.item-row .collapse').first();
+  const played = () => collapse.evaluate((el) => el.getAnimations().map((a) => `${(a as CSSAnimation).animationName} ${Number(a.effect!.getTiming().duration)}`));
+  // Opening plays a fade, not a growing height (the row's chevron turns at once).
+  expect(await collapse.evaluate((el) => getComputedStyle(el).animationName)).toBe('fade-in');
   await r.getByRole('button', { name: 'Hide details' }).click();
-  expect(await details.count()).toBe(0);
+  // Closing fades out over --duration-fast, then the row goes.
+  await expect(page.locator('li.item-row .collapse.is-closing')).toHaveCount(1);
+  expect(await played()).toEqual(['fade-out 250']);
+  await expect(details).toHaveCount(0);
+  expect(await r.locator('.item-expand-icon').evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
 });

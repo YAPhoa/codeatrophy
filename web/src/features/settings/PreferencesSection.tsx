@@ -4,6 +4,7 @@ import { useLimits, usePreferences, useUpdatePreferences } from '../../api/queri
 import type { EditorPreferences, Preferences, PreferencesUpdate } from '../../api/types';
 import { setThemePreference, useThemePreference } from '../../lib/theme';
 import { setReadingSize, useReadingSize } from '../../lib/readingSize';
+import { setReduceMotion, useReduceMotion } from '../../lib/motion';
 import { setTextWidth, TEXT_WIDTHS, useTextWidth } from '../../lib/textWidth';
 import { StatusSwap } from '../../ui/Animated';
 import { Checkbox, NumberStepper, Segmented } from '../../ui/Field';
@@ -124,6 +125,7 @@ export function PreferencesSection() {
   const setEditor = (change: Partial<EditorPreferences>) => save({ editor: change });
   const theme = useThemePreference();
   const readingSize = useReadingSize();
+  const reduceMotion = useReduceMotion();
   const textWidth = useTextWidth();
   const limits = useLimits();
   const maxGenerated = limits?.maxGeneratedTestCases ?? 30;
@@ -174,6 +176,20 @@ export function PreferencesSection() {
               { value: 'small', label: 'Small' },
               { value: 'default', label: 'Default' },
               { value: 'large', label: 'Large' },
+            ]}
+          />
+        </div>
+        <div className="prefs-row">
+          <div className="prefs-row-text">
+            <div className="prefs-row-label">Reduce motion</div>
+          </div>
+          <Segmented
+            label="Reduce motion"
+            value={reduceMotion}
+            onChange={setReduceMotion}
+            options={[
+              { value: 'on', label: 'On' },
+              { value: 'off', label: 'Off' },
             ]}
           />
         </div>

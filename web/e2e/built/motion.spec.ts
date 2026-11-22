@@ -81,3 +81,66 @@ test('built: a tooltip goes almost at once', async ({ page }) => {
   expect(lasted).toBeGreaterThan(30);
   expect(lasted).toBeLessThan(130);
 });
+
+test('built: with motion reduced, the page has it from its first paint, and the slide follows it', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('codeatrophy:motion', 'reduce');
+    // The attribute as it is when the page's body is parsed: before the app's script runs, and before the first paint.
+    const w = window as unknown as { __motionAtBody?: string | null };
+    new MutationObserver((_, mo) => {
+      if (!document.body) return;
+      w.__motionAtBody = document.documentElement.getAttribute('data-motion');
+      mo.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await open(page, '/');
+  expect(await page.evaluate(() => (window as unknown as { __motionAtBody?: string | null }).__motionAtBody)).toBe('reduce');
+  await expect(page.locator('html')).not.toHaveClass(/is-booting/);
+  // In the minified stylesheet too: fades keep their durations, the movement tokens are neutral.
+  expect(await page.locator('.shell').evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0.15s');
+  expect(await page.evaluate(() => ['--movement', '--scale-popover', '--distance-toast'].map((t) => getComputedStyle(document.documentElement).getPropertyValue(t).trim()))).toEqual(['0', '1', '0px']);
+  // The width snaps, and the rail fades in over --duration-quick, as script reads it too.
+  const fade = await page.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        document.addEventListener('animationstart', (e) => resolve(`${e.animationName} ${getComputedStyle(e.target as Element).animationDuration}`), { capture: true, once: true });
+        document.querySelector<HTMLButtonElement>('[aria-label^="Minimise navigation"]')!.click();
+      }),
+  );
+  expect(fade).toBe('fade-in 0.15s');
+  await expect(page.locator('aside.sidebar.is-rail')).toBeVisible();
+  expect((await page.locator('aside.sidebar').boundingBox())!.width).toBe(48);
+  await expect(page.locator('.shell')).not.toHaveClass(/\bis-sliding\b/);
+  await expect(page.locator('.shell')).not.toHaveClass(/\bis-nav-fading\b/);
+});
+
+test('built: the navigation slides open over --duration-slow and closed over --duration-medium', async ({ page }) => {
+  await open(page, '/');
+  await expect(page.locator('html')).not.toHaveClass(/is-booting/);
+  expect(await page.evaluate(() => document.documentElement.hasAttribute('data-motion'))).toBe(false);
+  // The slide's transition as the minified stylesheet has it, read as it starts.
+  const slide = (button: RegExp) =>
+    page.evaluate(
+      (source) =>
+        new Promise<number>((resolve) => {
+          document.addEventListener(
+            'transitionrun',
+            (e) => {
+              if (e.propertyName !== 'grid-template-columns') return;
+              const a = (e.target as Element).getAnimations().find((x) => (x as CSSTransition).transitionProperty === e.propertyName)!;
+              resolve(Number(a.effect!.getTiming().duration));
+            },
+            { capture: true, once: true },
+          );
+          const label = new RegExp(source);
+          [...document.querySelectorAll<HTMLButtonElement>('aside button[aria-label]')].find((b) => label.test(b.getAttribute('aria-label')!))!.click();
+        }),
+      button.source,
+    );
+  expect(await slide(/^Minimise navigation/)).toBe(350);
+  await expect(page.locator('.shell')).not.toHaveClass(/\bis-sliding\b/);
+  expect((await page.locator('aside.sidebar').boundingBox())!.width).toBe(48);
+  expect(await slide(/^Expand navigation/)).toBe(400);
+  await expect(page.locator('.shell')).not.toHaveClass(/\bis-sliding\b/);
+  expect((await page.locator('aside.sidebar').boundingBox())!.width).toBe(252);
+});

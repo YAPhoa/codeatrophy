@@ -1,11 +1,11 @@
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState, type TransitionEvent } from 'react';
 import { Link, Outlet, matchPath, useLocation, useNavigate } from 'react-router';
 import { Menu as MenuIcon, Plus, Search } from 'lucide-react';
 import { useAiSettings, useMeta } from '../api/queries';
 import { CollectionActionsProvider } from '../features/collections/CollectionActions';
 import { isBooting } from '../lib/boot';
 import { useHotkeys } from '../lib/hotkeys';
-import { exitDuration } from '../lib/motion';
+import { exitDuration, movementDuration } from '../lib/motion';
 import { useNewItemHref } from '../lib/newItem';
 import { readJson, writeJson } from '../lib/storage';
 import { useMediaQuery } from '../lib/useMediaQuery';
@@ -20,6 +20,11 @@ import { JobsProvider, useJobs } from '../features/jobs/JobsContext';
 
 /** Routes that show a problem workspace: the coding page and the pages that share its header. */
 const WORKSPACE_ROUTES = ['/items/:id', '/items/:id/tests', '/items/:id/tests/generate', '/items/:id/solutions'];
+
+/** The longer of the sidebar's slides, expanding (minimising takes --duration-medium; layout.css). */
+const SLIDE_TOKEN = '--duration-slow';
+/** How long the sidebar's new content takes to fade in when, with motion reduced, it does not slide. */
+const FADE_TOKEN = '--duration-quick';
 
 /** Whether the navigation is minimised, remembered separately for workspaces and for the other pages. */
 interface NavPrefs {
@@ -58,6 +63,8 @@ export function Shell() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [navPrefs, setNavPrefs] = useState(readNavPrefs);
   const [declared, setDeclared] = useState<boolean | null>(null);
+  const [sliding, setSliding] = useState(0);
+  const [navFading, setNavFading] = useState(0);
   const narrow = useMediaQuery('(max-width: 900px)');
 
   // Until the page says otherwise, an item route is taken to be a workspace,
@@ -79,9 +86,31 @@ export function Shell() {
       writeJson('layout:nav', next);
       return next;
     });
+    // Only a toggle slides the sidebar's edge (layout.css): going between a
+    // workspace and another page, which remember it apart, switches at once.
+    // With motion reduced the width snaps and the new content fades in.
+    if (movementDuration(SLIDE_TOKEN) > 0) setSliding((n) => n + 1);
+    else if (exitDuration(FADE_TOKEN) > 0) setNavFading((n) => n + 1);
   }, [narrow, workspace]);
 
-  const layout = useMemo<ShellLayout>(() => ({ navMinimised, toggleNav, declareWorkspace: setDeclared }), [navMinimised, toggleNav]);
+  // The slide ends with its transition (onTransitionEnd below): taking the
+  // class off any sooner would cut it short. This is only a fallback, should
+  // none end; each toggle restarts it.
+  useEffect(() => {
+    if (sliding === 0) return;
+    const t = window.setTimeout(() => setSliding(0), exitDuration(SLIDE_TOKEN) + 1000);
+    return () => window.clearTimeout(t);
+  }, [sliding]);
+  useEffect(() => {
+    if (navFading === 0) return;
+    const t = window.setTimeout(() => setNavFading(0), exitDuration(FADE_TOKEN) + 100);
+    return () => window.clearTimeout(t);
+  }, [navFading]);
+  const endSlide = (e: TransitionEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && e.propertyName === 'grid-template-columns') setSliding(0);
+  };
+
+  const layout = useMemo<ShellLayout>(() => ({ toggleNav, declareWorkspace: setDeclared }), [toggleNav]);
 
   // Close the navigation drawer (narrow screens) after navigating.
   useEffect(() => setDrawerOpen(false), [location.pathname, location.search]);
@@ -151,7 +180,7 @@ export function Shell() {
       <CollectionActionsProvider>
         {/* The jobs list opens only where the sidebar is on screen: not in a closed drawer. */}
         <JobsProvider canOpen={!narrow || drawerOpen}>
-        <div className={cx('shell', navMinimised && 'is-rail', arriving && 'is-arriving')}>
+        <div className={cx('shell', navMinimised && 'is-rail', sliding > 0 && 'is-sliding', navFading > 0 && 'is-nav-fading', arriving && 'is-arriving')} onTransitionEnd={endSlide}>
         <a href="#main" className="skip-link">
           Skip to content
         </a>

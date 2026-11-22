@@ -175,9 +175,10 @@ third-party origin.
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
+| `rail` | The navigation rail's one label beside its icons, on hover and focus: its wait, fade and travel between icons; the view an item page's Back leads to, lit in the sidebar; the sidebar's edge sliding on a toggle and only then |
 | `library-*`, `tags`, `palette`, `select` | The library list, the count by its title, its filters, paging and sorting; the Tags page; the command palette; selects |
 | `styles`, `system-prompt`, `generate-code`, `markdown`, `text-width` | Writing styles and prompts; "Generate code"; rendered Markdown, collapsible blocks, language tabs; the reader's text width |
-| `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not; when a loading state shows |
+| `guidelines`, `motion`, `loading` | Keyboard, focus, forms and layout rules; what animates and what does not, and what Reduce motion keeps and cuts; when a loading state shows |
 | `long-text` | Values at their longest with nothing to break at (titles, collection names, tags, test case names, a model id) stay inside their boxes on each screen that shows them, wrapped or cut short with their full text on hover |
 | `built/` | How a reload paints, judged on a production build (a second project, served by `vite preview` on port 5175, or `E2E_BUILT_PORT`, built afresh each run) |
 
@@ -287,8 +288,8 @@ A few conventions worth knowing:
   is a parameter in Favorites and a collection), sort and page. The old
   `/?type=…` and `/?favorite=true` addresses lead to the paths.
 - **Preferences live on the server** (`/settings/preferences`), so they follow
-  the user between browsers; only the theme, the reading text size and the
-  reader's text width (`src/lib/textWidth.ts`, also switched from the reader's
+  the user between browsers; only the theme, Reduce motion, the reading text
+  size and the reader's text width (`src/lib/textWidth.ts`, also switched from the reader's
   bar) are local, with the library's page size and its sort. The sort is
   remembered for each view of the sidebar and each collection apart, for 30
   days from the last visit (`src/lib/sortStore.ts`); a URL that names a sort
@@ -355,11 +356,26 @@ A few conventions worth knowing:
   in `src/styles/tokens.css`: things open in `--duration-fast` and close in
   `--duration-quick`. Overlays play their exit when React removes them:
   dialogs, popovers and the palette through `exitOnRemove`
-  (`src/lib/motion.ts`), opening rows through `Collapse` (`src/ui`). Neither waits
-  under reduced motion, where `base.css` also cuts every CSS duration and
-  animation delay (the draft review's staggered entrance) to nil and turns
-  smooth scrolling off.
-  Keep list rows, menu items and other keyboard-driven highlights instant.
+  (`src/lib/motion.ts`), opening rows through `Collapse` (`src/ui`).
+- **Reduce motion is a setting kept in the browser** (Settings, Appearance):
+  On or Off, stored as `codeatrophy:motion` (`reduce` or `full`). Until one
+  is chosen nothing is stored and the OS's reduced-motion setting decides,
+  followed live; once chosen, the OS is not consulted. While it is on,
+  `<html>` carries `data-motion="reduce"`, set by the script in `index.html`
+  before the first paint and kept up to date by `src/lib/motion.ts`;
+  nothing else reads `prefers-reduced-motion`.
+- **Reduced motion means no movement, not no animation.** Fades keep their
+  durations, exits included; what moves is removed. The movement tokens go
+  neutral (`--scale-*` to 1, `--distance-*` to 0, `--movement` to 0, at the
+  end of `tokens.css`), so the same keyframes become fades; a keyframe that
+  moves by a fixed amount multiplies it by `--movement`. `base.css` cuts the
+  transitions that only move (chevrons turning, a progress fill) and turns
+  smooth scrolling off; height tweens (`Collapse`, a toast's row) fade
+  instead; the sidebar's slide snaps, with its new content fading in.
+  Script asks `exitDuration` for a fade and `movementDuration` (nil while
+  motion is reduced) for a move: slides, FLIPs, the sliding indicators,
+  `MorphText`'s width, a shake. Loops (spinners, placeholders, the
+  generating mark, the editor's cursor) stand still.
 - **Animate a change, never an arrival.** A state that changes on screen may
   animate: an icon swapping (`IconSwap`), a label (`MorphText`), a count
   (`NumberChange`, all in `src/ui/Animated.tsx`), a fresh verdict, a toast.
@@ -382,7 +398,13 @@ A few conventions worth knowing:
   and the reader's text column eases aside for the notes as one (`slideFrom`).
   `Collapse` grows a row's height, which lays its content out on every frame:
   fine for a few rows, but pass `heavy` for code editors and diffs, which then
-  fade in. The navigation rail does not tween its width: with a long library on
-  screen that reflows the page on every frame.
+  fade in. The one width that tweens is the navigation's: minimising or
+  expanding it (the button or Ctrl+B, never arriving at a page that
+  remembers it otherwise) slides the shell's first grid column
+  (`is-sliding`, `src/app/Shell.tsx`) as a panel: open in `--duration-slow`,
+  closed in `--duration-medium`. The page beside it is laid out on each
+  frame, which holds 60fps on the library and the solve workspace as long as
+  nothing re-renders for the toggle: the shell's layout context leaves out
+  whether the navigation is minimised for that reason.
 - **Unit tests cover logic, not layout**: the API client, the mock, and the
   modules in `src/lib`. The Playwright suite covers the main flows end to end.

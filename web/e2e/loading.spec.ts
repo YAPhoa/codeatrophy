@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loadingRecord, open, recordLoading } from './support';
+import { loadingRecord, open, recordLoading, reduceMotion } from './support';
 
 // A load that is quick shows nothing as loading: the screen simply fades in.
 // Only a slow one shows an indicator, and only once 400ms have passed.
@@ -74,21 +74,22 @@ test('loading: resting on a row loads the item, so opening it shows no loading s
   expect(await page.evaluate(() => (window as unknown as { __mountedLoading: number }).__mountedLoading)).toBe(0);
 });
 
-test.describe('reduced motion', () => {
-  test.use({ reducedMotion: 'reduce' });
+test.describe('with motion reduced', () => {
+  test.beforeEach(async ({ page }) => reduceMotion(page));
 
-  test('a slow load still waits 400ms to show as loading, and the screen appears without a fade', async ({ page }) => {
+  test('a slow load still waits 400ms to show as loading, and the screen still fades in', async ({ page }) => {
     await recordLoading(page);
     await open(page, '/', 'slow');
     await expect(twoSum(page)).toBeVisible({ timeout: 10_000 });
     await twoSum(page).click();
     await expect(page.locator('.workspace-body')).toBeVisible();
-    expect(await page.locator('.workspace-body').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
     await inWorkspace(page);
     const record = await loadingRecord(page);
     expect(record.indicators.length).toBeGreaterThanOrEqual(2);
     for (const i of record.indicators) expect(i.shownAt - i.mountedAt).toBeGreaterThanOrEqual(395);
-    // No screen fades in. (The app's reveal flips at once: base.css cuts every duration to nil.)
-    expect(record.entrances.filter((e) => e.what !== 'div#root.')).toEqual([]);
+    // The screens fade in as they do with motion: a fade does not move.
+    expect(record.entrances.filter((e) => e.what !== 'div#root.').length).toBeGreaterThan(0);
+    // And so does a loading indicator once shown.
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('.workspace-body')!).transitionDuration)).not.toBe('0s');
   });
 });

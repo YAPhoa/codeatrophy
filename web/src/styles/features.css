@@ -104,7 +104,7 @@
   }
 
   30% {
-    transform: scale(0.8);
+    transform: scale(calc(1 - 0.2 * var(--movement)));
   }
 
   100% {
@@ -500,7 +500,7 @@
   color: var(--on-accent);
   pointer-events: none;
   opacity: 0;
-  transform: scale(0.5);
+  transform: scale(calc(1 - 0.5 * var(--movement)));
   transition:
     opacity var(--duration-quick) var(--ease-out),
     transform var(--duration-quick) var(--ease-out);
@@ -1949,37 +1949,34 @@ a.pager-btn.is-current:hover {
   }
 }
 
-/* Reduced motion: a still frame with four lines written and the caret at the
-   end of the last; the counter beside it still shows that time is passing. */
-@media (prefers-reduced-motion: reduce) {
-  .generating-row,
-  .generating-token,
-  .generating-caret {
-    animation: none;
-  }
+/* Reduced motion (the Reduce motion setting, lib/motion.ts): a still frame
+   with four lines written and the caret at the end of the last; the counter
+   beside it still shows that time is passing. */
+:where(:root[data-motion='reduce']) :is(.generating-row, .generating-token, .generating-caret) {
+  animation: none;
+}
 
-  .generating-row:nth-child(2) {
-    opacity: 0;
-  }
+:where(:root[data-motion='reduce']) .generating-row:nth-child(2) {
+  opacity: 0;
+}
 
-  .generating-row:nth-child(3) {
-    transform: translateY(-21px);
-    opacity: 0.38;
-  }
+:where(:root[data-motion='reduce']) .generating-row:nth-child(3) {
+  transform: translateY(-21px);
+  opacity: 0.38;
+}
 
-  .generating-row:nth-child(4) {
-    transform: translateY(-14px);
-    opacity: 0.52;
-  }
+:where(:root[data-motion='reduce']) .generating-row:nth-child(4) {
+  transform: translateY(-14px);
+  opacity: 0.52;
+}
 
-  .generating-row:nth-child(5) {
-    transform: translateY(-7px);
-    opacity: 0.7;
-  }
+:where(:root[data-motion='reduce']) .generating-row:nth-child(5) {
+  transform: translateY(-7px);
+  opacity: 0.7;
+}
 
-  .generating-caret {
-    transform: translate(28px, 23px);
-  }
+:where(:root[data-motion='reduce']) .generating-caret {
+  transform: translate(28px, 23px);
 }
 
 .generating-title {
@@ -2331,7 +2328,7 @@ a.usage-line:hover {
 @keyframes review-in {
   from {
     opacity: 0;
-    transform: translateY(var(--space-2));
+    transform: translateY(calc(var(--space-2) * var(--movement)));
   }
 }
 
@@ -2373,7 +2370,7 @@ a.usage-line:hover {
 @keyframes tick-in {
   from {
     opacity: 0;
-    transform: scale(0.5);
+    transform: scale(calc(1 - 0.5 * var(--movement)));
   }
 }
 
@@ -3132,7 +3129,7 @@ fieldset.stack legend {
 @keyframes check-in {
   from {
     opacity: 0;
-    rotate: 70deg;
+    rotate: calc(70deg * var(--movement));
     filter: blur(var(--blur-large));
   }
 }
@@ -3626,7 +3623,7 @@ button.case-chip:hover {
 @keyframes notes-in {
   from {
     opacity: 0;
-    transform: translateX(10%);
+    transform: translateX(calc(10% * var(--movement)));
     filter: blur(var(--blur-small));
   }
 }
@@ -3634,7 +3631,7 @@ button.case-chip:hover {
 @keyframes notes-out {
   to {
     opacity: 0;
-    transform: translateX(10%);
+    transform: translateX(calc(10% * var(--movement)));
     filter: blur(var(--blur-small));
   }
 }

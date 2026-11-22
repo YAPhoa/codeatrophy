@@ -16,6 +16,14 @@ export async function open(page: Page, path: string, mock = 'fast'): Promise<voi
   await page.goto(`${route}${route.includes('?') ? '&' : '?'}mock=${mock}${hash ? `#${hash}` : ''}`);
 }
 
+/**
+ * Set Reduce motion (Settings, Appearance) to On for every page load from now
+ * on, as the setting stored in the browser does, whatever the OS asks for.
+ */
+export async function reduceMotion(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('codeatrophy:motion', 'reduce'));
+}
+
 /** What `recordLoading` saw, in ms since the page started. */
 export interface LoadingRecord {
   /** When the app was first shown (`is-booting` gone). */

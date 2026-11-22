@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { legacyLibraryPath, libraryRouteAt } from './libraryPaths';
+import { backViewAt, isItemPage, legacyLibraryPath, libraryRouteAt } from './libraryPaths';
 
 describe('libraryRouteAt', () => {
   it('names the view of each library path', () => {
@@ -41,5 +41,37 @@ describe('legacyLibraryPath', () => {
     expect(legacyLibraryPath('?q=x&status=done&sort=title')).toBeNull();
     expect(legacyLibraryPath('?type=video')).toBeNull();
     expect(legacyLibraryPath('?favorite=false')).toBeNull();
+  });
+});
+
+describe('isItemPage', () => {
+  it('is the pages of one item whose Back leads to the library', () => {
+    for (const p of ['/items/i1', '/items/i1/', '/items/i1/tests', '/items/i1/tests/generate', '/items/i1/solutions']) expect(isItemPage(p)).toBe(true);
+    for (const p of ['/', '/problems', '/items/i1/edit', '/items/i1/saved', '/items/i1/variant', '/drafts/d1', '/items']) expect(isItemPage(p)).toBe(false);
+  });
+});
+
+describe('backViewAt', () => {
+  it('names the view Back leads to, by its path alone', () => {
+    expect(backViewAt('/items/i1', '/favorites?q=sum&sort=title')).toEqual({ view: 'favorite', collectionId: null });
+    expect(backViewAt('/items/i1/tests', '/problems')).toEqual({ view: 'problem', collectionId: null });
+    expect(backViewAt('/items/i1', '/collections/c1?page=2')).toEqual({ view: 'collection', collectionId: 'c1' });
+    expect(backViewAt('/items/i1', '/?q=graph')).toEqual({ view: 'all', collectionId: null });
+  });
+
+  it('is All items when nothing is stored', () => {
+    expect(backViewAt('/items/i1', null)).toEqual({ view: 'all', collectionId: null });
+    expect(backViewAt('/items/i1', '')).toEqual({ view: 'all', collectionId: null });
+  });
+
+  it('follows an old address to the view it leads to', () => {
+    expect(backViewAt('/items/i1', '/?type=reading&q=raft')).toEqual({ view: 'reading', collectionId: null });
+    expect(backViewAt('/items/i1', '/?favorite=true')).toEqual({ view: 'favorite', collectionId: null });
+  });
+
+  it('is null off an item page, or for an address that is no view', () => {
+    expect(backViewAt('/tags', '/favorites')).toBeNull();
+    expect(backViewAt('/items/i1/edit', '/favorites')).toBeNull();
+    expect(backViewAt('/items/i1', '/tags')).toBeNull();
   });
 });

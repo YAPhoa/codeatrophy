@@ -10,8 +10,9 @@
     <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
     <title>Codeatrophy</title>
     <!-- Before the first paint, so a reload in the dark theme does not flash white
-         while the stylesheet and lib/theme.ts load. Keep the storage key and the
-         two backgrounds (--bg) in step with lib/theme.ts and styles/tokens.css.
+         while the stylesheet and lib/theme.ts load, and nothing animates on it
+         while motion is reduced. Keep the storage keys and the two backgrounds
+         (--bg) in step with lib/theme.ts, lib/motion.ts and styles/tokens.css.
          `is-booting` keeps the app hidden until lib/boot.ts shows it whole;
          layout.css fades it in. -->
     <script>
@@ -20,6 +21,13 @@
         var t = localStorage.getItem('codeatrophy:theme');
         if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.dataset.theme = t;
+      } catch (e) {}
+      // Reduce motion (lib/motion.ts): on when chosen so (`reduce`), or, with nothing
+      // chosen, when the OS asks for it. The stylesheets key on this attribute.
+      try {
+        var m = null;
+        try { m = localStorage.getItem('codeatrophy:motion'); } catch (e) {}
+        if (m === 'reduce' || (m !== 'full' && matchMedia('(prefers-reduced-motion: reduce)').matches)) document.documentElement.dataset.motion = 'reduce';
       } catch (e) {}
     </script>
     <style>

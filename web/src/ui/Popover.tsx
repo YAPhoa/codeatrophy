@@ -194,9 +194,11 @@ export type MenuEntry =
 interface MenuButtonProps extends Omit<ButtonProps, 'onClick' | 'onSelect'> {
   items: MenuEntry[];
   align?: 'start' | 'end';
-  /** Accessible name for icon-only triggers. */
+  /** Accessible name for icon-only triggers, and their tooltip unless `noTitle`. */
   label?: string;
   menuLabel?: string;
+  /** No native tooltip: something else shows the label (the navigation rail's). */
+  noTitle?: boolean;
 }
 
 function moveFocus(container: HTMLElement, delta: number | 'first' | 'last') {
@@ -211,7 +213,7 @@ function moveFocus(container: HTMLElement, delta: number | 'first' | 'last') {
 }
 
 /** A button that opens a menu of actions. Arrow keys move, Enter/Space selects, Escape closes. */
-export function MenuButton({ items, align = 'start', label, menuLabel, children, ...buttonProps }: MenuButtonProps) {
+export function MenuButton({ items, align = 'start', label, menuLabel, noTitle, children, ...buttonProps }: MenuButtonProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -245,7 +247,7 @@ export function MenuButton({ items, align = 'start', label, menuLabel, children,
         {...buttonProps}
         ref={anchorRef}
         aria-label={label}
-        title={buttonProps.title ?? label}
+        title={noTitle ? undefined : (buttonProps.title ?? label)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

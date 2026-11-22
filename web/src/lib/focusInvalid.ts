@@ -1,4 +1,4 @@
-import { exitDuration, prefersReducedMotion } from './motion';
+import { movementDuration, prefersReducedMotion } from './motion';
 
 /**
  * After a failed save, take the user to the first thing that is wrong: focus
@@ -25,8 +25,8 @@ const SHAKEN_WHOLE = '.taginput, .editor-frame, .body-editor';
 
 const shakeEnds = new WeakMap<HTMLElement, number>();
 
-/** How long one shake lasts, in ms; nil under reduced motion. */
-export const shakeDuration = (): number => exitDuration('--duration-micro') * 4;
+/** How long one shake lasts, in ms; nil with motion reduced. */
+export const shakeDuration = (): number => movementDuration('--duration-micro') * 4;
 
 /** Plays `.is-shaking` (ui.css) from the start, even when the last shake has not ended. */
 export function shake(el: HTMLElement): void {

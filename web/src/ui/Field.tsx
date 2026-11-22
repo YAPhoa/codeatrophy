@@ -305,7 +305,7 @@ export function NumberStepper({ value, onChange, min, max, decreaseLabel, increa
           commit(settled.value);
           if (settled.clamped && inputRef.current) {
             shake(inputRef.current);
-            // The mark stays as long as a shake would last, under reduced motion too.
+            // The mark stays as long as a shake would last, with motion reduced too.
             setFlagged(true);
             window.clearTimeout(flagTimer.current);
             flagTimer.current = window.setTimeout(() => setFlagged(false), shakeDuration() || parseDuration(token('--duration-micro')) * 4);

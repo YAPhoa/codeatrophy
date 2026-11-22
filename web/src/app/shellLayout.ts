@@ -1,9 +1,12 @@
 import { createContext, useContext, useLayoutEffect } from 'react';
 import { readJson, writeJson } from '../lib/storage';
 
+/**
+ * What pages need of the application frame. Whether the navigation is
+ * minimised is left out on purpose: a toggle would re-render every page that
+ * reads this (the solve workspace), in the frame its edge starts to slide.
+ */
 export interface ShellLayout {
-  /** Whether the navigation sidebar is currently minimised to a rail. */
-  navMinimised: boolean;
   toggleNav: () => void;
   /**
    * Pages under `/items/:id` say whether they are a problem workspace (where
@@ -14,7 +17,6 @@ export interface ShellLayout {
 }
 
 export const ShellLayoutContext = createContext<ShellLayout>({
-  navMinimised: false,
   toggleNav: () => {},
   declareWorkspace: () => {},
 });

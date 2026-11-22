@@ -53,3 +53,33 @@ export function legacyLibraryPath(search: string): string | null {
   const qs = sp.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+/**
+ * The pages of one item whose Back arrow leads to the library view looked at
+ * last (`libraryHref` in features/item): the solve workspace or the reader,
+ * and a problem's other tabs.
+ */
+const ITEM_PAGES = ['/items/:id', '/items/:id/tests', '/items/:id/tests/generate', '/items/:id/solutions'];
+
+/** Whether `pathname` is a page of one item whose Back leads to the library. */
+export function isItemPage(pathname: string): boolean {
+  return ITEM_PAGES.some((path) => matchPath(path, pathname) !== null);
+}
+
+/**
+ * The view an item page's Back leads to, from the address stored as the
+ * library's last (`null` when none is: All items). Only its path counts, as
+ * the old addresses lead to theirs; `null` on any page that is not an item's,
+ * or when the address is not a view.
+ */
+export function backViewAt(pathname: string, last: string | null): LibraryRoute | null {
+  if (!isItemPage(pathname)) return null;
+  let url: URL;
+  try {
+    url = new URL(last || '/', 'http://library.invalid');
+  } catch {
+    return libraryRouteAt('/');
+  }
+  const moved = url.pathname === '/' ? legacyLibraryPath(url.search) : null;
+  return libraryRouteAt(moved ? new URL(moved, url).pathname : url.pathname);
+}

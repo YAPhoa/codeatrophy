@@ -1,8 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
-import { open, TWO_SUM_TEXT, writeCode } from './support';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { open, reduceMotion, TWO_SUM_TEXT, writeCode } from './support';
 
 // Motion plays on a change made on screen, never on arriving at data that
-// was already so; under reduced motion every change lands at once.
+// was already so; with motion reduced every change lands at once.
 
 /**
  * What fades in as it arrives: the app once on a reload, and each screen as
@@ -253,27 +253,153 @@ test('motion: a closing dialog plays its exit out of reach, then goes', async ({
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
 });
 
-test.describe('reduced motion', () => {
-  test.use({ reducedMotion: 'reduce' });
+test.describe('the Reduce motion setting', () => {
+  const html = (page: Page) => page.locator('html');
+  const setting = (page: Page) => page.getByRole('radiogroup', { name: 'Reduce motion' });
+  const option = (page: Page, name: 'On' | 'Off') => setting(page).getByRole('radio', { name, exact: true });
+  const stored = (page: Page) => page.evaluate(() => localStorage.getItem('codeatrophy:motion'));
+  /** How a menu opens: it fades in either way, and scales only while motion is not reduced. */
+  const menuEntrance = async (page: Page) => {
+    await page.getByRole('button', { name: /^Theme: / }).click();
+    const menu = page.locator('.popover[role="menu"]');
+    const seen = await menu.evaluate((el) => {
+      const a = el.getAnimations()[0] as CSSAnimation;
+      const from = (a.effect as KeyframeEffect).getKeyframes()[0]!;
+      a.pause();
+      a.currentTime = 0;
+      const cs = getComputedStyle(el);
+      return { name: a.animationName, duration: cs.animationDuration, opacity: from.opacity, transform: cs.transform };
+    });
+    await page.keyboard.press('Escape');
+    return seen;
+  };
+  const scaled = { name: 'popover-in', duration: '0.25s', opacity: '0', transform: 'matrix(0.97, 0, 0, 0.97, 0, 0)' };
+  const faded = { name: 'popover-in', duration: '0.25s', opacity: '0', transform: 'matrix(1, 0, 0, 1, 0, 0)' };
 
-  test('a toast and the copy label land at once', async ({ page }) => {
+  test.describe('when the OS asks for reduced motion', () => {
+    test.use({ reducedMotion: 'reduce' });
+
+    test('with nothing chosen it is on; Off overrides it, and is kept across a reload', async ({ page }) => {
+      await open(page, '/settings/preferences');
+      await expect(option(page, 'On')).toBeChecked();
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+      expect(await stored(page)).toBeNull();
+      expect(await menuEntrance(page)).toEqual(faded);
+
+      await setting(page).getByText('Off', { exact: true }).click();
+      await expect(option(page, 'Off')).toBeChecked();
+      await expect(html(page)).not.toHaveAttribute('data-motion');
+      expect(await stored(page)).toBe('full');
+      expect(await menuEntrance(page)).toEqual(scaled);
+
+      await page.reload();
+      await expect(option(page, 'Off')).toBeChecked();
+      await expect(html(page)).not.toHaveAttribute('data-motion');
+    });
+  });
+
+  test.describe('when the OS does not', () => {
+    test.use({ reducedMotion: 'no-preference' });
+
+    test('with nothing chosen it is off; On overrides it, and is kept across a reload', async ({ page }) => {
+      await open(page, '/settings/preferences');
+      await expect(option(page, 'Off')).toBeChecked();
+      await expect(html(page)).not.toHaveAttribute('data-motion');
+      expect(await menuEntrance(page)).toEqual(scaled);
+
+      await setting(page).getByText('On', { exact: true }).click();
+      await expect(option(page, 'On')).toBeChecked();
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+      expect(await stored(page)).toBe('reduce');
+      expect(await menuEntrance(page)).toEqual(faded);
+
+      await page.reload();
+      await expect(option(page, 'On')).toBeChecked();
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+    });
+
+    test('with nothing chosen it follows the OS as it changes; once chosen, it does not', async ({ page }) => {
+      await open(page, '/settings/preferences');
+      await expect(html(page)).not.toHaveAttribute('data-motion');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+      await expect(option(page, 'On')).toBeChecked();
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await expect(html(page)).not.toHaveAttribute('data-motion');
+      await expect(option(page, 'Off')).toBeChecked();
+
+      // On chosen while the OS asks for nothing; the OS changing back and forth leaves it be.
+      await setting(page).getByText('On', { exact: true }).click();
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await expect(option(page, 'On')).toBeChecked();
+      await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
+    });
+  });
+});
+
+/** Play every animation and transition at a tenth of its speed, so one can be caught partway. */
+async function slowMotion(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Animation.enable');
+  await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 });
+}
+
+/**
+ * The element's animations as they start: each one's name (or the property a
+ * transition moves) and duration, and the element's opacity and movement at
+ * their first frame.
+ */
+const atStart = (target: Locator) =>
+  target.evaluate((el) => {
+    const all = el.getAnimations();
+    for (const a of all) {
+      a.pause();
+      a.currentTime = 0;
+    }
+    const cs = getComputedStyle(el);
+    const seen = {
+      animations: all.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty} ${Number(a.effect!.getTiming().duration)}`),
+      opacity: cs.opacity,
+      // Anything moved off its place: a transform that is not the identity.
+      moved: [cs.transform, cs.translate, cs.scale, cs.rotate].filter((v) => !['none', '0deg', '0px', '0px 0px', '1', 'matrix(1, 0, 0, 1, 0, 0)'].includes(v)),
+    };
+    for (const a of all) a.play();
+    return seen;
+  });
+
+test.describe('with motion reduced', () => {
+  // Nothing moves; fades keep their durations.
+  test.beforeEach(async ({ page }) => reduceMotion(page));
+
+  test('a toast fades in without rising, and the copy label cross-fades without its width easing', async ({ page }) => {
     await open(page, '/');
     await settled(page);
+    await slowMotion(page);
     await page.locator('.item-row .item-check input').first().click();
     await page.locator('.bulkbar').getByRole('button', { name: /favorite/i }).click();
-    const toast = page.locator('.toast');
+    const toast = page.locator('.toast').first();
     await expect(toast).toBeVisible();
-    expect(await toast.evaluate((el) => [getComputedStyle(el).opacity, getComputedStyle(el).transform, getComputedStyle(el).filter])).toEqual(['1', 'none', 'none']);
+    expect(await atStart(toast)).toEqual({ animations: ['toast-in 350'], opacity: '0', moved: [] });
+    // Its row takes its height at once.
+    expect(await page.locator('.toast-slot').first().evaluate((el) => el.getAnimations().length)).toBe(0);
 
     await open(page, '/settings/mcp');
+    await slowMotion(page);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     const copy = page.locator('.copy-btn').first();
     await copy.click();
     await expect(copy).toHaveAccessibleName('Copied');
-    expect(await copy.locator('.morph-swap, .icon-swap-out').count()).toBe(0);
+    const swap = copy.locator('.morph-swap');
+    await expect(swap).toHaveCount(1);
+    expect(await swap.evaluate((el) => ({ width: el.getAnimations().length, fades: [...el.children].map((c) => c.getAnimations().length) }))).toEqual({ width: 0, fades: [1, 1] });
+    // The icon cross-fades as well, without growing or shrinking.
+    expect(await atStart(copy.locator('.icon-swap-icon.is-in'))).toMatchObject({ opacity: '0', moved: [] });
+    expect((await atStart(copy.locator('.icon-swap-out'))).moved).toEqual([]);
   });
 
-  test('the notes panel opens and closes at once', async ({ page }) => {
+  test('the notes panel fades in and out, and the text column does not move aside', async ({ page }) => {
     await open(page, '/readings');
     await page.getByRole('link', { name: 'Untrusted Markdown: What a Renderer Must Not Do' }).click();
     const notesButton = page.getByRole('button', { name: 'Notes', exact: true });
@@ -281,30 +407,31 @@ test.describe('reduced motion', () => {
     await expect(notesButton).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('.reader-notes')).toHaveCount(0);
 
+    await slowMotion(page);
     await notesButton.click();
     const panel = page.getByRole('complementary', { name: 'Private notes' });
     await expect(panel).toBeVisible();
-    expect(await panel.evaluate((el) => [getComputedStyle(el).opacity, getComputedStyle(el).transform])).toEqual(['1', 'none']);
+    expect(await atStart(panel)).toEqual({ animations: ['notes-in 400'], opacity: '0', moved: [] });
     expect(await page.locator('.reader-article').evaluate((el) => el.getAnimations().length)).toBe(0);
 
+    // Closing, it stays for its fade.
     await page.getByRole('button', { name: 'Close notes' }).click();
-    expect(await page.locator('.reader-notes').count()).toBe(0);
+    await expect(page.locator('.reader-notes.is-closing')).toHaveCount(1);
+    await expect(page.locator('.reader-notes')).toHaveCount(0);
   });
 
-  test('an accepted verdict is shown at once', async ({ page }) => {
+  test('an accepted verdict fades in, without turning, settling or drawing', async ({ page }) => {
     await open(page, '/');
     await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
     await writeCode(page, 'import sys\n\nprint(len(sys.stdin.readline()))\n');
+    await slowMotion(page);
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     const head = page.locator('.result-head.is-fresh');
     await expect(head).toContainText('Accepted');
     const check = head.locator('.result-check');
-    expect(await check.evaluate((el) => [getComputedStyle(el).opacity, getComputedStyle(el).filter, getComputedStyle(el.querySelector('path')!).strokeDashoffset])).toEqual([
-      '1',
-      'none',
-      '0px',
-    ]);
-    expect(await head.locator('.result-verdict').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    expect(await atStart(check)).toEqual({ animations: ['check-in 500', 'check-settle 500'], opacity: '0', moved: [] });
+    expect(await check.locator('path').evaluate((el) => parseFloat(getComputedStyle(el).strokeDashoffset))).toBe(0);
+    expect(await atStart(head.locator('.result-verdict'))).toEqual({ animations: ['result-in 350'], opacity: '0', moved: [] });
   });
 
   test('the mark of a generation in progress is a still frame', async ({ page }) => {
@@ -322,18 +449,39 @@ test.describe('reduced motion', () => {
     await expect(caret).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 28, 23)');
   });
 
-  test('dialogs and menus close at once', async ({ page }) => {
+  test('dialogs and menus fade in and out without scaling', async ({ page }) => {
     await open(page, '/');
+    await slowMotion(page);
     await page.getByRole('button', { name: 'New collection' }).click();
-    await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+    const dialog = page.getByRole('dialog', { name: 'New collection' });
+    await expect(dialog).toBeVisible();
+    expect((await atStart(dialog)).moved).toEqual([]);
+    expect(await atStart(page.locator('.dialog-backdrop'))).toMatchObject({ opacity: '0', moved: [] });
+    const finishAll = () => page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+    const closing = (selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector);
+    await finishAll();
     await page.keyboard.press('Escape');
-    expect(await page.locator('.dialog-backdrop').count()).toBe(0);
+    // Still there for its exit, then gone.
+    expect(await closing('.dialog-backdrop.is-closing')).toBe(1);
+    await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
 
     await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
     await page.getByRole('button', { name: 'More actions' }).click();
-    await expect(page.getByRole('menu')).toBeVisible();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    expect(await atStart(menu)).toEqual({ animations: ['popover-in 250'], opacity: '0', moved: [] });
+    await finishAll();
     await page.keyboard.press('Escape');
-    expect(await page.locator('.popover').count()).toBe(0);
+    expect(await closing('.popover.is-closing')).toBe(1);
+    await expect(page.locator('.popover')).toHaveCount(0);
+  });
+
+  test('a sliding indicator moves at once', async ({ page }) => {
+    await open(page, '/settings/preferences');
+    await settled(page);
+    await page.getByRole('radiogroup', { name: 'Reading text size' }).getByText('Large').click();
+    await page.getByRole('radiogroup', { name: 'Reading text size' }).getByText('Default').click();
+    expect(await page.evaluate(() => document.getAnimations().filter((a) => (a.effect as KeyframeEffect).pseudoElement).length)).toBe(0);
   });
 
   test('the reader jumps to a heading instead of scrolling smoothly', async ({ page }) => {

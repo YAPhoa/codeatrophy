@@ -38,9 +38,13 @@ export function Button({ variant = 'default', size = 'md', icon, busy, children,
   );
 }
 
-/** A button that shows only an icon. `label` is required: it is the accessible name and the tooltip. */
-export function IconButton({ label, ...rest }: Omit<ButtonProps, 'children' | 'aria-label'> & { label: string }) {
-  return <Button variant="ghost" {...rest} aria-label={label} title={rest.title ?? label} />;
+/**
+ * A button that shows only an icon. `label` is required: it is the accessible
+ * name and the tooltip, unless `noTitle` leaves the tooltip to something else
+ * (a label on the navigation rail).
+ */
+export function IconButton({ label, noTitle, ...rest }: Omit<ButtonProps, 'children' | 'aria-label'> & { label: string; noTitle?: boolean }) {
+  return <Button variant="ghost" {...rest} aria-label={label} title={noTitle ? undefined : (rest.title ?? label)} />;
 }
 
 export function LinkButton({

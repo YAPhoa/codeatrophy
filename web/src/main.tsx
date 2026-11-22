@@ -8,6 +8,7 @@ import { routes } from './App';
 import { initTheme } from './lib/theme';
 import { applyCodeTheme } from './lib/codeThemes';
 import { initReadingSize } from './lib/readingSize';
+import { initMotion } from './lib/motion';
 import { revealWhenSettled } from './lib/boot';
 import { AuthGate } from './app/AuthGate';
 import { ConfirmProvider } from './ui/Dialog';
@@ -38,6 +39,7 @@ async function start() {
   initTheme();
   applyCodeTheme();
   initReadingSize();
+  initMotion();
 
   const queryClient = new QueryClient({
     defaultOptions: {

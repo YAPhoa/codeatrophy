@@ -1,7 +1,77 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { readString, writeString } from './storage';
 
+/**
+ * Reduce motion (Settings, Appearance), On or Off, kept in the browser as
+ * `codeatrophy:motion`: `reduce` for On, `full` for Off. Until either is
+ * chosen, nothing is stored and the OS decides (`prefers-reduced-motion:
+ * reduce` is On), followed live; once chosen, the OS is no longer asked.
+ * While it is on, `<html>` carries `data-motion="reduce"`, which the
+ * stylesheets key on: nothing moves, and fades keep their durations
+ * (tokens.css, base.css). index.html sets the attribute before the first
+ * paint by the same rule; keep the two in step.
+ */
+export type ReduceMotion = 'on' | 'off';
+
+const MOTION_KEY = 'motion';
+const OS_REDUCED = '(prefers-reduced-motion: reduce)';
+const motionListeners = new Set<() => void>();
+
+/** What was chosen, if anything: `reduce` (On) or `full` (Off). */
+function storedMotion(): 'full' | 'reduce' | null {
+  const v = readString(MOTION_KEY);
+  return v === 'full' || v === 'reduce' ? v : null;
+}
+
+function osReducesMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.(OS_REDUCED).matches === true;
+}
+
+/** Whether motion is reduced, from what was chosen (if anything) and the OS's setting. */
+export function reduceMotionFor(stored: 'full' | 'reduce' | null, osReduced: boolean): ReduceMotion {
+  if (stored) return stored === 'reduce' ? 'on' : 'off';
+  return osReduced ? 'on' : 'off';
+}
+
+export function getReduceMotion(): ReduceMotion {
+  return reduceMotionFor(storedMotion(), osReducesMotion());
+}
+
+function applyMotion(): void {
+  if (getReduceMotion() === 'on') document.documentElement.dataset.motion = 'reduce';
+  else delete document.documentElement.dataset.motion;
+}
+
+function notifyMotion(): void {
+  applyMotion();
+  motionListeners.forEach((fn) => fn());
+}
+
+/** Choose On or Off; from then on the OS's setting is not consulted. */
+export function setReduceMotion(value: ReduceMotion): void {
+  writeString(MOTION_KEY, value === 'on' ? 'reduce' : 'full');
+  notifyMotion();
+}
+
+/** Apply the setting, and follow the OS's while nothing has been chosen. */
+export function initMotion(): void {
+  applyMotion();
+  window.matchMedia?.(OS_REDUCED).addEventListener?.('change', notifyMotion);
+}
+
+function subscribeMotion(fn: () => void): () => void {
+  motionListeners.add(fn);
+  return () => motionListeners.delete(fn);
+}
+
+/** Whether motion is reduced now, as the setting shows it. */
+export function useReduceMotion(): ReduceMotion {
+  return useSyncExternalStore(subscribeMotion, getReduceMotion, () => 'off');
+}
+
+/** Whether motion is reduced now, as applied to the page (`data-motion`). */
 export function prefersReducedMotion(): boolean {
-  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  return typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduce';
 }
 
 // Tokens are read from the stylesheet once and kept: a style read forces a
@@ -19,13 +89,23 @@ export function token(name: string): string {
 
 /**
  * How long something closing plays its exit before it unmounts, in ms: a
- * duration token, `--duration-quick` unless told otherwise. Nil under reduced
- * motion, and where the stylesheet is not loaded (in unit tests), so it goes
- * at once. Anything else timed in JS reads its duration here too.
+ * duration token, `--duration-quick` unless told otherwise. Exits are fades
+ * (whatever moves in them is neutral while motion is reduced, see base.css),
+ * so they play with motion reduced too. Nil where the stylesheet is not
+ * loaded (in unit tests), so it goes at once. Anything else timed in JS that
+ * fades reads its duration here too.
  */
 export function exitDuration(name = '--duration-quick'): number {
-  if (prefersReducedMotion()) return 0;
   return parseDuration(token(name));
+}
+
+/**
+ * The duration of something that only moves (a slide, a FLIP, a sliding
+ * indicator, a width easing): `exitDuration`, but nil while motion is
+ * reduced, when it lands at once.
+ */
+export function movementDuration(name = '--duration-quick'): number {
+  return prefersReducedMotion() ? 0 : exitDuration(name);
 }
 
 /**
@@ -50,7 +130,7 @@ export const LOADING_SHOWS_AFTER_MS = 400;
 /**
  * Whether a loading indicator should be shown: once `loading` has been true
  * for LOADING_SHOWS_AFTER_MS. Timed here rather than with `animation-delay`,
- * which reduced motion cuts to nil; the wait holds there too. Give the
+ * so the wait is the same however the stylesheet treats motion. Give the
  * indicator `loading-delay` and `is-pending` until this is true: it keeps its
  * size meanwhile, and fades in once shown.
  */
@@ -94,7 +174,7 @@ export function slideFrom(el: HTMLElement, from: DOMRect, name = '--duration-slo
   const to = el.getBoundingClientRect();
   const dx = from.left - to.left;
   const dy = from.top - to.top;
-  const ms = exitDuration(name);
+  const ms = movementDuration(name);
   if ((dx === 0 && dy === 0) || ms === 0 || typeof el.animate !== 'function') return;
   el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: ms, easing: token('--ease-out') || 'ease-out' });
 }
@@ -129,9 +209,9 @@ export function usePresence(open: boolean, exitToken = '--duration-quick'): { mo
  * marked `is-closing`, inert and hidden from assistive technology, and is
  * dropped once the exit has played (`--duration-quick` unless another
  * duration token is named). The stylesheet gives `.is-closing` the exit.
- * Under reduced motion it simply goes, and so does anything not yet drawn (a
- * tooltip still waiting to show); one caught partway into its entrance
- * leaves from as far as it got.
+ * Anything not yet drawn (a tooltip still waiting to show) simply goes; one
+ * caught partway into its entrance leaves from as far as it got. With motion
+ * reduced the exit still plays, as a fade.
  *
  * Pass it as `ref` directly, or call it from a ref callback of your own and
  * return what it returns.
@@ -253,7 +333,7 @@ function placeIndicator(container: HTMLElement, selector: string, pseudo: string
   container.style.setProperty('--indicator-w', `${w}px`);
   // The indicator is created in place the first time, so it does not slide in from the edge.
   container.setAttribute('data-indicator', '');
-  const ms = exitDuration('--duration-fast');
+  const ms = movementDuration('--duration-fast');
   if (!prev || ms === 0 || typeof container.animate !== 'function') return;
   const scale = Math.max(0, prev.w - inset) / Math.max(1, w - inset);
   container.animate(
@@ -289,7 +369,7 @@ function placeVertical(container: HTMLElement, selector: string, pseudo: string)
   container.style.setProperty('--indicator-y', `${y}px`);
   container.style.setProperty('--indicator-h', `${h}px`);
   container.setAttribute('data-indicator', '');
-  const ms = exitDuration('--duration-fast');
+  const ms = movementDuration('--duration-fast');
   if (!prev || performance.now() - since < SETTLE_MS || ms === 0 || typeof container.animate !== 'function') return;
   container.animate(
     [{ transform: `translate(${prev.x}px, ${prev.y}px) scaleY(${prev.h / Math.max(1, h)})` }, { transform: `translate(${x}px, ${y}px) scaleY(1)` }],
