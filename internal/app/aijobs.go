@@ -156,10 +156,10 @@ func jobDetail(j store.AIJob) AIJobDetail {
 
 func activeJob(status string) bool { return status == store.JobQueued || status == store.JobRunning }
 
-// decodeRequest decodes a request body as the HTTP API does: a type error
-// in a field is a validation error on that field, anything else that is
-// not JSON a bad request.
-func decodeRequest(raw json.RawMessage, v any) error {
+// DecodeInput decodes a request body, or a tool's arguments, into v: an
+// empty body is {}, a type error in a field is a validation error on that
+// field, anything else that is not JSON a bad request.
+func DecodeInput(raw json.RawMessage, v any) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		raw = json.RawMessage("{}")
 	}
@@ -183,28 +183,28 @@ func (a *App) prepareAITask(ctx context.Context, kind, itemID string, raw json.R
 	switch kind {
 	case JobDraft:
 		var in DraftInput
-		if err := decodeRequest(raw, &in); err != nil {
+		if err := DecodeInput(raw, &in); err != nil {
 			return aiTask{}, err
 		}
 		t, err := a.prepareDraft(ctx, in)
 		return t.erase(), err
 	case JobVariant:
 		var in VariantInput
-		if err := decodeRequest(raw, &in); err != nil {
+		if err := DecodeInput(raw, &in); err != nil {
 			return aiTask{}, err
 		}
 		t, err := a.prepareVariant(ctx, itemID, in)
 		return t.erase(), err
 	case JobTestCases:
 		var in GenerateTestCasesInput
-		if err := decodeRequest(raw, &in); err != nil {
+		if err := DecodeInput(raw, &in); err != nil {
 			return aiTask{}, err
 		}
 		t, err := a.prepareTestCases(ctx, itemID, in)
 		return t.erase(), err
 	case JobCode:
 		var in CodeInput
-		if err := decodeRequest(raw, &in); err != nil {
+		if err := DecodeInput(raw, &in); err != nil {
 			return aiTask{}, err
 		}
 		t, err := a.prepareCode(ctx, in)
@@ -218,7 +218,7 @@ func jobOrigin(raw json.RawMessage) (*string, error) {
 	var in struct {
 		Origin domain.Opt[string] `json:"origin"`
 	}
-	if err := decodeRequest(raw, &in); err != nil {
+	if err := DecodeInput(raw, &in); err != nil {
 		return nil, err
 	}
 	if !in.Origin.HasValue() {

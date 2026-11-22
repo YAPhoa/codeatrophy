@@ -116,10 +116,7 @@ func decode(r *http.Request, v any) error {
 	if err != nil {
 		return err
 	}
-	if err := domain.DecodeJSON(data, v); err != nil {
-		return decodeError(err)
-	}
-	return nil
+	return app.DecodeInput(data, v)
 }
 
 // readBody reads a JSON body without decoding it, for services that keep
@@ -144,19 +141,6 @@ func readBody(r *http.Request) (json.RawMessage, error) {
 			Message: "a request body must be sent with Content-Type: application/json"}}
 	}
 	return data, nil
-}
-
-// decodeError maps a JSON decoding error to an API error.
-func decodeError(err error) error {
-	var te *domain.TypeError
-	if errors.As(err, &te) {
-		if te.Path == "" {
-			return apiError(app.CodeBadRequest, "%s", te.Error())
-		}
-		return &app.Error{Code: app.CodeValidation, Message: te.Error(),
-			Fields: map[string]any{te.Path: "must be " + te.Expected}}
-	}
-	return apiError(app.CodeBadRequest, "malformed JSON: %v", err)
 }
 
 // Query helpers.
