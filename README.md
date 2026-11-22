@@ -98,7 +98,7 @@ Working on the code:
 ## Development
 
 Layout: `cmd/` and `internal/` hold the Go server, `web/` the React UI,
-`docs/` the design documents. Start with
+`docs/` the documents listed above. Start with
 [`docs/architecture.md`](docs/architecture.md); the HTTP API in
 [`docs/api.md`](docs/api.md) is the contract between server and UI.
 

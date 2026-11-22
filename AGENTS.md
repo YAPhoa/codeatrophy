@@ -19,7 +19,7 @@ database.
 | `cmd/codeatrophy/` | Server entry point |
 | `internal/` | Go packages: application services, HTTP API, MCP server, storage, AI providers, judge engines, grading, bundles |
 | `web/` | Web UI (TypeScript, React, Vite) |
-| `docs/` | Architecture, HTTP API reference, MCP server, bundle format |
+| `docs/` | Running an instance (configuration, signing in, storage, security, MCP server) and the design (architecture, HTTP API reference, bundle format) |
 | `skills/` | Companion skill for AI assistants that work on a library over MCP |
 | `compose.yaml` | Deployment stack |
 
