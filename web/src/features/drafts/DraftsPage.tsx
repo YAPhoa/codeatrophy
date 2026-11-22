@@ -64,7 +64,7 @@ export default function DraftsPage() {
           New items wait here until they are saved to the library.
         </EmptyState>
       ) : (
-        <ul className="drafts-list" aria-label="Drafts">
+        <ul className="drafts-list card" aria-label="Drafts">
           {list.map((d) => {
             const state = draftStateLabel(d);
             return (

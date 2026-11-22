@@ -11,7 +11,7 @@ import { VARIANT_MODES } from './variantModes';
  */
 export function VariantCard({ item, aiEnabled, heading: Heading = 'h3' }: { item: Item; aiEnabled: boolean; heading?: 'h2' | 'h3' }) {
   return (
-    <section className="next-card" aria-labelledby="next-variant">
+    <section className="next-card card" aria-labelledby="next-variant">
       <div className="next-card-icon" aria-hidden="true">
         <GitBranch size={18} />
       </div>

@@ -572,9 +572,6 @@
 }
 
 .item-list-wrap {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
   overflow: hidden;
 }
 
@@ -1375,9 +1372,6 @@ a.pager-btn.is-current:hover {
   position: sticky;
   top: var(--space-3);
   padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
 }
 
 .editor-side .segmented {
@@ -2214,12 +2208,6 @@ a.usage-line:hover {
 
 /* Asking for a revision: folded to its title until it is wanted, then one
    control under another. */
-.revise {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
 .revise-toggle {
   display: flex;
   align-items: center;
@@ -2494,10 +2482,7 @@ fieldset.stack legend {
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
-  border: 1px solid var(--border);
   border-left: 4px solid var(--ok);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
 }
 
 .saved-banner > svg {
@@ -2522,9 +2507,6 @@ fieldset.stack legend {
   gap: var(--space-1-5);
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
 }
 
 .saved-solution .row > svg {
@@ -2555,9 +2537,6 @@ fieldset.stack legend {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
 }
 
 .next-card-icon {
@@ -4287,9 +4266,6 @@ button.case-chip:hover {
 .import-collections {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
 }
 
 .import-collections li {
@@ -5139,9 +5115,6 @@ button.log-row:hover {
 .drafts-list {
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
   list-style: none;
 }
 

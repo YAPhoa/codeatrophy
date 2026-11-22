@@ -318,7 +318,7 @@ export function ImportSection() {
                     <h2 className="section-title">Collections</h2>
                     <span className="muted">Existing collections keep their name and place; missing members are appended.</span>
                   </div>
-                  <ul className="import-collections">
+                  <ul className="import-collections card">
                     {preview.collections.map((c) => (
                       <li key={c.id}>
                         <span className="truncate" onMouseEnter={titleIfCut}>

@@ -616,7 +616,7 @@ export function LibraryPage() {
           )}
 
           {query.isPending ? (
-            <div className={cx('item-list-wrap', noVerdict && 'no-verdict', 'loading-delay', !skeletonShown && 'is-pending')} role="status">
+            <div className={cx('item-list-wrap', 'card', noVerdict && 'no-verdict', 'loading-delay', !skeletonShown && 'is-pending')} role="status">
               <div className="item-list-head">
                 <span className="item-cell item-check">
                   <span className="skel skel-box" />
@@ -659,7 +659,7 @@ export function LibraryPage() {
               </EmptyState>
             )
           ) : (
-            <div ref={wrapRef} className={cx('item-list-wrap', reorderable && 'is-reorderable', noVerdict && 'no-verdict', query.isPlaceholderData && 'is-stale')}>
+            <div ref={wrapRef} className={cx('item-list-wrap', 'card', reorderable && 'is-reorderable', noVerdict && 'no-verdict', query.isPlaceholderData && 'is-stale')}>
               {/* Always shown, so selecting a row or filtering never pushes the list down. */}
               <div className="item-list-head">
                 <span className="item-cell item-check">

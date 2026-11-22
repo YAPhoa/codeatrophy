@@ -190,7 +190,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
       )}
 
       {props.aiDrafted && props.aiEnabled && (
-        <section className="revise">
+        <section className="revise card">
           <button type="button" className="revise-toggle" aria-expanded={reviseOpen} aria-controls={reviseOpen ? 'revise-form' : undefined} onClick={() => setReviseOpen((v) => !v)}>
             <ExpandChevron open={reviseOpen} />
             <RefreshCw size={14} aria-hidden="true" />

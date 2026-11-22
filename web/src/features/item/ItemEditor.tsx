@@ -537,7 +537,7 @@ export function ItemEditor({
         )}
       </div>
 
-      <aside className="editor-side" aria-label="Properties">
+      <aside className="editor-side card" aria-label="Properties">
         {mode === 'create' && (
           <div className="field">
             <span className="field-label">Type</span>

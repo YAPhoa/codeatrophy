@@ -20,7 +20,7 @@ import { VariantCard } from './VariantCard';
 function SavedSolution({ item, solution }: { item: Item; solution: SourceCode }) {
   const test = useSolutionTest(item, { language: solution.language, isReference: true });
   return (
-    <section className="saved-solution" aria-labelledby="saved-solution-title">
+    <section className="saved-solution card" aria-labelledby="saved-solution-title">
       <div className="row">
         <EyeOff size={16} aria-hidden="true" />
         <h2 id="saved-solution-title">Reference solution</h2>
@@ -60,7 +60,7 @@ export default function SavedPage() {
 
   return (
     <div className="page page-narrow saved">
-      <div className="saved-banner" role="status">
+      <div className="saved-banner card" role="status">
         <CheckCircle2 size={22} aria-hidden="true" />
         <div className="grow">
           <p className="saved-kicker">Saved to your library</p>
@@ -82,7 +82,7 @@ export default function SavedPage() {
         <>
           <h2 className="saved-next">Next steps</h2>
           <div className="next-cards">
-            <section className="next-card" aria-labelledby="next-tests">
+            <section className="next-card card" aria-labelledby="next-tests">
               <div className="next-card-icon" aria-hidden="true">
                 <FlaskConical size={18} />
               </div>
