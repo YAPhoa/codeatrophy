@@ -39,11 +39,11 @@ can keep the library in a single SQLite file instead.
 
 ## Quick start
 
-Requirements: Docker with Compose v2.20 or later. The judge needs a
+Requirements: Docker with Compose v2.24 or later. The judge needs a
 privileged container (see [Security](#security)).
 
 ```sh
-git clone <repository-url> codeatrophy
+git clone https://github.com/YAPhoa/codeatrophy.git
 cd codeatrophy
 cp .env.example .env      # adjust if you like; the defaults work
 docker compose up -d --build
