@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { open, reduceMotion, TWO_SUM_TEXT, writeCode } from './support';
+import { open, recordMatches, reduceMotion, TWO_SUM_TEXT, writeCode } from './support';
 
 // Motion plays on a change made on screen, never on arriving at data that
 // was already so; with motion reduced every change lands at once.
@@ -472,12 +472,13 @@ test.describe('with motion reduced', () => {
     expect((await atStart(dialog)).moved).toEqual([]);
     expect(await atStart(page.locator('.dialog-backdrop'))).toMatchObject({ opacity: '0', moved: [] });
     const finishAll = () => page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
-    const closing = (selector: string) => page.evaluate((s) => document.querySelectorAll(s).length, selector);
     await finishAll();
+    // Still there for its exit, then gone. The exit lasts --duration-quick
+    // on a timer, so the copy left for it is recorded in the page.
+    const backdrops = await recordMatches(page, '.dialog-backdrop.is-closing');
     await page.keyboard.press('Escape');
-    // Still there for its exit, then gone.
-    expect(await closing('.dialog-backdrop.is-closing')).toBe(1);
     await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+    expect(await backdrops()).toHaveLength(1);
 
     await page.getByRole('link', { name: 'Longest Substring Without Repeating Characters' }).click();
     await page.getByRole('button', { name: 'More actions' }).click();
@@ -485,9 +486,10 @@ test.describe('with motion reduced', () => {
     await expect(menu).toBeVisible();
     expect(await atStart(menu)).toEqual({ animations: ['popover-in 250'], opacity: '0', moved: [] });
     await finishAll();
+    const popovers = await recordMatches(page, '.popover.is-closing');
     await page.keyboard.press('Escape');
-    expect(await closing('.popover.is-closing')).toBe(1);
     await expect(page.locator('.popover')).toHaveCount(0);
+    expect(await popovers()).toHaveLength(1);
   });
 
   test('a sliding indicator moves at once', async ({ page }) => {
