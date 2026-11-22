@@ -135,7 +135,9 @@ export function LibraryPage() {
     (next: LibraryFilters) => {
       const change = sortChange(filters, next, urlFilters, collectionId, remembered);
       if (change.remember !== undefined) rememberSort(scope, change.remember);
-      setSearchParams(filtersToSearch(change.url, collectionId), { replace: true });
+      // Drawn at once rather than in a transition: until the page shows the
+      // URL's filters, the next change would be made from the previous ones.
+      setSearchParams(filtersToSearch(change.url, collectionId), { replace: true, flushSync: true });
     },
     [filters, urlFilters, collectionId, scope, remembered, setSearchParams],
   );

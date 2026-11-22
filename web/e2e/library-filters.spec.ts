@@ -125,6 +125,22 @@ test('filters: Clear empties the menu\'s values, and the header keeps its height
   await expect(status.getByRole('checkbox', { name: 'To do' })).toBeFocused();
 });
 
+test('filters: a value ticked as soon as the last one is in the URL adds to it', async ({ page }) => {
+  await open(page, '/');
+  const status = await openMenu(page, 'Status');
+  // The second tick comes before the page has had a moment to draw the first:
+  // the URL holds the filters, so it is all the second may go by.
+  const url = await status.evaluate(async (el) => {
+    const box = (name: string) => el.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+    box('To do').click();
+    for (let i = 0; i < 100 && !location.search.includes('status=todo'); i++) await Promise.resolve();
+    box('In progress').click();
+    return location.search;
+  });
+  expect(url).toMatch(/status=todo&status=in_progress/);
+  await expect(status.getByRole('checkbox', { checked: true })).toHaveCount(2);
+});
+
 test('filters: the counts follow a status changed from a row', async ({ page }) => {
   await open(page, '/');
   await openMenu(page, 'Status');
