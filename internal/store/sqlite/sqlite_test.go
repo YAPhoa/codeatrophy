@@ -17,6 +17,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/storetest"
 )
 
 func openTest(t *testing.T) *DB {
@@ -30,26 +31,6 @@ func openTest(t *testing.T) *DB {
 }
 
 var now = time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-
-func write(t *testing.T, db *DB, fn func(store.Tx) error) {
-	t.Helper()
-	if err := db.Write(context.Background(), fn); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func read[T any](t *testing.T, db *DB, fn func(store.Tx) (T, error)) T {
-	t.Helper()
-	var out T
-	if err := db.Read(context.Background(), func(tx store.Tx) error {
-		var err error
-		out, err = fn(tx)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
 
 // clearStylePresets removes the built-in presets a new database starts with.
 func clearStylePresets(t *testing.T, db *DB) {
@@ -118,7 +99,7 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db2.Close()
-	if list := read(t, db2, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() }); len(list) != 0 {
+	if list := storetest.Read(t, db2, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() }); len(list) != 0 {
 		t.Errorf("deleted presets came back: %+v", list)
 	}
 }
@@ -176,7 +157,7 @@ func TestBackupBeforeMigrating(t *testing.T) {
 		}
 		return db
 	}()
-	write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "before") })
+	storetest.Write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "before") })
 	backups := func() []string {
 		m, _ := filepath.Glob(filepath.Join(dir, "codeatrophy.db.backup-v*"))
 		return m
@@ -187,7 +168,7 @@ func TestBackupBeforeMigrating(t *testing.T) {
 	addMigration(t, laterMigration, `CREATE TABLE later (x INTEGER);`)
 	for i := range keepBackups + 2 {
 		if i == 0 {
-			write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "at the old version") })
+			storetest.Write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "at the old version") })
 		}
 		if err := db.migrate(context.Background()); err != nil {
 			t.Fatal(err)
@@ -234,7 +215,7 @@ func TestBackupBeforeMigrating(t *testing.T) {
 // directly.
 func TestAIProviderKindIsImmutable(t *testing.T) {
 	db := openTest(t)
-	write(t, db, func(tx store.Tx) error {
+	storetest.Write(t, db, func(tx store.Tx) error {
 		return tx.InsertAIProvider(&store.AIProvider{ID: "p", Name: "P", Kind: "anthropic", CreatedAt: now, UpdatedAt: now})
 	})
 	if _, err := db.writer.Exec(`UPDATE ai_providers SET kind = 'openai_compatible' WHERE id = 'p'`); err == nil {
@@ -249,7 +230,7 @@ func TestAIProviderKindIsImmutable(t *testing.T) {
 func TestTablesMatchTheLogicalSchema(t *testing.T) {
 	db := openTest(t)
 	for _, tb := range store.Tables {
-		cols := read(t, db, func(stx store.Tx) ([]string, error) {
+		cols := storetest.Read(t, db, func(stx store.Tx) ([]string, error) {
 			rows, err := stx.(*tx).query(`SELECT name FROM pragma_table_info(?) ORDER BY cid`, tb.Name)
 			if err != nil {
 				return nil, err
@@ -319,7 +300,7 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
+	storetest.Write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
 	db.Close()
 }
 
@@ -334,7 +315,7 @@ func TestOlderSchemaIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
+	storetest.Write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
 	db.Close()
 	for _, v := range []int{1, 10, store.BaselineVersion - 1} {
 		setVersion(t, path, v)
