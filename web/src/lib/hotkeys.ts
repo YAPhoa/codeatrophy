@@ -43,7 +43,7 @@ export function useHotkeys(bindings: Record<string, Handler>, options: { enabled
       const parts: string[] = [];
       if (mod) parts.push('mod');
       if (e.altKey) parts.push('alt');
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
+      const key = e.key.toLowerCase();
       // Shift is part of the combo for named keys and letters, but not for symbols like "?".
       if (e.shiftKey && (key.length > 1 || /[a-z0-9]/.test(key))) parts.push('shift');
       parts.push(key);
