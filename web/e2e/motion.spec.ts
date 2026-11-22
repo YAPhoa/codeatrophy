@@ -241,16 +241,23 @@ test('motion: a closing dialog plays its exit out of reach, then goes', async ({
   const opener = page.getByRole('button', { name: 'New collection' });
   await opener.click();
   await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
-  await page.keyboard.press('Escape');
   // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
-  const closing = await page.evaluate(() => {
-    const backdrop = document.querySelector('.dialog-backdrop');
-    return backdrop && { closing: backdrop.classList.contains('is-closing'), inert: backdrop.hasAttribute('inert'), hidden: backdrop.getAttribute('aria-hidden') };
+  // Its exit lasts --duration-quick and can be over before a look from here:
+  // the backdrop is recorded from the page as it is put back for it.
+  await page.evaluate(() => {
+    const seen: { closing: boolean; inert: boolean; hidden: string | null }[] = [];
+    (window as unknown as { backdrops: typeof seen }).backdrops = seen;
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of r.addedNodes)
+          if (n instanceof Element && n.matches('.dialog-backdrop')) seen.push({ closing: n.classList.contains('is-closing'), inert: n.hasAttribute('inert'), hidden: n.getAttribute('aria-hidden') });
+    }).observe(document.body, { childList: true, subtree: true });
   });
-  expect(closing).toEqual({ closing: true, inert: true, hidden: 'true' });
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(opener).toBeFocused();
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { backdrops: unknown[] }).backdrops)).toEqual([{ closing: true, inert: true, hidden: 'true' }]);
 });
 
 test.describe('the Reduce motion setting', () => {
