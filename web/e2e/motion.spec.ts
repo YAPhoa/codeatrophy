@@ -358,25 +358,27 @@ async function slowMotion(page: Page) {
 /**
  * The element's animations as they start: each one's name (or the property a
  * transition moves) and duration, and the element's opacity and movement at
- * their first frame.
+ * their first frame. It runs in the page.
  */
-const atStart = (target: Locator) =>
-  target.evaluate((el) => {
-    const all = el.getAnimations();
-    for (const a of all) {
-      a.pause();
-      a.currentTime = 0;
-    }
-    const cs = getComputedStyle(el);
-    const seen = {
-      animations: all.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty} ${Number(a.effect!.getTiming().duration)}`),
-      opacity: cs.opacity,
-      // Anything moved off its place: a transform that is not the identity.
-      moved: [cs.transform, cs.translate, cs.scale, cs.rotate].filter((v) => !['none', '0deg', '0px', '0px 0px', '1', 'matrix(1, 0, 0, 1, 0, 0)'].includes(v)),
-    };
-    for (const a of all) a.play();
-    return seen;
-  });
+function firstFrame(el: Element) {
+  const all = el.getAnimations();
+  for (const a of all) {
+    a.pause();
+    a.currentTime = 0;
+  }
+  const cs = getComputedStyle(el);
+  const seen = {
+    animations: all.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty} ${Number(a.effect!.getTiming().duration)}`),
+    opacity: cs.opacity,
+    // Anything moved off its place: a transform that is not the identity.
+    moved: [cs.transform, cs.translate, cs.scale, cs.rotate].filter((v) => !['none', '0deg', '0px', '0px 0px', '1', 'matrix(1, 0, 0, 1, 0, 0)'].includes(v)),
+  };
+  for (const a of all) a.play();
+  return seen;
+}
+
+/** `firstFrame` of what `target` finds. */
+const atStart = (target: Locator) => target.evaluate(firstFrame);
 
 test.describe('with motion reduced', () => {
   // Nothing moves; fades keep their durations.
