@@ -46,9 +46,11 @@ privileged container (see [Security](docs/security.md)).
 git clone https://github.com/YAPhoa/codeatrophy.git
 cd codeatrophy
 cp .env.example .env      # adjust if you like; the defaults work
-docker compose up -d --build
+docker compose up -d
 ```
 
+This pulls the published image, for amd64 or arm64, of the release the
+checkout names (`main` is always the latest release); nothing is built.
 Open <http://localhost:8484>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
@@ -57,7 +59,8 @@ password you want to sign in with. A sign-in lasts 30 days from the last time yo
 [Signing in](docs/signing-in.md) to turn sign-in off or manage accounts.
 
 To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
-`codeatrophy-data` volumes).
+`codeatrophy-data` volumes). To move to a later release, see
+[Upgrading](docs/storage.md#upgrading).
 
 ### Without the judge
 
@@ -65,6 +68,14 @@ Set `CODEATROPHY_JUDGE_ENGINE=none` and remove `judge0` from
 `COMPOSE_PROFILES` in `.env`. The Judge0 containers are then not started and
 the UI hides run and submit; the library, AI drafting, bundles and MCP keep
 working.
+
+### Building from source
+
+`docker compose up -d --build` builds the app image from the checkout
+instead, inside Docker, and runs it; `make up` does the same and stamps the
+build with its version from git (otherwise it reports `dev`). The build takes
+the published image's name; `docker compose pull` puts the published one
+back.
 
 ## Configuration
 

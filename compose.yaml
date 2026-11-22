@@ -46,12 +46,16 @@ x-judge0-env: &judge0-env
 
 services:
   app:
-    # The default of CODEATROPHY_VERSION is the release this checkout
-    # installs, and the one place the version is written down. A build from
-    # source reports dev unless VERSION is passed, as "make image" does.
+    # The published image (linux/amd64, linux/arm64) of the release this
+    # checkout installs: the default of CODEATROPHY_VERSION, the one place
+    # the version is written down. With no pull_policy, "up" pulls it when it
+    # is not here yet and "docker compose pull" fetches it again (pull_policy:
+    # missing would make that skip it); it is built from this checkout with
+    # "up --build", or if the pull fails. A build from source takes this name
+    # and reports version dev unless VERSION is passed, as "make image" does.
+    image: ghcr.io/yaphoa/codeatrophy:${CODEATROPHY_VERSION:-0.1.0}
     build:
       context: .
-    image: codeatrophy:${CODEATROPHY_VERSION:-0.1.0}
     restart: unless-stopped
     # The server waits up to 15 s for requests in progress, then stops its
     # services and closes the database; Docker's default of 10 s would kill

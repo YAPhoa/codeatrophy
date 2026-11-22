@@ -22,11 +22,21 @@ is quick for a personal library of thousands of items.
 
 1. **Back up first** (see [Backup and restore](#backup-and-restore)):
    `pg_dump` for PostgreSQL, or the `codeatrophy-data` volume for SQLite.
-2. Pull, then `docker compose up -d --build`. By default the server applies
-   pending schema migrations at startup and logs each one. Before migrating
-   a SQLite database it also writes a copy next to it, named after the
-   version it was at (`codeatrophy.db.backup-v5-<time>`), and keeps the
-   three newest; PostgreSQL gets no automatic backup.
+2. Bring the checkout to the new release: `git pull` on `main`, which is
+   always the latest release, or `git fetch --tags` and
+   `git checkout v1.2.0` for a given one. Its `compose.yaml` names that
+   release's image. Read its notes below before going on.
+3. `docker compose pull`, then `docker compose up -d`. (If you build from
+   source, `docker compose up -d --build` instead.) By default the server
+   applies pending schema migrations at startup and logs each one. Before
+   migrating a SQLite database it also writes a copy next to it, named
+   after the version it was at (`codeatrophy.db.backup-v5-<time>`), and
+   keeps the three newest; PostgreSQL gets no automatic backup.
+
+**Published images.** Releases now come as a published image,
+`ghcr.io/yaphoa/codeatrophy`, which `docker compose pull` fetches. The
+image an install built before, `codeatrophy:0.1.0`, is no longer used;
+remove it with `docker image rm codeatrophy:0.1.0`.
 
 **Default port 8484.** The default port changed from 8080 to 8484. To keep
 reaching an existing install on 8080, set `CODEATROPHY_HOST_PORT=8080` in
@@ -42,7 +52,7 @@ never changes the schema: on a database behind its version (or without a
 schema) it stops with a message naming both versions. Then run
 
 ```sh
-docker compose build app
+docker compose pull app
 docker compose stop app
 docker compose run --rm app db migrate   # lists what is pending, then applies it
 docker compose up -d
@@ -58,7 +68,7 @@ new one. With SQLite the copy is a file next to the database:
 
 ```sh
 docker compose exec app codeatrophy db copy --from configured --to /data/rehearsal.db
-docker compose build app
+docker compose pull app
 docker compose run --rm app db migrate --db /data/rehearsal.db
 docker compose run --rm app db status --db /data/rehearsal.db
 ```
