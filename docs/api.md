@@ -1243,7 +1243,11 @@ exist.
 - The overall `verdict` is `accepted` if every result is accepted, otherwise
   the verdict of the first non-accepted result in order. A compile error yields
   a single overall `compile_error` with `compileOutput` set and `results`
-  empty.
+  empty. The exception is a compile error that the engine reports on a later
+  case only (a compiler that timed out under load, say): that case gets a
+  `compile_error` result with the compiler output in its `stderr`, the other
+  results stay, and when it is the first non-accepted result `compileOutput`
+  holds its compiler output.
 - `results` fills in as cases finish; while `running`, cases not yet finished
   are absent. Results may arrive in groups rather than one at a time (an
   engine that runs cases in batches reports a batch when it finishes), and
@@ -1255,8 +1259,8 @@ exist.
   it will run, or `1` for a custom-stdin run — so progress can be shown from
   the first poll. `passedCount` counts results whose verdict is `accepted` or
   `executed`.
-- On a compile error `passedCount` is `0`, `totalCount` keeps its value, and
-  `timeMs` / `memoryKb` are `null`.
+- On a compile error with empty `results`, `passedCount` is `0`, `totalCount`
+  keeps its value, and `timeMs` / `memoryKb` are `null`.
 - `error` is a human-readable message when `verdict` is `internal_error`
   (engine unreachable, etc.), otherwise `null`.
 - `source` is what was submitted: for a `function` problem, the solution part

@@ -150,6 +150,43 @@ func TestRunAllStopsAfterCompileError(t *testing.T) {
 	}
 }
 
+// A compile error reported on a case after the first (Judge0 does this when
+// the compiler times out under load) is that case's result: it is kept in
+// Results and decides the verdict, so the run is never stored as Accepted.
+func TestGradeLaterCaseCompileError(t *testing.T) {
+	fake := judgetest.New()
+	fake.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		if req.Stdin == "b" {
+			return judge.ExecResult{Status: judge.StatusCompileError, CompileOutput: "kotlinc: timed out"}, nil
+		}
+		return judge.ExecResult{Status: judge.StatusOK, Stdout: req.Stdin}, nil
+	}
+	var mu sync.Mutex
+	reported := map[int]domain.Verdict{}
+	out := New(fake, 2).Grade(context.Background(), Program{Language: "python", Source: "x"}, domain.CompareTokens,
+		cases("a", "a", "b", "b", "c", "c"), func(i int, r domain.SubmissionResult) {
+			mu.Lock()
+			reported[i] = r.Verdict
+			mu.Unlock()
+		})
+	if out.Verdict != domain.VerdictCompileError {
+		t.Fatalf("verdict %s, want compile_error: %+v", out.Verdict, out)
+	}
+	if out.Total != 3 || len(out.Results) != out.Total || out.Passed != 2 {
+		t.Fatalf("total %d, results %d, passed %d; want 3, 3, 2", out.Total, len(out.Results), out.Passed)
+	}
+	r := out.Results[1]
+	if r.Verdict != domain.VerdictCompileError || !strings.Contains(r.Stderr, "kotlinc: timed out") {
+		t.Errorf("case 2: %+v", r)
+	}
+	if !strings.Contains(out.CompileOutput, "kotlinc: timed out") {
+		t.Errorf("compile output %q", out.CompileOutput)
+	}
+	if reported[1] != domain.VerdictCompileError || len(reported) != 3 {
+		t.Errorf("reported %v", reported)
+	}
+}
+
 type batchFake struct {
 	*judgetest.Engine
 	batches int

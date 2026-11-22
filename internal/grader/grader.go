@@ -309,12 +309,19 @@ func (g *Grader) Grade(ctx context.Context, p Program, mode domain.CompareMode, 
 		stdins[j] = cases[i].Stdin
 	}
 	var compileOutput string
+	caseCompileOutput := make([]string, len(cases))
 	execs := g.RunAll(ctx, p, stdins, func(j int, e Execution) {
-		if e.CompileFailed() {
+		// A compile error on the first case fails the whole run (RunAll
+		// reports it once, below). A later case can still report one, for
+		// example when the compiler times out under load; that is recorded
+		// as the case's own result so the run cannot pass without it.
+		if j == 0 && e.CompileFailed() {
 			return
 		}
 		i := runnable[j]
-		if compileOutput == "" && e.Result.CompileOutput != "" {
+		if e.CompileFailed() {
+			caseCompileOutput[i] = e.Result.CompileOutput
+		} else if compileOutput == "" && e.Result.CompileOutput != "" {
 			compileOutput = e.Result.CompileOutput
 		}
 		r := caseResult(mode, cases[i], e)
@@ -351,7 +358,7 @@ func (g *Grader) Grade(ctx context.Context, p Program, mode domain.CompareMode, 
 		out.Verdict = domain.VerdictExecuted
 	}
 	decided := false
-	for _, r := range results {
+	for i, r := range results {
 		if r == nil {
 			continue
 		}
@@ -360,6 +367,12 @@ func (g *Grader) Grade(ctx context.Context, p Program, mode domain.CompareMode, 
 			out.Passed++
 		} else if !decided {
 			out.Verdict, decided = r.Verdict, true
+			if r.Verdict == domain.VerdictCompileError {
+				out.CompileOutput = caseCompileOutput[i]
+				if out.CompileOutput == "" {
+					out.CompileOutput = "Compilation failed."
+				}
+			}
 		}
 		out.TimeMs = maxPtr(out.TimeMs, r.TimeMs)
 		out.MemoryKb = maxPtr(out.MemoryKb, r.MemoryKb)
@@ -391,6 +404,9 @@ func caseResult(mode domain.CompareMode, c Case, e Execution) domain.SubmissionR
 	}
 	if r.Verdict == domain.VerdictInternalError && r.Stderr == "" {
 		r.Stderr = ErrorMessage(e)
+	}
+	if r.Verdict == domain.VerdictCompileError && r.Stderr == "" {
+		r.Stderr = domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
 	}
 	if r.Verdict == domain.VerdictRuntimeError && r.Stderr == "" && e.Result.Message != "" {
 		r.Stderr = e.Result.Message
