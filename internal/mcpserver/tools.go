@@ -3,7 +3,10 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 	"time"
 
@@ -17,6 +20,7 @@ type tools struct {
 	app *app.App
 	// pretty indents the JSON of results.
 	pretty bool
+	log    *slog.Logger
 }
 
 // toolFunc returns the value of a tool's result, which is sent as JSON with
@@ -55,7 +59,16 @@ func (t *tools) add(s *mcp.Server, name, title, desc string, schema map[string]a
 	a := *ann
 	a.Title = title
 	s.AddTool(&mcp.Tool{Name: name, Title: title, Description: desc, InputSchema: schema, Annotations: &a},
-		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		func(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, err error) {
+			// A panic is an internal error of this call, as it is over the
+			// HTTP API, and must not end the process (the SDK runs each
+			// call on a goroutine of its own, with no recovery).
+			defer func() {
+				if p := recover(); p != nil {
+					t.log.Error("panic in an MCP tool", "tool", name, "panic", p, "stack", string(debug.Stack()))
+					res, err = toolError(errors.New("panic"), t.pretty), nil
+				}
+			}()
 			var raw json.RawMessage
 			if req.Params != nil {
 				raw = req.Params.Arguments
@@ -63,6 +76,7 @@ func (t *tools) add(s *mcp.Server, name, title, desc string, schema map[string]a
 			ctx = app.WithChangeSource(ctx, domain.ViaMCP, clientName(req), modelArg(raw))
 			v, err := fn(ctx, raw)
 			if err != nil {
+				t.logError(ctx, name, err)
 				return toolError(err, t.pretty), nil
 			}
 			switch r := v.(type) {
@@ -73,6 +87,19 @@ func (t *tools) add(s *mcp.Server, name, title, desc string, schema map[string]a
 			}
 			return result(v, elideBytes, t.pretty), nil
 		})
+}
+
+// logError logs a tool's internal error, whose cause its result does not
+// tell the client, as the HTTP API logs one (a call the client cancelled
+// is only noted).
+func (t *tools) logError(ctx context.Context, name string, err error) {
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		t.log.Debug("MCP tool call canceled by the client", "tool", name)
+		return
+	}
+	if app.AsError(err).Code == app.CodeInternal {
+		t.log.Error("MCP tool failed", "tool", name, "error", err)
+	}
 }
 
 // clientName is the name the client gave in the initialize handshake, or

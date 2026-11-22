@@ -186,10 +186,10 @@ func serve() error {
 	defer a.Stop()
 
 	hosts := cfg.HostAllowList()
-	var mcpHandler http.Handler
+	var mcpEndpoint *mcpserver.Endpoint
 	if cfg.MCP.Enabled {
 		mcpOrigins := append(append([]string{}, cfg.AllowedOrigins...), cfg.MCP.AllowedOrigins...)
-		mcpHandler = mcpserver.Handler(mcpserver.Options{
+		mcpEndpoint = mcpserver.Handler(mcpserver.Options{
 			App: a, Logger: log, Token: cfg.MCP.Token, RequireToken: cfg.Auth, MaxSessions: cfg.MCP.MaxSessions,
 			PrettyJSON: cfg.MCP.PrettyJSON,
 			CheckToken: func(ctx context.Context, token string) (string, error) {
@@ -202,17 +202,15 @@ func serve() error {
 			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})
 	}
+	var mcpHandler http.Handler
+	if mcpEndpoint != nil {
+		mcpHandler = mcpEndpoint
+	}
 	handler := httpapi.New(httpapi.Options{
 		App: a, Logger: log, AllowedOrigins: cfg.AllowedOrigins, AllowedHosts: hosts,
 		MCP: mcpHandler, MCPPath: "/mcp", Web: webui.Handler(),
 	})
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
-	}
+	srv := newHTTPServer(cfg.Addr, handler, mcpEndpoint, log)
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		return err
@@ -230,13 +228,46 @@ func serve() error {
 		}
 	case <-ctx.Done():
 		log.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Warn("shutdown", "error", err)
-		}
+		shutdown(srv, shutdownTimeout, log)
 	}
 	return nil
+}
+
+// shutdownTimeout is how long shutdown waits for requests in progress. It
+// leaves time, within the 30 s compose.yaml gives the container to stop,
+// for the services and the database to close after it.
+const shutdownTimeout = 15 * time.Second
+
+// newHTTPServer returns the server for handler. When the MCP endpoint is
+// on, shutting the server down ends its sessions, whose clients otherwise
+// hold a stream open that the shutdown would wait for.
+func newHTTPServer(addr string, handler http.Handler, mcp *mcpserver.Endpoint, log *slog.Logger) *http.Server {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	if mcp != nil {
+		srv.RegisterOnShutdown(mcp.Close)
+	}
+	return srv
+}
+
+// shutdown stops srv, waiting up to timeout for requests in progress, and
+// then closes the connections still open, so that the caller can go on to
+// stop the services and close the database before the process is killed.
+// It reports whether every request finished in time.
+func shutdown(srv *http.Server, timeout time.Duration, log *slog.Logger) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Warn("requests still in progress at shutdown were cut off", "error", err)
+		_ = srv.Close()
+		return false
+	}
+	return true
 }
 
 // healthcheck requests /api/v1/health from the local server.

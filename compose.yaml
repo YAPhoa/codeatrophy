@@ -52,6 +52,10 @@ services:
         VERSION: ${CODEATROPHY_VERSION:-0.1.0}
     image: codeatrophy:${CODEATROPHY_VERSION:-0.1.0}
     restart: unless-stopped
+    # The server waits up to 15 s for requests in progress, then stops its
+    # services and closes the database; Docker's default of 10 s would kill
+    # it first.
+    stop_grace_period: 30s
     env_file:
       - path: .env
         required: false

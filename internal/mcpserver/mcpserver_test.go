@@ -1272,3 +1272,113 @@ func TestSessionCapIgnoresSessionsNotInitialized(t *testing.T) {
 		srv.Close()
 	}
 }
+
+// hostHeader sends requests with the given Host header, as a reverse proxy
+// on the same machine does.
+type hostHeader struct {
+	host string
+	base http.RoundTripper
+}
+
+func (h hostHeader) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Host = h.host
+	return h.base.RoundTrip(r)
+}
+
+// A reverse proxy or tunnel on the same machine reaches the server on a
+// loopback address with the public Host. The instance's Host allow-list
+// decides, as it does for the HTTP API: an allowed host or a *.localhost
+// name gets a session, any other host 403.
+func TestHostBehindSameHostProxy(t *testing.T) {
+	f := newFixture(t, "")
+	h := httpapi.New(httpapi.Options{App: f.app, AllowedHosts: []string{"codeatrophy.example"},
+		MCP: mcpserver.Handler(mcpserver.Options{App: f.app}), MCPPath: "/mcp"})
+	srv := httptest.NewServer(h) // listens on 127.0.0.1
+	defer srv.Close()
+	for _, tc := range []struct {
+		host string
+		ok   bool
+	}{
+		{"codeatrophy.example", true},
+		{"codeatrophy.example:443", true},
+		{"codeatrophy.localhost:8080", true},
+		{"evil.example", false},
+	} {
+		c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+		ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+		s, err := c.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp", MaxRetries: -1,
+			HTTPClient: &http.Client{Transport: hostHeader{tc.host, http.DefaultTransport}}}, nil)
+		cancel()
+		if tc.ok {
+			if err != nil {
+				t.Errorf("%s: %v", tc.host, err)
+				continue
+			}
+			if _, isErr := call(t, s, "get_overview", map[string]any{}); isErr {
+				t.Errorf("%s: get_overview failed", tc.host)
+			}
+			s.Close()
+			continue
+		}
+		if err == nil {
+			s.Close()
+			t.Errorf("%s: connected", tc.host)
+		}
+		req := httptest.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(`{}`))
+		req.RequestURI = ""
+		req.Host = tc.host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := new(bytes.Buffer)
+		_, _ = body.ReadFrom(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden || !strings.Contains(body.String(), "CODEATROPHY_ALLOWED_HOSTS") {
+			t.Errorf("%s: %d %s", tc.host, resp.StatusCode, body.String())
+		}
+	}
+}
+
+// Closing the endpoint ends its sessions, which releases the stream each
+// client holds open, and refuses new sessions; http.Server.Shutdown then
+// returns at once instead of waiting for the streams.
+func TestCloseEndsSessions(t *testing.T) {
+	f := newFixture(t, "")
+	ep := mcpserver.Handler(mcpserver.Options{App: f.app})
+	streams := make(chan struct{}, 4)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			streams <- struct{}{}
+		}
+		ep.ServeHTTP(w, r)
+	}))
+	srv.Config.RegisterOnShutdown(ep.Close)
+	srv.Start()
+	defer srv.Close()
+	s, err := connectTo(f.ctx, srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	select {
+	case <-streams:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client opened no stream")
+	}
+	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+	defer cancel()
+	if err := srv.Config.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown waited for the open session: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	ep.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("a new session after Close: %d %s", rec.Code, rec.Body.String())
+	}
+}

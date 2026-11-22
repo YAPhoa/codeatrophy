@@ -803,8 +803,19 @@ Design points:
   many cases, whether to add large ones as generators); like style presets,
   they cannot be changed over MCP.
 - **Access.** The endpoint can be disabled, and can require a bearer token.
-  It shares the HTTP API's request checks (below). Idle sessions are closed
-  after 30 minutes and the number of open sessions is capped.
+  It shares the HTTP API's request checks (below); the MCP SDK's own DNS
+  rebinding check, which refuses any non-loopback `Host` on a loopback
+  connection, is off, since it would refuse a reverse proxy or tunnel on the
+  same machine even for an allowed host. Idle sessions are closed after 30
+  minutes and the number of open sessions is capped.
+- **Failures.** A panic while serving a tool, prompt or resource is
+  recovered and logged, and answered as an internal error, as over the HTTP
+  API; internal errors that tools return are logged too.
+- **Shutdown.** Each session's client holds a stream open for as long as the
+  session lasts, so on shutdown the server ends every session, which
+  releases those streams, before it waits (up to 15 seconds) for the
+  requests in progress. It then stops the services and closes the database;
+  `compose.yaml` gives the container 30 seconds to stop.
 
 ## Bundles
 
