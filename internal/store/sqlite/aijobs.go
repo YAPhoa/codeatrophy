@@ -12,7 +12,7 @@ import (
 
 // AI jobs: one row each in ai_jobs, the request and the result compressed.
 
-const aiJobColumns = `id, created_at, kind, item_id, draft_id, title, status, origin, error, started_at, finished_at, picked_up_at`
+const aiJobColumns = `id, created_at, kind, item_id, draft_id, title, status, origin, error, started_at, finished_at, picked_up_at, user_id`
 
 func scanAIJob(sc interface{ Scan(...any) error }, extra ...any) (store.AIJob, error) {
 	var (
@@ -22,7 +22,7 @@ func scanAIJob(sc interface{ Scan(...any) error }, extra ...any) (store.AIJob, e
 		started, finished, pickedUp      sql.NullInt64
 	)
 	dest := append([]any{&j.ID, &created, &j.Kind, &itemID, &draftID, &j.Title, &j.Status, &origin, &errBody, &started, &finished,
-		&pickedUp}, extra...)
+		&pickedUp, &j.UserID}, extra...)
 	if err := sc.Scan(dest...); err != nil {
 		return j, err
 	}
@@ -48,9 +48,9 @@ func compressedOrNil(p *string) any {
 }
 
 func (t *tx) InsertAIJob(j *store.AIJob) error {
-	_, err := t.exec(`INSERT INTO ai_jobs (`+aiJobColumns+`, request, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := t.exec(`INSERT INTO ai_jobs (`+aiJobColumns+`, request, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, toUnix(j.CreatedAt), j.Kind, nullStr(j.ItemID), nullStr(j.DraftID), j.Title, j.Status, nullStr(j.Origin), nullStr(j.Error),
-		nullUnix(j.StartedAt), nullUnix(j.FinishedAt), nullUnix(j.PickedUpAt), store.CompressText(j.Request),
+		nullUnix(j.StartedAt), nullUnix(j.FinishedAt), nullUnix(j.PickedUpAt), j.UserID, store.CompressText(j.Request),
 		compressedOrNil(j.Result))
 	return err
 }
@@ -82,6 +82,9 @@ func (t *tx) ListAIJobs(f store.AIJobFilter) ([]store.AIJob, error) {
 	var args []any
 	if f.Active {
 		where = append(where, "status IN ('queued', 'running')")
+	}
+	if f.UserID != nil {
+		where, args = append(where, "user_id = ?"), append(args, *f.UserID)
 	}
 	if f.Kind != "" {
 		where, args = append(where, "kind = ?"), append(args, f.Kind)

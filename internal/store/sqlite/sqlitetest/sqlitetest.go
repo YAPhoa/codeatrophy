@@ -113,6 +113,34 @@ var DownMigrations = map[int]string{
 		ALTER TABLE items DROP COLUMN updated_model;`,
 	18: `DROP TABLE sessions; DROP TABLE users;`,
 	19: `DROP TABLE mcp_tokens;`,
+	20: `ALTER TABLE items ADD COLUMN status TEXT NOT NULL DEFAULT 'todo';
+		ALTER TABLE items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+		ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+		UPDATE items SET status = s.status, favorite = s.favorite, notes = s.notes FROM item_states s
+			WHERE s.item_id = items.id AND s.user_id = COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		DROP TABLE item_states;
+		CREATE TABLE working_copies_old (
+			item_id    TEXT    NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+			language   TEXT    NOT NULL,
+			source     TEXT    NOT NULL,
+			updated_at INTEGER NOT NULL,
+			write_seq  INTEGER NOT NULL,
+			PRIMARY KEY (item_id, language)) WITHOUT ROWID;
+		INSERT INTO working_copies_old SELECT item_id, language, source, updated_at, write_seq FROM working_copies
+			WHERE user_id = COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		DROP TABLE working_copies;
+		ALTER TABLE working_copies_old RENAME TO working_copies;
+		CREATE INDEX working_copies_write_seq ON working_copies (write_seq);
+		DROP INDEX submissions_user_item;
+		DROP INDEX drafts_user_updated;
+		DROP INDEX ai_jobs_user_newest;
+		DROP INDEX ai_log_user_newest;
+		ALTER TABLE submissions DROP COLUMN user_id;
+		ALTER TABLE drafts DROP COLUMN user_id;
+		ALTER TABLE ai_jobs DROP COLUMN user_id;
+		ALTER TABLE ai_log DROP COLUMN user_id;
+		UPDATE settings SET key = 'preferences' WHERE key = 'preferences:' || COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		DELETE FROM settings WHERE key LIKE 'preferences:%';`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

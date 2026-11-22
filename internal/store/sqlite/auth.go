@@ -81,7 +81,35 @@ func (t *tx) DeleteUser(id string) (bool, error) {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil || n == 0 {
+		return false, err
+	}
+	if _, err := t.exec(`DELETE FROM ai_log_bodies WHERE entry_id IN (SELECT id FROM ai_log WHERE user_id = ?)`, id); err != nil {
+		return false, err
+	}
+	for _, table := range store.PersonalTables {
+		if _, err := t.exec(`DELETE FROM `+table+` WHERE user_id = ?`, id); err != nil {
+			return false, err
+		}
+	}
+	if _, err := t.exec(`DELETE FROM ai_log_texts WHERE hash NOT IN
+		(SELECT system_hash FROM ai_log_bodies WHERE system_hash IS NOT NULL)`); err != nil {
+		return false, err
+	}
+	_, err = t.exec(`DELETE FROM settings WHERE key = ?`, store.PreferencesKey(id))
+	return true, err
+}
+
+func (t *tx) ClaimUnowned(userID string) error {
+	for _, table := range store.PersonalTables {
+		if _, err := t.exec(`UPDATE `+table+` SET user_id = ? WHERE user_id = ?`, userID, store.Unowned); err != nil {
+			return err
+		}
+	}
+	_, err := t.exec(`UPDATE settings SET key = ? WHERE key = ?
+		AND NOT EXISTS (SELECT 1 FROM settings WHERE key = ?)`,
+		store.PreferencesKey(userID), store.PreferencesKey(store.Unowned), store.PreferencesKey(userID))
+	return err
 }
 
 func (t *tx) InsertSession(s *store.Session) error {

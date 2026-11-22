@@ -59,6 +59,7 @@ func Run(t *testing.T, open Opener) {
 		{"WorkingCopyPutsRaceDeletion", testWorkingCopyPutsRaceDeletion},
 		{"UsersAndSessions", testUsersAndSessions},
 		{"MCPTokens", testMCPTokens},
+		{"PersonalData", testPersonalData},
 		{"AIProviderConstraints", testAIProviderConstraints},
 		{"AIUsage", testAIUsage},
 		{"AILog", testAILog},
@@ -204,7 +205,7 @@ func testFunctionProblemRoundTrip(t *testing.T, db store.Store) {
 		t.Errorf("plain submission: %+v", gp)
 	}
 	sums := Read(t, db, func(tx store.Tx) ([]domain.SubmissionSummary, error) {
-		l, _, err := tx.ListSubmissions("fn", "", 10, 0)
+		l, _, err := tx.ListSubmissions("", "fn", "", 10, 0)
 		return l, err
 	})
 	if len(sums) != 2 || sums[1].LineOffset != 3 || sums[0].LineOffset != 0 {
@@ -1405,7 +1406,7 @@ func testSubmissions(t *testing.T, db store.Store) {
 		var out []string
 		var total int
 		if err := db.Read(context.Background(), func(tx store.Tx) error {
-			list, n, err := tx.ListSubmissions("a", mode, limit, offset)
+			list, n, err := tx.ListSubmissions("", "a", mode, limit, offset)
 			for _, s := range list {
 				out = append(out, s.ID)
 			}
@@ -1476,12 +1477,12 @@ func testDeleteCompletedRuns(t *testing.T, db store.Store) {
 				return err
 			}
 		}
-		return tx.DeleteCompletedRuns("a")
+		return tx.DeleteCompletedRuns("", "a")
 	})
 	list := func(item string) string {
 		var out []string
 		if err := db.Read(context.Background(), func(tx store.Tx) error {
-			l, _, err := tx.ListSubmissions(item, "", 0, 0)
+			l, _, err := tx.ListSubmissions("", item, "", 0, 0)
 			for _, s := range l {
 				out = append(out, s.ID)
 			}
@@ -2160,7 +2161,7 @@ func testAILog(t *testing.T, db store.Store) {
 	}
 
 	// Pruning removes what is older, and the system text only entry 7 used.
-	Write(t, db, func(tx store.Tx) error { at := now.Add(3 * time.Second); return tx.DeleteAILog(&at) })
+	Write(t, db, func(tx store.Tx) error { at := now.Add(3 * time.Second); return tx.DeleteAILog("", &at) })
 	if _, n := list(store.AILogFilter{}); n != 22 {
 		t.Errorf("after pruning: %d", n)
 	}
@@ -2170,7 +2171,7 @@ func testAILog(t *testing.T, db store.Store) {
 	if n := texts(); n != 1 {
 		t.Errorf("%d system texts after pruning, want 1", n)
 	}
-	Write(t, db, func(tx store.Tx) error { return tx.DeleteAILog(nil) })
+	Write(t, db, func(tx store.Tx) error { return tx.DeleteAILog("", nil) })
 	if _, n := list(store.AILogFilter{}); n != 0 {
 		t.Errorf("cleared: %d", n)
 	}

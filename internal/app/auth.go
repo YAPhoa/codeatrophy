@@ -23,8 +23,8 @@ import (
 // Sign-in for the web UI. Accounts are kept in the store with bcrypt
 // password hashes; a signed-in browser holds a random session token whose
 // SHA-256 hash is the session's id in the store. While no account exists,
-// the UI creates the first one with just an email and a password. Every
-// account sees the same library: accounts only decide who may sign in.
+// the UI creates the first one with just an email and a password. Accounts
+// share the library and keep their own personal data (see account.go).
 
 // Default and bounds of the auth settings.
 const (
@@ -191,7 +191,7 @@ func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
 		if n > 0 {
 			return errConflict("an account already exists; sign in instead", nil)
 		}
-		if err := tx.InsertUser(&u); err != nil {
+		if err := insertUser(tx, &u); err != nil {
 			return err
 		}
 		out, err = a.newSession(tx, u, now)
@@ -383,9 +383,25 @@ func (a *App) CreateUser(ctx context.Context, email, password string) (AuthUser,
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
-		return tx.InsertUser(&u)
+		return insertUser(tx, &u)
 	})
 	return authUser(u), err
+}
+
+// insertUser adds an account. The first one takes over the personal data
+// kept while no account existed (see store.Unowned).
+func insertUser(tx store.Tx, u *store.User) error {
+	n, err := tx.CountUsers()
+	if err != nil {
+		return err
+	}
+	if err := tx.InsertUser(u); err != nil {
+		return err
+	}
+	if n == 0 {
+		return tx.ClaimUnowned(u.ID)
+	}
+	return nil
 }
 
 // SetUserPassword replaces an account's password and ends its sessions.

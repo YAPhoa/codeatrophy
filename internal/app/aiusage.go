@@ -113,7 +113,7 @@ func (a *App) generate(ctx context.Context, op string, p activeProvider, subject
 	}
 	a.log.Info("AI generation", attrs...)
 	if p.id != "" {
-		u.LogID = a.account(op, p, subject, req, resp, u, status, err)
+		u.LogID = a.account(accountOf(ctx), op, p, subject, req, resp, u, status, err)
 	}
 	return u, err
 }
@@ -136,11 +136,12 @@ func sum(ns ...*int) int64 {
 }
 
 // account writes a finished request to its provider's counts and to the AI
-// log, in one transaction, and returns the log entry's id.
-func (a *App) account(op string, p activeProvider, subject *logSubject, req ai.GenerateRequest, resp ai.GenerateResponse,
+// log of the account it was made for, in one transaction, and returns the
+// log entry's id.
+func (a *App) account(userID, op string, p activeProvider, subject *logSubject, req ai.GenerateRequest, resp ai.GenerateResponse,
 	u Usage, status string, failure error) *string {
 	now := a.clock()
-	e := store.AILogEntry{ID: newID(), CreatedAt: now, Operation: op, ProviderID: p.id, ProviderName: p.name, Kind: p.kind,
+	e := store.AILogEntry{ID: newID(), UserID: userID, CreatedAt: now, Operation: op, ProviderID: p.id, ProviderName: p.name, Kind: p.kind,
 		Model: u.Model, Status: status, DurationMs: u.DurationMs, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		ReasoningTokens: u.ReasoningTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens}
 	if subject != nil {

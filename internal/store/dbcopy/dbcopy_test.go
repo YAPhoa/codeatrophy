@@ -241,7 +241,7 @@ func sameViews(t *testing.T, want, got store.Store) {
 				}
 				tcs, _ := tx.ListTestCases(s.ID)
 				sols, _ := tx.ListSolutions(s.ID)
-				subs, _, _ := tx.ListSubmissions(s.ID, "", 0, 0)
+				subs, _, _ := tx.ListSubmissions("", s.ID, "", 0, 0)
 				j(it, tcs, sols, subs)
 				for _, sub := range subs {
 					full, _ := tx.GetSubmission(sub.ID)

@@ -187,12 +187,12 @@ func serve() error {
 		mcpHandler = mcpserver.Handler(mcpserver.Options{
 			App: a, Logger: log, Token: cfg.MCP.Token, RequireToken: cfg.Auth, MaxSessions: cfg.MCP.MaxSessions,
 			PrettyJSON: cfg.MCP.PrettyJSON,
-			CheckToken: func(ctx context.Context, token string) error {
+			CheckToken: func(ctx context.Context, token string) (string, error) {
 				if !cfg.Auth {
-					return errors.New("sign-in is off")
+					return "", errors.New("sign-in is off")
 				}
-				_, err := a.AuthenticateMCPToken(ctx, token)
-				return err
+				u, err := a.AuthenticateMCPToken(ctx, token)
+				return u.ID, err
 			},
 			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})

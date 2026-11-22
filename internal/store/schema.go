@@ -16,7 +16,7 @@ var ErrNewerSchema = errors.New("this database was last used by a newer Codeatro
 // each must bring its database to this version: a schema change adds one
 // migration per backend with the next number and bumps this constant (and
 // Tables, when tables or columns change).
-const SchemaVersion = 19
+const SchemaVersion = 20
 
 // Table is a table of the logical schema: the tables and columns every
 // backend has, whatever their physical types. Backend-specific tables, such
@@ -43,22 +43,25 @@ var Tables = []Table{
 		"last_used_at"}, Key: []string{"provider_id", "day"}},
 	{Name: "ai_log", Columns: []string{"id", "created_at", "operation", "item_id", "title", "provider_id",
 		"provider_name", "kind", "model", "status", "error", "duration_ms", "input_tokens", "output_tokens",
-		"reasoning_tokens", "cache_read_tokens", "cache_write_tokens"}, Key: []string{"created_at", "id"}},
+		"reasoning_tokens", "cache_read_tokens", "cache_write_tokens", "user_id"}, Key: []string{"created_at", "id"}},
 	{Name: "ai_log_texts", Columns: []string{"hash", "text"}, Key: []string{"hash"}},
 	{Name: "ai_log_bodies", Columns: []string{"entry_id", "system_hash", "request", "response", "truncated"},
 		Key: []string{"entry_id"}},
 	{Name: "ai_jobs", Columns: []string{"id", "created_at", "kind", "item_id", "draft_id", "title", "status", "origin",
-		"request", "result", "error", "started_at", "finished_at", "picked_up_at"}, Key: []string{"created_at", "id"}},
+		"request", "result", "error", "started_at", "finished_at", "picked_up_at", "user_id"}, Key: []string{"created_at", "id"}},
 	{Name: "drafts", Columns: []string{"id", "created_at", "updated_at", "kind", "variant_of", "title", "client_title",
-		"revision", "edited", "request", "job_id", "error", "generation", "generation_seq", "content", "based_on"},
+		"revision", "edited", "request", "job_id", "error", "generation", "generation_seq", "content", "based_on",
+		"user_id"},
 		Key: []string{"created_at", "id"}},
 	{Name: "style_presets", Columns: []string{"seq", "id", "name", "name_key", "instructions", "is_default",
 		"created_at", "updated_at"}, Key: []string{"seq"}},
-	{Name: "items", Columns: []string{"seq", "id", "type", "title", "summary", "body", "difficulty", "status",
-		"favorite", "notes", "raw_input", "source_url", "source_note", "variant_of", "revision", "time_limit_ms",
+	{Name: "items", Columns: []string{"seq", "id", "type", "title", "summary", "body", "difficulty",
+		"raw_input", "source_url", "source_note", "variant_of", "revision", "time_limit_ms",
 		"memory_limit_kb", "compare_mode", "starter_code", "created_at", "updated_at", "problem_interface", "harness",
 		"created_via", "created_client", "created_model", "updated_via", "updated_client", "updated_model"},
 		Key: []string{"seq"}},
+	{Name: "item_states", Columns: []string{"user_id", "item_id", "status", "favorite", "notes"},
+		Key: []string{"user_id", "item_id"}},
 	{Name: "item_links", Columns: []string{"seq", "item_a", "item_b", "created_at"}, Key: []string{"seq"}},
 	{Name: "deleted_items", Columns: []string{"id", "title", "type", "deleted_at"}, Key: []string{"id"}},
 	{Name: "tags", Columns: []string{"name"}, Key: []string{"name"}},
@@ -73,11 +76,11 @@ var Tables = []Table{
 	{Name: "solutions", Columns: []string{"seq", "id", "item_id", "name", "language", "source", "notes",
 		"is_reference", "created_at", "updated_at", "last_run_passed", "last_run_total", "last_run_time_ms",
 		"last_run_memory_kb", "last_run_at"}, Key: []string{"seq"}},
-	{Name: "working_copies", Columns: []string{"item_id", "language", "source", "updated_at", "write_seq"},
-		Key: []string{"item_id", "language"}},
+	{Name: "working_copies", Columns: []string{"item_id", "language", "source", "updated_at", "write_seq", "user_id"},
+		Key: []string{"user_id", "item_id", "language"}},
 	{Name: "submissions", Columns: []string{"seq", "id", "item_id", "mode", "language", "source", "stdin",
 		"case_ids", "status", "verdict", "passed_count", "total_count", "time_ms", "memory_kb", "compile_output",
-		"error", "created_at", "finished_at", "line_offset", "harness"}, Key: []string{"seq"}},
+		"error", "created_at", "finished_at", "line_offset", "harness", "user_id"}, Key: []string{"seq"}},
 	{Name: "submission_results", Columns: []string{"submission_id", "idx", "test_case_id", "name", "is_sample",
 		"verdict", "stdin", "expected_stdout", "stdout", "stderr", "time_ms", "memory_kb"},
 		Key: []string{"submission_id", "idx"}},

@@ -255,6 +255,23 @@ var downMigrations = map[int]string{
 		DROP COLUMN updated_via, DROP COLUMN updated_client, DROP COLUMN updated_model;`,
 	18: `DROP TABLE sessions; DROP TABLE users;`,
 	19: `DROP TABLE mcp_tokens;`,
+	20: `ALTER TABLE items ADD COLUMN status text COLLATE "C" NOT NULL DEFAULT 'todo',
+			ADD COLUMN favorite boolean NOT NULL DEFAULT false, ADD COLUMN notes bytea NOT NULL DEFAULT '';
+		UPDATE items SET status = s.status, favorite = s.favorite, notes = s.notes FROM item_states s
+			WHERE s.item_id = items.id AND s.user_id = COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		ALTER TABLE items ALTER COLUMN status DROP DEFAULT;
+		DROP TABLE item_states;
+		DELETE FROM working_copies WHERE user_id <> COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		DROP INDEX working_copies_item_id;
+		ALTER TABLE working_copies DROP CONSTRAINT working_copies_pkey, ADD PRIMARY KEY (item_id, language);
+		DROP INDEX submissions_user_item, drafts_user_updated, ai_jobs_user_newest, ai_log_user_newest;
+		ALTER TABLE working_copies DROP COLUMN user_id;
+		ALTER TABLE submissions DROP COLUMN user_id;
+		ALTER TABLE drafts DROP COLUMN user_id;
+		ALTER TABLE ai_jobs DROP COLUMN user_id;
+		ALTER TABLE ai_log DROP COLUMN user_id;
+		UPDATE settings SET key = 'preferences' WHERE key = 'preferences:' || COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
+		DELETE FROM settings WHERE key LIKE 'preferences:%';`,
 }
 
 // undoMigrationsFrom takes the database back to the version before from.

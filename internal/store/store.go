@@ -91,6 +91,7 @@ type AIUsage struct {
 // AILogEntry is the index row of one request in the AI activity log.
 type AILogEntry struct {
 	ID           string
+	UserID       string // the account whose request it was
 	CreatedAt    time.Time
 	Operation    string
 	ItemID       *string
@@ -119,6 +120,8 @@ type AILogBody struct {
 
 // AILogFilter selects AI log entries; zero values select everything.
 type AILogFilter struct {
+	// UserID is the account whose entries to list; it always applies.
+	UserID                        string
 	ProviderID, Operation, Status string
 	// Before starts the page after this entry (keyset paging).
 	Before *AILogCursor
@@ -140,6 +143,7 @@ type AILogCursor struct {
 // failed.
 type AIJob struct {
 	ID        string
+	UserID    string // the account that asked for it
 	CreatedAt time.Time
 	Kind      string
 	ItemID    *string
@@ -169,6 +173,8 @@ const (
 
 // AIJobFilter selects AI jobs; zero values select everything.
 type AIJobFilter struct {
+	// UserID, when set, selects the jobs of that account only.
+	UserID *string
 	// Active selects queued and running jobs only.
 	Active  bool
 	Kind    string
@@ -184,6 +190,7 @@ type AIJobFilter struct {
 // JSON documents, which stores compress (see CompressText); Error is JSON.
 type Draft struct {
 	ID        string
+	UserID    string // the account it belongs to
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Kind      string
@@ -202,8 +209,10 @@ type Draft struct {
 	BasedOn       int
 }
 
-// DraftFilter selects drafts; zero values select everything.
+// DraftFilter selects drafts of one account; other zero values select
+// everything.
 type DraftFilter struct {
+	UserID    string
 	Kind      string
 	VariantOf string
 }
@@ -273,7 +282,10 @@ type Tx interface {
 	// Items. Computed fields (collectionIds, variantCount, linkCount,
 	// testCaseCount, lastVerdict, variantOrigin) are filled on read and
 	// ignored on write. Inserting an item removes the record kept of a
-	// deleted item with its id.
+	// deleted item with its id. Status, favorite, notes and lastVerdict are
+	// those of the account in the transaction's context (see AccountOf),
+	// in reads, filters and writes alike; an account that never set them
+	// has todo, false and "".
 	GetItem(id string) (domain.Item, error)
 	ListItems(f ItemFilter) ([]domain.ItemSummary, int, error)
 	// CountItemsBy counts the items ListItems selects for f (its order and
@@ -339,17 +351,21 @@ type Tx interface {
 	AddCollectionItems(id string, itemIDs []string) error
 	RemoveCollectionItem(id, itemID string) (bool, error)
 
-	// Submissions. GetSubmission includes results.
+	// Submissions, each of an account (UserID). GetSubmission includes
+	// results, whoever owns it; ListSubmissions lists one account's.
 	InsertSubmission(s *domain.Submission) error
 	GetSubmission(id string) (domain.Submission, error)
-	ListSubmissions(itemID string, mode domain.SubmissionMode, limit, offset int) ([]domain.SubmissionSummary, int, error)
+	ListSubmissions(userID, itemID string, mode domain.SubmissionMode, limit, offset int) ([]domain.SubmissionSummary, int, error)
 	UpdateSubmission(s *domain.Submission) error
 	AddSubmissionResult(submissionID string, index int, r domain.SubmissionResult) error
 	UnfinishedSubmissionIDs() ([]string, error)
-	// DeleteCompletedRuns removes an item's completed run-mode submissions
-	// with their results. Submit-mode and unfinished ones are kept.
-	DeleteCompletedRuns(itemID string) error
+	// DeleteCompletedRuns removes an account's completed run-mode
+	// submissions of an item with their results. Submit-mode and
+	// unfinished ones are kept.
+	DeleteCompletedRuns(userID, itemID string) error
 
+	// Stats counts the library, with the item statuses, favorites and
+	// submissions of the account in the transaction's context.
 	Stats() (domain.Stats, error)
 
 	// Solutions of a problem: the reference first, then oldest first.
@@ -364,18 +380,18 @@ type Tx interface {
 	// ClearReference unsets isReference on every solution of the item.
 	ClearReference(itemID string) error
 
-	// Working copies: one per problem and language, deleted with the item.
-	// ListWorkingCopies returns an item's working copies, the most recently
-	// written first.
-	ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error)
-	// PutWorkingCopy creates or replaces the working copy of w.ItemID in
-	// w.Language, in one statement that writes the whole row. It returns
+	// Working copies: one per account, problem and language, deleted with
+	// the item. ListWorkingCopies returns an account's working copies of an
+	// item, the most recently written first.
+	ListWorkingCopies(userID, itemID string) ([]domain.WorkingCopy, error)
+	// PutWorkingCopy creates or replaces the working copy of w.UserID for
+	// w.ItemID in w.Language, in one statement that writes the whole row. It returns
 	// ErrNotFound, writing nothing, when no problem with that id exists (a
 	// missing item or a reading).
 	PutWorkingCopy(w *domain.WorkingCopy) error
-	// DeleteWorkingCopy removes the working copy of an item in a language,
-	// reporting whether there was one.
-	DeleteWorkingCopy(itemID, language string) (bool, error)
+	// DeleteWorkingCopy removes an account's working copy of an item in a
+	// language, reporting whether there was one.
+	DeleteWorkingCopy(userID, itemID, language string) (bool, error)
 
 	// Style presets, default first, then by name.
 	ListStylePresets() ([]domain.StylePreset, error)
@@ -410,8 +426,9 @@ type Tx interface {
 	// matching the filters (ignoring Before); it reads no bodies.
 	ListAILog(f AILogFilter) ([]AILogEntry, int, error)
 	GetAILogEntry(id string) (AILogEntry, AILogBody, error)
-	// DeleteAILog removes the entries created before the time, or all.
-	DeleteAILog(before *time.Time) error
+	// DeleteAILog removes an account's entries created before the time, or
+	// all of them.
+	DeleteAILog(userID string, before *time.Time) error
 
 	// AI jobs, newest first by (created time, id). GetAIJob reads the
 	// request and the result; ListAIJobs leaves them out (Request "",
@@ -438,7 +455,8 @@ type Tx interface {
 	DeleteDraft(id string) (bool, error)
 
 	// Users, by email. InsertUser fails on an email already taken.
-	// DeleteUser removes the user's sessions too.
+	// DeleteUser removes the user's sessions, tokens and personal data
+	// too. ClaimUnowned gives the personal data of Unowned to the user.
 	CountUsers() (int, error)
 	ListUsers() ([]User, error)
 	GetUser(id string) (User, error)
@@ -446,6 +464,7 @@ type Tx interface {
 	InsertUser(u *User) error
 	UpdateUserPassword(id, passwordHash string, at time.Time) error
 	DeleteUser(id string) (bool, error)
+	ClaimUnowned(userID string) error
 
 	// Sessions. GetSession returns a session whatever its expiry; callers
 	// compare ExpiresAt. DeleteUserSessions removes every session of a user

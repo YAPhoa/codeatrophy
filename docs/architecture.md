@@ -844,8 +844,8 @@ the host is an explicit operator decision.
 
 The web UI and the HTTP API require a signed-in session unless the operator
 sets `CODEATROPHY_AUTH=off`. Accounts (`users`) hold an email and a bcrypt
-password hash; every account sees the same library, since accounts decide
-only who may sign in. The rules live in the application services
+password hash. Accounts share one library and keep their own personal data
+(below). The rules live in the application services
 (`internal/app/auth.go`): validation, creating the first account,
 sign-in with a per-address limit on failures, sessions, password
 changes. The HTTP adapter maps them onto a cookie and gates `/api/` in front
@@ -870,9 +870,37 @@ of the routes; the `codeatrophy user` command uses the same services.
   on `/mcp` requires a bearer token and is never the one open door. Each
   account makes its own tokens (`mcp_tokens`, stored as SHA-256 hashes like
   sessions, revoked with the account), and `CODEATROPHY_MCP_TOKEN` adds a
-  server-wide one. The MCP adapter asks the services whether a token is an
-  account's; it does not yet scope what that account may do, since every
-  account shares the library.
+  server-wide one. The MCP adapter asks the services whose token it is, and
+  hands the account to the SDK as the token's user, so each request acts for
+  it and a session cannot be taken over with another account's token.
+
+#### Personal data
+
+The library (items and their content, test cases, solutions, collections,
+tags, AI providers, style presets) is shared. An item's status, favorite and
+notes, working copies, submissions, drafts, AI jobs, the AI log and
+preferences belong to an account:
+
+- **Which account.** The adapters put the account a request acts for in its
+  context (`app.WithAccount`): the session's account, an MCP token's
+  account, or with sign-in off (and for `CODEATROPHY_MCP_TOKEN`) the oldest
+  account (`App.DefaultAccount`). Background work acts for the account that
+  started it: a submission's verdict sets its submitter's status, and an AI
+  job's requests are logged for its owner.
+- **Item state.** `item_states` holds a row per account and item whose state
+  differs from the default (todo, not a favorite, no notes). The stores join
+  the context's account into every item read, filter and count, and item
+  writes store its state for that account, so the services read and write
+  items as before. Personal state never moves an item's `revision` or
+  `updatedAt`, as it never did.
+- **Other records** carry a `user_id`, which the services set and check:
+  lists take the account, and a record of another account read by id is
+  not found. Preferences are the setting `preferences:<user id>`.
+- **No account yet.** The account `''` (`store.Unowned`) holds what is kept
+  while no account exists, as with sign-in off from the start. The first
+  account created takes it over in the same transaction, and migration 20
+  gave existing data to the oldest account. Deleting an account deletes its
+  personal data.
 
 The UI's static files stay public; `GET /api/v1/auth/session` tells the UI
 whether to show the sign-in page. `GET /api/v1/health` needs no session, for

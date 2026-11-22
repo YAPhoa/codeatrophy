@@ -199,7 +199,10 @@ func testMCPTokensMigration(t *testing.T, h MigrationHarness) {
 		Populate(t, db)
 		Write(t, db, func(tx store.Tx) error {
 			u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
-			return tx.InsertUser(&u)
+			if err := tx.InsertUser(&u); err != nil {
+				return err
+			}
+			return tx.ClaimUnowned("u")
 		})
 	}, func(db MigrationDB) {
 		if err := h.Exec(db, `SELECT COUNT(*) FROM mcp_tokens`); err == nil {

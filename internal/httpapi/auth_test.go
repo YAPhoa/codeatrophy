@@ -18,6 +18,7 @@ import (
 
 type authClient struct {
 	t   *testing.T
+	app *app.App
 	srv *httptest.Server
 	hc  *http.Client
 }
@@ -42,7 +43,20 @@ func newAuthServer(t *testing.T) *authClient {
 		a.Stop()
 	})
 	jar, _ := cookiejar.New(nil)
-	return &authClient{t: t, srv: srv, hc: &http.Client{Jar: jar}}
+	return &authClient{t: t, app: a, srv: srv, hc: &http.Client{Jar: jar}}
+}
+
+// as returns a client of the same server with a cookie jar of its own,
+// signed in as a new account with that email.
+func (c *authClient) as(email string) *authClient {
+	c.t.Helper()
+	if _, err := c.app.CreateUser(context.Background(), email, "correct horse"); err != nil {
+		c.t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	other := &authClient{t: c.t, app: c.app, srv: c.srv, hc: &http.Client{Jar: jar}}
+	other.expect("POST", api+"/auth/login", `{"email":"`+email+`","password":"correct horse"}`, 200)
+	return other
 }
 
 func (c *authClient) do(method, path, body string, header ...string) (*http.Response, string) {
@@ -217,4 +231,67 @@ func TestAuthMCPTokens(t *testing.T) {
 	id = id[:strings.Index(id, `"`)]
 	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 204)
 	c.expect("DELETE", api+"/auth/mcp-tokens/"+id, "", 404)
+}
+
+// Each account has its own status, favorite, notes, working copies,
+// submissions, drafts and preferences on the shared library.
+func TestPersonalDataPerAccount(t *testing.T) {
+	me := newAuthServer(t)
+	me.login()
+	you := me.as("you@example.com")
+	_, body := me.expect("POST", api+"/items", `{"type":"problem","title":"Two Sum"}`, 201)
+	id := body[strings.Index(body, `"id":"`)+6:]
+	id = id[:strings.Index(id, `"`)]
+
+	me.expect("PATCH", api+"/items/"+id, `{"status":"done","favorite":true,"notes":"mine","title":"Two Sum II"}`, 200)
+	_, body = you.expect("GET", api+"/items/"+id, "", 200)
+	for _, want := range []string{`"title":"Two Sum II"`, `"status":"todo"`, `"favorite":false`, `"notes":""`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the other account's item lacks %s: %s", want, body)
+		}
+	}
+	_, body = me.expect("GET", api+"/items/"+id, "", 200)
+	if !strings.Contains(body, `"status":"done"`) || !strings.Contains(body, `"notes":"mine"`) {
+		t.Errorf("own item: %s", body)
+	}
+	if _, body = you.expect("GET", api+"/items?favorite=true", "", 200); !strings.Contains(body, `"total":0`) {
+		t.Errorf("the other account's favorites: %s", body)
+	}
+
+	me.expect("PUT", api+"/items/"+id+"/workspace/python", `{"source":"print(1)"}`, 200)
+	if _, body = you.expect("GET", api+"/items/"+id+"/workspace", "", 200); strings.Contains(body, "print(1)") {
+		t.Errorf("the other account sees my working copy: %s", body)
+	}
+
+	me.expect("PUT", api+"/settings/preferences", `{"editor":{"tabSize":2}}`, 200)
+	if _, body = you.expect("GET", api+"/settings/preferences", "", 200); !strings.Contains(body, `"tabSize":4`) {
+		t.Errorf("the other account's preferences: %s", body)
+	}
+
+	_, body = me.expect("POST", api+"/drafts", `{"kind":"capture","title":"Mine"}`, 201)
+	draft := body[strings.Index(body, `"id":"`)+6:]
+	draft = draft[:strings.Index(draft, `"`)]
+	if _, body = you.expect("GET", api+"/drafts", "", 200); strings.Contains(body, draft) {
+		t.Errorf("the other account lists my draft: %s", body)
+	}
+	you.expect("GET", api+"/drafts/"+draft, "", 404)
+	you.expect("DELETE", api+"/drafts/"+draft, "", 404)
+	me.expect("GET", api+"/drafts/"+draft, "", 200)
+}
+
+// With sign-in off, requests act for the oldest account; while there is
+// none, what is kept goes to the first account created.
+func TestSignInOffActsForTheOldestAccount(t *testing.T) {
+	c := newServer(t)
+	id := c.expect("POST", api+"/items", `{"type":"reading","title":"R"}`, 201).json(t)["id"].(string)
+	c.expect("PATCH", api+"/items/"+id, `{"status":"in_progress"}`, 200)
+	if _, err := c.app.CreateUser(context.Background(), "first@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.app.CreateUser(context.Background(), "second@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.expect("GET", api+"/items/"+id, "", 200).json(t)["status"]; got != "in_progress" {
+		t.Errorf("status after the first account took it over: %v", got)
+	}
 }

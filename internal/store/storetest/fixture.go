@@ -353,12 +353,12 @@ func ClearNewerData(t *testing.T, db store.Store) {
 func ClearWorkingCopies(t *testing.T, db store.Store) {
 	t.Helper()
 	Write(t, db, func(tx store.Tx) error {
-		ws, err := tx.ListWorkingCopies("origin")
+		ws, err := tx.ListWorkingCopies("", "origin")
 		if err != nil {
 			return err
 		}
 		for _, w := range ws {
-			if _, err := tx.DeleteWorkingCopy(w.ItemID, w.Language); err != nil {
+			if _, err := tx.DeleteWorkingCopy("", w.ItemID, w.Language); err != nil {
 				return err
 			}
 		}

@@ -66,21 +66,28 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authorize enforces sign-in on an API request when it is on. It reports
-// false when it has answered the request itself.
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
+// authorize enforces sign-in on an API request when it is on, and returns
+// the request acting for its account: the signed-in one, or with sign-in
+// off the default account. It reports false when it has answered the
+// request itself.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
 	if !s.app.AuthEnabled() {
-		return true
+		account, err := s.app.DefaultAccount(r.Context())
+		if err != nil {
+			s.writeError(w, r, err)
+			return r, false
+		}
+		return r.WithContext(app.WithAccount(r.Context(), account)), true
 	}
 	// A session cookie is sent by the browser on its own, so state-changing
 	// requests must also come from a page of this server (CSRF).
 	if err := s.csrf.Check(r); err != nil {
 		writeJSON(w, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden,
 			Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
-		return false
+		return r, false
 	}
 	if publicPaths[r.URL.Path] {
-		return true
+		return r, true
 	}
 	sess, err := s.app.Authenticate(r.Context(), sessionToken(r))
 	if err != nil {
@@ -88,12 +95,12 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 			clearSessionCookie(w, r)
 		}
 		s.writeError(w, r, err)
-		return false
+		return r, false
 	}
 	if sess.Extended {
 		setSessionCookie(w, r, sessionToken(r), sess.ExpiresAt)
 	}
-	return true
+	return r.WithContext(app.WithAccount(r.Context(), sess.User.ID)), true
 }
 
 func (s *Server) getHealth(w http.ResponseWriter, r *http.Request) error {

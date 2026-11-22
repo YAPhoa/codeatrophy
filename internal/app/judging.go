@@ -204,7 +204,7 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 		return domain.Submission{}, err
 	}
 	sub := domain.Submission{
-		ID: newID(), ItemID: itemID, Mode: mode, Language: in.Language, Source: in.Source,
+		ID: newID(), UserID: accountOf(ctx), ItemID: itemID, Mode: mode, Language: in.Language, Source: in.Source,
 		LineOffset: asm.LineOffset, Harness: h,
 		Status: domain.SubmissionQueued, TotalCount: total, Stdin: in.Stdin.Ptr(), CaseIDs: caseIDs,
 		CreatedAt: a.clock(), Results: []domain.SubmissionResult{},
@@ -214,10 +214,10 @@ func (a *App) CreateSubmission(ctx context.Context, itemID string, in Submission
 		if err != nil {
 			return notFoundAs(err, "item")
 		}
-		// Only the latest run of a problem is kept. Runs still being
-		// judged are left for the next run to remove.
+		// Only an account's latest run of a problem is kept. Runs still
+		// being judged are left for the next run to remove.
 		if mode == domain.ModeRun {
-			if err := tx.DeleteCompletedRuns(itemID); err != nil {
+			if err := tx.DeleteCompletedRuns(sub.UserID, itemID); err != nil {
 				return err
 			}
 		}
@@ -351,7 +351,9 @@ func (a *App) judge(id string) {
 	sub.CompileOutput = domain.Truncate(out.CompileOutput, domain.MaxResultTextBytes)
 	sub.Error = out.Error
 	sub.FinishedAt = &now
-	err = a.store.Write(context.Background(), func(tx store.Tx) error {
+	// The status that follows from the verdict is the submitter's.
+	done := WithAccount(context.Background(), sub.UserID)
+	err = a.store.Write(done, func(tx store.Tx) error {
 		if err := tx.UpdateSubmission(&sub); err != nil {
 			return err
 		}
@@ -363,7 +365,7 @@ func (a *App) judge(id string) {
 			if cur.Status != domain.StatusDone {
 				next := cur.Clone()
 				next.Status = domain.StatusDone
-				return a.saveItem(context.Background(), tx, &cur, &next)
+				return a.saveItem(done, tx, &cur, &next)
 			}
 		}
 		return nil
@@ -409,12 +411,15 @@ func (a *App) recoverSubmissions(ctx context.Context) error {
 	})
 }
 
-// GetSubmission returns a submission with its results.
+// GetSubmission returns one of the account's submissions with its results.
 func (a *App) GetSubmission(ctx context.Context, id string) (domain.Submission, error) {
 	var s domain.Submission
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		var err error
 		s, err = tx.GetSubmission(id)
+		if err == nil && s.UserID != accountOf(ctx) {
+			err = store.ErrNotFound
+		}
 		return notFoundAs(err, "submission")
 	})
 	return s, err
@@ -444,7 +449,8 @@ type SubmissionQuery struct {
 	Offset int
 }
 
-// ListSubmissions lists a problem's submissions, newest first.
+// ListSubmissions lists the account's submissions of a problem, newest
+// first.
 func (a *App) ListSubmissions(ctx context.Context, itemID string, q SubmissionQuery) (Page[domain.SubmissionSummary], error) {
 	mode := domain.SubmissionMode(q.Mode)
 	if q.Mode != "" && !mode.Valid() {
@@ -459,7 +465,7 @@ func (a *App) ListSubmissions(ctx context.Context, itemID string, q SubmissionQu
 		if _, err := tx.GetItem(itemID); err != nil {
 			return notFoundAs(err, "item")
 		}
-		items, total, err := tx.ListSubmissions(itemID, mode, limit, offset)
+		items, total, err := tx.ListSubmissions(accountOf(ctx), itemID, mode, limit, offset)
 		out = Page[domain.SubmissionSummary]{Items: items, Total: total}
 		return err
 	})

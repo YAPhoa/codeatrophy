@@ -14,7 +14,7 @@ import (
 	"codeatrophy/internal/store"
 )
 
-// Preferences are personal settings for clients to honour. The server stores
+// Preferences are an account's personal settings for clients to honour. The server stores
 // and validates them but does not act on them. They are never exported.
 // Over MCP the test case preferences can be read (see Overview), never
 // changed.
@@ -67,8 +67,6 @@ var preferenceSchema = []prefDef{
 	{path: "editor.tabSize", kind: prefInt, def: 4, allowed: []int{2, 4, 8}},
 	{path: "editor.fontSize", kind: prefInt, def: 14, min: 10, max: 24},
 }
-
-const keyPreferences = "preferences"
 
 // Preferences is the nested preferences document.
 type Preferences map[string]any
@@ -169,9 +167,10 @@ func normalizeStored(v any) any {
 	return v
 }
 
-func (a *App) storedPreferences(tx store.Tx) (map[string]any, error) {
+// storedPreferences reads the preferences of the account ctx acts for.
+func (a *App) storedPreferences(ctx context.Context, tx store.Tx) (map[string]any, error) {
 	stored := map[string]any{}
-	raw, ok, err := tx.GetSetting(keyPreferences)
+	raw, ok, err := tx.GetSetting(store.PreferencesKey(accountOf(ctx)))
 	if err != nil || !ok {
 		return stored, err
 	}
@@ -188,7 +187,7 @@ func (a *App) storedPreferences(tx store.Tx) (map[string]any, error) {
 func (a *App) GetPreferences(ctx context.Context) (Preferences, error) {
 	var out Preferences
 	err := a.store.Read(ctx, func(tx store.Tx) error {
-		stored, err := a.storedPreferences(tx)
+		stored, err := a.storedPreferences(ctx, tx)
 		out = renderPreferences(stored, a.limits)
 		return err
 	})
@@ -244,7 +243,7 @@ func (a *App) UpdatePreferences(ctx context.Context, raw json.RawMessage) (Prefe
 	}
 	var out Preferences
 	err := a.store.Write(ctx, func(tx store.Tx) error {
-		stored, err := a.storedPreferences(tx)
+		stored, err := a.storedPreferences(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -255,7 +254,7 @@ func (a *App) UpdatePreferences(ctx context.Context, raw json.RawMessage) (Prefe
 		if err != nil {
 			return err
 		}
-		if err := tx.SetSetting(keyPreferences, string(b)); err != nil {
+		if err := tx.SetSetting(store.PreferencesKey(accountOf(ctx)), string(b)); err != nil {
 			return err
 		}
 		out = renderPreferences(stored, a.limits)

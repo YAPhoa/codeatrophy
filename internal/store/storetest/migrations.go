@@ -71,6 +71,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0017Provenance", testProvenanceMigration},
 		{"0018Auth", testAuthMigration},
 		{"0019MCPTokens", testMCPTokensMigration},
+		{"0020PerAccount", testPerAccountMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -480,7 +481,7 @@ func testWorkingCopiesMigration(t *testing.T, h MigrationHarness) {
 	Write(t, db, func(tx store.Tx) error {
 		return tx.PutWorkingCopy(&domain.WorkingCopy{ItemID: "origin", Language: "go", Source: "package main", UpdatedAt: now})
 	})
-	if ws := Read(t, db, func(tx store.Tx) ([]domain.WorkingCopy, error) { return tx.ListWorkingCopies("origin") }); len(ws) != 1 ||
+	if ws := Read(t, db, func(tx store.Tx) ([]domain.WorkingCopy, error) { return tx.ListWorkingCopies("", "origin") }); len(ws) != 1 ||
 		ws[0].Source != "package main" {
 		t.Errorf("after migrating: %+v", ws)
 	}

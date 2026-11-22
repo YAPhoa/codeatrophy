@@ -28,6 +28,7 @@ import (
 
 type client struct {
 	t   *testing.T
+	app *app.App
 	srv *httptest.Server
 	ai  *aitest.Provider
 	// h is the root handler, for tests that call it directly.
@@ -90,7 +91,7 @@ func newServerWith(t *testing.T, appOpts func(*app.Options), opts ...func(*httpa
 		srv.Close()
 		a.Stop()
 	})
-	return &client{t: t, srv: srv, ai: fake, h: h}
+	return &client{t: t, app: a, srv: srv, ai: fake, h: h}
 }
 
 // defaultProvider saves a ready provider and makes it the default.

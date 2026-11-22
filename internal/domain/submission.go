@@ -45,6 +45,9 @@ type Submission struct {
 	CreatedAt     time.Time          `json:"createdAt"`
 	FinishedAt    *time.Time         `json:"finishedAt"`
 
+	// UserID is the account that made the submission. It is not part of
+	// the API shape.
+	UserID string `json:"-"`
 	// Stdin is the custom input of a run, or nil to use test cases. It is
 	// not part of the API shape.
 	Stdin *string `json:"-"`

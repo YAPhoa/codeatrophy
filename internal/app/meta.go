@@ -266,7 +266,7 @@ func (a *App) Overview(ctx context.Context) (Overview, error) {
 		if out.Stats, err = tx.Stats(); err != nil {
 			return err
 		}
-		stored, err := a.storedPreferences(tx)
+		stored, err := a.storedPreferences(ctx, tx)
 		if err != nil {
 			return err
 		}

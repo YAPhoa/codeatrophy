@@ -10,6 +10,7 @@ import (
 // progress, not content: bundles do not carry it and writing it changes
 // neither the item's revision nor its updatedAt.
 type WorkingCopy struct {
+	UserID    string    `json:"-"`
 	ItemID    string    `json:"-"`
 	Language  string    `json:"language"`
 	Source    string    `json:"source"`

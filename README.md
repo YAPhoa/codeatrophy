@@ -123,7 +123,9 @@ request needs a session, except the health check (`/api/v1/health`).
   and is renewed as you use the app, so you are asked again only after that
   long away. Sign out from the sidebar or Settings → Account, where you can
   also change your password (which signs out your other browsers).
-- **Accounts on the command line.** Every account sees the same library.
+- **Accounts on the command line.** Accounts share one library. Each keeps
+  its own progress (status, favorites, notes), code, submissions, drafts, AI
+  history and preferences, and deleting an account deletes those.
 
   ```sh
   docker compose exec app codeatrophy user list
@@ -138,7 +140,9 @@ request needs a session, except the health check (`/api/v1/health`).
 - **Turning it off.** Set `CODEATROPHY_AUTH=off` to skip sign-in entirely,
   for example on a machine only you use, or behind a reverse proxy that
   already authenticates. Anyone who can reach the port can then use the app,
-  as before sign-in existed. The server logs a warning at startup.
+  as before sign-in existed, and it keeps the progress of the oldest
+  account (or of none, until one is created). The server logs a warning at
+  startup.
 - **MCP.** Assistants cannot sign in with a password, so while sign-in is on
   `/mcp` needs a bearer token: make one per machine or assistant under
   Settings → Account → MCP tokens (shown once, with the command that

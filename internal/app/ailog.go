@@ -96,9 +96,10 @@ func decodeLogCursor(s string) (*store.AILogCursor, bool) {
 	return &store.AILogCursor{CreatedAt: time.Unix(n, 0).UTC(), ID: id}, true
 }
 
-// ListAILog returns a page of the AI log, newest first, without bodies.
+// ListAILog returns a page of the account's AI log, newest first, without
+// bodies.
 func (a *App) ListAILog(ctx context.Context, q AILogQuery) (AILogPage, error) {
-	f := store.AILogFilter{ProviderID: q.ProviderID, Operation: q.Operation, Status: q.Status}
+	f := store.AILogFilter{UserID: accountOf(ctx), ProviderID: q.ProviderID, Operation: q.Operation, Status: q.Status}
 	if f.Operation != "" && !slices.Contains(logOperations, f.Operation) {
 		return AILogPage{}, errBadRequest("operation must be one of %s", strings.Join(logOperations, ", "))
 	}
@@ -151,6 +152,9 @@ func (a *App) GetAILogEntry(ctx context.Context, id string) (AILogDetail, error)
 	var out AILogDetail
 	err := a.store.Read(ctx, func(tx store.Tx) error {
 		e, b, err := tx.GetAILogEntry(id)
+		if err == nil && e.UserID != accountOf(ctx) {
+			err = store.ErrNotFound
+		}
 		if err != nil {
 			return notFoundAs(err, "AI log entry")
 		}
@@ -166,8 +170,8 @@ func (a *App) GetAILogEntry(ctx context.Context, id string) (AILogDetail, error)
 	return out, err
 }
 
-// DeleteAILog removes every entry of the AI log, or those created before a
-// timestamp (RFC 3339). Provider usage counts are not affected.
+// DeleteAILog removes every entry of the account's AI log, or those created
+// before a timestamp (RFC 3339). Provider usage counts are not affected.
 func (a *App) DeleteAILog(ctx context.Context, before string) error {
 	var at *time.Time
 	if before != "" {
@@ -177,5 +181,5 @@ func (a *App) DeleteAILog(ctx context.Context, before string) error {
 		}
 		at = &t
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error { return tx.DeleteAILog(at) })
+	return a.store.Write(ctx, func(tx store.Tx) error { return tx.DeleteAILog(accountOf(ctx), at) })
 }

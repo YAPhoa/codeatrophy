@@ -10,8 +10,9 @@ import (
 )
 
 // linkedItemColumns describe the item or deleted item with the id in
-// column "other", joined as i and d.
-const linkedItemColumns = `i.id IS NOT NULL, COALESCE(i.title, d.title), COALESCE(i.type, d.type), i.status, i.difficulty`
+// column "other", joined as i and d, with stateJoin after them.
+const linkedItemColumns = `i.id IS NOT NULL, COALESCE(i.title, d.title), COALESCE(i.type, d.type),
+	CASE WHEN i.id IS NOT NULL THEN COALESCE(ps.status, 'todo') END, i.difficulty`
 
 // scanLinkedItem scans linkedItemColumns, after the columns scanned into
 // first.
@@ -42,7 +43,7 @@ func scanLinkedItem(sc interface{ Scan(...any) error }, first ...any) (domain.Li
 // linkedItem describes the item with that id, whether it exists or not.
 func (t *tx) linkedItem(id string) (domain.LinkedItem, error) {
 	li, err := scanLinkedItem(t.queryRow(`SELECT `+linkedItemColumns+` FROM (SELECT $1::text COLLATE "C" AS other) l
-		LEFT JOIN items i ON i.id = l.other LEFT JOIN deleted_items d ON d.id = l.other`, id))
+		LEFT JOIN items i ON i.id = l.other LEFT JOIN deleted_items d ON d.id = l.other`+stateJoin("$2"), id, t.account()))
 	if err != nil {
 		return li, err
 	}
@@ -55,8 +56,8 @@ func (t *tx) ItemLinks(id string) ([]domain.LinkedItem, error) {
 	err := t.eachRow(`SELECT l.other, l.created_at, `+linkedItemColumns+` FROM (
 			SELECT seq, item_b AS other, created_at FROM item_links WHERE item_a = $1
 			UNION ALL SELECT seq, item_a, created_at FROM item_links WHERE item_b = $1) l
-		LEFT JOIN items i ON i.id = l.other LEFT JOIN deleted_items d ON d.id = l.other
-		ORDER BY i.id IS NULL, l.created_at, l.seq`, []any{id}, func(r *sql.Rows) error {
+		LEFT JOIN items i ON i.id = l.other LEFT JOIN deleted_items d ON d.id = l.other`+stateJoin("$2")+`
+		ORDER BY i.id IS NULL, l.created_at, l.seq`, []any{id, t.account()}, func(r *sql.Rows) error {
 		var other string
 		var at int64
 		li, err := scanLinkedItem(r, &other, &at)

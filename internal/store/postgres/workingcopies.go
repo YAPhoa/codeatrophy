@@ -5,9 +5,9 @@ import (
 	"codeatrophy/internal/store"
 )
 
-func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
-	rows, err := t.query(`SELECT item_id, language, source, updated_at FROM working_copies WHERE item_id = $1
-		ORDER BY write_seq DESC`, itemID)
+func (t *tx) ListWorkingCopies(userID, itemID string) ([]domain.WorkingCopy, error) {
+	rows, err := t.query(`SELECT user_id, item_id, language, source, updated_at FROM working_copies
+		WHERE user_id = $1 AND item_id = $2 ORDER BY write_seq DESC`, userID, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -18,7 +18,7 @@ func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
 			w       domain.WorkingCopy
 			updated int64
 		)
-		if err := rows.Scan(&w.ItemID, &w.Language, &w.Source, &updated); err != nil {
+		if err := rows.Scan(&w.UserID, &w.ItemID, &w.Language, &w.Source, &updated); err != nil {
 			return nil, err
 		}
 		w.UpdatedAt = fromUnix(updated)
@@ -32,12 +32,12 @@ func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
 // takes the next write_seq, which orders the list. The parameters are cast
 // because a SELECT list does not take its types from the insert's columns.
 func (t *tx) PutWorkingCopy(w *domain.WorkingCopy) error {
-	res, err := t.exec(`INSERT INTO working_copies (item_id, language, source, updated_at, write_seq)
-		SELECT id, $1::text, $2::bytea, $3::bigint, (SELECT COALESCE(MAX(write_seq), 0) + 1 FROM working_copies)
+	res, err := t.exec(`INSERT INTO working_copies (user_id, item_id, language, source, updated_at, write_seq)
+		SELECT $6::text, id, $1::text, $2::bytea, $3::bigint, (SELECT COALESCE(MAX(write_seq), 0) + 1 FROM working_copies)
 		FROM items WHERE id = $4 AND type = $5
-		ON CONFLICT (item_id, language) DO UPDATE
+		ON CONFLICT (user_id, item_id, language) DO UPDATE
 		SET source = excluded.source, updated_at = excluded.updated_at, write_seq = excluded.write_seq`,
-		w.Language, text(w.Source), toUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem))
+		w.Language, text(w.Source), toUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem), w.UserID)
 	if err != nil {
 		return err
 	}
@@ -49,8 +49,8 @@ func (t *tx) PutWorkingCopy(w *domain.WorkingCopy) error {
 	return nil
 }
 
-func (t *tx) DeleteWorkingCopy(itemID, language string) (bool, error) {
-	res, err := t.exec(`DELETE FROM working_copies WHERE item_id = $1 AND language = $2`, itemID, language)
+func (t *tx) DeleteWorkingCopy(userID, itemID, language string) (bool, error) {
+	res, err := t.exec(`DELETE FROM working_copies WHERE user_id = $1 AND item_id = $2 AND language = $3`, userID, itemID, language)
 	if err != nil {
 		return false, err
 	}

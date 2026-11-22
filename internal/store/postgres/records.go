@@ -240,7 +240,7 @@ func (t *tx) RemoveCollectionItem(id, itemID string) (bool, error) {
 // Submissions.
 
 const submissionColumns = `id, item_id, mode, language, source, stdin, case_ids, status, verdict, passed_count, total_count,
-	time_ms, memory_kb, compile_output, error, created_at, finished_at, line_offset, harness`
+	time_ms, memory_kb, compile_output, error, created_at, finished_at, line_offset, harness, user_id`
 
 func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, error) {
 	var (
@@ -252,7 +252,7 @@ func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, erro
 		caseIDs                 string
 	)
 	err := sc.Scan(&s.ID, &s.ItemID, &s.Mode, &s.Language, &s.Source, &stdin, &caseIDs, &s.Status, &verdict, &s.PassedCount,
-		&s.TotalCount, &timeMs, &memKb, &s.CompileOutput, &errMsg, &created, &finished, &s.LineOffset, &harness)
+		&s.TotalCount, &timeMs, &memKb, &s.CompileOutput, &errMsg, &created, &finished, &s.LineOffset, &harness, &s.UserID)
 	s.Stdin = strPtr(stdin)
 	_ = json.Unmarshal([]byte(caseIDs), &s.CaseIDs)
 	if verdict.Valid {
@@ -291,10 +291,10 @@ func (t *tx) InsertSubmission(s *domain.Submission) error {
 	}
 	caseIDs, _ := json.Marshal(ids)
 	_, err := t.exec(`INSERT INTO submissions (`+submissionColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
 		s.ID, s.ItemID, string(s.Mode), s.Language, text(s.Source), nullText(s.Stdin), string(caseIDs), string(s.Status),
 		verdictArg(s.Verdict), s.PassedCount, s.TotalCount, nullInt(s.TimeMs), nullInt(s.MemoryKb), text(s.CompileOutput),
-		nullText(s.Error), toUnix(s.CreatedAt), nullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness))
+		nullText(s.Error), toUnix(s.CreatedAt), nullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness), s.UserID)
 	return err
 }
 
@@ -332,9 +332,9 @@ func (t *tx) GetSubmission(id string) (domain.Submission, error) {
 	return s, err
 }
 
-func (t *tx) ListSubmissions(itemID string, mode domain.SubmissionMode, limit, offset int) ([]domain.SubmissionSummary, int, error) {
+func (t *tx) ListSubmissions(userID, itemID string, mode domain.SubmissionMode, limit, offset int) ([]domain.SubmissionSummary, int, error) {
 	var p params
-	where := `item_id = ` + p.add(itemID)
+	where := `user_id = ` + p.add(userID) + ` AND item_id = ` + p.add(itemID)
 	if mode != "" {
 		where += ` AND mode = ` + p.add(string(mode))
 	}
@@ -389,8 +389,9 @@ func (t *tx) AddSubmissionResult(submissionID string, index int, r domain.Submis
 	return err
 }
 
-func (t *tx) DeleteCompletedRuns(itemID string) error {
-	_, err := t.exec(`DELETE FROM submissions WHERE item_id = $1 AND mode = 'run' AND status = 'completed'`, itemID)
+func (t *tx) DeleteCompletedRuns(userID, itemID string) error {
+	_, err := t.exec(`DELETE FROM submissions WHERE user_id = $1 AND item_id = $2 AND mode = 'run' AND status = 'completed'`,
+		userID, itemID)
 	return err
 }
 

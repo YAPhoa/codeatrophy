@@ -1184,11 +1184,11 @@ func TestLimitsInOverviewAndSchemas(t *testing.T) {
 // or an account's, which CheckToken accepts.
 func TestRequireToken(t *testing.T) {
 	a := app.New(app.Options{Store: teststore.Open(t)})
-	check := func(_ context.Context, tok string) error {
+	check := func(_ context.Context, tok string) (string, error) {
 		if tok == "cat_good" {
-			return nil
+			return "u1", nil
 		}
-		return errors.New("unknown")
+		return "", errors.New("unknown")
 	}
 	for _, tc := range []struct {
 		name, configured, auth string
@@ -1213,5 +1213,45 @@ func TestRequireToken(t *testing.T) {
 		if tc.name == "no token" && !strings.Contains(rec.Body.String(), "Settings > Account") {
 			t.Errorf("no token: %s", rec.Body.String())
 		}
+	}
+}
+
+// A session acts for the account of its token: what it changes of an
+// item's personal state is that account's, and the other account's
+// sessions see their own.
+func TestSessionsActForTheTokensAccount(t *testing.T) {
+	var accounts = map[string]string{}
+	f := newFixture(t, "", func(o *mcpserver.Options) {
+		o.RequireToken = true
+		o.CheckToken = func(_ context.Context, tok string) (string, error) {
+			if id, ok := accounts[tok]; ok {
+				return id, nil
+			}
+			return "", errors.New("unknown")
+		}
+	})
+	for _, name := range []string{"a", "b"} {
+		u, err := f.app.CreateUser(f.ctx, name+"@example.com", "correct horse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		accounts["cat_"+name] = u.ID
+	}
+	sa, sb := f.connect(t, "cat_a"), f.connect(t, "cat_b")
+	it, _ := call(t, sa, "create_item", map[string]any{"type": "reading", "title": "Shared"})
+	id := it["id"].(string)
+	if res, isErr := call(t, sa, "bulk_update_items", map[string]any{"ids": []string{id}, "action": "setFavorite",
+		"favorite": true}); isErr {
+		t.Fatalf("setFavorite: %v", res)
+	}
+	item := func(s *mcp.ClientSession) map[string]any {
+		got, _ := call(t, s, "get_item", map[string]any{"id": id})
+		return got["item"].(map[string]any)
+	}
+	if got := item(sa); got["favorite"] != true {
+		t.Errorf("a's own favorite: %v", got)
+	}
+	if got := item(sb); got["favorite"] != false || got["title"] != "Shared" {
+		t.Errorf("b sees: %v", got)
 	}
 }

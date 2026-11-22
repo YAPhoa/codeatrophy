@@ -13,10 +13,32 @@ import (
 	"codeatrophy/internal/store"
 )
 
-const itemColumns = `i.seq, i.id, i.type, i.title, i.summary, i.body, i.difficulty, i.status, i.favorite, i.notes,
+const itemColumns = `i.seq, i.id, i.type, i.title, i.summary, i.body, i.difficulty, COALESCE(ps.status, 'todo'),
+	COALESCE(ps.favorite, 0), COALESCE(ps.notes, ''),
 	i.raw_input, i.source_url, i.source_note, i.variant_of, i.revision, i.time_limit_ms, i.memory_limit_kb,
 	i.compare_mode, i.starter_code, i.problem_interface, i.harness, i.created_at, i.updated_at, i.created_via,
 	i.created_client, i.created_model, i.updated_via, i.updated_client, i.updated_model`
+
+// stateJoin joins the personal state (ps) of the account given as its one
+// argument to items i.
+const stateJoin = ` LEFT JOIN item_states ps ON ps.item_id = i.id AND ps.user_id = ?`
+
+// account is the account whose personal state this transaction reads and
+// writes.
+func (t *tx) account() string { return store.AccountOf(t.ctx) }
+
+// writeState stores the personal state of it for the transaction's
+// account: a row when it differs from the default, none otherwise.
+func (t *tx) writeState(it *domain.Item) error {
+	if it.Status == domain.StatusTodo && !it.Favorite && it.Notes == "" {
+		_, err := t.exec(`DELETE FROM item_states WHERE user_id = ? AND item_id = ?`, t.account(), it.ID)
+		return err
+	}
+	_, err := t.exec(`INSERT INTO item_states (user_id, item_id, status, favorite, notes) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, item_id) DO UPDATE SET status = excluded.status, favorite = excluded.favorite,
+		notes = excluded.notes`, t.account(), it.ID, string(it.Status), boolInt(it.Favorite), it.Notes)
+	return err
+}
 
 type itemRow struct {
 	seq  int64
@@ -79,7 +101,7 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 }
 
 func (t *tx) GetItem(id string) (domain.Item, error) {
-	r, err := scanItem(t.queryRow(`SELECT `+itemColumns+` FROM items i WHERE i.id = ?`, id))
+	r, err := scanItem(t.queryRow(`SELECT `+itemColumns+` FROM items i`+stateJoin+` WHERE i.id = ?`, t.account(), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Item{}, store.ErrNotFound
 	}
@@ -189,7 +211,7 @@ func itemArgs(it *domain.Item) []any {
 		harness = string(b)
 	}
 	return []any{
-		it.Type, it.Title, it.Summary, it.Body, difficulty, it.Status, boolInt(it.Favorite), it.Notes,
+		it.Type, it.Title, it.Summary, it.Body, difficulty,
 		nullStr(it.RawInput), nullStr(it.Source.URL), nullStr(it.Source.Note), nullStr(it.VariantOf), it.Revision,
 		timeLimit, memLimit, compareMode, starter, toUnix(it.CreatedAt), toUnix(it.UpdatedAt), iface, harness,
 	}
@@ -198,11 +220,11 @@ func itemArgs(it *domain.Item) []any {
 func (t *tx) InsertItem(it *domain.Item) error {
 	args := append([]any{it.ID}, itemArgs(it)...)
 	args = append(append(args, sourceArgs(it.CreatedBy)...), sourceArgs(it.LastUpdatedBy)...)
-	res, err := t.exec(`INSERT INTO items (id, type, title, summary, body, difficulty, status, favorite, notes,
+	res, err := t.exec(`INSERT INTO items (id, type, title, summary, body, difficulty,
 		raw_input, source_url, source_note, variant_of, revision, time_limit_ms, memory_limit_kb, compare_mode,
 		starter_code, created_at, updated_at, problem_interface, harness, created_via, created_client, created_model,
 		updated_via, updated_client, updated_model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 	if err != nil {
 		return err
 	}
@@ -211,6 +233,9 @@ func (t *tx) InsertItem(it *domain.Item) error {
 		return err
 	}
 	if err := t.writeTags(it.ID, it.Tags); err != nil {
+		return err
+	}
+	if err := t.writeState(it); err != nil {
 		return err
 	}
 	if _, err := t.exec(`DELETE FROM deleted_items WHERE id = ?`, it.ID); err != nil {
@@ -222,8 +247,7 @@ func (t *tx) InsertItem(it *domain.Item) error {
 func (t *tx) UpdateItem(it *domain.Item) error {
 	// The type is immutable, and so is who created the item.
 	args := append(append(itemArgs(it)[1:], sourceArgs(it.LastUpdatedBy)...), it.ID)
-	res, err := t.exec(`UPDATE items SET title = ?, summary = ?, body = ?, difficulty = ?, status = ?, favorite = ?,
-		notes = ?, raw_input = ?, source_url = ?, source_note = ?, variant_of = ?, revision = ?, time_limit_ms = ?,
+	res, err := t.exec(`UPDATE items SET title = ?, summary = ?, body = ?, difficulty = ?, raw_input = ?, source_url = ?, source_note = ?, variant_of = ?, revision = ?, time_limit_ms = ?,
 		memory_limit_kb = ?, compare_mode = ?, starter_code = ?, created_at = ?, updated_at = ?, problem_interface = ?,
 		harness = ?, updated_via = ?, updated_client = ?, updated_model = ? WHERE id = ?`, args...)
 	if err != nil {
@@ -236,6 +260,9 @@ func (t *tx) UpdateItem(it *domain.Item) error {
 		return err
 	}
 	if err := t.writeTags(it.ID, it.Tags); err != nil {
+		return err
+	}
+	if err := t.writeState(it); err != nil {
 		return err
 	}
 	var seq int64
@@ -412,8 +439,8 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 			return err
 		}
 		if err := t.eachRow(`SELECT s.item_id, s.verdict FROM submissions s WHERE s.item_id IN (`+ph+`)
-			AND s.seq = (SELECT MAX(s2.seq) FROM submissions s2 WHERE s2.item_id = s.item_id
-			             AND s2.mode = 'submit' AND s2.status = 'completed')`, args,
+			AND s.seq = (SELECT MAX(s2.seq) FROM submissions s2 WHERE s2.item_id = s.item_id AND s2.user_id = ?
+			             AND s2.mode = 'submit' AND s2.status = 'completed')`, append(args, t.account()),
 			func(r *sql.Rows) error {
 				var id string
 				var v sql.NullString
@@ -465,7 +492,7 @@ func ftsQuery(q string) string {
 // itemFilterSQL returns the FROM clause and WHERE condition that select the
 // items of f, with their arguments in order. ok is false when f can match no
 // item at all (a search of punctuation only).
-func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bool) {
+func itemFilterSQL(f store.ItemFilter, account string) (from, whereSQL string, args []any, ok bool) {
 	from = `items i`
 	var (
 		where     []string
@@ -481,6 +508,8 @@ func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bo
 		where = append(where, `items_fts MATCH ?`)
 		whereArgs = append(whereArgs, fq)
 	}
+	from += stateJoin
+	joinArgs = append(joinArgs, account)
 	if f.CollectionID != "" && !f.Recursive {
 		from += ` JOIN collection_items ci ON ci.item_id = i.id AND ci.collection_id = ?`
 		joinArgs = append(joinArgs, f.CollectionID)
@@ -500,7 +529,7 @@ func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bo
 		whereArgs = append(whereArgs, string(f.Type))
 	}
 	if len(f.Statuses) > 0 {
-		where = append(where, `i.status IN (`+placeholders(len(f.Statuses))+`)`)
+		where = append(where, `COALESCE(ps.status, 'todo') IN (`+placeholders(len(f.Statuses))+`)`)
 		for _, s := range f.Statuses {
 			whereArgs = append(whereArgs, string(s))
 		}
@@ -533,7 +562,7 @@ func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bo
 		whereArgs = append(whereArgs, f.VariantOf)
 	}
 	if f.Favorite != nil {
-		where = append(where, `i.favorite = ?`)
+		where = append(where, `COALESCE(ps.favorite, 0) = ?`)
 		whereArgs = append(whereArgs, boolInt(*f.Favorite))
 	}
 	if len(where) > 0 {
@@ -543,7 +572,7 @@ func itemFilterSQL(f store.ItemFilter) (from, whereSQL string, args []any, ok bo
 }
 
 func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
-	from, whereSQL, args, ok := itemFilterSQL(f)
+	from, whereSQL, args, ok := itemFilterSQL(f, t.account())
 	if !ok {
 		return []domain.ItemSummary{}, 0, nil
 	}
@@ -619,7 +648,7 @@ func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
 
 func (t *tx) CountItemsBy(f store.ItemFilter, group string) (map[string]int, error) {
 	out := map[string]int{}
-	from, whereSQL, args, ok := itemFilterSQL(f)
+	from, whereSQL, args, ok := itemFilterSQL(f, t.account())
 	if !ok {
 		return out, nil
 	}
@@ -628,7 +657,7 @@ func (t *tx) CountItemsBy(f store.ItemFilter, group string) (map[string]int, err
 	case store.GroupType:
 		key = `i.type`
 	case store.GroupStatus:
-		key = `i.status`
+		key = `COALESCE(ps.status, 'todo')`
 	case store.GroupDifficulty:
 		key = `COALESCE(i.difficulty, 'none')`
 	case store.GroupTag:
@@ -691,7 +720,8 @@ func (t *tx) ItemIDsWithTag(name string) ([]string, error) {
 
 func (t *tx) Stats() (domain.Stats, error) {
 	s := domain.NewStats()
-	if err := t.eachRow(`SELECT type, status, COALESCE(difficulty, 'none'), COUNT(*) FROM items GROUP BY 1, 2, 3`, nil,
+	if err := t.eachRow(`SELECT i.type, COALESCE(ps.status, 'todo'), COALESCE(i.difficulty, 'none'), COUNT(*)
+		FROM items i`+stateJoin+` GROUP BY 1, 2, 3`, []any{t.account()},
 		func(r *sql.Rows) error {
 			var typ, status, diff string
 			var n int
@@ -707,8 +737,9 @@ func (t *tx) Stats() (domain.Stats, error) {
 		return s, err
 	}
 	// The conditions ListItems applies for its Favorite and Uncollected filters.
-	if err := t.queryRow(`SELECT COALESCE(SUM(i.favorite = 1), 0),
-		COALESCE(SUM(NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id)), 0) FROM items i`).
+	if err := t.queryRow(`SELECT COALESCE(SUM(ps.favorite = 1), 0),
+		COALESCE(SUM(NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id)), 0) FROM items i`+stateJoin,
+		t.account()).
 		Scan(&s.Items.Favorites, &s.Items.Uncollected); err != nil {
 		return s, err
 	}
@@ -718,7 +749,8 @@ func (t *tx) Stats() (domain.Stats, error) {
 	if err := t.queryRow(`SELECT COUNT(DISTINCT tag) FROM item_tags`).Scan(&s.Tags); err != nil {
 		return s, err
 	}
-	if err := t.queryRow(`SELECT COUNT(*), COALESCE(SUM(verdict = 'accepted'), 0) FROM submissions WHERE mode = 'submit'`).
+	if err := t.queryRow(`SELECT COUNT(*), COALESCE(SUM(verdict = 'accepted'), 0) FROM submissions WHERE mode = 'submit' AND user_id = ?`,
+		t.account()).
 		Scan(&s.Submissions.Total, &s.Submissions.Accepted); err != nil {
 		return s, err
 	}

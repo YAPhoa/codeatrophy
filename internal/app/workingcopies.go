@@ -25,7 +25,7 @@ func workspaceItem(tx store.Tx, id string) (domain.Item, error) {
 	return it, nil
 }
 
-// ListWorkingCopies lists a problem's working copies, the most recently
+// ListWorkingCopies lists the account's working copies of a problem, the most recently
 // written first.
 func (a *App) ListWorkingCopies(ctx context.Context, itemID string) (List[domain.WorkingCopy], error) {
 	var out List[domain.WorkingCopy]
@@ -33,18 +33,18 @@ func (a *App) ListWorkingCopies(ctx context.Context, itemID string) (List[domain
 		if _, err := workspaceItem(tx, itemID); err != nil {
 			return err
 		}
-		ws, err := tx.ListWorkingCopies(itemID)
+		ws, err := tx.ListWorkingCopies(accountOf(ctx), itemID)
 		out.Items = ws
 		return err
 	})
 	return out, err
 }
 
-// PutWorkingCopy creates or replaces a problem's working copy in a
-// language. The write is one upsert, so concurrent writes each leave one
+// PutWorkingCopy creates or replaces the account's working copy of a
+// problem in a language. The write is one upsert, so concurrent writes each leave one
 // whole row and the last one wins; updatedAt is the server's time.
 func (a *App) PutWorkingCopy(ctx context.Context, itemID, language string, in domain.WorkingCopyInput) (domain.WorkingCopy, error) {
-	w := domain.WorkingCopy{ItemID: itemID, Language: language, Source: in.Source.Val}
+	w := domain.WorkingCopy{UserID: accountOf(ctx), ItemID: itemID, Language: language, Source: in.Source.Val}
 	fe := domain.FieldErrors{}
 	if !in.Source.HasValue() {
 		fe.Add("source", "is required")
@@ -70,7 +70,8 @@ func (a *App) PutWorkingCopy(ctx context.Context, itemID, language string, in do
 	return w, err
 }
 
-// DeleteWorkingCopy removes a problem's working copy in a language; there
+// DeleteWorkingCopy removes the account's working copy of a problem in a
+// language; there
 // being none is not an error.
 func (a *App) DeleteWorkingCopy(ctx context.Context, itemID, language string) error {
 	if !domain.KnownLanguage(language) {
@@ -80,7 +81,7 @@ func (a *App) DeleteWorkingCopy(ctx context.Context, itemID, language string) er
 		if _, err := workspaceItem(tx, itemID); err != nil {
 			return err
 		}
-		_, err := tx.DeleteWorkingCopy(itemID, language)
+		_, err := tx.DeleteWorkingCopy(accountOf(ctx), itemID, language)
 		return err
 	})
 }

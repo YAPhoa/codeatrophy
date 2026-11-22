@@ -70,7 +70,7 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 			return err
 		}
 		if in.SubmissionID.HasValue() {
-			if s.LastRun, err = submissionRun(tx, &s, in.SubmissionID.Val); err != nil {
+			if s.LastRun, err = submissionRun(tx, accountOf(ctx), &s, in.SubmissionID.Val); err != nil {
 				return err
 			}
 		}
@@ -161,10 +161,10 @@ func (a *App) DeleteSolution(ctx context.Context, id string) error {
 
 // submissionRun returns the figures of a submission as the last run of a
 // new solution s, or nil when the submission does not describe s's code:
-// it is missing, of another item, not completed, a run on custom input,
+// it is missing, another account's, of another item, not completed, a run on custom input,
 // stopped by an engine failure, or of another language or source. The
 // figures are always the server's own, never the client's.
-func submissionRun(tx store.Tx, s *domain.ItemSolution, submissionID string) (*domain.SolutionRun, error) {
+func submissionRun(tx store.Tx, userID string, s *domain.ItemSolution, submissionID string) (*domain.SolutionRun, error) {
 	sub, err := tx.GetSubmission(submissionID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -172,7 +172,7 @@ func submissionRun(tx store.Tx, s *domain.ItemSolution, submissionID string) (*d
 	if err != nil {
 		return nil, err
 	}
-	if sub.ItemID != s.ItemID || sub.Status != domain.SubmissionCompleted || sub.FinishedAt == nil || sub.Stdin != nil ||
+	if sub.UserID != userID || sub.ItemID != s.ItemID || sub.Status != domain.SubmissionCompleted || sub.FinishedAt == nil || sub.Stdin != nil ||
 		sub.Verdict == nil || *sub.Verdict == domain.VerdictInternalError ||
 		sub.Language != s.Language || domain.NormalizeText(sub.Source) != s.Source {
 		return nil, nil

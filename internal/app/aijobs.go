@@ -254,7 +254,7 @@ func (a *App) StartAIJob(ctx context.Context, kind, itemID string, raw json.RawM
 		return AIJob{}, err
 	}
 	now := a.clock()
-	j := store.AIJob{ID: newID(), CreatedAt: now, Kind: kind, ItemID: t.itemID, Title: t.title, Status: store.JobQueued,
+	j := store.AIJob{ID: newID(), UserID: accountOf(ctx), CreatedAt: now, Kind: kind, ItemID: t.itemID, Title: t.title, Status: store.JobQueued,
 		Origin: origin, Request: string(raw)}
 	err = a.store.Write(ctx, func(tx store.Tx) error { return insertJob(tx, &j) })
 	if err != nil {
@@ -273,8 +273,8 @@ func requestBody(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-// insertJob stores a new queued job, unless too many are active, and prunes
-// old ones. The caller pushes it to the queue once the transaction has
+// insertJob stores a new queued job, unless too many are active (of every
+// account: they share the queue), and prunes old ones. The caller pushes it to the queue once the transaction has
 // committed.
 func insertJob(tx store.Tx, j *store.AIJob) error {
 	active, err := tx.ListAIJobs(store.AIJobFilter{Active: true, Limit: MaxActiveJobs})
@@ -324,6 +324,9 @@ func (a *App) runJob(ctx context.Context, id string) {
 		}
 		return
 	}
+	// The job's requests are logged for, and its items read as, the
+	// account that started it.
+	ctx = WithAccount(ctx, j.UserID)
 	start := time.Now()
 	var result any
 	var title string
@@ -334,7 +337,7 @@ func (a *App) runJob(ctx context.Context, id string) {
 	if a.ctx.Err() != nil {
 		return // shutting down
 	}
-	wctx, cancel := context.WithTimeout(context.Background(), jobWriteTimeout)
+	wctx, cancel := context.WithTimeout(WithAccount(context.Background(), j.UserID), jobWriteTimeout)
 	defer cancel()
 	err = a.store.Write(wctx, func(tx store.Tx) error {
 		cur, gerr := tx.GetAIJob(id)
@@ -481,7 +484,7 @@ type AIJobQuery struct {
 	Limit    *int
 }
 
-// ListAIJobs lists jobs, newest first: by default those whose result has
+// ListAIJobs lists the account's jobs, newest first: by default those whose result has
 // not been picked up.
 func (a *App) ListAIJobs(ctx context.Context, q AIJobQuery) (List[AIJob], error) {
 	limit, _, err := pageBounds(q.Limit, 0)
@@ -493,7 +496,8 @@ func (a *App) ListAIJobs(ctx context.Context, q AIJobQuery) (List[AIJob], error)
 	default:
 		return List[AIJob]{}, errBadRequest("kind must be draft, variant, testcases or code")
 	}
-	f := store.AIJobFilter{Active: q.Active, Kind: q.Kind, ItemID: q.ItemID, DraftID: q.DraftID, PickedUp: &q.PickedUp, Limit: limit}
+	account := accountOf(ctx)
+	f := store.AIJobFilter{UserID: &account, Active: q.Active, Kind: q.Kind, ItemID: q.ItemID, DraftID: q.DraftID, PickedUp: &q.PickedUp, Limit: limit}
 	var jobs []store.AIJob
 	err = a.store.Read(ctx, func(tx store.Tx) (err error) { jobs, err = tx.ListAIJobs(f); return err })
 	out := List[AIJob]{Items: make([]AIJob, len(jobs))}
@@ -503,10 +507,20 @@ func (a *App) ListAIJobs(ctx context.Context, q AIJobQuery) (List[AIJob], error)
 	return out, err
 }
 
+// ownJob returns a job of the account ctx acts for; another account's is
+// not found.
+func ownJob(ctx context.Context, tx store.Tx, id string) (store.AIJob, error) {
+	j, err := tx.GetAIJob(id)
+	if err == nil && j.UserID != accountOf(ctx) {
+		err = store.ErrNotFound
+	}
+	return j, notFoundAs(err, "AI job")
+}
+
 // GetAIJob returns a job with its request and result.
 func (a *App) GetAIJob(ctx context.Context, id string) (AIJobDetail, error) {
 	var j store.AIJob
-	err := a.store.Read(ctx, func(tx store.Tx) (err error) { j, err = tx.GetAIJob(id); return notFoundAs(err, "AI job") })
+	err := a.store.Read(ctx, func(tx store.Tx) (err error) { j, err = ownJob(ctx, tx, id); return err })
 	if err != nil {
 		return AIJobDetail{}, err
 	}
@@ -518,8 +532,8 @@ func (a *App) GetAIJob(ctx context.Context, id string) (AIJobDetail, error) {
 func (a *App) CancelAIJob(ctx context.Context, id string) (AIJob, error) {
 	var j store.AIJob
 	err := a.store.Write(ctx, func(tx store.Tx) (err error) {
-		if j, err = tx.GetAIJob(id); err != nil {
-			return notFoundAs(err, "AI job")
+		if j, err = ownJob(ctx, tx, id); err != nil {
+			return err
 		}
 		if !activeJob(j.Status) {
 			return nil
@@ -539,6 +553,9 @@ func (a *App) CancelAIJob(ctx context.Context, id string) (AIJob, error) {
 // running.
 func (a *App) DismissAIJob(ctx context.Context, id string) error {
 	err := a.store.Write(ctx, func(tx store.Tx) error {
+		if _, err := ownJob(ctx, tx, id); err != nil {
+			return err
+		}
 		ok, err := tx.DeleteAIJob(id)
 		if err == nil && !ok {
 			return errNotFound("AI job")
@@ -557,8 +574,8 @@ func (a *App) DismissAIJob(ctx context.Context, id string) error {
 func (a *App) PickUpAIJob(ctx context.Context, id string) (AIJobDetail, error) {
 	var j store.AIJob
 	err := a.store.Write(ctx, func(tx store.Tx) (err error) {
-		if j, err = tx.GetAIJob(id); err != nil {
-			return notFoundAs(err, "AI job")
+		if j, err = ownJob(ctx, tx, id); err != nil {
+			return err
 		}
 		if activeJob(j.Status) {
 			return errConflict("the AI job has not finished yet", nil)

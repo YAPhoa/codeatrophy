@@ -15,7 +15,7 @@ import (
 // ai_log_texts.
 
 const aiLogColumns = `id, created_at, operation, item_id, title, provider_id, provider_name, kind, model, status, error,
-	duration_ms, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens`
+	duration_ms, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, user_id`
 
 func scanAILogEntry(sc interface{ Scan(...any) error }) (store.AILogEntry, error) {
 	var (
@@ -25,7 +25,7 @@ func scanAILogEntry(sc interface{ Scan(...any) error }) (store.AILogEntry, error
 		created                            int64
 	)
 	if err := sc.Scan(&e.ID, &created, &e.Operation, &itemID, &title, &e.ProviderID, &e.ProviderName, &e.Kind, &e.Model,
-		&e.Status, &errMsg, &e.DurationMs, &in, &out, &reasoning, &cacheR, &cacheW); err != nil {
+		&e.Status, &errMsg, &e.DurationMs, &in, &out, &reasoning, &cacheR, &cacheW, &e.UserID); err != nil {
 		return e, err
 	}
 	e.CreatedAt = fromUnix(created)
@@ -36,10 +36,10 @@ func scanAILogEntry(sc interface{ Scan(...any) error }) (store.AILogEntry, error
 }
 
 func (t *tx) InsertAILogEntry(e store.AILogEntry, b store.AILogBody) error {
-	if _, err := t.exec(`INSERT INTO ai_log (`+aiLogColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err := t.exec(`INSERT INTO ai_log (`+aiLogColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, toUnix(e.CreatedAt), e.Operation, nullStr(e.ItemID), nullStr(e.Title), e.ProviderID, e.ProviderName, e.Kind,
 		e.Model, e.Status, nullStr(e.Error), e.DurationMs, nullInt(e.InputTokens), nullInt(e.OutputTokens),
-		nullInt(e.ReasoningTokens), nullInt(e.CacheReadTokens), nullInt(e.CacheWriteTokens)); err != nil {
+		nullInt(e.ReasoningTokens), nullInt(e.CacheReadTokens), nullInt(e.CacheWriteTokens), e.UserID); err != nil {
 		return err
 	}
 	var hash any
@@ -61,12 +61,12 @@ func (t *tx) InsertAILogEntry(e store.AILogEntry, b store.AILogBody) error {
 }
 
 func (t *tx) ListAILog(f store.AILogFilter) ([]store.AILogEntry, int, error) {
-	where := []string{"TRUE"}
 	var args []any
 	arg := func(v any) string {
 		args = append(args, v)
 		return "?"
 	}
+	where := []string{"user_id = " + arg(f.UserID)}
 	if f.ProviderID != "" {
 		where = append(where, "provider_id = "+arg(f.ProviderID))
 	}
@@ -142,10 +142,10 @@ func (t *tx) GetAILogEntry(id string) (store.AILogEntry, store.AILogBody, error)
 	return e, b, nil
 }
 
-func (t *tx) DeleteAILog(before *time.Time) error {
-	cond, args := ``, []any{}
+func (t *tx) DeleteAILog(userID string, before *time.Time) error {
+	cond, args := ` WHERE user_id = ?`, []any{userID}
 	if before != nil {
-		cond, args = ` WHERE created_at < ?`, []any{toUnix(*before)}
+		cond, args = cond+` AND created_at < ?`, append(args, toUnix(*before))
 	}
 	if _, err := t.exec(`DELETE FROM ai_log_bodies WHERE entry_id IN (SELECT id FROM ai_log`+cond+`)`, args...); err != nil {
 		return err

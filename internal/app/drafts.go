@@ -36,7 +36,7 @@ const (
 	DraftFailed   = "failed"
 )
 
-// MaxDrafts is how many drafts an instance keeps at most.
+// MaxDrafts is how many drafts an account keeps at most.
 const MaxDrafts = 500
 
 // DraftSummary is a draft as lists show it.
@@ -173,18 +173,19 @@ type DraftQuery struct {
 	VariantOf string
 }
 
-// ListDrafts lists drafts, most recently changed first.
+// ListDrafts lists the account's drafts, most recently changed first.
 func (a *App) ListDrafts(ctx context.Context, q DraftQuery) (List[DraftSummary], error) {
 	if q.Kind != "" && q.Kind != DraftCapture && q.Kind != DraftVariant {
 		return List[DraftSummary]{}, errBadRequest("kind must be capture or variant")
 	}
 	out := List[DraftSummary]{Items: []DraftSummary{}}
 	err := a.store.Read(ctx, func(tx store.Tx) error {
-		drafts, err := tx.ListDrafts(store.DraftFilter{Kind: q.Kind, VariantOf: q.VariantOf})
+		account := accountOf(ctx)
+		drafts, err := tx.ListDrafts(store.DraftFilter{UserID: account, Kind: q.Kind, VariantOf: q.VariantOf})
 		if err != nil {
 			return err
 		}
-		jobs, err := tx.ListAIJobs(store.AIJobFilter{})
+		jobs, err := tx.ListAIJobs(store.AIJobFilter{UserID: &account})
 		if err != nil {
 			return err
 		}
@@ -204,13 +205,23 @@ func (a *App) ListDrafts(ctx context.Context, q DraftQuery) (List[DraftSummary],
 	return out, err
 }
 
+// ownDraft returns a draft of the account ctx acts for; another account's
+// is not found.
+func ownDraft(ctx context.Context, tx store.Tx, id string) (store.Draft, error) {
+	d, err := tx.GetDraft(id)
+	if err == nil && d.UserID != accountOf(ctx) {
+		err = store.ErrNotFound
+	}
+	return d, notFoundAs(err, "draft")
+}
+
 // GetDraft returns a draft with its documents.
 func (a *App) GetDraft(ctx context.Context, id string) (Draft, error) {
 	var out Draft
 	err := a.store.Read(ctx, func(tx store.Tx) error {
-		d, err := tx.GetDraft(id)
+		d, err := ownDraft(ctx, tx, id)
 		if err != nil {
-			return notFoundAs(err, "draft")
+			return err
 		}
 		out, err = a.draftView(tx, d)
 		return err
@@ -288,7 +299,7 @@ func (a *App) newDraftJob(ctx context.Context, d store.Draft, raw json.RawMessag
 		return store.AIJob{}, err
 	}
 	id := d.ID
-	return store.AIJob{ID: newID(), CreatedAt: a.clock(), Kind: kind, ItemID: t.itemID, DraftID: &id, Title: t.title,
+	return store.AIJob{ID: newID(), UserID: d.UserID, CreatedAt: a.clock(), Kind: kind, ItemID: t.itemID, DraftID: &id, Title: t.title,
 		Status: store.JobQueued, Origin: origin, Request: string(raw)}, nil
 }
 
@@ -323,7 +334,7 @@ func (a *App) CreateDraft(ctx context.Context, in NewDraftInput) (out Draft, sta
 		return Draft{}, false, err
 	}
 	now := a.clock()
-	d := store.Draft{ID: newID(), CreatedAt: now, UpdatedAt: now, Kind: kind, ClientTitle: title, Revision: 1,
+	d := store.Draft{ID: newID(), UserID: accountOf(ctx), CreatedAt: now, UpdatedAt: now, Kind: kind, ClientTitle: title, Revision: 1,
 		Content: content, Edited: content != nil && !in.Generate.HasValue()}
 	if kind == DraftVariant {
 		v := in.VariantOf.Val
@@ -344,7 +355,7 @@ func (a *App) CreateDraft(ctx context.Context, in NewDraftInput) (out Draft, sta
 		d.Request, d.JobID = &req, &job.ID
 	}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		existing, err := tx.ListDrafts(store.DraftFilter{})
+		existing, err := tx.ListDrafts(store.DraftFilter{UserID: d.UserID})
 		if err != nil {
 			return err
 		}
@@ -422,9 +433,9 @@ func (a *App) UpdateDraft(ctx context.Context, id string, in DraftPatch) (Draft,
 	}
 	var out Draft
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		d, err := tx.GetDraft(id)
+		d, err := ownDraft(ctx, tx, id)
 		if err != nil {
-			return notFoundAs(err, "draft")
+			return err
 		}
 		if err := checkDraftRevision(d, in.ExpectedRevision); err != nil {
 			return err
@@ -465,7 +476,7 @@ func (a *App) UpdateDraft(ctx context.Context, id string, in DraftPatch) (Draft,
 // instruction).
 func (a *App) GenerateDraft(ctx context.Context, id string, raw json.RawMessage) (Draft, error) {
 	var d store.Draft
-	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = tx.GetDraft(id); return notFoundAs(err, "draft") }); err != nil {
+	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = ownDraft(ctx, tx, id); return err }); err != nil {
 		return Draft{}, err
 	}
 	return a.startDraftGeneration(ctx, d, raw)
@@ -474,7 +485,7 @@ func (a *App) GenerateDraft(ctx context.Context, id string, raw json.RawMessage)
 // RetryDraft starts a generation with the draft's latest request again.
 func (a *App) RetryDraft(ctx context.Context, id string) (Draft, error) {
 	var d store.Draft
-	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = tx.GetDraft(id); return notFoundAs(err, "draft") }); err != nil {
+	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = ownDraft(ctx, tx, id); return err }); err != nil {
 		return Draft{}, err
 	}
 	if d.Request == nil {
@@ -490,9 +501,9 @@ func (a *App) startDraftGeneration(ctx context.Context, d store.Draft, raw json.
 	}
 	var out Draft
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		cur, err := tx.GetDraft(d.ID)
+		cur, err := ownDraft(ctx, tx, d.ID)
 		if err != nil {
-			return notFoundAs(err, "draft")
+			return err
 		}
 		prev, err := draftJob(tx, cur)
 		if err != nil {
@@ -572,7 +583,7 @@ type DraftSaveInput struct {
 // form was built from one.
 func (a *App) SaveDraft(ctx context.Context, id string, in DraftSaveInput) (domain.Item, error) {
 	var d store.Draft
-	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = tx.GetDraft(id); return notFoundAs(err, "draft") }); err != nil {
+	if err := a.store.Read(ctx, func(tx store.Tx) (err error) { d, err = ownDraft(ctx, tx, id); return err }); err != nil {
 		return domain.Item{}, err
 	}
 	item := in.Item
@@ -589,9 +600,9 @@ func (a *App) SaveDraft(ctx context.Context, id string, in DraftSaveInput) (doma
 	var out domain.Item
 	var cancelled *string
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		cur, err := tx.GetDraft(id)
+		cur, err := ownDraft(ctx, tx, id)
 		if err != nil {
-			return notFoundAs(err, "draft")
+			return err
 		}
 		if err := checkDraftRevision(cur, in.ExpectedRevision); err != nil {
 			return err
@@ -647,9 +658,9 @@ func (a *App) endDraft(tx store.Tx, d store.Draft) (*string, error) {
 func (a *App) DeleteDraft(ctx context.Context, id string) error {
 	var cancelled *string
 	err := a.store.Write(ctx, func(tx store.Tx) error {
-		d, err := tx.GetDraft(id)
+		d, err := ownDraft(ctx, tx, id)
 		if err != nil {
-			return notFoundAs(err, "draft")
+			return err
 		}
 		cancelled, err = a.endDraft(tx, d)
 		return err

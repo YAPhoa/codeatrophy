@@ -103,7 +103,7 @@ func TestWorkingCopies(t *testing.T) {
 	must(e.app.BulkItems(e.ctx, app.BulkInput{IDs: []string{other.ID}, Action: "delete"}))
 	for _, id := range []string{it.ID, other.ID} {
 		if err := e.db.Read(e.ctx, func(tx store.Tx) error {
-			ws, err := tx.ListWorkingCopies(id)
+			ws, err := tx.ListWorkingCopies("", id)
 			if err == nil && len(ws) != 0 {
 				t.Errorf("a deleted item keeps working copies %+v", ws)
 			}
@@ -201,7 +201,7 @@ func TestWorkingCopyWritesRaceDeletion(t *testing.T) {
 		t.Errorf("%d writes succeeded, %d writers found no item, want 6", ok, gone)
 	}
 	if err := e.db.Read(e.ctx, func(tx store.Tx) error {
-		ws, err := tx.ListWorkingCopies(it.ID)
+		ws, err := tx.ListWorkingCopies("", it.ID)
 		if err == nil && len(ws) != 0 {
 			t.Errorf("the deleted item keeps working copies %+v", ws)
 		}

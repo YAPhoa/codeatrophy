@@ -16,7 +16,7 @@ import (
 
 func workingCopies(t *testing.T, db store.Store, itemID string) []domain.WorkingCopy {
 	t.Helper()
-	return Read(t, db, func(tx store.Tx) ([]domain.WorkingCopy, error) { return tx.ListWorkingCopies(itemID) })
+	return Read(t, db, func(tx store.Tx) ([]domain.WorkingCopy, error) { return tx.ListWorkingCopies("", itemID) })
 }
 
 func putWorkingCopy(db store.Store, w domain.WorkingCopy) error {
@@ -103,13 +103,13 @@ func testWorkingCopies(t *testing.T, db store.Store) {
 	}
 
 	Write(t, db, func(tx store.Tx) error {
-		if ok, err := tx.DeleteWorkingCopy("p", "python"); err != nil || !ok {
+		if ok, err := tx.DeleteWorkingCopy("", "p", "python"); err != nil || !ok {
 			return fmt.Errorf("deleting python: %v %v", ok, err)
 		}
-		if ok, err := tx.DeleteWorkingCopy("p", "python"); err != nil || ok {
+		if ok, err := tx.DeleteWorkingCopy("", "p", "python"); err != nil || ok {
 			return fmt.Errorf("deleting python again: %v %v", ok, err)
 		}
-		if ok, err := tx.DeleteWorkingCopy("missing", "python"); err != nil || ok {
+		if ok, err := tx.DeleteWorkingCopy("", "missing", "python"); err != nil || ok {
 			return fmt.Errorf("deleting one of a missing item: %v %v", ok, err)
 		}
 		return nil

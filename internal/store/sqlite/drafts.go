@@ -13,7 +13,7 @@ import (
 // content compressed.
 
 const draftColumns = `id, created_at, updated_at, kind, variant_of, title, client_title, revision, edited, job_id, error,
-	generation_seq, based_on`
+	generation_seq, based_on, user_id`
 
 func scanDraft(sc interface{ Scan(...any) error }, extra ...any) (store.Draft, error) {
 	var (
@@ -23,7 +23,7 @@ func scanDraft(sc interface{ Scan(...any) error }, extra ...any) (store.Draft, e
 		edited                                int
 	)
 	dest := append([]any{&d.ID, &created, &updated, &d.Kind, &variantOf, &d.Title, &clientTitle, &d.Revision, &edited,
-		&jobID, &errMsg, &d.GenerationSeq, &d.BasedOn}, extra...)
+		&jobID, &errMsg, &d.GenerationSeq, &d.BasedOn, &d.UserID}, extra...)
 	if err := sc.Scan(dest...); err != nil {
 		return d, err
 	}
@@ -45,10 +45,10 @@ func decompressedOrNil(b []byte, id, what string) (*string, error) {
 
 func (t *tx) InsertDraft(d *store.Draft) error {
 	_, err := t.exec(`INSERT INTO drafts (`+draftColumns+`, request, generation, content)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, toUnix(d.CreatedAt), toUnix(d.UpdatedAt), d.Kind, nullStr(d.VariantOf), d.Title, nullStr(d.ClientTitle),
 		d.Revision, boolInt(d.Edited), nullStr(d.JobID), nullStr(d.Error), d.GenerationSeq, d.BasedOn,
-		compressedOrNil(d.Request), compressedOrNil(d.Generation), compressedOrNil(d.Content))
+		d.UserID, compressedOrNil(d.Request), compressedOrNil(d.Generation), compressedOrNil(d.Content))
 	return err
 }
 
@@ -73,8 +73,8 @@ func (t *tx) GetDraft(id string) (store.Draft, error) {
 }
 
 func (t *tx) ListDrafts(f store.DraftFilter) ([]store.Draft, error) {
-	where := []string{"TRUE"}
-	var args []any
+	where := []string{"user_id = ?"}
+	args := []any{f.UserID}
 	if f.Kind != "" {
 		where, args = append(where, "kind = ?"), append(args, f.Kind)
 	}

@@ -254,7 +254,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
 			return
 		}
-		if !s.authorize(rec, r) {
+		r, ok := s.authorize(rec, r)
+		if !ok {
 			return
 		}
 		s.api.ServeHTTP(rec, r)

@@ -110,6 +110,27 @@ a cross-origin check against request forgery (Go's
 match the `Host` header. Requests with neither header (not from a browser)
 pass. This check applies to `POST /auth/login` too.
 
+### Personal data
+
+Accounts share one library: items, test cases, solutions, collections, tags,
+AI providers, style presets and settings. What a person does with the
+library is their account's own:
+
+- an item's `status`, `favorite` and `notes` (and the `lastVerdict`, the
+  status filters and counts of `GET /items`, `GET /items/facets` and
+  `GET /stats`, which follow from them),
+- [working copies](#working-copies) and [submissions](#submissions),
+- [drafts](#drafts), [AI jobs](#ai-jobs) and the [AI activity log](#ai-activity-log),
+- [preferences](#preferences).
+
+A request acts for the signed-in account; over MCP, for the account whose
+token it sends. With sign-in off, or with `CODEATROPHY_MCP_TOKEN`, it acts
+for the oldest account, or, while there is none, for no account: what is
+kept then goes to the first account created. Another account's submission,
+draft, AI job or AI log entry answers `404 not_found`, as one that does not
+exist. Deleting an account (`codeatrophy user delete`) deletes its personal
+data.
+
 ### Single-line fields
 
 Item `title`, tags, collection `name`, style preset `name` and solution
@@ -198,7 +219,8 @@ session of the account ends. A wrong current password is
 a new password outside 8 characters to 72 bytes is `422` on `newPassword`.
 
 Other accounts are managed on the server with `codeatrophy user`
-(`list`, `add`, `password`, `delete`); every account sees the same library.
+(`list`, `add`, `password`, `delete`); accounts share one library and keep
+their own [personal data](#personal-data).
 
 ### MCP tokens
 
@@ -375,6 +397,8 @@ to show.
 ```
 
 All enum keys are always present, with `0` when empty.
+`items.byStatus`, `items.favorites` and `submissions` count the account's own
+status, favorites and submissions (see [Personal data](#personal-data)).
 `items.favorites` is the count the library's Favorites view shows, and
 `items.uncollected` the number of items in no collection: each equals the
 `total` of `GET /items` with only `favorite=true`, or only
@@ -1081,8 +1105,8 @@ reference solution does not reset `verified` on test cases; run
 ## Working copies
 
 The code the user is writing on a problem, kept on the server so that it
-follows them across browsers and devices: one working copy per problem and
-language, so switching to another language and back finds the earlier code
+follows them across browsers and devices: one working copy per account,
+problem and language, so switching to another language and back finds the earlier code
 again. A working copy is not a solution and not a submission. It is personal
 work in progress: never exported in bundles, not shown over MCP, and
 writing it changes neither the item's `revision` nor its `updatedAt`. It is
@@ -1443,10 +1467,13 @@ An unknown or removed job is `404` on every endpoint. A bad query value is
 
 - At most `CODEATROPHY_AI_WORKERS` jobs (default 2) run at once; the others
   wait `queued`, in the order they were started.
-- At most 20 jobs may be active at once. A request that would start a 21st
-  is `409 conflict`, and nothing is queued.
+- At most 20 jobs may be active at once, counting every account's, since
+  they share the workers. A request that would start a 21st is
+  `409 conflict`, and nothing is queued.
+- Jobs are listed, read, cancelled and dismissed by the account that started
+  them only; another account's job is `404`.
 - A finished job is kept for 3 days after it finished, and only while it is
-  among the 200 newest jobs. Active jobs are never removed. A removed job is `404`; the [AI activity
+  among the 200 newest jobs of the server. Active jobs are never removed. A removed job is `404`; the [AI activity
   log](#ai-activity-log) keeps its request either way, and a draft keeps what
   its job produced.
 - When the server starts, jobs a previous process left `running` become
@@ -1930,7 +1957,8 @@ that limit is applied, not refused.
 
 ## Drafts
 
-A **draft** is a new item in progress, kept on the server: one being captured
+A **draft** is a new item in progress, kept on the server for the account
+that made it: one being captured
 (`kind: "capture"`) or a variant of an existing item (`kind: "variant"`),
 written by the AI or by hand. It holds what the generation produced and the
 client's review form with the user's edits, so the work survives leaving the
@@ -2016,7 +2044,7 @@ harder") is another generation of the same draft, with `previousDraft` and
 
 `DraftSummary` is `Draft` without `request`, `generation` and `content`.
 
-Limits: at most 500 drafts (`409 conflict` beyond).
+Limits: at most 500 drafts per account (`409 conflict` beyond).
 
 ### `GET /drafts`
 
@@ -2411,8 +2439,8 @@ the request itself is valid.
 ### AI activity log
 
 The server keeps a record of each request it sends to an AI provider — the
-same requests that [`AiProvider.usage`](#ai-settings) counts — so that what a
-generation cost, and exactly what was sent and what came back, can be looked
+same requests that [`AiProvider.usage`](#ai-settings) counts — for the
+account it was made for, so that what a generation cost, and exactly what was sent and what came back, can be looked
 up afterwards.
 
 `AiLogEntry`:
@@ -2696,8 +2724,8 @@ from bundles, and no MCP tool reads or sets it.
 
 ## Preferences
 
-How the user likes the app to behave. Preferences are stored on the server so
-they follow the user across browsers; they are personal and never exported.
+How the user likes the app to behave. Preferences are stored on the server,
+per account, so they follow the user across browsers; they are personal and never exported.
 Over MCP, `get_overview` reports the test case preferences (`hideTestCases`,
 `generatedTestCases`, `largeTestCase`, `largeTestCaseCount`) for the
 assistant to follow; no MCP tool changes them. The server stores and

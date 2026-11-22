@@ -5,9 +5,9 @@ import (
 	"codeatrophy/internal/store"
 )
 
-func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
-	rows, err := t.query(`SELECT item_id, language, source, updated_at FROM working_copies WHERE item_id = ?
-		ORDER BY write_seq DESC`, itemID)
+func (t *tx) ListWorkingCopies(userID, itemID string) ([]domain.WorkingCopy, error) {
+	rows, err := t.query(`SELECT user_id, item_id, language, source, updated_at FROM working_copies
+		WHERE user_id = ? AND item_id = ? ORDER BY write_seq DESC`, userID, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -18,7 +18,7 @@ func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
 			w       domain.WorkingCopy
 			updated int64
 		)
-		if err := rows.Scan(&w.ItemID, &w.Language, &w.Source, &updated); err != nil {
+		if err := rows.Scan(&w.UserID, &w.ItemID, &w.Language, &w.Source, &updated); err != nil {
 			return nil, err
 		}
 		w.UpdatedAt = fromUnix(updated)
@@ -31,12 +31,12 @@ func (t *tx) ListWorkingCopies(itemID string) ([]domain.WorkingCopy, error) {
 // a reading inserts no row, and a write replaces the whole row. Each write
 // takes the next write_seq, which orders the list.
 func (t *tx) PutWorkingCopy(w *domain.WorkingCopy) error {
-	res, err := t.exec(`INSERT INTO working_copies (item_id, language, source, updated_at, write_seq)
-		SELECT id, ?, ?, ?, (SELECT COALESCE(MAX(write_seq), 0) + 1 FROM working_copies)
+	res, err := t.exec(`INSERT INTO working_copies (user_id, item_id, language, source, updated_at, write_seq)
+		SELECT ?, id, ?, ?, ?, (SELECT COALESCE(MAX(write_seq), 0) + 1 FROM working_copies)
 		FROM items WHERE id = ? AND type = ?
-		ON CONFLICT (item_id, language) DO UPDATE
+		ON CONFLICT (user_id, item_id, language) DO UPDATE
 		SET source = excluded.source, updated_at = excluded.updated_at, write_seq = excluded.write_seq`,
-		w.Language, w.Source, toUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem))
+		w.UserID, w.Language, w.Source, toUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem))
 	if err != nil {
 		return err
 	}
@@ -48,8 +48,8 @@ func (t *tx) PutWorkingCopy(w *domain.WorkingCopy) error {
 	return nil
 }
 
-func (t *tx) DeleteWorkingCopy(itemID, language string) (bool, error) {
-	res, err := t.exec(`DELETE FROM working_copies WHERE item_id = ? AND language = ?`, itemID, language)
+func (t *tx) DeleteWorkingCopy(userID, itemID, language string) (bool, error) {
+	res, err := t.exec(`DELETE FROM working_copies WHERE user_id = ? AND item_id = ? AND language = ?`, userID, itemID, language)
 	if err != nil {
 		return false, err
 	}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"codeatrophy/internal/ai"
@@ -35,8 +36,9 @@ type Options struct {
 	// way into an instance that otherwise asks for a password.
 	RequireToken bool
 	// CheckToken, when set, accepts the tokens accounts make for their MCP
-	// clients (besides Token). It returns an error for any other token.
-	CheckToken func(ctx context.Context, token string) error
+	// clients (besides Token), returning the account the token belongs to.
+	// It returns an error for any other token.
+	CheckToken func(ctx context.Context, token string) (account string, err error)
 	// OriginAllowed decides whether a request's Origin header is acceptable.
 	OriginAllowed func(*http.Request) bool
 	// MaxSessions caps concurrent sessions (default DefaultMaxSessions).
@@ -121,6 +123,14 @@ func Handler(opts Options) http.Handler {
 		SessionTimeout:      timeout,
 		MaxRequestBodyBytes: domain.MaxRequestBytes,
 	})
+	serve := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.Header.Get("Mcp-Session-Id") == "" && reg.open() >= maxSessions {
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, "too many open MCP sessions; close an unused session or try again later", http.StatusServiceUnavailable)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if opts.OriginAllowed != nil && !opts.OriginAllowed(r) {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
@@ -128,7 +138,11 @@ func Handler(opts Options) http.Handler {
 		}
 		if opts.Token != "" || opts.RequireToken {
 			got, ok := bearerToken(r.Header.Get("Authorization"))
-			if !ok || !tokenAccepted(r.Context(), opts, got) {
+			var account string
+			if ok {
+				account, ok = tokenAccount(r.Context(), opts, got)
+			}
+			if !ok {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
 				msg := "unauthorized"
 				if !ok && opts.RequireToken {
@@ -138,23 +152,50 @@ func Handler(opts Options) http.Handler {
 				http.Error(w, msg, http.StatusUnauthorized)
 				return
 			}
-		}
-		if r.Method == http.MethodPost && r.Header.Get("Mcp-Session-Id") == "" && reg.open() >= maxSessions {
-			w.Header().Set("Retry-After", "60")
-			http.Error(w, "too many open MCP sessions; close an unused session or try again later", http.StatusServiceUnavailable)
+			// The account goes with the request as its token's user, which
+			// the tool handlers act for (see actAs) and which ties the MCP
+			// session to the account that opened it.
+			info := &auth.TokenInfo{UserID: account, Expiration: time.Now().Add(time.Hour)}
+			auth.RequireBearerToken(func(context.Context, string, *http.Request) (*auth.TokenInfo, error) {
+				return info, nil
+			}, nil)(serve).ServeHTTP(w, r)
 			return
 		}
-		h.ServeHTTP(w, r)
+		serve.ServeHTTP(w, r)
 	})
 }
 
-// tokenAccepted reports whether a bearer token is the configured one or an
-// account's token.
-func tokenAccepted(ctx context.Context, opts Options, got string) bool {
+// tokenAccount returns the account a bearer token acts for: the default
+// account for the configured token, or the account whose token it is. ok
+// is false for any other token.
+func tokenAccount(ctx context.Context, opts Options, got string) (account string, ok bool) {
 	if opts.Token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(opts.Token)) == 1 {
-		return true
+		account, err := opts.App.DefaultAccount(ctx)
+		return account, err == nil
 	}
-	return opts.CheckToken != nil && got != "" && opts.CheckToken(ctx, got) == nil
+	if opts.CheckToken == nil || got == "" {
+		return "", false
+	}
+	account, err := opts.CheckToken(ctx, got)
+	return account, err == nil
+}
+
+// actAs makes every request act for an account: the one its bearer token
+// belongs to, or the default account when the endpoint takes no token (and
+// for clients connected in-process).
+func actAs(a *app.App) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {
+				return next(app.WithAccount(ctx, extra.TokenInfo.UserID), method, req)
+			}
+			account, err := a.DefaultAccount(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return next(app.WithAccount(ctx, account), method, req)
+		}
+	}
 }
 
 // bearerToken is the token of an Authorization header in the Bearer
@@ -190,6 +231,7 @@ func NewServer(opts Options) *mcp.Server {
 	a := opts.App
 	s := mcp.NewServer(&mcp.Implementation{Name: "codeatrophy", Version: a.Version()},
 		&mcp.ServerOptions{Instructions: instructions, Logger: opts.Logger})
+	s.AddReceivingMiddleware(actAs(a))
 	t := &tools{app: a, pretty: opts.PrettyJSON}
 	t.register(s)
 	registerPrompts(s, a)
