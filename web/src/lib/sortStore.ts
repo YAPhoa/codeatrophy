@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { ItemSort, SortOrder } from '../api/types';
+import type { SortOrder } from '../api/types';
 import type { RememberedSort } from './filters';
 import { readString, remove, writeJson } from './storage';
 
@@ -15,7 +15,13 @@ import { readString, remove, writeJson } from './storage';
 const KEY = 'librarySort';
 export const SORT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-interface Entry extends RememberedSort {
+/** A remembered sort of any scope, as stored: `order` is `null` for the sort's natural direction. */
+interface Stored {
+  sort: string;
+  order: SortOrder | null;
+}
+
+interface Entry extends Stored {
   at: number;
 }
 
@@ -24,12 +30,17 @@ const SORTS: readonly string[] = ['updated', 'created', 'title', 'difficulty', '
 
 const SCOPE = /^(view:(all|problem|reading|favorite)|collection:.+)$/;
 
-function alive(e: unknown, now: number): e is Entry {
+/** The sorts a scope can remember, or `null` for a scope not in use. */
+function sortsOf(scope: string): readonly string[] | null {
+  return SCOPE.test(scope) ? SORTS : null;
+}
+
+function alive(e: unknown, sorts: readonly string[], now: number): e is Entry {
   if (!e || typeof e !== 'object') return false;
   const { sort, order, at } = e as Record<string, unknown>;
   return (
     typeof sort === 'string' &&
-    SORTS.includes(sort) &&
+    sorts.includes(sort) &&
     (order === null || order === 'asc' || order === 'desc') &&
     typeof at === 'number' &&
     Number.isFinite(at) &&
@@ -51,7 +62,8 @@ function load(now: number): { entries: Record<string, Entry>; stale: boolean } {
   const entries: Record<string, Entry> = {};
   let stale = false;
   for (const [scope, e] of Object.entries(parsed)) {
-    if (SCOPE.test(scope) && alive(e, now)) entries[scope] = { sort: e.sort as ItemSort, order: e.order as SortOrder | null, at: e.at };
+    const sorts = sortsOf(scope);
+    if (sorts && alive(e, sorts, now)) entries[scope] = { sort: e.sort, order: e.order, at: e.at };
     else stale = true;
   }
   return { entries, stale };
@@ -65,18 +77,27 @@ function save(entries: Record<string, Entry>): void {
   listeners.forEach((fn) => fn());
 }
 
-/** The sort remembered for a scope, or `null`. */
-export function readRememberedSort(scope: string, now = Date.now()): RememberedSort | null {
+function readStored(scope: string, now: number): Stored | null {
   const e = load(now).entries[scope];
   return e ? { sort: e.sort, order: e.order } : null;
 }
 
-/** Remember a scope's sort, or forget it (`null`). */
-export function rememberSort(scope: string, sort: RememberedSort | null, now = Date.now()): void {
+/** The sort remembered for a scope, or `null`. */
+export function readRememberedSort(scope: string, now = Date.now()): RememberedSort | null {
+  // A library scope holds only the library's sorts (`sortsOf`).
+  return readStored(scope, now) as RememberedSort | null;
+}
+
+function writeStored(scope: string, sort: Stored | null, now: number): void {
   const { entries } = load(now);
   if (sort) entries[scope] = { sort: sort.sort, order: sort.order, at: now };
   else delete entries[scope];
   save(entries);
+}
+
+/** Remember a scope's sort, or forget it (`null`). */
+export function rememberSort(scope: string, sort: RememberedSort | null, now = Date.now()): void {
+  writeStored(scope, sort, now);
 }
 
 /** A visit to a scope's view: its entry's 30 days start again, and expired ones go. */
@@ -93,17 +114,23 @@ function subscribe(fn: () => void): () => void {
 }
 
 // As one string, which React can compare from one read to the next.
-const encode = (s: RememberedSort | null) => (s ? `${s.sort} ${s.order ?? ''}` : '');
+const encode = (s: Stored | null) => (s ? `${s.sort} ${s.order ?? ''}` : '');
 
-function decode(text: string): RememberedSort | null {
+function decode(text: string): Stored | null {
   if (!text) return null;
-  const [sort, order] = text.split(' ');
-  return { sort: sort as ItemSort, order: order ? (order as SortOrder) : null };
+  const [sort = '', order] = text.split(' ');
+  return { sort, order: order ? (order as SortOrder) : null };
+}
+
+/** The sort remembered for a scope, kept up to date; mounting counts as a visit to the scope. */
+function useStored(scope: string): Stored | null {
+  useEffect(() => touchRememberedSort(scope), [scope]);
+  const text = useSyncExternalStore(subscribe, () => encode(readStored(scope, Date.now())));
+  return useMemo(() => decode(text), [text]);
 }
 
 /** The sort remembered for a scope; opening the scope's view counts as a visit. */
 export function useRememberedSort(scope: string): RememberedSort | null {
-  useEffect(() => touchRememberedSort(scope), [scope]);
-  const text = useSyncExternalStore(subscribe, () => encode(readRememberedSort(scope)));
-  return useMemo(() => decode(text), [text]);
+  // See readRememberedSort.
+  return useStored(scope) as RememberedSort | null;
 }
