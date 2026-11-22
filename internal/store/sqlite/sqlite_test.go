@@ -393,3 +393,75 @@ func TestDatabaseUpgradedTo100OpensUnchanged(t *testing.T) {
 		t.Errorf("a backup was written: %v", m)
 	}
 }
+
+// A migration whose first line is "-- foreign_keys=off" runs with foreign
+// key enforcement off: it can rebuild a table other tables refer to, which
+// SQLite cannot otherwise do without deleting their rows, and it is rolled
+// back if it leaves a reference to a row that does not exist.
+func TestMigrationWithoutForeignKeys(t *testing.T) {
+	ctx := context.Background()
+	newDB := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "codeatrophy.db")
+		db, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.writer.Exec(`INSERT INTO items (id, type, title, created_at, updated_at) VALUES ('a', 'reading', 'A', 0, 0);
+			INSERT INTO tags (name) VALUES ('x'); INSERT INTO item_tags (item_id, tag) VALUES ('a', 'x')`); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const rebuild = `CREATE TABLE tags_new (name TEXT NOT NULL PRIMARY KEY) WITHOUT ROWID;
+INSERT INTO tags_new (name) SELECT name FROM tags;
+DROP TABLE tags;
+ALTER TABLE tags_new RENAME TO tags;`
+	tagged := func(t *testing.T, path string) string {
+		t.Helper()
+		raw, err := sql.Open("sqlite", "file:"+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer raw.Close()
+		var s string
+		if err := raw.QueryRow(`SELECT (SELECT group_concat(name) FROM tags) || ' ' || (SELECT group_concat(item_id || ':' || tag) FROM item_tags)
+			|| ' ' || (SELECT MAX(version) FROM schema_migrations)`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	t.Run("Rebuild", func(t *testing.T) {
+		path := newDB(t)
+		addMigration(t, laterMigration, "-- foreign_keys=off\n"+rebuild)
+		db, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+		if got, want := tagged(t, path), fmt.Sprintf("x a:x %d", store.SchemaVersion+1); got != want {
+			t.Errorf("after the rebuild: %q, want %q", got, want)
+		}
+	})
+	t.Run("RebuildWithForeignKeysOn", func(t *testing.T) {
+		path := newDB(t)
+		addMigration(t, laterMigration, rebuild)
+		if _, err := Open(ctx, path); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
+			t.Errorf("the same rebuild with foreign keys on: %v", err)
+		}
+		if got, want := tagged(t, path), fmt.Sprintf("x a:x %d", store.SchemaVersion); got != want {
+			t.Errorf("after the failed migration: %q, want %q", got, want)
+		}
+	})
+	t.Run("BrokenReference", func(t *testing.T) {
+		path := newDB(t)
+		addMigration(t, laterMigration, "-- foreign_keys=off\nDELETE FROM tags;")
+		if _, err := Open(ctx, path); err == nil || !strings.Contains(err.Error(), "a row of item_tags refers to a missing row of tags") {
+			t.Errorf("a migration that breaks a reference: %v", err)
+		}
+		if got, want := tagged(t, path), fmt.Sprintf("x a:x %d", store.SchemaVersion); got != want {
+			t.Errorf("after the rolled back migration: %q, want %q", got, want)
+		}
+	})
+}
