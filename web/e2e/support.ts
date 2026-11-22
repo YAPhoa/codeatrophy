@@ -89,6 +89,39 @@ export async function loadingRecord(page: Page): Promise<LoadingRecord> {
   return page.evaluate(() => structuredClone((window as unknown as { __loading: LoadingRecord }).__loading));
 }
 
+let matchRecords = 0;
+
+/**
+ * Record, from inside the page, each element that comes to match `selector`
+ * from now on, put in already matching or changed until it does: what
+ * `probe` reads from it at that moment (its class unless told otherwise),
+ * once for each element. For a state too short for a look from the test to
+ * be sure of catching, often timed in script: a closing copy (`is-closing`),
+ * a swap. Call it before the action that starts the state, and read the
+ * record with the function it returns. `probe` runs in the page, so like an
+ * `evaluate` callback it uses nothing from outside itself.
+ */
+export async function recordMatches<T = string>(page: Page, selector: string, probe?: (el: Element) => T): Promise<() => Promise<T[]>> {
+  const key = `__matches${++matchRecords}`;
+  const read = probe ?? ((el: Element) => el.className);
+  await page.evaluate(`(${watchMatches})(${JSON.stringify(key)}, ${JSON.stringify(selector)}, ${read})`);
+  return () => page.evaluate((key) => (window as unknown as Record<string, T[]>)[key]!, key);
+}
+
+function watchMatches(key: string, selector: string, probe: (el: Element) => unknown): void {
+  const seen: unknown[] = [];
+  (window as unknown as Record<string, unknown[]>)[key] = seen;
+  // What matches already is not recorded.
+  const met = new WeakSet<Element>(document.querySelectorAll(selector));
+  new MutationObserver(() => {
+    for (const el of document.querySelectorAll(selector)) {
+      if (met.has(el)) continue;
+      met.add(el);
+      seen.push(probe(el));
+    }
+  }).observe(document, { subtree: true, childList: true, attributes: true });
+}
+
 /**
  * Give the mock library `count` more readings before the app first loads it
  * (and again on every reload): "Extra reading 001" and on, older than any
