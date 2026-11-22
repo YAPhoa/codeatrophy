@@ -1255,3 +1255,20 @@ func TestSessionsActForTheTokensAccount(t *testing.T) {
 		t.Errorf("b sees: %v", got)
 	}
 }
+
+// A client probes with server/discover before it initializes, which opens a
+// session that the server closes again once it has answered. That probe does
+// not count against the cap, so a client can always take the last place.
+func TestSessionCapIgnoresSessionsNotInitialized(t *testing.T) {
+	f := newFixture(t, "")
+	for i := range 50 {
+		srv := httptest.NewServer(mcpserver.Handler(mcpserver.Options{App: f.app, MaxSessions: 1,
+			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, nil, nil) }}))
+		s, err := connectTo(f.ctx, srv.URL, "")
+		if err != nil {
+			t.Fatalf("connection %d: %v", i, err)
+		}
+		s.Close()
+		srv.Close()
+	}
+}

@@ -76,21 +76,28 @@ func (r *sessionRegistry) add(s *mcp.Server) {
 }
 
 // open counts open sessions and forgets servers whose session has ended.
+// Only initialized sessions count: a client probes with server/discover
+// before it initializes, and the server closes the session that probe
+// opened only after answering it, so counting it would refuse the
+// client's own initialize while the cap has one place left.
 func (r *sessionRegistry) open() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	kept := r.servers[:0]
 	for _, reg := range r.servers {
-		c := 0
-		for range reg.server.Sessions() {
+		c, initialized := 0, 0
+		for ss := range reg.server.Sessions() {
 			c++
+			if ss.InitializeParams() != nil {
+				initialized++
+			}
 		}
 		// A server without a session yet is kept for a minute (its client
 		// may still be initialising) but not counted.
 		if c > 0 || time.Since(reg.created) < time.Minute {
 			kept = append(kept, reg)
-			n += c
+			n += initialized
 		}
 	}
 	r.servers = kept
