@@ -246,20 +246,12 @@ test('motion: a closing dialog plays its exit out of reach, then goes', async ({
   // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
   // Its exit lasts --duration-quick and can be over before a look from here:
   // the backdrop is recorded from the page as it is put back for it.
-  await page.evaluate(() => {
-    const seen: { closing: boolean; inert: boolean; hidden: string | null }[] = [];
-    (window as unknown as { backdrops: typeof seen }).backdrops = seen;
-    new MutationObserver((records) => {
-      for (const r of records)
-        for (const n of r.addedNodes)
-          if (n instanceof Element && n.matches('.dialog-backdrop')) seen.push({ closing: n.classList.contains('is-closing'), inert: n.hasAttribute('inert'), hidden: n.getAttribute('aria-hidden') });
-    }).observe(document.body, { childList: true, subtree: true });
-  });
+  const backdrops = await recordMatches(page, '.dialog-backdrop', (el) => ({ closing: el.classList.contains('is-closing'), inert: el.hasAttribute('inert'), hidden: el.getAttribute('aria-hidden') }));
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(opener).toBeFocused();
   await expect(page.locator('.dialog-backdrop')).toHaveCount(0);
-  expect(await page.evaluate(() => (window as unknown as { backdrops: unknown[] }).backdrops)).toEqual([{ closing: true, inert: true, hidden: 'true' }]);
+  expect(await backdrops()).toEqual([{ closing: true, inert: true, hidden: 'true' }]);
 });
 
 test.describe('the Reduce motion setting', () => {
@@ -430,15 +422,11 @@ test.describe('with motion reduced', () => {
 
     // Closing, it stays for its fade, then goes. It goes on a timer, which
     // slowMotion does not slow, and can be gone before a poll looks: the
-    // panel's classes are recorded from the page instead.
-    await panel.evaluate((el) => {
-      const seen: string[] = [];
-      (window as unknown as { notesClasses: string[] }).notesClasses = seen;
-      new MutationObserver(() => seen.push(el.className)).observe(el, { attributes: true, attributeFilter: ['class'] });
-    });
+    // panel is recorded from the page instead as it starts closing.
+    const closing = await recordMatches(page, '.reader-notes.is-closing');
     await page.getByRole('button', { name: 'Close notes' }).click();
     await expect(page.locator('.reader-notes')).toHaveCount(0);
-    expect(await page.evaluate(() => (window as unknown as { notesClasses: string[] }).notesClasses)).toContain('reader-notes is-closing');
+    expect(await closing()).toEqual(['reader-notes is-closing']);
   });
 
   test('an accepted verdict fades in, without turning, settling or drawing', async ({ page }) => {
