@@ -77,6 +77,25 @@ build with its version from git (otherwise it reports `dev`). The build takes
 the published image's name; `docker compose pull` puts the published one
 back.
 
+## Judge engine
+
+"Run" and "Submit" hand your code to a judge engine: a sandboxed runner that
+executes one program on one input under a time and a memory limit. Choosing
+the test cases, comparing output and giving the verdict is Codeatrophy's own
+work, so the engine is a part that can be replaced.
+
+This version uses [Judge0](https://github.com/judge0/judge0), run as
+containers of its own. It is the engine of the current iteration, with limits
+worth knowing: its toolchains are old (for example Python 3.8, GCC 9, Go
+1.13, Java 13, Node 12), and its sandbox needs a privileged container (see
+[Security](docs/security.md)).
+
+A later iteration may replace it with a judge written for Codeatrophy and
+shaped to what the app needs. Problems, test cases and bundles do not depend
+on which engine runs them. "Judge engines" in
+[`docs/architecture.md`](docs/architecture.md#judge-engines) has the interface
+an engine implements.
+
 ## Configuration
 
 Everything is configured with environment variables, all documented in
