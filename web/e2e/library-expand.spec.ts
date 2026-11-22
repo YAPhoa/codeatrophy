@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { mockApi, mockItem, open, reduceMotion, row } from './support';
+import { mockApi, mockItem, open, recordMatches, reduceMotion, row } from './support';
 
 // A library row's line shows the title, as many tags as fit and the facts in
 // columns, named in the list's head; it opens, from its chevron or a click
@@ -582,13 +582,13 @@ test('library details: with motion reduced they fade in and out, at their full h
   const details = await detailsOf(page, LONGEST);
   await expect(details).toBeVisible();
   const collapse = page.locator('li.item-row .collapse').first();
-  const played = () => collapse.evaluate((el) => el.getAnimations().map((a) => `${(a as CSSAnimation).animationName} ${Number(a.effect!.getTiming().duration)}`));
   // Opening plays a fade, not a growing height (the row's chevron turns at once).
   expect(await collapse.evaluate((el) => getComputedStyle(el).animationName)).toBe('fade-in');
+  // Closing lasts --duration-fast on a timer: what it plays is read in the page as it starts.
+  const closing = await recordMatches(page, 'li.item-row .collapse.is-closing', (el) => el.getAnimations().map((a) => `${(a as CSSAnimation).animationName} ${Number(a.effect!.getTiming().duration)}`));
   await r.getByRole('button', { name: 'Hide details' }).click();
   // Closing fades out over --duration-fast, then the row goes.
-  await expect(page.locator('li.item-row .collapse.is-closing')).toHaveCount(1);
-  expect(await played()).toEqual(['fade-out 250']);
   await expect(details).toHaveCount(0);
+  expect(await closing()).toEqual([['fade-out 250']]);
   expect(await r.locator('.item-expand-icon').evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
 });
