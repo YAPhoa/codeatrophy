@@ -25,29 +25,46 @@ database.
 
 ## Documentation
 
+- `CONTRIBUTING.md` — the rules for every change
 - `docs/architecture.md` — components and how they fit together
 - `docs/api.md` — HTTP API reference; the contract between server and UI
 - `docs/mcp.md` — MCP server: connecting a client, tools, prompts
 - `docs/bundle-format.md` — the import/export bundle format
-
-Read the relevant document before changing behaviour it describes, and update
-it in the same change.
+- `web/README.md` — the UI: scripts, the API mock, structure, conventions
 
 ## Working on the code
 
-- The server is Go; the UI is TypeScript. `make help` lists the build, test and
-  lint targets for both; they run Go and npm in Docker when those are not
+[`CONTRIBUTING.md`](CONTRIBUTING.md) binds an assistant as it binds a person.
+Read it before the first change in a session, and the document for the part
+you are changing before changing behaviour it describes. In short:
+
+- The server is Go; the UI is TypeScript. `make help` lists the build, test
+  and lint targets for both; they run Go and npm in Docker when those are not
   installed.
-- Server and UI communicate only through the HTTP API in `docs/api.md`. A
-  change to a request or response shape must update that document, the server
-  handlers, and the UI client types together.
-- The HTTP API and the MCP server are thin adapters over the same application
-  services. Put business rules in the services so both transports share them,
-  and keep `docs/mcp.md` in step with the tool definitions.
-- AI providers and judge engines sit behind small interfaces. Add a new one as
-  a new implementation of the interface, not as a special case in callers.
-- Storage has a SQLite and a PostgreSQL implementation behind one interface.
-  A schema change needs a migration for each, at the same schema version.
-- The bundle format is versioned. Do not change the meaning of an existing
-  field within a format version.
-- Add or update tests alongside behaviour changes.
+- Server and UI communicate only through the HTTP API in `docs/api.md`.
+  Business rules live in the application services (`internal/app`), which the
+  HTTP API and the MCP server both adapt.
+- Whatever describes a behaviour changes in the same commit as the behaviour:
+  documents, client types, the API mock, both databases' migrations, tests.
+  "What must change together" in `CONTRIBUTING.md` has the full list.
+
+For assistants in particular:
+
+- **Say when a request breaks a rule.** If what you are asked to do would
+  go against `CONTRIBUTING.md` (a commit over the size limit, two changes in
+  one commit, a behaviour change with no test, a check failing, a document
+  left behind), name the rule by its number and what following it would take
+  before you do the work. This holds whoever is asking, the maintainer
+  included. Then do as they decide, and record the exception in the commit
+  message as the guideline asks.
+- **Measure before committing.** Run the size command of rule 1 on what is
+  staged, and split the work if it is over.
+- **A change is done when the checks pass.** Run `make check`, and the
+  browser tests for a change in `web/`, before reporting it finished. Report
+  a failure as it is, with its output; do not describe unverified work as
+  working.
+- **Commit and push only when asked**, with the repository's configured git
+  identity, in the message style of `CONTRIBUTING.md`, and with no line that
+  credits a tool.
+- **Leave out of the repository** anything about your own session: plans,
+  notes, scratch files, tool settings.
