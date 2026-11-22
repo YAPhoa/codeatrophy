@@ -310,6 +310,8 @@ func testSearchAndFilters(t *testing.T, db store.Store) {
 		{store.ItemFilter{Sort: store.SortCreated}, "c,b,a"},
 		{store.ItemFilter{Query: "subseq", Sort: store.SortRelevance, Desc: true}, "a,b"}, // best match first
 		{store.ItemFilter{Query: "subseq", Sort: store.SortRelevance}, "b,a"},
+		{store.ItemFilter{Sort: store.SortRelevance}, "c,b,a"}, // no query: the latest added first
+		{store.ItemFilter{Sort: store.SortRelevance, Desc: true}, "c,b,a"},
 		{store.ItemFilter{IDs: []string{"c", "a", "zzz"}, Sort: store.SortTitle}, "a,c"},
 		{store.ItemFilter{Query: "DP"}, "a,b"}, // tags are searched
 		{store.ItemFilter{Query: "raft consensus"}, "c"},

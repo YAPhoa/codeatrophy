@@ -603,6 +603,10 @@ func (t *tx) ListItems(f store.ItemFilter) ([]domain.ItemSummary, int, error) {
 	case store.SortPosition:
 		order = `ci.position ` + dir
 	case store.SortRelevance:
+		if f.Query == "" {
+			order = `i.seq DESC`
+			break
+		}
 		// bm25 is lower for better matches, so descending relevance is
 		// ascending bm25.
 		rdir := `DESC`

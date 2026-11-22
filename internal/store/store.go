@@ -20,7 +20,7 @@ const (
 	SortTitle      = "title"
 	SortDifficulty = "difficulty"
 	SortPosition   = "position"
-	SortRelevance  = "relevance"
+	SortRelevance  = "relevance" // with no query, the latest added first
 )
 
 // Fields CountItemsBy groups by.
