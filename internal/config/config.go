@@ -140,17 +140,20 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		}
 		return n
 	}
+	// A switch takes on/off and the words strconv.ParseBool takes, in any
+	// case, so that every spelling either set of variables once took works.
 	getBool := func(key string, def bool) bool {
 		v := get(key, "")
-		if v == "" {
+		switch strings.ToLower(v) {
+		case "":
 			return def
+		case "on", "yes", "true", "t", "1":
+			return true
+		case "off", "no", "false", "f", "0":
+			return false
 		}
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: not a boolean: %q", key, v))
-			return def
-		}
-		return b
+		errs = append(errs, fmt.Errorf("%s: must be on or off (or true/false, yes/no, 1/0, t/f), not %q", key, v))
+		return def
 	}
 	getDur := func(key string, def time.Duration) time.Duration {
 		v := get(key, "")
@@ -199,24 +202,10 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 				"or unset for SQLite"))
 		}
 	}
-	onOff := func(key string, def bool) bool {
-		d := "off"
-		if def {
-			d = "on"
-		}
-		switch strings.ToLower(get(key, d)) {
-		case "on", "true", "1", "yes":
-			return true
-		case "off", "false", "0", "no":
-			return false
-		}
-		errs = append(errs, fmt.Errorf("%s: must be on or off", key))
-		return def
-	}
-	c.SQLiteImport = onOff("CODEATROPHY_SQLITE_IMPORT", true)
-	c.DBAutoMigrate = onOff("CODEATROPHY_DB_AUTO_MIGRATE", true)
-	c.Auth = onOff("CODEATROPHY_AUTH", true)
-	c.AccessLog = onOff("CODEATROPHY_ACCESS_LOG", false)
+	c.SQLiteImport = getBool("CODEATROPHY_SQLITE_IMPORT", true)
+	c.DBAutoMigrate = getBool("CODEATROPHY_DB_AUTO_MIGRATE", true)
+	c.Auth = getBool("CODEATROPHY_AUTH", true)
+	c.AccessLog = getBool("CODEATROPHY_ACCESS_LOG", false)
 	c.SessionTTL = getDur("CODEATROPHY_SESSION_TTL", 30*24*time.Hour)
 	if c.SessionTTL < 2*time.Hour {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_SESSION_TTL: must be at least 2h"))

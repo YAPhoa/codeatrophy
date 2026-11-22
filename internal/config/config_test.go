@@ -332,3 +332,36 @@ func TestAIEgress(t *testing.T) {
 		}
 	}
 }
+
+// Every on/off variable takes the same words, in any case, and a value
+// that is none of them is an error that lists them.
+func TestSwitches(t *testing.T) {
+	read := map[string]func(Config) bool{
+		"CODEATROPHY_AUTH":             func(c Config) bool { return c.Auth },
+		"CODEATROPHY_ACCESS_LOG":       func(c Config) bool { return c.AccessLog },
+		"CODEATROPHY_SQLITE_IMPORT":    func(c Config) bool { return c.SQLiteImport },
+		"CODEATROPHY_DB_AUTO_MIGRATE":  func(c Config) bool { return c.DBAutoMigrate },
+		"CODEATROPHY_JUDGE0_CGROUPS":   func(c Config) bool { return c.Judge.Judge0Cgroups },
+		"CODEATROPHY_AI_BLOCK_PRIVATE": func(c Config) bool { return c.AI.Egress.BlockPrivate },
+		"CODEATROPHY_MCP_ENABLED":      func(c Config) bool { return c.MCP.Enabled },
+		"CODEATROPHY_MCP_PRETTY_JSON":  func(c Config) bool { return c.MCP.PrettyJSON },
+	}
+	words := map[string]bool{
+		"on": true, "ON": true, "true": true, "True": true, "TRUE": true, "yes": true, "Yes": true, "1": true,
+		"t": true, "T": true,
+		"off": false, "Off": false, "false": false, "FALSE": false, "no": false, "NO": false, "0": false,
+		"f": false, "F": false,
+	}
+	for key, get := range read {
+		for v, want := range words {
+			if c, err := LoadFrom(env(map[string]string{key: v})); err != nil || get(c) != want {
+				t.Errorf("%s=%s: %v %v, want %v", key, v, get(c), err, want)
+			}
+		}
+		_, err := LoadFrom(env(map[string]string{key: "maybe"}))
+		if err == nil || !strings.Contains(err.Error(),
+			key+`: must be on or off (or true/false, yes/no, 1/0, t/f), not "maybe"`) {
+			t.Errorf("%s=maybe: %v", key, err)
+		}
+	}
+}

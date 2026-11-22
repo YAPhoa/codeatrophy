@@ -28,6 +28,9 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_LOG_LEVEL`, `CODEATROPHY_LOG_FORMAT` | `info`, `text` | Log level (`debug`, `info`, `warn`, `error`) and format (`text`, `json`) |
 | `CODEATROPHY_ACCESS_LOG` | `off` | Log every request (method, path, status, client) at info instead of debug |
 
+A variable that turns something on or off takes `on`/`off`, `true`/`false`,
+`yes`/`no`, `1`/`0` or `t`/`f`, in any case.
+
 AI providers are normally set up in the UI under Settings. You can keep
 several, such as a work key, a personal one and a local model server, and
 choose one as the default the AI features use. For each, enter the key, test
