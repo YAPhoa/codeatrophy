@@ -51,7 +51,7 @@ reports the current state (the item revision conflict described under
 | 409 | `conflict` | Request conflicts with current state (e.g. a collection cycle) |
 | 413 | `too_large` | Body or upload exceeds a limit |
 | 422 | `validation_failed` | Well-formed but invalid |
-| 429 | `rate_limited` | Too many failed sign-in attempts from this address; the `Retry-After` header gives the seconds to wait |
+| 429 | `rate_limited` | Too many failed sign-in attempts from this client or browser, or wrong current passwords for this account; the `Retry-After` header gives the seconds to wait |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
 | 503 | `ai_unavailable` | AI features are switched off, or no default AI provider is chosen, or it is not ready |
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
@@ -193,13 +193,25 @@ exists.
 ### `POST /auth/login`
 
 `{ "email": "...", "password": "..." }`. On success `200` with the
-`GET /auth/session` body and a new session cookie. The email is compared
-without regard to case. A wrong email or password is `401 unauthorized`,
-the same for both. Each address may fail 10 times in 15 minutes; past that
-every attempt, right or wrong, is `429 rate_limited` with `Retry-After`
-until the oldest failure is 15 minutes old. Behind a reverse proxy every
-client shares the proxy's address, and so the limit. With sign-in off it is
+`GET /auth/session` body, a new session cookie and a device cookie (below).
+The email is compared without regard to case. A wrong email or password is
+`401 unauthorized`, the same for both. With sign-in off it is
 `400 bad_request`.
+
+Failed attempts are limited to 10 in 15 minutes per client; past that
+every attempt, right or wrong, is `429 rate_limited` with `Retry-After`
+until the oldest failure is 15 minutes old. A client is its address: the
+peer's, or behind a proxy listed in `CODEATROPHY_TRUSTED_PROXIES` the
+nearest untrusted address in `X-Forwarded-For` (read from the right, so a
+client cannot choose it). A browser that has signed in to the account
+before is a client of its own whatever its address: every sign-in sets
+the `codeatrophy_device` cookie (`HttpOnly`, `SameSite=Strict`, path
+`/api/v1/auth`, 400 days), which names the account sealed with the
+server's secret key, and attempts on that account from a browser that
+sends it are counted for that browser alone. So behind an untrusted proxy,
+where every client has the proxy's address, others' failures can keep a
+new browser out for 15 minutes but not one that has signed in before.
+Signing out keeps the device cookie.
 
 ### `POST /auth/setup`
 
@@ -219,7 +231,8 @@ Ends the cookie's session, if any, and clears the cookie. `204`.
 Changes the signed-in account's password:
 `{ "currentPassword": "...", "newPassword": "..." }`. `204`, and every other
 session of the account ends. A wrong current password is
-`422 validation_failed` on `currentPassword` and counts as a failed attempt;
+`422 validation_failed` on `currentPassword`; 10 of these in 15 minutes per
+account make further changes `429 rate_limited`, apart from sign-in failures;
 a new password outside 8 characters to 72 bytes is `422` on `newPassword`.
 
 Other accounts are managed on the server with `codeatrophy user`

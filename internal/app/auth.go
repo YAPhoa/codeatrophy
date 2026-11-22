@@ -40,6 +40,11 @@ const (
 	// Failed sign-in attempts allowed per client within loginWindow.
 	maxLoginFailures = 10
 	loginWindow      = 15 * time.Minute
+
+	// DeviceTTL is how long a browser that signed in is recognised as one
+	// that did (see LoginClient.Device). Browsers keep a cookie at most
+	// 400 days.
+	DeviceTTL = 400 * 24 * time.Hour
 )
 
 // bcryptCost is the work factor of password hashes (tests lower it).
@@ -79,6 +84,24 @@ type SignIn struct {
 	Token     string
 	ExpiresAt time.Time
 	User      AuthUser
+	// Device marks the browser as one that has signed in to this account,
+	// for LoginClient.Device; the client keeps it for DeviceTTL. Empty when
+	// the server has no secret key to seal it with.
+	Device string
+}
+
+// LoginClient is where a sign-in attempt comes from, for limiting failed
+// attempts.
+type LoginClient struct {
+	// Addr is the client's address.
+	Addr string
+	// Device is the Device of an earlier sign-in from this browser, if it
+	// sent one. When it belongs to the account being signed in to, the
+	// browser's failed attempts are counted on their own rather than with
+	// everyone else's from Addr. Behind a reverse proxy every client has
+	// the proxy's address, so without this anyone could keep the owner
+	// from signing in by failing ten times.
+	Device string
 }
 
 // Session is a session that has been checked.
@@ -199,6 +222,7 @@ func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
 	if err != nil {
 		return SignIn{}, err
 	}
+	out.Device = a.newDevice(u.ID)
 	a.log.Info("first account created", "email", email)
 	return out, nil
 }
@@ -210,32 +234,47 @@ var dummyHash = sync.OnceValue(func() []byte {
 	return h
 })
 
-// Login checks an email and password and starts a session. client
-// identifies where the attempt comes from (its address), for rate
-// limiting failed attempts.
-func (a *App) Login(ctx context.Context, in LoginInput, client string) (SignIn, error) {
+// Login checks an email and password and starts a session. client says
+// where the attempt comes from, for limiting failed attempts: they are
+// counted per address, or per browser for one that has signed in to the
+// account before (see LoginClient).
+func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient) (SignIn, error) {
 	if !a.authOpts.Enabled {
 		return SignIn{}, errBadRequest("sign-in is turned off on this server")
 	}
-	if err := a.checkLoginRate(client); err != nil {
-		return SignIn{}, err
-	}
 	email := normalizeEmail(in.Email)
+	deviceUser, device := a.openDevice(client.Device)
+	bucket := "addr:" + client.Addr
+	if deviceUser == "" {
+		// Checked before the lookup, so that a client over the limit
+		// costs no database read.
+		if err := a.checkLoginRate(bucket); err != nil {
+			return SignIn{}, err
+		}
+	}
 	var u store.User
 	err := a.store.Read(ctx, func(tx store.Tx) (err error) { u, err = tx.GetUserByEmail(email); return })
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return SignIn{}, err
+	}
+	if deviceUser != "" {
+		if err == nil && u.ID == deviceUser {
+			bucket = "device:" + device
+		}
+		if err := a.checkLoginRate(bucket); err != nil {
+			return SignIn{}, err
+		}
 	}
 	hash := []byte(u.PasswordHash)
 	if err != nil {
 		hash = dummyHash()
 	}
 	if bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil || u.ID == "" || len(in.Password) > MaxPasswordBytes {
-		a.recordLoginFailure(client)
-		a.log.Info("failed sign-in", "client", client)
+		a.recordLoginFailure(bucket)
+		a.log.Info("failed sign-in", "client", client.Addr, "knownBrowser", strings.HasPrefix(bucket, "device:"))
 		return SignIn{}, errUnauthorized("the email or password is incorrect")
 	}
-	a.resetLoginFailures(client)
+	a.resetLoginFailures(bucket)
 	now := a.now().UTC()
 	var out SignIn
 	err = a.store.Write(ctx, func(tx store.Tx) error {
@@ -245,7 +284,53 @@ func (a *App) Login(ctx context.Context, in LoginInput, client string) (SignIn, 
 		out, err = a.newSession(tx, u, now)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return SignIn{}, err
+	}
+	out.Device = a.newDevice(u.ID)
+	return out, nil
+}
+
+// deviceContext binds a sealed device to its use.
+const deviceContext = "sign-in device"
+
+// newDevice returns a device for a browser that has just signed in to
+// account: the account and a random id, sealed with the secret key so
+// that only this server can make one.
+func (a *App) newDevice(account string) string {
+	if a.secrets == nil {
+		return ""
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	sealed, err := a.secrets.EncryptBound(account+" "+base64.RawURLEncoding.EncodeToString(b), deviceContext)
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(sealed))
+}
+
+// openDevice returns the account and id of a device made by newDevice,
+// or empty strings for anything else.
+func (a *App) openDevice(device string) (account, id string) {
+	if a.secrets == nil || device == "" || len(device) > 512 {
+		return "", ""
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(device)
+	if err != nil {
+		return "", ""
+	}
+	plain, err := a.secrets.DecryptBound(string(sealed), deviceContext)
+	if err != nil {
+		return "", ""
+	}
+	account, id, ok := strings.Cut(plain, " ")
+	if !ok || account == "" || id == "" {
+		return "", ""
+	}
+	return account, id
 }
 
 func (a *App) newSession(tx store.Tx, u store.User, now time.Time) (SignIn, error) {
@@ -317,13 +402,16 @@ func (a *App) Logout(ctx context.Context, token string) error {
 }
 
 // ChangePassword changes the password of the account signed in with token,
-// after checking its current password, and ends its other sessions.
-func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChange, client string) error {
+// after checking its current password, and ends its other sessions. Wrong
+// current passwords are limited per account, as for sign-in, but apart
+// from it: only someone signed in to the account can make them.
+func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChange) error {
 	s, err := a.Authenticate(ctx, token)
 	if err != nil {
 		return err
 	}
-	if err := a.checkLoginRate(client); err != nil {
+	bucket := "account:" + s.User.ID
+	if err := a.checkLoginRate(bucket); err != nil {
 		return err
 	}
 	var u store.User
@@ -331,7 +419,7 @@ func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChang
 		return err
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.CurrentPassword)) != nil {
-		a.recordLoginFailure(client)
+		a.recordLoginFailure(bucket)
 		return errField("currentPassword", "is incorrect")
 	}
 	if err := validatePassword("newPassword", in.NewPassword); err != nil {
@@ -475,7 +563,9 @@ func hashPassword(pw string) (string, error) {
 	return string(h), err
 }
 
-// Rate limiting of failed attempts, per client, in memory.
+// Rate limiting of failed attempts, in memory, per bucket: "addr:" and
+// a client address, "device:" and a device id, or "account:" and an
+// account id.
 
 func (a *App) checkLoginRate(client string) error {
 	a.authState.mu.Lock()

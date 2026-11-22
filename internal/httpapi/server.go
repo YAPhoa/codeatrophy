@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"runtime/debug"
 	"strconv"
@@ -34,6 +35,10 @@ type Options struct {
 	// without port) accepted on /api/ and /mcp in addition to loopback
 	// names and addresses. "*" accepts any host.
 	AllowedHosts []string
+	// TrustedProxies are the addresses of reverse proxies whose
+	// X-Forwarded-For header names the client, for limiting failed
+	// sign-ins per client rather than per proxy.
+	TrustedProxies []netip.Prefix
 	// MCP is mounted at MCPPath when non-nil.
 	MCP     http.Handler
 	MCPPath string
@@ -53,12 +58,14 @@ type Server struct {
 	web     http.Handler
 	// csrf checks state-changing requests when sign-in is on.
 	csrf *http.CrossOriginProtection
+	// proxies are the trusted reverse proxies (Options.TrustedProxies).
+	proxies []netip.Prefix
 }
 
 // New returns the root HTTP handler.
 func New(opts Options) *Server {
 	s := &Server{app: opts.App, log: opts.Logger, origins: opts.AllowedOrigins, hosts: opts.AllowedHosts, mcp: opts.MCP,
-		mcpPath: opts.MCPPath, web: opts.Web, api: http.NewServeMux()}
+		mcpPath: opts.MCPPath, web: opts.Web, api: http.NewServeMux(), proxies: opts.TrustedProxies}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
 	}

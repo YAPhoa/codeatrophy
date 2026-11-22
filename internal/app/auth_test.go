@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/app"
+	"codeatrophy/internal/secrets"
 	"codeatrophy/internal/store"
 	"codeatrophy/internal/store/teststore"
 )
@@ -52,8 +54,12 @@ func newAuthEnv(t *testing.T, enabled bool) *authEnv {
 	logs := &logCapture{attrs: map[string]string{}}
 	clock := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	e := &authEnv{db: db, logs: logs, clock: &clock, ctx: context.Background()}
+	box, err := secrets.NewBox(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
 	e.app = app.New(app.Options{Store: db, Logger: slog.New(logs), Now: func() time.Time { return *e.clock },
-		Auth: app.AuthOptions{Enabled: enabled, SessionTTL: 48 * time.Hour}, HealthInterval: time.Hour})
+		Secrets: box, Auth: app.AuthOptions{Enabled: enabled, SessionTTL: 48 * time.Hour}, HealthInterval: time.Hour})
 	if err := e.app.Start(e.ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +73,7 @@ func TestAuthOff(t *testing.T) {
 	if err != nil || st.Enabled || st.SetupRequired || st.User != nil {
 		t.Fatalf("status %+v, %v", st, err)
 	}
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, "c"); code(err) != app.CodeBadRequest {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, app.LoginClient{Addr: "c"}); code(err) != app.CodeBadRequest {
 		t.Errorf("login with sign-in off: %v", err)
 	}
 }
@@ -115,13 +121,13 @@ func TestAuthSetupAndLogin(t *testing.T) {
 
 	// Sign in: the email is case-insensitive; wrong passwords and unknown
 	// accounts get the same answer.
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, "c2"); code(err) != app.CodeUnauthorized {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, app.LoginClient{Addr: "c2"}); code(err) != app.CodeUnauthorized {
 		t.Errorf("wrong password: %v", err)
 	}
-	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "nobody@example.com", Password: "correct horse"}, "c2"); code(err) != app.CodeUnauthorized {
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "nobody@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"}); code(err) != app.CodeUnauthorized {
 		t.Errorf("unknown account: %v", err)
 	}
-	si2, err := e.app.Login(e.ctx, app.LoginInput{Email: "ME@example.com", Password: "correct horse"}, "c2")
+	si2, err := e.app.Login(e.ctx, app.LoginInput{Email: "ME@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +152,7 @@ func TestAuthSessionExpiry(t *testing.T) {
 	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
 		t.Fatal(err)
 	}
-	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, "c")
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,12 +188,12 @@ func TestAuthRateLimit(t *testing.T) {
 	}
 	bad := app.LoginInput{Email: "me@example.com", Password: "wrong password"}
 	for range 10 {
-		if _, err := e.app.Login(e.ctx, bad, "attacker"); code(err) != app.CodeUnauthorized {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "attacker"}); code(err) != app.CodeUnauthorized {
 			t.Fatalf("failure: %v", err)
 		}
 	}
 	good := app.LoginInput{Email: "me@example.com", Password: "correct horse"}
-	_, err := e.app.Login(e.ctx, good, "attacker")
+	_, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"})
 	if code(err) != app.CodeRateLimited {
 		t.Fatalf("11th attempt: %v", err)
 	}
@@ -195,12 +201,98 @@ func TestAuthRateLimit(t *testing.T) {
 		t.Errorf("retry after %v", ae.RetryAfter)
 	}
 	// Another client is not held back, and the limit lifts with time.
-	if _, err := e.app.Login(e.ctx, good, "owner"); err != nil {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "owner"}); err != nil {
 		t.Errorf("other client: %v", err)
 	}
 	*e.clock = e.clock.Add(15*time.Minute + time.Second)
-	if _, err := e.app.Login(e.ctx, good, "attacker"); err != nil {
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "attacker"}); err != nil {
 		t.Errorf("after the window: %v", err)
+	}
+}
+
+// Behind a reverse proxy every client has the proxy's address. A browser
+// that signed in before keeps its own count, so failures from others at
+// the same address do not keep its owner out.
+func TestAuthRateLimitKnownBrowser(t *testing.T) {
+	e := newAuthEnv(t, true)
+	for _, email := range []string{"me@example.com", "other@example.com"} {
+		if _, err := e.app.CreateUser(e.ctx, email, "correct horse"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	good := app.LoginInput{Email: "me@example.com", Password: "correct horse"}
+	bad := app.LoginInput{Email: "me@example.com", Password: "wrong password"}
+	first, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Device == "" {
+		t.Fatal("no device issued")
+	}
+	other, err := e.app.Login(e.ctx, app.LoginInput{Email: "other@example.com", Password: "correct horse"}, app.LoginClient{Addr: "proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "proxy"}); code(err) != app.CodeUnauthorized {
+			t.Fatalf("failure: %v", err)
+		}
+	}
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy"}); code(err) != app.CodeRateLimited {
+		t.Fatalf("new browser at the limited address: %v", err)
+	}
+	// The browser that signed in before gets in.
+	again, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: first.Device})
+	if err != nil {
+		t.Fatalf("known browser: %v", err)
+	}
+	if again.Device == "" || again.Device == first.Device {
+		t.Errorf("device not renewed: %q", again.Device)
+	}
+	// A device of another account, or a made-up one, is no way around the
+	// limit.
+	for name, device := range map[string]string{"other account": other.Device, "made up": "bm90LWEtZGV2aWNl", "sealed elsewhere": "djE6AAAA"} {
+		if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "proxy", Device: device}); code(err) != app.CodeRateLimited {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A known browser has its own limit.
+	for range 10 {
+		if _, err := e.app.Login(e.ctx, bad, app.LoginClient{Addr: "elsewhere", Device: first.Device}); code(err) != app.CodeUnauthorized {
+			t.Fatalf("known browser failure: %v", err)
+		}
+	}
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere", Device: first.Device}); code(err) != app.CodeRateLimited {
+		t.Errorf("known browser over its limit: %v", err)
+	}
+	if _, err := e.app.Login(e.ctx, good, app.LoginClient{Addr: "elsewhere"}); err != nil {
+		t.Errorf("the address is not limited by the browser's failures: %v", err)
+	}
+}
+
+// Wrong current passwords in a password change are limited per account,
+// not per address, so they neither count toward nor wait on sign-in
+// failures from the same proxy.
+func TestAuthChangePasswordLimit(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, app.LoginClient{Addr: "proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		_, _ = e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, app.LoginClient{Addr: "proxy"})
+	}
+	wrong := app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"}
+	for range 10 {
+		if err := e.app.ChangePassword(e.ctx, si.Token, wrong); code(err) != app.CodeValidation {
+			t.Fatalf("wrong current password: %v", err)
+		}
+	}
+	if err := e.app.ChangePassword(e.ctx, si.Token, wrong); code(err) != app.CodeRateLimited {
+		t.Errorf("11th wrong current password: %v", err)
 	}
 }
 
@@ -210,15 +302,15 @@ func TestAuthChangePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := func(pw string) (app.SignIn, error) {
-		return e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: pw}, "c")
+		return e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: pw}, app.LoginClient{Addr: "c"})
 	}
 	a, _ := login("correct horse")
 	b, _ := login("correct horse")
-	err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"}, "c")
+	err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"})
 	if code(err) != app.CodeValidation {
 		t.Fatalf("wrong current password: %v", err)
 	}
-	if err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "correct horse", NewPassword: "battery staple"}, "c"); err != nil {
+	if err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "correct horse", NewPassword: "battery staple"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.app.Authenticate(e.ctx, a.Token); err != nil {
@@ -249,7 +341,7 @@ func TestAuthAccounts(t *testing.T) {
 	if _, err := e.app.CreateUser(e.ctx, "a@example.com", "correct horse"); code(err) != app.CodeConflict {
 		t.Errorf("duplicate: %v", err)
 	}
-	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@example.com", Password: "correct horse"}, "c")
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@example.com", Password: "correct horse"}, app.LoginClient{Addr: "c"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +376,7 @@ func TestMCPTokens(t *testing.T) {
 		}
 	}
 	login := func(email string) string {
-		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, "c")
+		si, err := e.app.Login(e.ctx, app.LoginInput{Email: email, Password: "correct horse"}, app.LoginClient{Addr: "c"})
 		if err != nil {
 			t.Fatal(err)
 		}

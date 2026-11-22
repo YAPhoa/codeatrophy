@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,6 +56,10 @@ type Config struct {
 	Auth bool
 	// SessionTTL is how long a sign-in lasts without being used.
 	SessionTTL time.Duration
+	// TrustedProxies are the reverse proxies (addresses or CIDR prefixes)
+	// whose X-Forwarded-For header is believed for the client's address
+	// (CODEATROPHY_TRUSTED_PROXIES).
+	TrustedProxies []netip.Prefix
 
 	Judge JudgeConfig
 	AI    AIConfig
@@ -208,6 +213,14 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if c.SessionTTL < 2*time.Hour {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_SESSION_TTL: must be at least 2h"))
 	}
+	for _, v := range list("CODEATROPHY_TRUSTED_PROXIES") {
+		p, err := parsePrefix(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CODEATROPHY_TRUSTED_PROXIES: %q is not an IP address or CIDR prefix", v))
+			continue
+		}
+		c.TrustedProxies = append(c.TrustedProxies, p)
+	}
 	switch strings.ToLower(get("CODEATROPHY_LOG_LEVEL", "info")) {
 	case "debug":
 		c.LogLevel = slog.LevelDebug
@@ -315,6 +328,37 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		PrettyJSON:     getBool("CODEATROPHY_MCP_PRETTY_JSON", false),
 	}
 	return c, errors.Join(errs...)
+}
+
+// parsePrefix reads an IP address (as a one-address prefix) or a CIDR
+// prefix.
+func parsePrefix(s string) (netip.Prefix, error) {
+	if strings.Contains(s, "/") {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+		u := netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-unmapBits(p.Addr()))
+		if !u.IsValid() {
+			return netip.Prefix{}, fmt.Errorf("invalid prefix %q", s)
+		}
+		return u.Masked(), nil
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	a = a.Unmap()
+	return netip.PrefixFrom(a, a.BitLen()), nil
+}
+
+// unmapBits is how many bits of a prefix length unmapping an IPv4-mapped
+// IPv6 address removes.
+func unmapBits(a netip.Addr) int {
+	if a.Is4In6() {
+		return 96
+	}
+	return 0
 }
 
 func parseIntMap(s string) (map[string]int, error) {

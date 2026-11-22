@@ -260,6 +260,30 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+// CODEATROPHY_TRUSTED_PROXIES takes addresses and CIDR prefixes; none are
+// trusted by default.
+func TestTrustedProxies(t *testing.T) {
+	if c, err := LoadFrom(env(nil)); err != nil || len(c.TrustedProxies) != 0 {
+		t.Errorf("defaults: %v %v", c.TrustedProxies, err)
+	}
+	c, err := LoadFrom(env(map[string]string{"CODEATROPHY_TRUSTED_PROXIES": " 172.16.0.0/12, 127.0.0.1,::1, ::ffff:10.0.0.0/104"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range c.TrustedProxies {
+		got = append(got, p.String())
+	}
+	if want := "172.16.0.0/12 127.0.0.1/32 ::1/128 10.0.0.0/8"; strings.Join(got, " ") != want {
+		t.Errorf("got %v, want %s", got, want)
+	}
+	for _, v := range []string{"proxy.local", "10.0.0.0/33", "::ffff:10.0.0.0/64"} {
+		if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_TRUSTED_PROXIES": v})); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}
+
 // AI providers may reach private addresses unless
 // CODEATROPHY_AI_BLOCK_PRIVATE is set; CODEATROPHY_AI_ALLOWED_HOSTS lists
 // exceptions, which must be names, addresses or CIDR prefixes.

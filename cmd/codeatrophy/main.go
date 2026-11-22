@@ -208,7 +208,7 @@ func serve() error {
 	}
 	handler := httpapi.New(httpapi.Options{
 		App: a, Logger: log, AllowedOrigins: cfg.AllowedOrigins, AllowedHosts: hosts,
-		MCP: mcpHandler, MCPPath: "/mcp", Web: webui.Handler(),
+		TrustedProxies: cfg.TrustedProxies, MCP: mcpHandler, MCPPath: "/mcp", Web: webui.Handler(),
 	})
 	srv := newHTTPServer(cfg.Addr, handler, mcpEndpoint, log)
 	ln, err := net.Listen("tcp", cfg.Addr)

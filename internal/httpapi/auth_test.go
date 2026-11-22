@@ -1,11 +1,14 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -13,6 +16,7 @@ import (
 
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/httpapi"
+	"codeatrophy/internal/secrets"
 	"codeatrophy/internal/store/teststore"
 )
 
@@ -25,10 +29,14 @@ type authClient struct {
 
 // newAuthServer starts a server with sign-in on and one account,
 // me@example.com with the password "correct horse".
-func newAuthServer(t *testing.T) *authClient {
+func newAuthServer(t *testing.T, configure ...func(*httpapi.Options)) *authClient {
 	t.Helper()
 	ctx := context.Background()
-	a := app.New(app.Options{Store: teststore.Open(t), Auth: app.AuthOptions{Enabled: true}, HealthInterval: time.Hour})
+	box, err := secrets.NewBox(bytes.Repeat([]byte{5}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(app.Options{Store: teststore.Open(t), Secrets: box, Auth: app.AuthOptions{Enabled: true}, HealthInterval: time.Hour})
 	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +44,24 @@ func newAuthServer(t *testing.T) *authClient {
 		t.Fatal(err)
 	}
 	mcp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("mcp")) })
-	srv := httptest.NewServer(httpapi.New(httpapi.Options{App: a, MCP: mcp, MCPPath: "/mcp",
-		AllowedOrigins: []string{"https://allowed.example"}}))
+	opts := httpapi.Options{App: a, MCP: mcp, MCPPath: "/mcp", AllowedOrigins: []string{"https://allowed.example"}}
+	for _, f := range configure {
+		f(&opts)
+	}
+	srv := httptest.NewServer(httpapi.New(opts))
 	t.Cleanup(func() {
 		srv.Close()
 		a.Stop()
 	})
 	jar, _ := cookiejar.New(nil)
 	return &authClient{t: t, app: a, srv: srv, hc: &http.Client{Jar: jar}}
+}
+
+// fresh returns a client of the same server with an empty cookie jar: a
+// browser that has never signed in.
+func (c *authClient) fresh() *authClient {
+	jar, _ := cookiejar.New(nil)
+	return &authClient{t: c.t, app: c.app, srv: c.srv, hc: &http.Client{Jar: jar}}
 }
 
 // as returns a client of the same server with a cookie jar of its own,
@@ -170,6 +188,65 @@ func TestAuthWrongPasswordAndRateLimit(t *testing.T) {
 	if res.Header.Get("Retry-After") == "" {
 		t.Error("no Retry-After on 429")
 	}
+}
+
+// Behind a reverse proxy every client has the proxy's address. A browser
+// that has signed in before is not kept out by others' failures there.
+func TestAuthRateLimitBehindProxyKeepsKnownBrowsersIn(t *testing.T) {
+	owner := newAuthServer(t)
+	res := owner.login()
+	var device *http.Cookie
+	for _, ck := range res.Cookies() {
+		if ck.Name == httpapi.DeviceCookie {
+			device = ck
+		}
+	}
+	if device == nil || !device.HttpOnly || device.Path != api+"/auth" || device.SameSite != http.SameSiteStrictMode ||
+		device.MaxAge < 300*24*3600 {
+		t.Fatalf("device cookie: %+v", device)
+	}
+	attacker := owner.fresh()
+	bad := `{"email":"me@example.com","password":"wrong password"}`
+	good := `{"email":"me@example.com","password":"correct horse"}`
+	for range 10 {
+		attacker.expect("POST", api+"/auth/login", bad, 401)
+	}
+	owner.fresh().expect("POST", api+"/auth/login", good, 429)
+	owner.expect("POST", api+"/auth/login", good, 200)
+	// Signing out keeps the browser known.
+	owner.expect("POST", api+"/auth/logout", "", 204)
+	owner.expect("POST", api+"/auth/login", good, 200)
+}
+
+// With the proxy trusted, each client is limited by its own address from
+// X-Forwarded-For, read from the right so that a client cannot pick it.
+func TestAuthRateLimitPerClientBehindTrustedProxy(t *testing.T) {
+	c := newAuthServer(t, func(o *httpapi.Options) {
+		o.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8")}
+	})
+	bad := `{"email":"me@example.com","password":"wrong password"}`
+	good := `{"email":"me@example.com","password":"correct horse"}`
+	for i := range 10 {
+		// The left entry is the attacker's own; the right one is added by
+		// the proxies, the nearest last.
+		c.expect("POST", api+"/auth/login", bad, 401,
+			"X-Forwarded-For", fmt.Sprintf("192.0.2.%d, 203.0.113.9, 10.1.2.3", i))
+	}
+	c.expect("POST", api+"/auth/login", good, 429, "X-Forwarded-For", "203.0.113.9")
+	c.expect("POST", api+"/auth/login", good, 200, "X-Forwarded-For", "198.51.100.7")
+	// Without the header the proxy's own address is the client.
+	c.fresh().expect("POST", api+"/auth/login", good, 200)
+}
+
+// An address that is not a trusted proxy cannot name another client.
+func TestAuthForwardedForIgnoredFromUntrustedPeers(t *testing.T) {
+	c := newAuthServer(t)
+	bad := `{"email":"me@example.com","password":"wrong password"}`
+	for i := range 10 {
+		c.expect("POST", api+"/auth/login", bad, 401, "X-Forwarded-For", fmt.Sprintf("192.0.2.%d", i))
+	}
+	c.expect("POST", api+"/auth/login", `{"email":"me@example.com","password":"correct horse"}`, 429,
+		"X-Forwarded-For", "198.51.100.7")
 }
 
 func TestAuthCrossSiteRequestsAreRefused(t *testing.T) {

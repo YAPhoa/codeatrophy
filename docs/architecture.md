@@ -875,7 +875,7 @@ sets `CODEATROPHY_AUTH=off`. Accounts (`users`) hold an email and a bcrypt
 password hash. Accounts share one library and keep their own personal data
 (below). The rules live in the application services
 (`internal/app/auth.go`): validation, creating the first account,
-sign-in with a per-address limit on failures, sessions, password
+sign-in with a limit on failures, sessions, password
 changes. The HTTP adapter maps them onto a cookie and gates `/api/` in front
 of the routes; the `codeatrophy user` command uses the same services.
 
@@ -890,6 +890,17 @@ of the routes; the `codeatrophy user` command uses the same services.
   (`sessions`), so a database leak yields no usable cookie. A session lasts
   `CODEATROPHY_SESSION_TTL` from its last use; the expiry is pushed back at
   most once an hour per session, to keep reads from writing.
+- **Failed sign-ins.** Counted in memory, 10 per 15 minutes, per client
+  address, or per known browser. Behind a reverse proxy every client has
+  the proxy's address, so one shared count would let anyone keep everyone
+  out. Two things split it: `CODEATROPHY_TRUSTED_PROXIES` lets the HTTP
+  adapter take the client from `X-Forwarded-For` (the nearest untrusted
+  hop), and each sign-in hands the browser a device cookie, the account id
+  and a random id sealed with the secret key (`secrets.Box`, bound to its
+  use), whose attempts on that account count on their own. Neither needs a
+  table: the counts reset on restart and the device is checked by
+  decrypting it. Wrong current passwords in a password change count per
+  account.
 - **CSRF.** With a cookie the browser authenticates on its own, so
   state-changing requests also pass Go's `http.CrossOriginProtection`
   (`Sec-Fetch-Site`, else `Origin` against `Host`). Unlike the host-based

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -12,6 +13,13 @@ import (
 // SessionCookie is the cookie that holds a signed-in browser's session
 // token.
 const SessionCookie = "codeatrophy_session"
+
+// DeviceCookie marks a browser that has signed in to an account, so that
+// its failed sign-ins are counted apart from other clients at the same
+// address (see app.LoginClient). It is sent only to the sign-in endpoints.
+const DeviceCookie = "codeatrophy_device"
+
+const deviceCookiePath = Prefix + "/auth"
 
 // publicPaths are the API paths reachable without a session when sign-in
 // is on: what the sign-in page needs, and the health check.
@@ -30,14 +38,67 @@ func sessionToken(r *http.Request) string {
 	return ""
 }
 
-// clientKey identifies where a request comes from, for rate limiting
-// failed sign-ins: the peer's address. Behind a reverse proxy every client
-// shares the proxy's address, so the limit applies to them together.
-func clientKey(r *http.Request) string {
-	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return h
+// clientAddr is the address a request comes from, for limiting failed
+// sign-ins and for the log: the peer's address, or when the peer is a
+// trusted proxy, the nearest address in X-Forwarded-For that is not one.
+// Without trusted proxies, every client behind a reverse proxy has the
+// proxy's address.
+func (s *Server) clientAddr(r *http.Request) string {
+	peer := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(peer); err == nil {
+		peer = h
 	}
-	return r.RemoteAddr
+	if !s.trustedProxy(peer) {
+		return peer
+	}
+	// Each proxy appends the address it was reached from, so the list is
+	// read from the right; addresses left of the first untrusted one may
+	// have been made up by the client.
+	var hops []string
+	for _, v := range r.Header.Values("X-Forwarded-For") {
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hops = append(hops, h)
+			}
+		}
+	}
+	addr := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		ip, err := netip.ParseAddr(hops[i])
+		if err != nil {
+			break
+		}
+		addr = ip.Unmap().String()
+		if !s.trustedProxy(addr) {
+			break
+		}
+	}
+	return addr
+}
+
+func (s *Server) trustedProxy(addr string) bool {
+	if len(s.proxies) == 0 {
+		return false
+	}
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	for _, p := range s.proxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) loginClient(r *http.Request) app.LoginClient {
+	c := app.LoginClient{Addr: s.clientAddr(r)}
+	if ck, err := r.Cookie(DeviceCookie); err == nil {
+		c.Device = ck.Value
+	}
+	return c
 }
 
 // secureRequest reports whether the browser reached the server over HTTPS,
@@ -53,6 +114,21 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 		Path:     "/",
 		Expires:  expires,
 		MaxAge:   max(1, int(time.Until(expires).Seconds())),
+		HttpOnly: true,
+		Secure:   secureRequest(r),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func setDeviceCookie(w http.ResponseWriter, r *http.Request, device string) {
+	if device == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     DeviceCookie,
+		Value:    device,
+		Path:     deviceCookiePath,
+		MaxAge:   int(app.DeviceTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   secureRequest(r),
 		SameSite: http.SameSiteStrictMode,
@@ -122,6 +198,7 @@ func (s *Server) getAuthSession(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, in app.SignIn) {
 	setSessionCookie(w, r, in.Token, in.ExpiresAt)
+	setDeviceCookie(w, r, in.Device)
 	u := in.User
 	writeJSON(w, http.StatusOK, app.AuthStatus{Enabled: true, User: &u})
 }
@@ -131,7 +208,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	out, err := s.app.Login(r.Context(), in, clientKey(r))
+	out, err := s.app.Login(r.Context(), in, s.loginClient(r))
 	if err != nil {
 		return err
 	}
@@ -166,7 +243,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	if err := s.app.ChangePassword(r.Context(), sessionToken(r), in, clientKey(r)); err != nil {
+	if err := s.app.ChangePassword(r.Context(), sessionToken(r), in); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

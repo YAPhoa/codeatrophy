@@ -88,6 +88,7 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_AI_ALLOWED_HOSTS` | unset | Host names, addresses or CIDR prefixes AI providers may reach whatever the rules say |
 | `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](#signing-in)) |
 | `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
+| `CODEATROPHY_TRUSTED_PROXIES` | unset | Addresses or CIDR prefixes of reverse proxies whose `X-Forwarded-For` is believed (see [Signing in](#signing-in)) |
 | `CODEATROPHY_MCP_TOKEN` | unset | Server-wide bearer token for `/mcp`, besides the per-account tokens made in the UI |
 
 AI providers are normally set up in the UI under Settings. You can keep
@@ -156,9 +157,12 @@ request needs a session, except the health check (`/api/v1/health`).
 Passwords are stored as bcrypt hashes. The session cookie is `HttpOnly` and
 `SameSite=Strict`, and `Secure` over HTTPS (also behind a proxy that sends
 `X-Forwarded-Proto: https`); the server keeps only a hash of it. Changes
-must come from the app's own pages (a cross-origin check), and each address
-gets 10 failed sign-ins per 15 minutes. Behind a reverse proxy all clients
-share the proxy's address and so that limit.
+must come from the app's own pages (a cross-origin check). Each client
+gets 10 failed sign-ins per 15 minutes, and a browser that has signed in
+before has a count of its own, so someone guessing passwords cannot keep
+you out of a browser you use. Behind a reverse proxy every client has the
+proxy's address; set `CODEATROPHY_TRUSTED_PROXIES` to the proxy's address
+so that the server reads each client's own from `X-Forwarded-For`.
 
 ## Connecting an MCP client
 
