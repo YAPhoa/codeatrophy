@@ -175,6 +175,7 @@ third-party origin.
 | `workspace` | The solve editor's working copies: a reload that shows the saved code from its first frame, switching language, Reset, a past submission's code, code older versions kept in the browser, a save that fails |
 | `judge` | Each verdict and its panes; a judge that is down or missing |
 | `organise` | Bulk status, tags and delete; renaming, moving and deleting a collection |
+| `account` | Settings › Account with sign-in on and off: the password, signing out here, elsewhere and from the sidebar, the sessions; MCP tokens made and revoked |
 | `related` | Related items: linking from the search box, unlinking, the remembered open state, links and origins to deleted items |
 | `rail` | The navigation rail's one label beside its icons, on hover and focus: its wait, fade and travel between icons; the view an item page's Back leads to, lit in the sidebar; the sidebar's edge sliding on a toggle and only then |
 | `library-*`, `tags`, `palette`, `select` | The library list, the count by its title, its filters, paging and sorting; the Tags page; the command palette; selects |
