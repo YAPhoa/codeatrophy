@@ -243,6 +243,8 @@ test('motion: a closing dialog plays its exit out of reach, then goes', async ({
   const opener = page.getByRole('button', { name: 'New collection' });
   await opener.click();
   await expect(page.getByRole('dialog', { name: 'New collection' })).toBeVisible();
+  // Drawn in full first: one closed before its first frame goes without an exit (exitOnRemove).
+  await page.locator('.dialog-backdrop').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   // Still on screen for its exit, but inert, hidden from assistive technology, and focus is already back.
   // Its exit lasts --duration-quick and can be over before a look from here:
   // the backdrop is recorded from the page as it is put back for it.
