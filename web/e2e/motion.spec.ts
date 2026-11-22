@@ -400,14 +400,17 @@ test.describe('with motion reduced', () => {
     await slowMotion(page);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     const copy = page.locator('.copy-btn').first();
+    // The label's swap and the leaving icon go on timers, the first after
+    // --duration-quick: what each plays is read in the page as it comes.
+    const swaps = await recordMatches(page, '.copy-btn .morph-swap', (el) => ({ width: el.getAnimations().length, fades: [...el.children].map((c) => c.getAnimations().length) }));
+    const iconsOut = await recordMatches(page, '.copy-btn .icon-swap-out', firstFrame);
     await copy.click();
     await expect(copy).toHaveAccessibleName('Copied');
-    const swap = copy.locator('.morph-swap');
-    await expect(swap).toHaveCount(1);
-    expect(await swap.evaluate((el) => ({ width: el.getAnimations().length, fades: [...el.children].map((c) => c.getAnimations().length) }))).toEqual({ width: 0, fades: [1, 1] });
+    // The first of each is Copy turning into Copied, which turns back later.
+    expect((await swaps())[0]).toEqual({ width: 0, fades: [1, 1] });
     // The icon cross-fades as well, without growing or shrinking.
     expect(await atStart(copy.locator('.icon-swap-icon.is-in'))).toMatchObject({ opacity: '0', moved: [] });
-    expect((await atStart(copy.locator('.icon-swap-out'))).moved).toEqual([]);
+    expect((await iconsOut())[0]?.moved).toEqual([]);
   });
 
   test('the notes panel fades in and out, and the text column does not move aside', async ({ page }) => {
