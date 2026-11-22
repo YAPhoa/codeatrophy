@@ -6,7 +6,10 @@ under `/api/v1`.
 ## Conventions
 
 - Request and response bodies are JSON (`application/json`) unless stated
-  otherwise. Field names are `camelCase`.
+  otherwise. Field names are `camelCase`. A request with a JSON body must
+  send `Content-Type: application/json` (parameters such as
+  `; charset=utf-8` are allowed), or it is `415`; a request without a body
+  needs none.
 - Ids are UUID strings. Timestamps are RFC 3339 in UTC
   (`2026-01-31T12:00:00Z`).
 - Optional scalar fields that have no value are returned as `null`, never
@@ -50,6 +53,7 @@ reports the current state (the item revision conflict described under
 | 405 | `bad_request` | The path exists but does not support this method; the `Allow` header lists the ones it does |
 | 409 | `conflict` | Request conflicts with current state (e.g. a collection cycle) |
 | 413 | `too_large` | Body or upload exceeds a limit |
+| 415 | `bad_request` | A JSON body was sent without `Content-Type: application/json` |
 | 422 | `validation_failed` | Well-formed but invalid |
 | 429 | `rate_limited` | Too many failed sign-in attempts from this client or browser; the `Retry-After` header gives the seconds to wait |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
@@ -59,10 +63,9 @@ reports the current state (the item revision conflict described under
 
 ### Host and origin checks
 
-Two checks protect every instance, with sign-in on or off. Both apply to
-every request under `/api/` and to the MCP endpoint; the UI's static files
-are served for any host. With sign-in on, the stricter cross-origin check of
-[Sign-in](#sign-in) applies as well.
+These checks protect every instance, with sign-in on or off. The first two
+apply to every request under `/api/` and to the MCP endpoint, the third to
+`/api/` only; the UI's static files are served for any host.
 
 1. **Host allow-list** (against DNS rebinding, applied first). The `Host`
    header must name the server: a loopback name or address (`localhost`,
@@ -82,6 +85,19 @@ are served for any host. With sign-in on, the stricter cross-origin check of
    or an origin whose host is listed in `CODEATROPHY_ALLOWED_HOSTS`. The
    origin is compared with this configured set, never with the request's
    own `Host` header. `Origin: null` is rejected.
+3. **Cross-origin check** (against request forgery from any other origin,
+   API only). Requests other than `GET`, `HEAD` and `OPTIONS` also pass
+   Go's `http.CrossOriginProtection`: a browser request is refused with
+   `403 forbidden` unless `Sec-Fetch-Site` is `same-origin` or `none`, or
+   its `Origin` is listed in `CODEATROPHY_ALLOWED_ORIGINS` (which includes
+   `CODEATROPHY_PUBLIC_URL`). Without `Sec-Fetch-Site` the `Origin` host
+   must match the `Host` header. Requests with neither header (not from a
+   browser) pass. The UI passes, also through the dev server's proxy, which
+   the browser sees as the same origin; a page on another port of this
+   machine, though a loopback origin, does not unless it is listed. This
+   check applies to `POST /auth/login` too. The MCP endpoint needs no such
+   check: it takes only `application/json` bodies and answers no CORS
+   preflight, so such a page cannot send it a request.
 
 ### Sign-in
 
@@ -101,14 +117,8 @@ keeps only its SHA-256 hash. It lasts `CODEATROPHY_SESSION_TTL` (30 days by
 default) from its last use: a request made more than an hour after the
 expiry was last pushed back pushes it back again and renews the cookie.
 
-With sign-in on, requests other than `GET`, `HEAD` and `OPTIONS` also pass
-a cross-origin check against request forgery (Go's
-`http.CrossOriginProtection`): a browser request is refused with
-`403 forbidden` unless `Sec-Fetch-Site` is `same-origin` or `none`, or its
-`Origin` is listed in `CODEATROPHY_ALLOWED_ORIGINS` (which includes
-`CODEATROPHY_PUBLIC_URL`). Without `Sec-Fetch-Site` the `Origin` host must
-match the `Host` header. Requests with neither header (not from a browser)
-pass. This check applies to `POST /auth/login` too.
+State-changing requests, `POST /auth/login` among them, pass the
+[cross-origin check](#host-and-origin-checks) whether sign-in is on or off.
 
 ### Personal data
 

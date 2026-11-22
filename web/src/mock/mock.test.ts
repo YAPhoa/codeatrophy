@@ -1538,7 +1538,7 @@ describe('collections and tags', () => {
     const { itemIds } = await api.collections.itemIds(id);
     expect(itemIds.length).toBeGreaterThan(0);
     for (const body of ['{}', '{"itemIds":null}']) {
-      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'PUT', body });
+      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'PUT', body, headers: { 'Content-Type': 'application/json' } });
       expect(res.status).toBe(422);
       const err = (await res.json()) as { error: { code: string; fields: Record<string, string> } };
       expect(err.error.code).toBe('validation_failed');
@@ -1553,7 +1553,7 @@ describe('collections and tags', () => {
     const id = seedIds.collections.dynamicProgramming;
     const { itemIds } = await api.collections.itemIds(id);
     for (const body of ['{}', '{"itemIds":null}']) {
-      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'POST', body });
+      const res = await server.fetch(`/api/v1/collections/${id}/items`, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } });
       expect(res.status).toBe(422);
       const err = (await res.json()) as { error: { code: string; fields: Record<string, string> } };
       expect(err.error.code).toBe('validation_failed');
@@ -3245,7 +3245,7 @@ describe('system prompt', () => {
       expect(err.fields).toHaveProperty('custom');
     }
     for (const body of ['{"custom":null}', '{}']) {
-      expect((await server.fetch('/api/v1/settings/ai/system-prompt', { method: 'PUT', body })).status).toBe(422);
+      expect((await server.fetch('/api/v1/settings/ai/system-prompt', { method: 'PUT', body, headers: { 'Content-Type': 'application/json' } })).status).toBe(422);
     }
     expect((await api.settings.systemPrompt()).custom).toBe('kept');
     expect((await api.settings.putSystemPrompt('😀'.repeat(LIMITS.maxSystemPromptChars))).isCustom).toBe(true);
@@ -3269,7 +3269,7 @@ describe('test case prompt', () => {
     for (const bad of ['', 'bell\u0007', 'é'.repeat(LIMITS.maxSystemPromptChars + 1)]) {
       expect((await failure(api.settings.putTestCasePrompt(bad))).fields).toHaveProperty('custom');
     }
-    expect((await server.fetch('/api/v1/settings/ai/testcase-prompt', { method: 'PUT', body: '{}' })).status).toBe(422);
+    expect((await server.fetch('/api/v1/settings/ai/testcase-prompt', { method: 'PUT', body: '{}', headers: { 'Content-Type': 'application/json' } })).status).toBe(422);
     expect((await api.settings.testCasePrompt()).custom).toBe('# Mine\n\n\tindented');
     const { builtIn } = await api.settings.testCasePrompt();
     expect((await api.settings.putTestCasePrompt(`\n${builtIn}\n`)).isCustom).toBe(false);
@@ -4347,7 +4347,18 @@ describe('routing', () => {
     const res = await server.fetch('/api/v1/nope');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: { code: 'not_found', message: 'no such endpoint' } });
-    expect((await server.fetch('/api/v1/items', { method: 'POST', body: '{oops' })).status).toBe(400);
+    expect((await server.fetch('/api/v1/items', { method: 'POST', body: '{oops', headers: { 'Content-Type': 'application/json' } })).status).toBe(400);
+  });
+
+  it('answers a JSON body sent without its content type with a 415', async () => {
+    for (const type of [undefined, 'text/plain', 'application/x-www-form-urlencoded']) {
+      const res = await server.fetch('/api/v1/collections', { method: 'POST', body: '{"name":"X"}', headers: type ? { 'Content-Type': type } : {} });
+      expect(res.status).toBe(415);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe('bad_request');
+    }
+    const res = await server.fetch('/api/v1/collections', { method: 'POST', body: '{"name":"X"}', headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+    expect(res.status).toBe(201);
+    expect((await server.fetch('/api/v1/settings/preferences', { method: 'PUT' })).status).toBe(200);
   });
 
   it('answers an unsupported method on a known path with a JSON 405', async () => {

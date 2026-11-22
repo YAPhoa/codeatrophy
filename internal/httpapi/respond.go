@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,6 +79,10 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	if !ok {
 		status = http.StatusInternalServerError
 	}
+	var se *statusError
+	if errors.As(err, &se) {
+		status = se.status
+	}
 	if ae.Code == app.CodeRateLimited && ae.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int((ae.RetryAfter+time.Second-1)/time.Second)))
 	}
@@ -95,6 +100,16 @@ func apiError(code app.Code, format string, args ...any) error {
 	return &app.Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
+// statusError is an API error answered with another status than its
+// code's.
+type statusError struct {
+	status int
+	err    *app.Error
+}
+
+func (e *statusError) Error() string { return e.err.Error() }
+func (e *statusError) Unwrap() error { return e.err }
+
 // decode reads a JSON body into v. An empty body decodes as {}.
 func decode(r *http.Request, v any) error {
 	data, err := readBody(r)
@@ -108,7 +123,9 @@ func decode(r *http.Request, v any) error {
 }
 
 // readBody reads a JSON body without decoding it, for services that keep
-// it as sent. An empty body is {}.
+// it as sent. An empty body is {}; any other must be sent as
+// application/json, which a page on another origin cannot do without the
+// browser asking first.
 func readBody(r *http.Request) (json.RawMessage, error) {
 	body := http.MaxBytesReader(nil, r.Body, maxJSONBody)
 	data, err := io.ReadAll(body)
@@ -120,7 +137,11 @@ func readBody(r *http.Request) (json.RawMessage, error) {
 		return nil, apiError(app.CodeBadRequest, "could not read the request body")
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		data = []byte("{}")
+		return []byte("{}"), nil
+	}
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		return nil, &statusError{http.StatusUnsupportedMediaType, &app.Error{Code: app.CodeBadRequest,
+			Message: "a request body must be sent with Content-Type: application/json"}}
 	}
 	return data, nil
 }

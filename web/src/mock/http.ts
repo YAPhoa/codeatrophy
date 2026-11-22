@@ -31,6 +31,9 @@ export const forbiddenHost = (host: string) =>
 /** The server answers an unsupported method on a known path with a JSON `405` whose code is `bad_request`. */
 export const methodNotAllowed = (method: string) =>
   new HttpError(405, 'bad_request', `method ${method} is not allowed for this path`);
+/** A JSON body sent without `Content-Type: application/json`, which the server answers with `415`. */
+export const unsupportedMediaType = () =>
+  new HttpError(415, 'bad_request', 'a request body must be sent with Content-Type: application/json');
 export const notFound = (what: string) => new HttpError(404, 'not_found', `${what} not found`);
 export const conflict = (message: string, fields?: Record<string, string | number>) =>
   new HttpError(409, 'conflict', message, fields);

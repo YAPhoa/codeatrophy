@@ -154,7 +154,8 @@ export async function mockApi<T = unknown>(page: Page, path: string, init?: { me
   return page.evaluate(
     async ({ path, init }) => {
       const mock = (window as unknown as { __codeatrophyMock: { fetch: (p: string, i?: RequestInit) => Promise<Response> } }).__codeatrophyMock;
-      const res = await mock.fetch(`/api/v1${path}`, init ? { method: init.method, body: init.body === undefined ? undefined : JSON.stringify(init.body) } : undefined);
+      const json = init?.body === undefined ? {} : { body: JSON.stringify(init.body), headers: { 'Content-Type': 'application/json' } };
+      const res = await mock.fetch(`/api/v1${path}`, init ? { method: init.method, ...json } : undefined);
       if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path}: ${res.status} ${await res.text()}`);
       return res.status === 204 ? null : res.json();
     },

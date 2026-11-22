@@ -197,13 +197,6 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Reques
 		}
 		return r.WithContext(app.WithAccount(r.Context(), account)), true
 	}
-	// A session cookie is sent by the browser on its own, so state-changing
-	// requests must also come from a page of this server (CSRF).
-	if err := s.csrf.Check(r); err != nil {
-		writeJSON(w, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden,
-			Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
-		return r, false
-	}
 	if publicPaths[r.URL.Path] {
 		return r, true
 	}

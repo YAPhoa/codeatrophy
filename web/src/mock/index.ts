@@ -22,7 +22,7 @@ import { testCaseRoutes } from './handlers/testcases';
 import { workspaceRoutes } from './handlers/workspace';
 import type { Handler, Reply, Req } from './http';
 import { JobRunner, jobRoutes, type StoredJob } from './jobs';
-import { badRequest, forbidden, forbiddenHost, HttpError, methodNotAllowed, notFound } from './http';
+import { badRequest, forbidden, forbiddenHost, HttpError, methodNotAllowed, notFound, unsupportedMediaType } from './http';
 import { seedDatabase, seedIds, seedStyles } from './seed';
 import { seedAiLog } from './seed/aiLog';
 import { abortError, sleep } from './util';
@@ -169,6 +169,8 @@ export function createMockServer(options: MockOptions = {}): MockServer {
     const body = init.body;
     if (typeof FormData !== 'undefined' && body instanceof FormData) req.form = body;
     else if (typeof body === 'string' && body !== '') {
+      const type = new Headers(init.headers).get('Content-Type') ?? '';
+      if (body.trim() !== '' && type.split(';')[0]!.trim().toLowerCase() !== 'application/json') throw unsupportedMediaType();
       try {
         req.body = JSON.parse(body) as unknown;
       } catch {

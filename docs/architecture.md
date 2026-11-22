@@ -919,10 +919,9 @@ of the routes; the `codeatrophy user` command uses the same services.
   use), whose attempts on that account count on their own. Neither needs a
   table: the counts reset on restart and the device is checked by
   decrypting it.
-- **CSRF.** With a cookie the browser authenticates on its own, so
-  state-changing requests also pass Go's `http.CrossOriginProtection`
-  (`Sec-Fetch-Site`, else `Origin` against `Host`). Unlike the host-based
-  origin check below, it tells apart another port of the same host.
+- **CSRF.** With a cookie the browser authenticates on its own; the
+  cross-origin check under "Request checks" below keeps other pages from
+  using it.
 - **MCP.** MCP clients cannot sign in with a password, so while sign-in is
   on `/mcp` requires a bearer token and is never the one open door. Each
   account makes its own tokens (`mcp_tokens`, stored as SHA-256 hashes like
@@ -974,8 +973,8 @@ from the cached probe, and answers `503` only while the database is down
 
 ### Request checks
 
-Two further request checks protect `/api/` and `/mcp` from web pages the
-user happens to visit, with sign-in on or off:
+Further request checks protect `/api/` and `/mcp` from web pages the user
+happens to visit, with sign-in on or off:
 
 - **Host allow-list (DNS rebinding).** A page on `attacker.example` can have
   its DNS name re-pointed at `127.0.0.1`; the browser then treats requests to
@@ -990,6 +989,16 @@ user happens to visit, with sign-in on or off:
   header must come from a loopback origin or the configured allowed origins
   and hosts. The comparison is against configuration only, never against the
   request's `Host`, which the attacker controls in the rebinding case.
+- **Cross-origin check (CSRF, API only).** State-changing API requests also
+  pass Go's `http.CrossOriginProtection` (`Sec-Fetch-Site`, else `Origin`
+  against `Host`). Unlike the check above it tells apart another port of
+  the same host, so a page from another server on this machine (a
+  notebook, say) cannot write to the library, with sign-in off too. The
+  UI's dev server passes: through its proxy it is the same origin to the
+  browser. As a second line, a JSON body must
+  be sent as `application/json`, which a page can send to another origin
+  only after a CORS preflight the server never grants. The MCP SDK requires
+  the same of `/mcp`, so it needs no cross-origin check of its own.
 
 The container's health check calls `GET /api/v1/health` on loopback with a
 loopback `Host`, so it passes whatever the allow-list holds and needs no

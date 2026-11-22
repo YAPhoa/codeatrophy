@@ -467,10 +467,14 @@ func TestCrossOriginWritesAreRejected(t *testing.T) {
 	if r := c.do("POST", api+"/items", body, "Origin", "https://evil.example"); r.status != 403 || r.errorCode(t) != "forbidden" {
 		t.Errorf("cross-origin POST: %d %s", r.status, r.body)
 	}
-	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:3000", "https://allowed.example"} {
-		if r := c.do("POST", api+"/items", body, "Origin", origin); r.status != 201 {
+	// The UI through the dev server's proxy, and an allowed origin.
+	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:3000"} {
+		if r := c.do("POST", api+"/items", body, "Origin", origin, "Sec-Fetch-Site", "same-origin"); r.status != 201 {
 			t.Errorf("%s: %d %s", origin, r.status, r.body)
 		}
+	}
+	if r := c.do("POST", api+"/items", body, "Origin", "https://allowed.example"); r.status != 201 {
+		t.Errorf("allowed origin: %d %s", r.status, r.body)
 	}
 	if r := c.do("GET", api+"/meta", "", "Origin", "https://evil.example"); r.status != 200 {
 		t.Error("reads are not origin-restricted")
@@ -1034,8 +1038,8 @@ func TestHostAllowList(t *testing.T) {
 	if r := c.hostDo("GET", "/", "evil.example"); r.status != 200 {
 		t.Errorf("UI: %d", r.status)
 	}
-	// An allowed host's origin may write.
-	if r := c.do("POST", api+"/items", `{"type":"reading","title":"x"}`, "Origin", "http://lan.example:8484"); r.status != 201 {
+	// The UI opened at an allowed host may write.
+	if r := c.do("POST", api+"/items", `{"type":"reading","title":"x"}`, "Origin", "http://lan.example:8484", "Sec-Fetch-Site", "same-origin"); r.status != 201 {
 		t.Errorf("allowed host origin: %d %s", r.status, r.body)
 	}
 	star := newServer(t, func(o *httpapi.Options) { o.AllowedHosts = []string{"*"} })

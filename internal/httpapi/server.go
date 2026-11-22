@@ -60,7 +60,8 @@ type Server struct {
 	mcp     http.Handler
 	mcpPath string
 	web     http.Handler
-	// csrf checks state-changing requests when sign-in is on.
+	// csrf checks that state-changing API requests come from a page of
+	// this server or an allowed origin.
 	csrf *http.CrossOriginProtection
 	// proxies are the trusted reverse proxies (Options.TrustedProxies).
 	proxies   []netip.Prefix
@@ -288,7 +289,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case isAPI:
 		h.Set("Cache-Control", "no-store")
 		setDeadlines(rec, path)
-		if !safeMethod(r.Method) && !s.originAllowed(r, s.origins) {
+		// Writes pass the configured origins and Go's cross-origin check,
+		// with sign-in on or off. The second tells the UI from a page on
+		// another port of this machine, which is a loopback origin too.
+		if !safeMethod(r.Method) && (!s.originAllowed(r, s.origins) || s.csrf.Check(r) != nil) {
 			writeJSON(rec, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden,
 				Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
 			return
