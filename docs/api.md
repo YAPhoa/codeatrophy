@@ -1024,8 +1024,9 @@ another language can be saved but not run.
   `updatedAt` or `revision`.
 
 Synchronous; may take as long as the cases take to run. `503
-judge_unavailable` if no engine is configured or the engine cannot be reached;
-nothing is changed in that case. If the engine fails part-way through, the
+judge_unavailable` if no engine is configured, the engine cannot be reached,
+or the engine fails on every case (an internal error of its own, such as
+Judge0's status 13); nothing is changed in that case. If the engine fails part-way through, the
 results that finished are kept, no further cases are started, and the rest
 are reported with verdict `internal_error`. If the reference solution or a
 case is changed while the run is in progress, the changed cases (or, for a

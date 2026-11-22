@@ -254,6 +254,55 @@ func TestVerifyLeavesCasesItCannotVouchFor(t *testing.T) {
 	}
 }
 
+// An internal error reported by the engine (Judge0's status 13) is an
+// engine failure, not the reference solution failing: the case keeps its
+// verified flag, and when every case meets it nothing changes at all.
+func TestVerifyTreatsEngineInternalErrorAsEngineFailure(t *testing.T) {
+	e := newEnv(t)
+	it := e.problem(t, `,"problem":{"referenceSolution":{"language":"python","source":"sum"}}`)
+	must(e.app.VerifyTestCases(e.ctx, it.ID, false, ""))
+	cases := must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !cases[0].Verified || !cases[1].Verified {
+		t.Fatalf("setup: %+v", cases)
+	}
+	internalError := judge.ExecResult{Status: judge.StatusInternalError, Message: "cgroup setup failed"}
+
+	// One case meets it: that case keeps its flag, the other is verified as usual.
+	e.engine.Handler = func(_ context.Context, req judge.ExecRequest) (judge.ExecResult, error) {
+		if req.Stdin == "5 5" {
+			return internalError, nil
+		}
+		return judgetest.Script(req), nil
+	}
+	before := must(e.app.GetItem(e.ctx, it.ID))
+	res := must(e.app.VerifyTestCases(e.ctx, it.ID, true, ""))
+	if r := res.Results[1]; r.OK || r.Verdict != domain.VerdictInternalError || !strings.Contains(r.Stderr, "cgroup setup failed") {
+		t.Fatalf("internal error result: %+v", r)
+	}
+	after := must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !after[0].Verified || !after[1].Verified || after[1].ExpectedStdout != "10" || !after[1].UpdatedAt.Equal(cases[1].UpdatedAt) {
+		t.Errorf("a case the engine failed on lost its flag: %+v", after[1])
+	}
+	if got := must(e.app.GetItem(e.ctx, it.ID)); !got.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Error("nothing changed, yet the item's updatedAt moved")
+	}
+
+	// Every case meets it: reported as the engine being unavailable, and
+	// nothing changes.
+	e.engine.Handler = func(context.Context, judge.ExecRequest) (judge.ExecResult, error) {
+		return internalError, nil
+	}
+	_, err := e.app.VerifyTestCases(e.ctx, it.ID, true, "")
+	wantCode(t, err, app.CodeJudgeUnavailable)
+	after = must(e.app.ListTestCases(e.ctx, it.ID)).Items
+	if !after[0].Verified || !after[1].Verified {
+		t.Errorf("an engine failing on every case cleared verified: %+v", after)
+	}
+	if got := must(e.app.GetItem(e.ctx, it.ID)); !got.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Error("an engine failing on every case moved the item's updatedAt")
+	}
+}
+
 func TestSubmissionTotalCountIsFixedAtCreation(t *testing.T) {
 	e := newEnv(t) // two workers
 	it := e.problem(t, "")

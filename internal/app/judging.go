@@ -559,13 +559,17 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 	if len(execs) > 0 {
 		allFailed := true
 		for _, e := range execs {
-			if e.Err == nil {
+			if !engineFailed(e) {
 				allFailed = false
 				break
 			}
 		}
 		if allFailed {
-			return VerifyResponse{}, &Error{Code: CodeJudgeUnavailable, Message: "the judge engine is unreachable: " + grader.ErrorMessage(execs[0])}
+			msg := "the judge engine failed: "
+			if execs[0].Err != nil {
+				msg = "the judge engine is unreachable: "
+			}
+			return VerifyResponse{}, &Error{Code: CodeJudgeUnavailable, Message: msg + grader.ErrorMessage(execs[0])}
 		}
 	}
 	resp := VerifyResponse{Results: make([]VerifyResult, len(cases))}
@@ -579,7 +583,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		switch {
 		case e.CompileFailed():
 			r.Stderr = domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
-		case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+		case engineFailed(e):
 			r.Stderr = grader.ErrorMessage(e)
 		case !r.OK && r.Stderr == "":
 			r.Stderr = e.Result.Message
@@ -608,7 +612,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		}
 		for i, c := range cases {
 			r := resp.Results[i]
-			if execs[i].Err != nil {
+			if engineFailed(execs[i]) {
 				continue // the engine failed; that says nothing about the case
 			}
 			tc, err := tx.GetTestCase(c.ID)
@@ -650,6 +654,13 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 		return nil
 	})
 	return resp, err
+}
+
+// engineFailed reports whether the engine itself failed on an execution:
+// it could not be reached, or it reported an internal error (Judge0's
+// status 13). Either way the execution says nothing about the program.
+func engineFailed(e grader.Execution) bool {
+	return e.Err != nil || e.Result.Status == judge.StatusInternalError
 }
 
 // recordLastRun stores run as the last run of the solution that ran, unless

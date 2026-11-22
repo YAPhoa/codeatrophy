@@ -887,7 +887,7 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 		}
 		msg := describeFailure(v, e)
 		c.Error = &msg
-		if e.Err == nil && e.Result.Status != judge.StatusInternalError {
+		if !engineFailed(e) {
 			failed = true
 		}
 	}
@@ -900,7 +900,7 @@ func (a *App) verifyGenerated(ctx context.Context, it domain.Item, h *domain.Har
 
 func describeFailure(v domain.Verdict, e grader.Execution) string {
 	switch {
-	case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+	case engineFailed(e):
 		return "the judge engine failed: " + grader.ErrorMessage(e)
 	case v == domain.VerdictExecuted:
 		return "the reference solution printed output that is not valid UTF-8"
@@ -1085,7 +1085,7 @@ func (a *App) checkReference(ctx context.Context, d *ItemDraft, c *DraftCheck, m
 			tc.outcome = outcome("wrong", "")
 		case errors.Is(e.Err, judge.ErrNotRun):
 			tc.outcome = outcome("not_run", "the judge engine failed on an earlier test case, so this one was not run")
-		case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+		case engineFailed(e):
 			tc.outcome = outcome("not_run", describeFailure(v, e))
 		default:
 			tc.outcome = outcome("failed", describeFailure(v, e))
@@ -1164,7 +1164,7 @@ func (a *App) checkRunners(ctx context.Context, d *ItemDraft) []RunnerCheck {
 			switch {
 			case e.Err != nil && ctx.Err() != nil:
 				set("skipped", "the check ran out of time")
-			case e.Err != nil || e.Result.Status == judge.StatusInternalError:
+			case engineFailed(e):
 				set("skipped", "the judge engine failed: "+grader.ErrorMessage(e))
 			case e.CompileFailed():
 				set("failed", "does not compile: "+domain.Truncate(strings.TrimSpace(e.Result.CompileOutput), 1000))
