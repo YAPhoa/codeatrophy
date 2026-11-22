@@ -1,23 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fakeStorage, installLocalStorage, removeLocalStorage } from '../test/fakeStorage';
 import type * as TextWidthModule from './textWidth';
 
 type Module = typeof TextWidthModule;
-
-function fakeStorage(failWrites = false): Storage {
-  const data = new Map<string, string>();
-  return {
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => {
-      if (failWrites) throw new DOMException('full', 'QuotaExceededError');
-      data.set(k, v);
-    },
-    removeItem: (k: string) => void data.delete(k),
-  } as unknown as Storage;
-}
-
-function useStorage(storage: Storage): void {
-  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
-}
 
 // A fresh copy of the module for each test, as a page load would have.
 async function load(): Promise<Module> {
@@ -26,18 +11,16 @@ async function load(): Promise<Module> {
 }
 
 describe('text width', () => {
-  afterEach(() => {
-    Reflect.deleteProperty(globalThis, 'localStorage');
-  });
+  afterEach(removeLocalStorage);
 
   it('is standard until one is chosen', async () => {
-    useStorage(fakeStorage());
+    installLocalStorage();
     const { getTextWidth } = await load();
     expect(getTextWidth()).toBe('standard');
   });
 
   it('keeps the choice for the next page load', async () => {
-    useStorage(fakeStorage());
+    installLocalStorage();
     for (const width of ['narrow', 'wide', 'full', 'standard'] as const) {
       (await load()).setTextWidth(width);
       expect((await load()).getTextWidth()).toBe(width);
@@ -51,19 +34,20 @@ describe('text width', () => {
     expect(parseTextWidth('Wide')).toBe('standard');
     expect(parseTextWidth('"wide"')).toBe('standard');
     expect(parseTextWidth('900px')).toBe('standard');
-    useStorage(fakeStorage());
+    installLocalStorage();
     globalThis.localStorage.setItem('codeatrophy:textWidth', 'enormous');
     expect((await load()).getTextWidth()).toBe('standard');
   });
 
   it('holds a choice for the visit when storage cannot keep it', async () => {
-    useStorage(fakeStorage(true));
+    // Every write fails, as a full storage's does.
+    installLocalStorage(fakeStorage(0));
     const failing = await load();
     expect(() => failing.setTextWidth('wide')).not.toThrow();
     expect(failing.getTextWidth()).toBe('wide');
     expect((await load()).getTextWidth()).toBe('standard');
 
-    Reflect.deleteProperty(globalThis, 'localStorage');
+    removeLocalStorage();
     const missing = await load();
     expect(missing.getTextWidth()).toBe('standard');
     missing.setTextWidth('full');
