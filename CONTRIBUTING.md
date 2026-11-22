@@ -193,3 +193,26 @@ before any other work.
   are never logged, exported or exposed over MCP; pasted text reaches a model
   as data, not instructions; the host, origin and AI provider address checks
   stay on by default; the UI makes no request to a third-party origin.
+
+### Releases
+
+A change goes from `dev` to staging, is promoted to `main` (rule 24), and
+is released by a tag on that commit.
+
+**Staging.** Every push to `dev` that passes CI publishes the image
+`ghcr.io/yaphoa/codeatrophy:dev`, and `dev-<commit>` beside it, for
+linux/amd64 and linux/arm64. The staging instance runs it from a checkout
+of `dev` in a directory of its own, whose `.env` sets
+`CODEATROPHY_VERSION=dev` and a `CODEATROPHY_HOST_PORT` other than
+production's:
+
+```sh
+git pull
+docker compose -p codeatrophy-staging pull
+docker compose -p codeatrophy-staging up -d
+```
+
+The project name gives staging its own containers and volumes. `dev` is a
+moving tag, so pull before every `up`. Staging cannot share production's
+checkout with another `--env-file`: the app reads the `.env` of its own
+directory as well, so production's settings would reach it.
