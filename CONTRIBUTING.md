@@ -75,29 +75,42 @@ any project; the second is what this one adds.
     commit by its short hash. No line crediting a tool (`Co-Authored-By`,
     "Generated with").
 17. **Pushed history is not rewritten.** A pushed mistake is fixed, or
-    reverted, with a new commit. If `main` is broken, mending it comes
-    before any other work.
+    reverted, with a new commit. If `dev` or `main` is broken, mending it
+    comes before any other work.
 18. **Nothing secret, personal or local is committed**: no `.env`, key,
     database file, real library content, private address, build output,
     editor or assistant settings, plans, task lists or notes.
 
 ### Branches and pull requests
 
-19. **`main` is the only long-lived branch, and its history is a straight
-    line.** GitHub refuses a force-push, a deletion or a merge commit on it,
-    for everyone.
-20. **A branch is short-lived and does one thing.** Cut it from `main`, name
-    it for what it does (`session-cap-count`), bring it up to date by
-    rebasing, never by merging `main` into it, and delete it once merged.
-21. **A pull request is one change, or a series that builds one thing.** One
-    change is squashed into a single commit when merged, so the whole pull
-    request stays within rule 1. A series is merged by rebase, each commit
-    as it is, so each one follows these rules by itself.
+19. **There are two long-lived branches, `dev` and `main`, and each is a
+    straight line.** Finished work lands on `dev`, where it is tried.
+    `main` holds only released code: it only ever points at a release,
+    tagged or about to be. `main` is the default branch, so a clone gets
+    the latest release. GitHub refuses a force-push, a deletion or a merge
+    commit on either, for everyone.
+20. **A branch is short-lived and does one thing.** Cut it from `dev`, name
+    it `feature/<what>` or `fix/<what>` (`fix/session-cap-count`), bring it
+    up to date by rebasing, never by merging `dev` into it, and delete it
+    once merged.
+21. **A pull request targets `dev`, and is one change, or a series that
+    builds one thing.** One change is squashed into a single commit when
+    merged, so the whole pull request stays within rule 1. A series is
+    merged by rebase, each commit as it is, so each one follows these rules
+    by itself.
 22. **The title and description are the commit message** (rules 15 and 16):
     a squash uses them as written. The description also says which checks
     you ran.
-23. **Only the maintainer merges**, and only with CI green. Expect to be
-    asked to split a pull request that does more than one thing.
+23. **Only the maintainer merges**, and only with CI green. For their own
+    work the maintainer may instead move `dev` forward to a commit CI has
+    passed. Expect to be asked to split a pull request that does more than
+    one thing.
+24. **`main` moves only by promotion.** It is fast-forwarded to a commit of
+    `dev` that has been tried on staging, and the release tag goes on that
+    commit. Nothing reaches `main` that is not already on `dev`.
+25. **There are no hotfix branches.** An urgent fix lands on `dev` like any
+    other change, and `dev` is promoted. So `main` can never get ahead of
+    `dev`, and `dev` has to stay fit to release at every commit (rule 2).
 
 ### Exceptions
 
@@ -120,8 +133,8 @@ An exception that keeps coming back means the rule is wrong. Change it here.
   route, an MCP tool, a bundle field, a configuration variable, a dependency,
   or a part of the UI that every screen shares. Open an issue that says what
   the user will see, and wait for an answer before writing the code.
-- **Pull requests are welcome**, from a branch of your fork. For anything on
-  the list above, the issue comes first.
+- **Pull requests are welcome**, from a branch of your fork, against `dev`.
+  For anything on the list above, the issue comes first.
 - **Terms for a contribution.** By opening a pull request you state that you
   wrote the change or have the right to submit it, that it is licensed under
   `AGPL-3.0-only` like the rest, and that you grant the copyright holder
@@ -143,8 +156,8 @@ the part you are changing.
 CI (`.github/workflows/ci.yml`) runs all of these on every push and every
 pull request, builds the Docker image and starts it, and looks for known
 vulnerabilities in the Go dependencies. Run them yourself first all the same:
-a red run on `main` is a broken `main`, and rule 17 puts mending it before
-any other work.
+a red run on `dev` or `main` is a broken branch, and rule 17 puts mending it
+before any other work.
 
 | When | Run |
 | --- | --- |
