@@ -478,6 +478,9 @@ A server binary built without the UI (`make build-server`, or plain
 `go build ./...`) serves a placeholder page; the Docker image always
 contains the UI.
 
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the rules for a change: how large a
+commit may be, the checks to run, and what must change together.
+
 ## License
 
 Copyright (C) 2026 YAPhoa
