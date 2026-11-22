@@ -153,11 +153,15 @@ to change:
 
 - *Writers are serialised.* SQLite allows one writer at a time, and the
   services' read-check-write sequences (revision checks, name uniqueness,
-  limits, positions) depend on it. Every PostgreSQL write transaction
-  therefore starts by taking one transaction-level advisory lock, so writes
-  run one at a time and each sees everything committed before it; reads run
-  in parallel on a repeatable-read snapshot, as SQLite readers do. This costs
-  write concurrency, which a single-user library does not need.
+  limits, positions) depend on it. A PostgreSQL writer therefore first waits
+  for the other writers of its process, before it takes a pooled connection,
+  and its transaction then starts by taking one transaction-level advisory
+  lock, which serialises it with writers of other processes (CLI commands,
+  a second server). Writes run one at a time and each sees everything
+  committed before it; queued writers hold no connections, so a long write
+  (a large import) uses one and leaves the rest of the pool to reads, which
+  run in parallel on a repeatable-read snapshot, as SQLite readers do. This
+  costs write concurrency, which a single-user library does not need.
 - *Same values.* Ids, Unix-second timestamps, revisions and insertion order
   (`seq`) are stored as on SQLite. Text is ordered byte-wise (the `C`
   collation, like SQLite's `BINARY`; title sorting folds ASCII letters only,

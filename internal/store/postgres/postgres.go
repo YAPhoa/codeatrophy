@@ -1,8 +1,10 @@
 // Package postgres implements store.Store on PostgreSQL using the pure-Go
 // pgx driver. It behaves like the SQLite store as seen through the store
 // interface: same ids, timestamps (Unix seconds), ordering, limits and
-// search rules. Write transactions are serialised with an advisory lock, as
-// SQLite serialises its writers.
+// search rules. Write transactions are serialised, as SQLite serialises its
+// writers: within the process a writer waits for its turn before it takes a
+// pooled connection, and then takes an advisory lock that serialises it with
+// writers of other processes.
 package postgres
 
 import (
@@ -48,6 +50,10 @@ type DB struct {
 	location string // URL without the password
 	log      *slog.Logger
 	pool     *sql.DB
+	// writeGate holds one token while a write transaction of this process
+	// runs. Writers queue on it rather than on the advisory lock, so a
+	// queue of writers holds no pooled connections and reads still get one.
+	writeGate chan struct{}
 }
 
 var (
@@ -135,7 +141,7 @@ func connect(ctx context.Context, rawURL string, opts Options) (*DB, error) {
 	pool.SetMaxIdleConns(conns)
 	pool.SetConnMaxIdleTime(5 * time.Minute)
 	pool.SetConnMaxLifetime(time.Hour)
-	db := &DB{location: location, log: log, pool: pool}
+	db := &DB{location: location, log: log, pool: pool, writeGate: make(chan struct{}, 1)}
 	if err := db.waitReady(ctx, wait); err != nil {
 		pool.Close()
 		return nil, err
@@ -190,17 +196,32 @@ func (db *DB) Read(ctx context.Context, fn func(store.Tx) error) error {
 	return db.run(ctx, true, func(t *tx) error { return fn(t) })
 }
 
-// Write implements store.Store. Every write transaction first takes the
-// write lock, so writers run one at a time, as on SQLite, and each one sees
-// everything committed before it started.
+// Write implements store.Store. Writers run one at a time, as on SQLite,
+// and each one sees everything committed before it started: a writer first
+// waits for the other writers of this process, without holding a
+// connection, and then takes the write lock, which other processes' writers
+// hold too. fn must not start another Write.
 func (db *DB) Write(ctx context.Context, fn func(store.Tx) error) error {
 	return db.run(ctx, false, func(t *tx) error { return fn(t) })
 }
 
+// run runs fn in a transaction. A write waits on the write gate before it
+// takes a connection, so queued writers cannot use up the pool, and keeps
+// the gate until its transaction has ended; it then waits on the advisory
+// write lock for writers of other processes.
 func (db *DB) run(ctx context.Context, readOnly bool, fn func(*tx) error) (err error) {
 	opts := &sql.TxOptions{}
 	if readOnly {
 		opts = &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead}
+	} else {
+		select {
+		case db.writeGate <- struct{}{}:
+		case <-ctx.Done():
+			return fmt.Errorf("write lock: %w", ctx.Err())
+		}
+		// Deferred first, so released after the commit or rollback below,
+		// on a panic too.
+		defer func() { <-db.writeGate }()
 	}
 	sqlTx, err := db.pool.BeginTx(ctx, opts)
 	if err != nil {

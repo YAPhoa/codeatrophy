@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -323,4 +325,117 @@ func TestMigrationsKeepData(t *testing.T) {
 			return pgObjects(t, db.(*DB), table)
 		},
 	})
+}
+
+// appendSetting adds s to the comma-separated setting "order": a
+// read-modify-write that loses entries unless writers run one at a time.
+func appendSetting(tx store.Tx, s string) error {
+	v, _, err := tx.GetSetting("order")
+	if err != nil {
+		return err
+	}
+	if v != "" {
+		v += ","
+	}
+	return tx.SetSetting("order", v+s)
+}
+
+// Writers queued behind a long one wait without holding connections, so
+// reads still get one from a small pool; then all of them commit, one at a
+// time.
+func TestQueuedWritesLeaveConnectionsForReads(t *testing.T) {
+	db, err := Open(context.Background(), pgtest.URL(t), Options{MaxConns: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	const queued = 5
+	started, release := make(chan struct{}), make(chan struct{})
+	errs := make(chan error, queued+1)
+	go func() {
+		errs <- db.Write(context.Background(), func(tx store.Tx) error {
+			if err := appendSetting(tx, "w0"); err != nil {
+				return err
+			}
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	for i := range queued {
+		go func() {
+			errs <- db.Write(context.Background(), func(tx store.Tx) error { return appendSetting(tx, fmt.Sprintf("w%d", i+1)) })
+		}()
+	}
+	time.Sleep(300 * time.Millisecond) // let the writers queue
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err = db.Read(ctx, func(tx store.Tx) error { _, _, err := tx.GetSetting("order"); return err })
+	cancel()
+	if err != nil {
+		t.Errorf("a read while writers queue: %v", err)
+	}
+	if n := len(errs); n != 0 {
+		t.Errorf("%d writes finished before the first one", n)
+	}
+
+	close(release)
+	for range queued + 1 {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("the queued writes did not finish")
+		}
+	}
+	var order string
+	if err := db.Read(context.Background(), func(tx store.Tx) (err error) {
+		order, _, err = tx.GetSetting("order")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(order, ",")
+	slices.Sort(got)
+	want := []string{"w0", "w1", "w2", "w3", "w4", "w5"}
+	if !slices.Equal(got, want) || !strings.HasPrefix(order, "w0,") {
+		t.Errorf("order = %q: want each of %v once, w0 first", order, want)
+	}
+}
+
+// A writer waiting for its turn gives up when its context ends.
+func TestQueuedWriteHonoursContext(t *testing.T) {
+	db := open(t, pgtest.URL(t), nil)
+	started, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		first <- db.Write(context.Background(), func(tx store.Tx) error {
+			close(started)
+			<-release
+			return tx.SetSetting("k", "first")
+		})
+	}()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	ran := false
+	start := time.Now()
+	err := db.Write(ctx, func(tx store.Tx) error { ran = true; return tx.SetSetting("k", "second") })
+	if !errors.Is(err, context.DeadlineExceeded) || ran {
+		t.Errorf("a queued write whose context ended: %v (ran: %v)", err, ran)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("it returned after %v", d)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	v := storetest.Read(t, db, func(tx store.Tx) (string, error) { v, _, err := tx.GetSetting("k"); return v, err })
+	if v != "first" {
+		t.Errorf("k = %q", v)
+	}
 }
