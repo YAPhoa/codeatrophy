@@ -51,8 +51,3 @@ export function markedRegions(text: string): MarkedRegion[] {
   }
   return regions;
 }
-
-/** The regions that are folded when code is opened: the outermost ones. */
-export function outermostRegions(text: string): MarkedRegion[] {
-  return markedRegions(text).filter((r) => r.depth === 0);
-}

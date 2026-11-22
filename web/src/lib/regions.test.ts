@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { markedRegions, outermostRegions } from './regions';
+import { markedRegions } from './regions';
 
 const lines = (...l: string[]) => l.join('\n');
+/** The regions folded when code is opened. */
+const outermostRegions = (text: string) => markedRegions(text).filter((r) => r.depth === 0);
 
 describe('markedRegions', () => {
   it('pairs a region with its endregion, in each comment style', () => {

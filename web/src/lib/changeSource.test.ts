@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { ChangeSource } from '../api/types';
-import { changeSourceLine, changeSourceText } from './changeSource';
+import { changeSourceLine } from './changeSource';
 
 const http = (model: string | null = null): ChangeSource => ({ via: 'http', client: null, model });
 const mcp = (client: string | null, model: string | null): ChangeSource => ({ via: 'mcp', client, model });
 const imported: ChangeSource = { via: 'import', client: null, model: null };
+
+/** `changeSourceLine` as plain text. */
+const changeSourceText = (createdBy: ChangeSource | null | undefined, lastUpdatedBy: ChangeSource | null | undefined): string =>
+  changeSourceLine(createdBy, lastUpdatedBy)
+    .map((p) => p.text)
+    .join('');
 
 describe('changeSourceText', () => {
   it('says nothing when neither is known', () => {

@@ -76,10 +76,3 @@ export function changeSourceLine(createdBy: ChangeSource | null | undefined, las
   if (first) parts[0] = { ...first, text: first.text.charAt(0).toUpperCase() + first.text.slice(1) };
   return parts;
 }
-
-/** `changeSourceLine` as plain text. */
-export function changeSourceText(createdBy: ChangeSource | null | undefined, lastUpdatedBy: ChangeSource | null | undefined): string {
-  return changeSourceLine(createdBy, lastUpdatedBy)
-    .map((p) => p.text)
-    .join('');
-}
