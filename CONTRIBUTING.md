@@ -178,6 +178,8 @@ before any other work.
 | A configuration variable | `internal/config`, `.env.example`, and the table in `docs/configuration.md` when most installations will want it. |
 | A bound on user input | The server, `limits` of `GET /meta`, and `Limits` in `web/src/api/types.ts`. The UI keeps no copies. |
 | An AI provider or judge engine | A new implementation of `ai.Provider` or `judge.Engine` in its own package, never a special case in a caller. |
+| The release version | Nothing else. It is written only as the default of `CODEATROPHY_VERSION` in `compose.yaml`, and changes alone, in the commit that gets the tag (see Releases). |
+| How the image is published | Both the staging job in `.github/workflows/ci.yml` and `.github/workflows/release.yml`, which build and label it the same way. |
 
 ### Code
 
@@ -216,3 +218,21 @@ The project name gives staging its own containers and volumes. `dev` is a
 moving tag, so pull before every `up`. Staging cannot share production's
 checkout with another `--env-file`: the app reads the `.env` of its own
 directory as well, so production's settings would reach it.
+
+**Cutting a release.**
+
+1. One commit on `dev` changes the default of `CODEATROPHY_VERSION` in
+   `compose.yaml` to the new version, and nothing else: the tag is put on
+   it. Upgrade notes for the release (in `docs/storage.md`) land before
+   it, with the changes they describe.
+2. It goes through CI and staging like any other commit. Then `main` is
+   fast-forwarded to it (rule 24).
+3. The tag `vX.Y.Z` is put on that commit and pushed.
+4. `.github/workflows/release.yml` checks that the tag is the version in
+   `compose.yaml` and that the commit is on `main`, publishes the image
+   as `X.Y.Z`, `X.Y`, `X` and `latest`, and creates the GitHub release
+   with generated notes.
+
+A published tag `vX.Y.Z`, like the image `X.Y.Z`, is never moved or
+reused; a release that went wrong is followed by the next version. Only
+`X.Y`, `X`, `latest` and `dev` move.
