@@ -414,10 +414,17 @@ test.describe('with motion reduced', () => {
     expect(await atStart(panel)).toEqual({ animations: ['notes-in 400'], opacity: '0', moved: [] });
     expect(await page.locator('.reader-article').evaluate((el) => el.getAnimations().length)).toBe(0);
 
-    // Closing, it stays for its fade.
+    // Closing, it stays for its fade, then goes. It goes on a timer, which
+    // slowMotion does not slow, and can be gone before a poll looks: the
+    // panel's classes are recorded from the page instead.
+    await panel.evaluate((el) => {
+      const seen: string[] = [];
+      (window as unknown as { notesClasses: string[] }).notesClasses = seen;
+      new MutationObserver(() => seen.push(el.className)).observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
     await page.getByRole('button', { name: 'Close notes' }).click();
-    await expect(page.locator('.reader-notes.is-closing')).toHaveCount(1);
     await expect(page.locator('.reader-notes')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { notesClasses: string[] }).notesClasses)).toContain('reader-notes is-closing');
   });
 
   test('an accepted verdict fades in, without turning, settling or drawing', async ({ page }) => {
