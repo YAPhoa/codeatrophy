@@ -165,6 +165,7 @@ test('sort: a search sorts by relevance, whatever is remembered, and a sort chos
   await open(page, '/');
   await column(page, 'title').click();
   await nav(page).getByRole('link', { name: /^Tags/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Tags/ })).toBeVisible();
   await nav(page).getByRole('link', { name: /^All items/ }).click();
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
 
@@ -228,6 +229,7 @@ test('sort: a search typed or cleared just before another view is opened stays i
   await open(page, '/problems');
   await column(page, 'title').click();
   await nav(page).getByRole('link', { name: /^Readings/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Readings/);
   await column(page, 'difficulty').click();
   await expect(column(page, 'difficulty')).toHaveAttribute('aria-pressed', 'true');
   await nav(page).getByRole('link', { name: /^Problems/ }).click();
