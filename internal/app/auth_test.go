@@ -352,3 +352,26 @@ func TestMCPTokens(t *testing.T) {
 		t.Errorf("token of a deleted account: %v", err)
 	}
 }
+
+// Accounts made in the same second keep the order they were made in: the
+// default account is the first, which took over the data kept before any
+// account existed.
+func TestDefaultAccountIsTheFirstMadeInTheSameSecond(t *testing.T) {
+	e := newAuthEnv(t, false)
+	if id, err := e.app.DefaultAccount(e.ctx); err != nil || id != store.Unowned {
+		t.Fatalf("before any account: %q, %v", id, err)
+	}
+	var first string
+	for i := range 8 {
+		u, err := e.app.CreateUser(e.ctx, fmt.Sprintf("user%d@example.com", i), "correct horse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = u.ID
+		}
+	}
+	if id, err := e.app.DefaultAccount(e.ctx); err != nil || id != first {
+		t.Errorf("default account %q, want the first made, %q (err %v)", id, first, err)
+	}
+}

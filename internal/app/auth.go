@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"codeatrophy/internal/domain"
@@ -181,7 +180,7 @@ func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
 		return SignIn{}, err
 	}
 	now := a.now().UTC()
-	u := store.User{ID: uuid.NewString(), Email: email, PasswordHash: hash, CreatedAt: now, UpdatedAt: now}
+	u := store.User{ID: newID(), Email: email, PasswordHash: hash, CreatedAt: now, UpdatedAt: now}
 	var out SignIn
 	err = a.store.Write(ctx, func(tx store.Tx) error {
 		n, err := tx.CountUsers()
@@ -376,7 +375,7 @@ func (a *App) CreateUser(ctx context.Context, email, password string) (AuthUser,
 		return AuthUser{}, err
 	}
 	now := a.now().UTC()
-	u := store.User{ID: uuid.NewString(), Email: email, PasswordHash: hash, CreatedAt: now, UpdatedAt: now}
+	u := store.User{ID: newID(), Email: email, PasswordHash: hash, CreatedAt: now, UpdatedAt: now}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
 		if _, err := tx.GetUserByEmail(email); err == nil {
 			return errConflict("an account with this email already exists", nil)

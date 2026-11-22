@@ -33,6 +33,8 @@ func (a *App) DefaultAccount(ctx context.Context) (string, error) {
 	id := store.Unowned
 	var at time.Time
 	for _, u := range users {
+		// created_at is kept in whole seconds; account ids are UUIDv7
+		// (newID), which sort in the order they were made.
 		if id == store.Unowned || u.CreatedAt.Before(at) || (u.CreatedAt.Equal(at) && u.ID < id) {
 			id, at = u.ID, u.CreatedAt
 		}
