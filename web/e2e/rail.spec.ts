@@ -291,12 +291,20 @@ test('sidebar: with motion reduced its width snaps, and what it now shows fades 
     );
   });
   const fades = () => page.evaluate(() => [...new Set((window as unknown as { __navFades: string[] }).__navFades.splice(0))]);
+  // The shell is fading only as long as the fade, on a timer, and can be done
+  // before a poll looks: its classes are recorded from the page instead.
+  await page.locator('.shell').evaluate((el) => {
+    const seen: string[] = [];
+    (window as unknown as { shellClasses: string[] }).shellClasses = seen;
+    new MutationObserver(() => seen.push(el.className)).observe(el, { attributes: true, attributeFilter: ['class'] });
+  });
 
   await page.getByRole('button', { name: /^Minimise navigation/ }).click();
   await expect(rail(page)).toBeVisible();
   expect(await sidebarWidth(page)).toBe(48);
   await expect(page.locator('.shell')).not.toHaveClass(/\bis-sliding\b/);
-  await expect(page.locator('.shell')).toHaveClass(/\bis-nav-fading\b/);
+  await expect(page.locator('.shell')).not.toHaveClass(/\bis-nav-fading\b/);
+  expect(await page.evaluate(() => (window as unknown as { shellClasses: string[] }).shellClasses)).toContain('shell is-rail is-nav-fading');
   await expect.poll(fades).toEqual(['fade-in 0.15s']);
 
   await page.keyboard.press('ControlOrMeta+b');
