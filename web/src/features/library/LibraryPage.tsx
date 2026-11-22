@@ -577,10 +577,9 @@ export function LibraryPage() {
             </>
           }
         >
-          Paste a problem you half remember, or an article worth keeping.{' '}
           {meta.data?.ai.enabled
-            ? 'The AI turns it into a complete entry and shows you what it assumed, and nothing is saved until you have reviewed it.'
-            : 'You can write entries by hand now, and turn on AI in Settings to have rough notes drafted for you.'}
+            ? 'Paste a problem you half remember, or an article worth keeping. The AI turns it into a complete entry and shows you what it assumed, and nothing is saved until you have reviewed it.'
+            : 'Add a problem or reading by hand, or turn on AI in Settings to draft from rough notes.'}
         </EmptyState>
       ) : (
         <>
