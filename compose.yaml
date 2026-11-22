@@ -127,6 +127,16 @@ services:
     restart: unless-stopped
     # The isolate sandbox needs a privileged container.
     privileged: true
+    # Caps for everything the judge runs together. The sandbox limits each
+    # process, but a submission may start up to 128 of them on each of the
+    # workers, so without these one program that forks could use up the
+    # host's memory and get the database killed. Memory and processes are
+    # capped by default; CPU is not (0), since a cap stretches wall-clock
+    # times and turns slow but correct runs into time limits.
+    mem_limit: ${JUDGE0_WORKERS_MEMORY:-4g}
+    memswap_limit: ${JUDGE0_WORKERS_MEMORY:-4g}
+    pids_limit: ${JUDGE0_WORKERS_PIDS:-1024}
+    cpus: ${JUDGE0_WORKERS_CPUS:-0}
     environment: *judge0-env
     networks: [judge0]
     depends_on:

@@ -398,6 +398,12 @@ which an older Codeatrophy refuses to import; upgrade it first.
   internal network without internet access, and submissions run without
   network. Treat the host accordingly. Judge0 keeps no copy of what it ran:
   the app deletes each submission there once it has read the result.
+  The sandbox limits each process, so the worker container as a whole is
+  capped at 4 GB of memory and 1024 processes, and a program that forks
+  cannot use up the host's memory and take the database down with it. Raise
+  `JUDGE0_WORKERS_MEMORY` (and `JUDGE0_WORKERS_PIDS`) if you raise
+  `JUDGE0_WORKER_COUNT` or set problems near the 2 GiB memory maximum;
+  `JUDGE0_WORKERS_CPUS` caps CPU, which is not capped by default.
 - **cgroup v2 hosts.** Judge0 1.13's sandbox can only use control groups on
   cgroup v1, which most current distributions no longer provide. Codeatrophy
   therefore asks Judge0 for per-process limits by default
