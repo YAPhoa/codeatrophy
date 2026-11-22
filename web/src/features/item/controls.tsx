@@ -11,7 +11,7 @@ import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx, type ButtonSize } from '../../ui/Button';
 import { MenuButton, Popover } from '../../ui/Popover';
 import { IconSwap } from '../../ui/Animated';
-import { Badge } from '../../ui/misc';
+import { Badge, CopyButton } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 
 export function StatusIcon({ status, size = 15 }: { status: ItemStatus; size?: number }) {
@@ -55,6 +55,22 @@ export function ChangeSourceLine({ createdBy, lastUpdatedBy, className }: { crea
         ),
       )}
     </span>
+  );
+}
+
+/** The item's id as it is, for MCP tools and the API, with a button that copies it. */
+export function ItemIdLine({ id, className }: { id: string; className?: string }) {
+  return (
+    <div className={cx('item-id-line', className)}>
+      <span className="fact-label">Item ID:</span>
+      <code translate="no" className="item-id">
+        <span className="item-id-hash" aria-hidden="true">
+          #
+        </span>
+        {id}
+      </code>
+      <CopyButton text={id} label="Copy ID" />
+    </div>
   );
 }
 

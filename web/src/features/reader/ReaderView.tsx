@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { ArrowLeft, ExternalLink, MoreHorizontal, MoveHorizontal, NotebookPen, TableOfContents } from 'lucide-react';
 import { useCollections } from '../../api/queries';
 import type { Item } from '../../api/types';
-import { absoluteTime, plural, readingMinutes, relativeTime } from '../../lib/format';
+import { absoluteTime, hostOf, plural, readingMinutes, relativeTime } from '../../lib/format';
 import { exitDuration, slideFrom, token, useChangeCount, usePresence, useSlidingIndicator } from '../../lib/motion';
 import { readJson, writeJson } from '../../lib/storage';
 import { useReadingSize } from '../../lib/readingSize';
@@ -15,7 +15,7 @@ import { MenuButton, Popover } from '../../ui/Popover';
 import { Callout } from '../../ui/misc';
 import { revealTarget } from '../../ui/revealTarget';
 import { useCollectionActions } from '../collections/CollectionActions';
-import { ChangeSourceLine, CollectionPicker, DifficultyBadge, FavoriteButton, StatusControl, TagChips } from '../item/controls';
+import { ChangeSourceLine, CollectionPicker, DifficultyBadge, FavoriteButton, ItemIdLine, StatusControl, TagChips } from '../item/controls';
 import { libraryHref, useItemActions } from '../item/itemActions';
 import { Notes } from '../item/Notes';
 import { Related } from '../item/Related';
@@ -249,8 +249,9 @@ export function ReaderView({ item }: { item: Item }) {
                     </a>
                   )}
                   {item.source.note && <span>{item.source.note}</span>}
-                  <ChangeSourceLine createdBy={item.createdBy} lastUpdatedBy={item.lastUpdatedBy} />
                 </div>
+                <ItemIdLine id={item.id} className="reader-item-id" />
+                <ChangeSourceLine createdBy={item.createdBy} lastUpdatedBy={item.lastUpdatedBy} className="reader-change-source" />
                 {item.tags.length > 0 && <TagChips tags={item.tags} />}
               </header>
               {item.body.trim() === '' ? (
@@ -396,12 +397,4 @@ function OutlineButton({ headings, active, onChoose }: OutlineProps) {
       </Popover>
     </>
   );
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host.replace(/^www\./, '');
-  } catch {
-    return 'Source';
-  }
 }

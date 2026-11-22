@@ -2767,6 +2767,63 @@ fieldset.stack legend {
   vertical-align: bottom;
 }
 
+/* An item's id under its text, as MCP tools and the API take it. */
+.item-id-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.item-id-line > * {
+  flex: none;
+}
+
+/* The bold label of a fact under an item's text: "Time Limit:", "Item ID". */
+.fact-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.item-id-hash {
+  margin-right: 0.5ch;
+  color: var(--text-3);
+}
+
+/* The button reaches into the gaps around the line, so the line is as tall
+   as the facts beside it. */
+.item-id-line .copy-btn {
+  margin-block: -4px;
+}
+
+/* In a narrow pane the id breaks rather than pushing the button down. */
+.item-id-line > .item-id {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.item-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* In a reading's header, between the meta line and the tags, with who
+   created and last changed it below. */
+.reader-item-id {
+  margin-bottom: var(--space-3);
+  color: var(--text-3);
+}
+
+.reader-change-source {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--text-3);
+  font-size: calc(var(--text-sm) * var(--reading-scale));
+}
+
 .related {
   margin-top: 28px;
   padding-top: var(--space-3);

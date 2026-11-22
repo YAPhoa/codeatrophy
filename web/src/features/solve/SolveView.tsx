@@ -9,7 +9,7 @@ import { useShellLayout } from '../../app/shellLayout';
 import { StatusSwap } from '../../ui/Animated';
 import { clearLegacy, clearUnsaved, codeFor, loadCustomInput, openingLanguage, openWorkspace, readLegacy, readUnsaved, rememberedLanguage, rememberLanguage, saveCustomInput, sendOrder } from '../../lib/codeStore';
 import { errorLine } from '../../lib/errors';
-import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, plural, verdictTone } from '../../lib/format';
+import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, hostOf, plural, verdictTone } from '../../lib/format';
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { LANGUAGES, languageName, sortLanguages } from '../../lib/languages';
 import { isLargeText, textFilename } from '../../lib/largeText';
@@ -26,7 +26,7 @@ import { Select } from '../../ui/Select';
 import { SplitPane } from '../../ui/SplitPane';
 import { Callout, ErrorCallout, PageLoading, Tabs, tabPanelProps } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
-import { ChangeSourceLine, TagChips } from '../item/controls';
+import { ChangeSourceLine, ItemIdLine, TagChips } from '../item/controls';
 import { ItemBar } from '../item/ItemBar';
 import { Notes } from '../item/Notes';
 import { Related, Variants } from '../item/Related';
@@ -543,26 +543,40 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
       ) : (
         <Markdown source={item.body} />
       )}
-      {/* After the statement: its tags, then how it is judged and where it came from. */}
+      {/* After the statement, one labelled line each: its tags, how it is
+          judged, where it came from, then its id and who wrote it. */}
       <div className="statement-facts">
         {item.tags.length > 0 && (
           <div className="statement-fact">
-            <span className="muted">Tags:</span>
+            <span className="fact-label">Tags:</span>
             <TagChips tags={item.tags} />
           </div>
         )}
         <div className="statement-fact">
-          <span className="muted">
-            Time {formatMs(problem.timeLimitMs)} · Memory {formatMemoryKb(problem.memoryLimitKb)} · {problem.compare === 'tokens' ? 'whitespace-insensitive check' : 'exact output check'}
-          </span>
-          {item.source.url && (
-            <a href={item.source.url} target="_blank" rel="noopener noreferrer" className="statement-source">
-              <ExternalLink size={12} aria-hidden="true" />
-              Source
-            </a>
-          )}
-          {item.source.note && <span className="muted">· {item.source.note}</span>}
+          <span className="fact-label">Time Limit:</span>
+          {formatMs(problem.timeLimitMs)}
         </div>
+        <div className="statement-fact">
+          <span className="fact-label">Memory Limit:</span>
+          {formatMemoryKb(problem.memoryLimitKb)}
+        </div>
+        <div className="statement-fact">
+          <span className="fact-label">Output Check:</span>
+          {problem.compare === 'tokens' ? 'Whitespace-insensitive' : 'Exact'}
+        </div>
+        {(item.source.url || item.source.note) && (
+          <div className="statement-fact">
+            <span className="fact-label">Source:</span>
+            {item.source.url && (
+              <a href={item.source.url} target="_blank" rel="noopener noreferrer" className="statement-source">
+                <ExternalLink size={12} aria-hidden="true" />
+                {hostOf(item.source.url)}
+              </a>
+            )}
+            {item.source.note && <span>{item.source.note}</span>}
+          </div>
+        )}
+        <ItemIdLine id={item.id} className="statement-fact" />
         <ChangeSourceLine createdBy={item.createdBy} lastUpdatedBy={item.lastUpdatedBy} className="muted" />
       </div>
       <Related item={item} />

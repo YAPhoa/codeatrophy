@@ -243,3 +243,12 @@ export function describeChanges(changes: readonly string[], type: ItemType): str
   if (names.length <= 1) return names.join('');
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
+
+/** The host of a source link without "www.", or "Source" when the link is not a URL. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return 'Source';
+  }
+}
