@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/shared/constant"
 
 	"codeatrophy/internal/ai"
+	"codeatrophy/internal/domain"
 )
 
 // DefaultModel is used when no model is configured.
@@ -114,8 +114,7 @@ func New(cfg ai.Config) (ai.Provider, error) {
 		option.WithMaxRetries(2),
 	}
 	if cfg.BaseURL != "" {
-		u, err := url.Parse(cfg.BaseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if domain.ValidateURL(cfg.BaseURL) != "" {
 			return nil, ai.Errorf(0, "the Anthropic base URL is not a valid http(s) URL")
 		}
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))

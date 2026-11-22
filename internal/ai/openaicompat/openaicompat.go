@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"codeatrophy/internal/ai"
+	"codeatrophy/internal/domain"
 )
 
 // DefaultBaseURL is the OpenAI API endpoint.
@@ -42,8 +42,7 @@ func New(cfg ai.Config) (ai.Provider, error) {
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	u, err := url.Parse(base)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if domain.ValidateURL(base) != "" {
 		return nil, ai.Errorf(0, "the OpenAI-compatible base URL is not a valid http(s) URL")
 	}
 	timeout := cfg.Timeout

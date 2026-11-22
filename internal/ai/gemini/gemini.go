@@ -17,6 +17,7 @@ import (
 
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/ai/openaicompat"
+	"codeatrophy/internal/domain"
 )
 
 // DefaultBaseURL is the Gemini API endpoint. Generation goes to its
@@ -54,8 +55,7 @@ func New(cfg ai.Config) (ai.Provider, error) {
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	u, err := url.Parse(base)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if domain.ValidateURL(base) != "" {
 		return nil, ai.Errorf(0, "the Gemini base URL is not a valid http(s) URL")
 	}
 	base = strings.TrimRight(base, "/")

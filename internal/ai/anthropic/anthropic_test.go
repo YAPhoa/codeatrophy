@@ -333,6 +333,19 @@ func (f *failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 // A request that gets no response says why, without the key, after the
 // SDK's retries; a cancelled one says it was cancelled, without trying.
+// A base URL must be an absolute http(s) URL, as the other providers'.
+func TestBaseURL(t *testing.T) {
+	for _, bad := range []string{"ftp://x", "not a url", "https://", "https://" + strings.Repeat("a", 2048)} {
+		if _, err := New(ai.Config{APIKey: testKey, BaseURL: bad}); err == nil ||
+			!strings.Contains(err.Error(), "Anthropic base URL") {
+			t.Errorf("%.20s: %v", bad, err)
+		}
+	}
+	if _, err := New(ai.Config{APIKey: testKey, BaseURL: "http://localhost:8080"}); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestGenerateWithoutAResponse(t *testing.T) {
 	tr := &failingTransport{}
 	p, _ := New(ai.Config{APIKey: testKey, BaseURL: "http://anthropic.invalid", HTTPClient: &http.Client{Transport: tr}})
