@@ -12,7 +12,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # A newer push replaces the run of an older one, except on dev and main,
+  # where every commit is checked and dev's staging image is published.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
 # Each job's `if` keeps a branch of this repository from running twice, once
 # for the push and once for its pull request: a push always runs, and a pull
