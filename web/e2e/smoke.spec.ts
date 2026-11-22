@@ -243,19 +243,23 @@ test('new item: starts as the type being browsed, and takes the tags the draft s
   const kind = page.getByRole('radiogroup', { name: 'Kind of item' });
 
   // From the readings, a new item is a reading; the preset is used once and leaves the URL.
+  // Until a view is drawn the last screen stays, and its New item is that screen's: wait for the view.
   await nav.getByRole('link', { name: /Readings/ }).click();
+  await expect(nav.getByRole('link', { name: /Readings/ })).toHaveAttribute('aria-current', 'page');
   await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Reading' })).toBeChecked();
   await expect(page).not.toHaveURL(/type=/);
 
   // From the problems, a problem.
   await nav.getByRole('link', { name: /Problems/ }).click();
+  await expect(nav.getByRole('link', { name: /Problems/ })).toHaveAttribute('aria-current', 'page');
   await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Problem' })).toBeChecked();
 
   // From the unfiltered library the last choice is left alone.
   await kind.getByText('Auto-detect').click();
   await nav.getByRole('link', { name: 'All items' }).click();
+  await expect(nav.getByRole('link', { name: 'All items' })).toHaveAttribute('aria-current', 'page');
   await nav.getByRole('link', { name: /New item/ }).click();
   await expect(kind.getByRole('radio', { name: 'Auto-detect' })).toBeChecked();
 
