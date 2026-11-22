@@ -96,9 +96,8 @@ any project; the second is what this one adds.
 22. **The title and description are the commit message** (rules 15 and 16):
     a squash uses them as written. The description also says which checks
     you ran.
-23. **Only the maintainer merges**, after running the checks again, since
-    there is no CI. Expect to be asked to split a pull request that does
-    more than one thing.
+23. **Only the maintainer merges**, and only with CI green. Expect to be
+    asked to split a pull request that does more than one thing.
 
 ### Exceptions
 
@@ -141,7 +140,11 @@ when they are installed and runs them in Docker otherwise. Read
 [`docs/architecture.md`](docs/architecture.md) first, then the document for
 the part you are changing.
 
-There is no CI. The checks you run are the only ones there are.
+CI (`.github/workflows/ci.yml`) runs all of these on every push and every
+pull request, builds the Docker image and starts it, and looks for known
+vulnerabilities in the Go dependencies. Run them yourself first all the same:
+a red run on `main` is a broken `main`, and rule 17 puts mending it before
+any other work.
 
 | When | Run |
 | --- | --- |
