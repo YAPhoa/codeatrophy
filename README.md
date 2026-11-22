@@ -1,11 +1,38 @@
 # Codeatrophy
 
-Codeatrophy is a self-hosted library for coding challenges and technical
-readings. Keep the problems you want to practise and the notes you want to
-keep in one place, organise them with collections and tags, and solve problems
-in the browser against your own test cases.
+Codeatrophy is a self-hosted, AI-assisted library for coding challenges and
+technical readings. Keep the problems you want to practise and the notes you
+want to keep in one place, organise them with collections and tags, and solve
+problems in the browser against your own test cases.
 
 ![Drafting a problem with AI from a one-line note, reviewing the draft, and saving it to the library](docs/images/drafting-demo.gif)
+
+## What you can do with it
+
+- **Connect your favourite harness.** The library has an MCP server: add it
+  to Claude Code, Claude Desktop or any other MCP client with one command, and
+  the assistant you already use reads, writes and tests items in your library.
+  No AI provider has to be set up in the app for this.
+- **Point the agent at a document.** Give it a chapter, an article, lecture
+  notes or a list of problems and ask for the items: it writes the readings
+  and the problems, and checks each problem's test cases by running a
+  reference solution on the judge.
+- **Make your own collections.** Have the agent file what it wrote into a
+  collection (a topic, a course, an interview plan), or build collections by
+  hand, nest them and reorder them. Export one as a bundle to share it.
+- **Draft from a rough note.** In the app, paste a half-remembered problem
+  and get a complete draft to review before it is saved.
+- **Have it written your way.** A new instance comes with three writing
+  styles (Interview practice, Contest style, Study notes): standing
+  instructions for how an item is laid out and worded, followed by the agent
+  you connect and by the app's own drafting alike. Edit them, or add your
+  own, under Settings → Styles.
+- **Practise.** Solve in the browser against the test cases, and keep your
+  status, notes and favourites on each item.
+
+[MCP server](docs/mcp.md) has the command that connects a client.
+
+## Features
 
 - **Problems and readings** in Markdown (with math and Mermaid diagrams), with
   tags, collections, difficulty and personal progress.
