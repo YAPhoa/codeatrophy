@@ -7,7 +7,9 @@
   place-items: center;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: var(--space-8) var(--space-4);
+  /* Extra room below lifts the content above the middle, where the eye
+     expects it; on a short window it shrinks back to plain centring. */
+  padding: var(--space-8) var(--space-4) max(var(--space-8), 30vh);
   background: var(--bg);
 }
 
@@ -26,10 +28,18 @@
   gap: var(--space-3);
 }
 
+/* The 64px mark drawn at twice its size: a whole multiple keeps its pixels
+   square and crisp. */
+.signin-brand .brand-mark,
+.signin-brand .brand-mark svg {
+  width: 128px;
+  height: 128px;
+}
+
 .signin-name {
   color: var(--text);
   font-family: var(--font-brand);
-  font-size: var(--text-2xl);
+  font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.03em;
 }
@@ -62,18 +72,6 @@
   width: 100%;
   justify-content: center;
   margin-top: var(--space-1);
-}
-
-.signin-foot {
-  margin: 0;
-  color: var(--text-3);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  text-align: center;
-}
-
-.signin code {
-  font-size: 0.92em;
 }
 
 /* ---- Settings: Account ---- */

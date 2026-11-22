@@ -352,6 +352,8 @@ A few conventions worth knowing:
   (`features/settings/modelCache.ts`): the Model field of the provider form
   offers the list remembered for the server in the form, and a saved provider
   with none loads its list as the form opens. A key is never stored.
+  The Settings page last open is kept as `codeatrophy:settings:last`, so
+  that `/settings` (the sidebar, the rail and the palette) opens it again.
 - **Colours are tokens.** Use the custom properties in
   `src/styles/tokens.css` so both themes stay correct, and check contrast in
   light and dark when adding one.

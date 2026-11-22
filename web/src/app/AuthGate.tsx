@@ -203,11 +203,6 @@ export function SignInPage({ setup, onSignedIn }: { setup: boolean; onSignedIn: 
             {setup ? 'Create account' : 'Sign in'}
           </Button>
         </form>
-        {!setup && (
-          <p className="signin-foot">
-            Forgot your password? Reset it on the server with <code translate="no">codeatrophy user password &lt;email&gt;</code>.
-          </p>
-        )}
       </div>
     </main>
   );

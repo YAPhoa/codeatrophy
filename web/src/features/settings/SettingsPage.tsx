@@ -1,14 +1,16 @@
+import { useEffect } from 'react';
 import { NavLink, Navigate, useLocation, useParams } from 'react-router';
 import { useMeta } from '../../api/queries';
 import { ExportSection } from '../share/ExportPage';
 import { ImportSection } from '../share/ImportPage';
 import { NotFoundPage } from '../../app/NotFoundPage';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
+import { readString, writeString } from '../../lib/storage';
 import { cx } from '../../ui/Button';
 import { AccountSection } from './AccountSection';
 import { AiActivitySection } from './AiActivitySection';
 import { AiSection } from './AiSection';
-import { SETTINGS_PAGES, findSettingsPage, movedSettingsPage, settingsLanding, settingsPath, type SettingsSlug } from './pages';
+import { LAST_SETTINGS_KEY, SETTINGS_PAGES, findSettingsPage, movedSettingsPage, settingsLanding, settingsPath, type SettingsSlug } from './pages';
 import { PreferencesSection } from './PreferencesSection';
 import { JudgeSection, McpSection } from './ServiceSections';
 import { StylesSection } from './StylesSection';
@@ -16,13 +18,14 @@ import { StylesSection } from './StylesSection';
 /**
  * Settings: one page per category under `/settings/<slug>`, with the list of
  * categories beside it. Only the category shown is rendered, so each loads
- * its own data and nothing else's.
+ * its own data and nothing else's. `/settings` opens the category last shown
+ * in this browser.
  */
 export default function SettingsPage() {
   const { section } = useParams();
   const location = useLocation();
   const page = findSettingsPage(section);
-  if (section === undefined) return <Navigate to={settingsLanding(location.hash)} replace />;
+  if (section === undefined) return <Navigate to={settingsLanding(location.hash, readString(LAST_SETTINGS_KEY))} replace />;
   const moved = movedSettingsPage(section);
   if (!page && moved) return <Navigate to={settingsPath(moved)} replace />;
   if (!page) return <NotFoundPage />;
@@ -32,6 +35,7 @@ export default function SettingsPage() {
 function SettingsCategory({ slug, label }: { slug: SettingsSlug; label: string }) {
   const meta = useMeta().data;
   useDocumentTitle(`${label} · Settings`);
+  useEffect(() => writeString(LAST_SETTINGS_KEY, slug), [slug]);
   if (!meta) return null;
 
   return (

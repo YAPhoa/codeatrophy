@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { SETTINGS_PAGES, findSettingsPage, movedIntoSettings, movedSettingsPage, settingsLanding } from './pages';
 
 describe('settingsLanding', () => {
+  it('goes to the page last open, unless the address names one', () => {
+    expect(settingsLanding('', 'account')).toBe('/settings/account');
+    expect(settingsLanding('', 'appearance')).toBe('/settings/preferences');
+    expect(settingsLanding('#judge', 'account')).toBe('/settings/judge');
+    expect(settingsLanding('', 'nonesuch')).toBe('/settings/ai');
+    expect(settingsLanding('', null)).toBe('/settings/ai');
+  });
+
   it('opens the first page for /settings on its own', () => {
     expect(settingsLanding('')).toBe('/settings/ai');
     expect(settingsLanding('#')).toBe('/settings/ai');

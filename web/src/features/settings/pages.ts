@@ -34,14 +34,23 @@ export function movedSettingsPage(slug: string | undefined): SettingsSlug | unde
   return slug === undefined ? undefined : MOVED[slug];
 }
 
+/** Where the page last open in Settings is remembered (lib/storage). */
+export const LAST_SETTINGS_KEY = 'settings:last';
+
 /**
  * Where `/settings` itself leads. Settings used to be one long page whose
  * sections were linked as `/settings#ai`; such an address goes to the page
- * that section became, anything else to the first page.
+ * that section became. Anything else goes to `last`, the page open when
+ * Settings was last left, or to the first page.
  */
-export function settingsLanding(hash: string): string {
+export function settingsLanding(hash: string, last?: string | null): string {
   const section = hash.replace(/^#/, '');
-  const slug = findSettingsPage(section)?.slug ?? movedSettingsPage(section) ?? SETTINGS_PAGES[0].slug;
+  const slug =
+    findSettingsPage(section)?.slug ??
+    movedSettingsPage(section) ??
+    findSettingsPage(last ?? undefined)?.slug ??
+    movedSettingsPage(last ?? undefined) ??
+    SETTINGS_PAGES[0].slug;
   return settingsPath(slug);
 }
 
