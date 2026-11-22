@@ -1,3 +1,4 @@
+import { isActiveJob } from '../../api/queries';
 import type { AiJob, AiJobKind, DraftSummary } from '../../api/types';
 import type { Tone } from '../../lib/format';
 
@@ -55,7 +56,7 @@ export function jobBelongsTo(job: Pick<AiJob, 'draftId' | 'origin'>, pathname: s
  * screen collects its own finished jobs.
  */
 export function listedJobs<J extends Pick<AiJob, 'status' | 'draftId' | 'origin'>>(jobs: readonly J[], pathname: string): J[] {
-  return jobs.filter((j) => j.status === 'queued' || j.status === 'running' || !jobBelongsTo(j, pathname));
+  return jobs.filter((j) => isActiveJob(j) || !jobBelongsTo(j, pathname));
 }
 
 /** Seconds as the AI jobs list shows them: "8 s", "1:05". */
