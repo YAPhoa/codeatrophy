@@ -409,16 +409,35 @@ func caseResult(mode domain.CompareMode, c Case, e Execution) domain.SubmissionR
 		exp := domain.Truncate(*c.Expected, domain.MaxResultTextBytes)
 		r.ExpectedStdout = &exp
 	}
-	if r.Verdict == domain.VerdictInternalError && r.Stderr == "" {
-		r.Stderr = ErrorMessage(e)
-	}
-	if r.Verdict == domain.VerdictCompileError && r.Stderr == "" {
-		r.Stderr = domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
-	}
-	if r.Verdict == domain.VerdictRuntimeError && r.Stderr == "" && e.Result.Message != "" {
-		r.Stderr = e.Result.Message
-	}
+	r.Stderr = FailureText(e, r.Verdict)
 	return r
+}
+
+// FailureText is what a case's result shows as its stderr, for an
+// execution with verdict v: whatever explains the verdict best. A compile
+// error shows the compiler's output, and an execution the engine failed on
+// the engine's error, since its stderr says nothing about the program. Any
+// other failure shows the program's stderr, or the engine's short message
+// (a signal, a limit) when the program wrote none. A run that did not fail
+// shows its stderr. The texts are cut to domain.MaxResultTextBytes.
+func FailureText(e Execution, v domain.Verdict) string {
+	stderr := domain.Truncate(e.Result.Stderr, domain.MaxResultTextBytes)
+	switch v {
+	case domain.VerdictAccepted, domain.VerdictWrongAnswer, domain.VerdictExecuted:
+		return stderr
+	case domain.VerdictCompileError:
+		if e.Result.CompileOutput != "" {
+			return domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
+		}
+	case domain.VerdictInternalError:
+		if msg := ErrorMessage(e); msg != "" {
+			return msg
+		}
+	}
+	if stderr == "" {
+		return domain.Truncate(e.Result.Message, domain.MaxResultTextBytes)
+	}
+	return stderr
 }
 
 func maxPtr(a, b *int) *int {

@@ -334,3 +334,59 @@ func TestMapOutputAppliesToEveryExecution(t *testing.T) {
 		}
 	}
 }
+
+// A case's stderr is what explains its verdict best, for a submission's
+// cases and a verification's alike.
+func TestFailureText(t *testing.T) {
+	long := strings.Repeat("é", domain.MaxResultTextBytes)
+	for _, c := range []struct {
+		name string
+		r    judge.ExecResult
+		err  error
+		v    domain.Verdict
+		want string
+	}{
+		{"accepted", judge.ExecResult{Status: judge.StatusOK, Stderr: "warning", Message: "m"}, nil,
+			domain.VerdictAccepted, "warning"},
+		{"wrong answer", judge.ExecResult{Status: judge.StatusOK, Message: "m"}, nil,
+			domain.VerdictWrongAnswer, ""},
+		{"executed", judge.ExecResult{Status: judge.StatusOK, Stderr: "debug"}, nil,
+			domain.VerdictExecuted, "debug"},
+		{"compile error", judge.ExecResult{Status: judge.StatusCompileError, Stderr: "noise", CompileOutput: "main.c:1: error"}, nil,
+			domain.VerdictCompileError, "main.c:1: error"},
+		{"compile error, no compiler output", judge.ExecResult{Status: judge.StatusCompileError, Stderr: "noise", Message: "m"}, nil,
+			domain.VerdictCompileError, "noise"},
+		{"compile error, nothing written", judge.ExecResult{Status: judge.StatusCompileError, Message: "Compilation Error"}, nil,
+			domain.VerdictCompileError, "Compilation Error"},
+		{"runtime error", judge.ExecResult{Status: judge.StatusRuntimeError, Stderr: "Traceback", Message: "SIGSEGV"}, nil,
+			domain.VerdictRuntimeError, "Traceback"},
+		{"runtime error, no stderr", judge.ExecResult{Status: judge.StatusRuntimeError, Message: "SIGSEGV"}, nil,
+			domain.VerdictRuntimeError, "SIGSEGV"},
+		{"time limit", judge.ExecResult{Status: judge.StatusTimeLimit, Message: "Time Limit Exceeded"}, nil,
+			domain.VerdictTimeLimitExceeded, "Time Limit Exceeded"},
+		{"time limit, with stderr", judge.ExecResult{Status: judge.StatusTimeLimit, Stderr: "partial", Message: "Time Limit Exceeded"}, nil,
+			domain.VerdictTimeLimitExceeded, "partial"},
+		{"memory limit", judge.ExecResult{Status: judge.StatusMemoryLimit, Message: "SIGKILL"}, nil,
+			domain.VerdictMemoryLimitExceeded, "SIGKILL"},
+		{"engine unreachable", judge.ExecResult{}, errors.New("connection refused"),
+			domain.VerdictInternalError, "connection refused"},
+		{"engine error", judge.ExecResult{Status: judge.StatusInternalError, Stderr: "noise", Message: "box failed"}, nil,
+			domain.VerdictInternalError, "judge engine error: box failed"},
+		{"unknown status", judge.ExecResult{Status: "strange", Message: "odd"}, nil,
+			domain.VerdictInternalError, "odd"},
+		{"long stderr", judge.ExecResult{Status: judge.StatusRuntimeError, Stderr: long}, nil,
+			domain.VerdictRuntimeError, long[:domain.MaxResultTextBytes]},
+		{"long message", judge.ExecResult{Status: judge.StatusRuntimeError, Message: long}, nil,
+			domain.VerdictRuntimeError, long[:domain.MaxResultTextBytes]},
+	} {
+		if got := FailureText(Execution{Result: c.r, Err: c.err}, c.v); got != c.want {
+			t.Errorf("%s: %.40q, want %.40q", c.name, got, c.want)
+		}
+	}
+	// A submission's case shows the same.
+	c := Case{TestCaseID: strp("t"), Expected: strp("1")}
+	tle := Execution{Result: judge.ExecResult{Status: judge.StatusTimeLimit, Message: "Time Limit Exceeded"}}
+	if r := caseResult(domain.CompareTokens, c, tle); r.Stderr != "Time Limit Exceeded" {
+		t.Errorf("a submission's case past the time limit: %q", r.Stderr)
+	}
+}

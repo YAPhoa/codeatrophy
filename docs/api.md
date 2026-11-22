@@ -1088,7 +1088,8 @@ another language can be saved but not run.
   when it measured nothing, as on a compile error); `timeMs` is read as for
   submissions.
 - `ok` — the solution ran to completion within limits. When `false`, `verdict`
-  says why (`runtime_error`, `time_limit_exceeded`, `compile_error`, …).
+  says why (`runtime_error`, `time_limit_exceeded`, `compile_error`, …), and
+  `stderr` holds what it holds in a [submission's](#submissions) results.
 - `matches` — `actualStdout` equals the stored expected output under the item's
   compare mode.
 - With the reference solution (`solutionId` omitted, `null`, or the
@@ -1345,6 +1346,10 @@ exist.
   not necessarily in case order; each result's position in `results` is its
   case order regardless. `stdin`, `expectedStdout`, `stdout` and `stderr` are each
   truncated to 64 KiB.
+- A result's `stderr` is what explains its verdict: the compiler output for
+  `compile_error`, the engine's error for `internal_error`, and otherwise
+  the program's stderr, or the engine's short message (a signal, a limit)
+  when a failed run wrote none.
 - `testCaseId` and `expectedStdout` are `null` for a custom-stdin run.
 - `totalCount` is fixed when the submission is created — the number of cases
   it will run, or `1` for a custom-stdin run — so progress can be shown from

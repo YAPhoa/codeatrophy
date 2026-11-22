@@ -579,15 +579,7 @@ func (a *App) VerifyTestCases(ctx context.Context, itemID string, updateExpected
 			MemoryKb: e.Result.MemoryKb}
 		r.OK = r.Verdict == domain.VerdictExecuted
 		r.ActualStdout = e.Result.Stdout
-		r.Stderr = domain.Truncate(e.Result.Stderr, domain.MaxResultTextBytes)
-		switch {
-		case e.CompileFailed():
-			r.Stderr = domain.Truncate(e.Result.CompileOutput, domain.MaxResultTextBytes)
-		case e.EngineFailed():
-			r.Stderr = grader.ErrorMessage(e)
-		case !r.OK && r.Stderr == "":
-			r.Stderr = e.Result.Message
-		}
+		r.Stderr = grader.FailureText(e, r.Verdict)
 		r.Matches = r.OK && grader.Match(it.Problem.Compare, c.ExpectedStdout, e.Result.Stdout)
 		resp.Results[i] = r
 	}
