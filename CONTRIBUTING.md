@@ -162,7 +162,7 @@ any other work.
 | The database schema | One migration per backend with the same new number, `store.SchemaVersion`, and `store.Tables`. Migrations are forward-only: never edit a pushed one. |
 | The `store` interface | Both implementations, and a case in `internal/store/storetest` so that both run the same test. |
 | The bundle format | `docs/bundle-format.md` and a fixture in `internal/bundle/testdata`. A field never changes meaning within a format version. |
-| A configuration variable | `internal/config`, `.env.example`, and the table in `README.md` when most installations will want it. |
+| A configuration variable | `internal/config`, `.env.example`, and the table in `docs/configuration.md` when most installations will want it. |
 | A bound on user input | The server, `limits` of `GET /meta`, and `Limits` in `web/src/api/types.ts`. The UI keeps no copies. |
 | An AI provider or judge engine | A new implementation of `ai.Provider` or `judge.Engine` in its own package, never a special case in a caller. |
 
