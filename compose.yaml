@@ -46,10 +46,11 @@ x-judge0-env: &judge0-env
 
 services:
   app:
+    # The default of CODEATROPHY_VERSION is the release this checkout
+    # installs, and the one place the version is written down. A build from
+    # source reports dev unless VERSION is passed, as "make image" does.
     build:
       context: .
-      args:
-        VERSION: ${CODEATROPHY_VERSION:-0.1.0}
     image: codeatrophy:${CODEATROPHY_VERSION:-0.1.0}
     restart: unless-stopped
     # The server waits up to 15 s for requests in progress, then stops its

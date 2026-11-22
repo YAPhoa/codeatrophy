@@ -8,7 +8,10 @@ SHELL := /bin/bash
 
 GO_VERSION   ?= 1.27.4
 NODE_VERSION ?= 22
-VERSION      ?= 0.1.0
+# The version a build reports, from git describe without the tag's v: the
+# release tag it is at or past (1.2.0, 1.2.0-3-gabc1234), the commit alone
+# before any tag, -dirty with uncommitted changes; dev outside a checkout.
+VERSION      ?= $(or $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null)),dev)
 BIN          := bin/codeatrophy
 COMPOSE      ?= docker compose
 
@@ -172,12 +175,12 @@ check: lint test test-postgres web-test ## Lint and test everything (the Go test
 ## ---- Docker ----------------------------------------------------------------
 
 .PHONY: image
-image: ## Build the Docker image (UI + server)
-	$(COMPOSE) build app
+image: ## Build the Docker image (UI + server) from this checkout
+	$(COMPOSE) build --build-arg VERSION=$(VERSION) app
 
 .PHONY: up
-up: ## Start the Compose stack (cp .env.example .env first)
-	$(COMPOSE) up -d --build
+up: image ## Build the image and start the Compose stack (cp .env.example .env first)
+	$(COMPOSE) up -d
 
 .PHONY: down
 down: ## Stop the Compose stack (data volumes are kept)

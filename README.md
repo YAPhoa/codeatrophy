@@ -110,7 +110,7 @@ make lint          # go vet, gofmt check, UI lint and type check
 make web-dev-mock  # UI dev server with an in-memory API mock
 make run           # server on 127.0.0.1:8484 with data in ./data
 make build         # UI + server binary with the UI embedded (bin/codeatrophy)
-make up            # the whole Compose stack
+make up            # the whole Compose stack, the app built from this checkout
 ```
 
 The Makefile uses Go and npm from your machine when they are installed and

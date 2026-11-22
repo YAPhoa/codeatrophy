@@ -31,8 +31,9 @@ import (
 	"codeatrophy/internal/webui"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
-var version = "0.1.0"
+// version is set at build time with -ldflags "-X main.version=..."; a
+// build that does not set it is "dev".
+var version = "dev"
 
 const usage = `Usage: codeatrophy [command]
 

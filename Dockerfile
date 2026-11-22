@@ -23,7 +23,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY --from=web /web/dist/ ./internal/webui/dist/
-ARG VERSION=0.1.0
+ARG VERSION=dev
 ARG TARGETOS TARGETARCH
 RUN test -f internal/webui/dist/index.html \
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/codeatrophy ./cmd/codeatrophy \
