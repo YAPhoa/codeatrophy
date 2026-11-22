@@ -57,6 +57,7 @@ func Run(t *testing.T, open Opener) {
 		{"WorkingCopies", testWorkingCopies},
 		{"WorkingCopyConcurrentPuts", testWorkingCopyConcurrentPuts},
 		{"WorkingCopyPutsRaceDeletion", testWorkingCopyPutsRaceDeletion},
+		{"UsersAndSessions", testUsersAndSessions},
 		{"AIProviderConstraints", testAIProviderConstraints},
 		{"AIUsage", testAIUsage},
 		{"AILog", testAILog},

@@ -39,6 +39,7 @@ const usage = `Usage: codeatrophy [command]
 Commands:
   serve        Run the server (default)
   db           Inspect, migrate or copy a database; run "codeatrophy db help"
+  user         List, add or remove sign-in accounts, reset a password; run "codeatrophy user help"
   healthcheck  Exit 0 if the server at CODEATROPHY_ADDR answers, 1 otherwise
   version      Print the version
 
@@ -58,6 +59,8 @@ func main() {
 		err = healthcheck()
 	case "db":
 		err = dbCommand(os.Args[2:])
+	case "user":
+		err = userCommand(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
@@ -167,8 +170,9 @@ func serve() error {
 		JudgeConcurrency: cfg.Judge.Concurrency,
 		AIWorkers:        cfg.AI.Workers,
 		Version:          version,
-		MCP: app.MCPInfo{Enabled: cfg.MCP.Enabled, Path: "/mcp", AuthRequired: cfg.MCP.Token != "",
+		MCP: app.MCPInfo{Enabled: cfg.MCP.Enabled, Path: "/mcp", AuthRequired: cfg.MCP.Token != "" || cfg.Auth,
 			PublicURL: cfg.PublicURL},
+		Auth:   app.AuthOptions{Enabled: cfg.Auth, SessionTTL: cfg.SessionTTL},
 		Logger: log,
 	})
 	if err := a.Start(ctx); err != nil {
@@ -178,10 +182,14 @@ func serve() error {
 
 	hosts := cfg.HostAllowList()
 	var mcpHandler http.Handler
+	if cfg.MCP.Enabled && cfg.Auth && cfg.MCP.Token == "" {
+		log.Warn("the MCP endpoint refuses every request: sign-in is on and CODEATROPHY_MCP_TOKEN is not set")
+	}
 	if cfg.MCP.Enabled {
 		mcpOrigins := append(append([]string{}, cfg.AllowedOrigins...), cfg.MCP.AllowedOrigins...)
 		mcpHandler = mcpserver.Handler(mcpserver.Options{
-			App: a, Logger: log, Token: cfg.MCP.Token, MaxSessions: cfg.MCP.MaxSessions, PrettyJSON: cfg.MCP.PrettyJSON,
+			App: a, Logger: log, Token: cfg.MCP.Token, RequireToken: cfg.Auth, MaxSessions: cfg.MCP.MaxSessions,
+			PrettyJSON:    cfg.MCP.PrettyJSON,
 			OriginAllowed: func(r *http.Request) bool { return httpapi.OriginAllowed(r, mcpOrigins, hosts) },
 		})
 	}
@@ -222,7 +230,7 @@ func serve() error {
 	return nil
 }
 
-// healthcheck requests /api/v1/meta from the local server.
+// healthcheck requests /api/v1/health from the local server.
 func healthcheck() error {
 	addr := os.Getenv("CODEATROPHY_ADDR")
 	if addr == "" {
@@ -236,7 +244,7 @@ func healthcheck() error {
 		host = "127.0.0.1"
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "http://"+net.JoinHostPort(strings.Trim(host, "[]"), port)+httpapi.Prefix+"/meta", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+net.JoinHostPort(strings.Trim(host, "[]"), port)+httpapi.Prefix+"/health", nil)
 	if err != nil {
 		return err
 	}

@@ -837,12 +837,44 @@ page that has it, and remembered in the browser.
 `compose.yaml` defines the server, its PostgreSQL database and the judge
 engine's containers. The database is on an internal network shared only with
 the server and is not published to the host. The server's port is published
-on loopback only by default: the app has no
-authentication and can execute code, so exposing it beyond the host is an
-explicit operator decision (put it behind a reverse proxy that authenticates).
+on loopback only by default: the app can execute code, so exposing it beyond
+the host is an explicit operator decision.
 
-Because there is no authentication, two request checks protect `/api/` and
-`/mcp` from web pages the user happens to visit:
+### Sign-in
+
+The web UI and the HTTP API require a signed-in session unless the operator
+sets `CODEATROPHY_AUTH=off`. Accounts (`users`) hold an email and a bcrypt
+password hash; every account sees the same library, since accounts decide
+only who may sign in. The rules live in the application services
+(`internal/app/auth.go`): validation, the one-time setup code for the first
+account, sign-in with a per-address limit on failures, sessions, password
+changes. The HTTP adapter maps them onto a cookie and gates `/api/` in front
+of the routes; the `codeatrophy user` command uses the same services.
+
+- **First account.** While no account exists the server generates a setup
+  code in memory and logs it; `POST /auth/setup` needs it, so reaching the
+  server first is not enough to claim it.
+- **Sessions.** A session is 32 random bytes, sent as an `HttpOnly`,
+  `SameSite=Strict` cookie; the store keeps only its SHA-256 hash
+  (`sessions`), so a database leak yields no usable cookie. A session lasts
+  `CODEATROPHY_SESSION_TTL` from its last use; the expiry is pushed back at
+  most once an hour per session, to keep reads from writing.
+- **CSRF.** With a cookie the browser authenticates on its own, so
+  state-changing requests also pass Go's `http.CrossOriginProtection`
+  (`Sec-Fetch-Site`, else `Origin` against `Host`). Unlike the host-based
+  origin check below, it tells apart another port of the same host.
+- **MCP.** MCP clients cannot sign in with a password, so while sign-in is
+  on `/mcp` requires `CODEATROPHY_MCP_TOKEN` and refuses every request
+  without it; the endpoint is never the one open door.
+
+The UI's static files stay public; `GET /api/v1/auth/session` tells the UI
+whether to show the sign-in page. `GET /api/v1/health` needs no session, for
+the container health check.
+
+### Request checks
+
+Two further request checks protect `/api/` and `/mcp` from web pages the
+user happens to visit, with sign-in on or off:
 
 - **Host allow-list (DNS rebinding).** A page on `attacker.example` can have
   its DNS name re-pointed at `127.0.0.1`; the browser then treats requests to
@@ -858,13 +890,14 @@ Because there is no authentication, two request checks protect `/api/` and
   and hosts. The comparison is against configuration only, never against the
   request's `Host`, which the attacker controls in the rebinding case.
 
-The container's health check calls the server on loopback with a loopback
-`Host`, so it passes whatever the allow-list holds.
+The container's health check calls `GET /api/v1/health` on loopback with a
+loopback `Host`, so it passes whatever the allow-list holds and needs no
+session.
 
 Configuration is by environment variable, documented in `.env.example`.
 
 ## Out of scope for the first version
 
-- Multiple users and built-in authentication.
+- Separate libraries per user, roles, and single sign-on (OAuth, OIDC).
 - Custom checkers and interactive problems.
 - File attachments. The bundle format reserves an `assets/` directory per item.

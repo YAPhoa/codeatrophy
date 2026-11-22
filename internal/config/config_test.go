@@ -243,3 +243,19 @@ func TestMCPPrettyJSON(t *testing.T) {
 		t.Errorf("a bad value: %v", err)
 	}
 }
+
+func TestAuth(t *testing.T) {
+	c, err := LoadFrom(env(nil))
+	if err != nil || !c.Auth || c.SessionTTL != 30*24*time.Hour {
+		t.Errorf("defaults: %v %v %v", c.Auth, c.SessionTTL, err)
+	}
+	c, err = LoadFrom(env(map[string]string{"CODEATROPHY_AUTH": "off", "CODEATROPHY_SESSION_TTL": "720h"}))
+	if err != nil || c.Auth || c.SessionTTL != 720*time.Hour {
+		t.Errorf("off: %v %v %v", c.Auth, c.SessionTTL, err)
+	}
+	for _, v := range []map[string]string{{"CODEATROPHY_AUTH": "maybe"}, {"CODEATROPHY_SESSION_TTL": "1h"}} {
+		if _, err := LoadFrom(env(v)); err == nil {
+			t.Errorf("%v accepted", v)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -23,6 +24,8 @@ const (
 	CodeAIUnavailable    Code = "ai_unavailable"
 	CodeJudgeUnavailable Code = "judge_unavailable"
 	CodeInternal         Code = "internal"
+	CodeUnauthorized     Code = "unauthorized"
+	CodeRateLimited      Code = "rate_limited"
 )
 
 // Error is an application error with a code, a safe message and, for
@@ -31,6 +34,9 @@ type Error struct {
 	Code    Code
 	Message string
 	Fields  map[string]any
+	// RetryAfter, for CodeRateLimited, is how long until a retry may
+	// succeed.
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string { return e.Message }

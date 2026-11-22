@@ -11,6 +11,7 @@ import {
   FolderPlus,
   Keyboard,
   Library,
+  LogOut,
   Monitor,
   Moon,
   MoreHorizontal,
@@ -45,6 +46,7 @@ import { IconButton, LinkButton, cx } from '../ui/Button';
 import { MenuButton } from '../ui/Popover';
 import { Kbd, Spinner } from '../ui/misc';
 import { DraftsPage, SettingsPage, TagsPage } from './screens';
+import { useAuth } from './AuthGate';
 import { Logo } from '../ui/Logo';
 import { Collapse, ExpandChevron } from '../ui/Collapse';
 import { useToast } from '../ui/Toast';
@@ -292,6 +294,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
   const onDrafts = location.pathname === '/drafts' || location.pathname.startsWith('/drafts/');
   const actions = useCollectionActions();
   const theme = useThemePreference();
+  const auth = useAuth();
   const footRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readJson<string[]>('sidebar:collapsed', [])));
 
@@ -339,6 +342,9 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
     />
   );
   const onSettings = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
+  const signOutButton = auth.session?.user ? (
+    <IconButton label={`Sign out (${auth.session.user.email})`} size="sm" icon={<LogOut size={16} />} onClick={() => void auth.signOut()} />
+  ) : null;
   const aiTitle = meta.ai.enabled ? `AI drafting: ${[meta.ai.providerName, meta.ai.model].filter(Boolean).join(' · ') || 'on'}` : 'AI drafting is off';
   const judgeTitle = judgeState === 'ok' ? `Judge: ${meta.judge.engine}` : judgeState === 'down' ? 'The judge engine is not responding' : 'No judge engine is configured';
 
@@ -378,6 +384,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
           <JobsEntry rail footRef={footRef} />
           <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
           {themeMenu}
+          {signOutButton}
         </div>
       </aside>
     );
@@ -475,6 +482,7 @@ export function Sidebar({ meta, open, minimised, onToggleMinimised, onClose, onO
         <span className="spacer" />
         <IconButton label="Keyboard shortcuts" size="sm" icon={<Keyboard size={16} />} onClick={onOpenShortcuts} />
         {themeMenu}
+        {signOutButton}
       </div>
     </aside>
   );

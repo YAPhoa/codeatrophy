@@ -64,8 +64,8 @@ services:
       CODEATROPHY_JUDGE0_URL: ${CODEATROPHY_JUDGE0_URL:-http://judge0-server:2358}
       CODEATROPHY_JUDGE0_AUTHZ_TOKEN: ${CODEATROPHY_JUDGE0_AUTHZ_TOKEN:-codeatrophy-judge0-authz}
     ports:
-      # Loopback only by default: the app has no authentication and can
-      # execute code.
+      # Loopback only by default: the app can execute code. Expose it only
+      # over HTTPS with sign-in on (CODEATROPHY_AUTH).
       - "${CODEATROPHY_BIND_ADDRESS:-127.0.0.1}:${CODEATROPHY_HOST_PORT:-8080}:8080"
     volumes:
       - codeatrophy-data:/data

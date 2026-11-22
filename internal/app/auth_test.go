@@ -1,0 +1,289 @@
+package app_test
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"codeatrophy/internal/app"
+	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/teststore"
+)
+
+func init() { app.FastPasswordHashes() }
+
+// logCapture records the attributes of every log record.
+type logCapture struct {
+	mu    sync.Mutex
+	attrs map[string]string
+}
+
+func (l *logCapture) Enabled(context.Context, slog.Level) bool { return true }
+func (l *logCapture) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r.Attrs(func(a slog.Attr) bool { l.attrs[a.Key] = a.Value.String(); return true })
+	return nil
+}
+func (l *logCapture) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *logCapture) WithGroup(string) slog.Handler      { return l }
+
+func (l *logCapture) get(key string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.attrs[key]
+}
+
+type authEnv struct {
+	app   *app.App
+	db    store.Store
+	logs  *logCapture
+	clock *time.Time
+	ctx   context.Context
+}
+
+func newAuthEnv(t *testing.T, enabled bool) *authEnv {
+	t.Helper()
+	db := teststore.Open(t)
+	logs := &logCapture{attrs: map[string]string{}}
+	clock := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	e := &authEnv{db: db, logs: logs, clock: &clock, ctx: context.Background()}
+	e.app = app.New(app.Options{Store: db, Logger: slog.New(logs), Now: func() time.Time { return *e.clock },
+		Auth: app.AuthOptions{Enabled: enabled, SessionTTL: 48 * time.Hour}, HealthInterval: time.Hour})
+	if err := e.app.Start(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(e.app.Stop)
+	return e
+}
+
+func TestAuthOff(t *testing.T) {
+	e := newAuthEnv(t, false)
+	st, err := e.app.GetAuthStatus(e.ctx, "")
+	if err != nil || st.Enabled || st.SetupRequired || st.User != nil {
+		t.Fatalf("status %+v, %v", st, err)
+	}
+	if e.logs.get("setupCode") != "" {
+		t.Error("a setup code was logged with sign-in off")
+	}
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, "c"); code(err) != app.CodeBadRequest {
+		t.Errorf("login with sign-in off: %v", err)
+	}
+}
+
+func TestAuthSetupAndLogin(t *testing.T) {
+	e := newAuthEnv(t, true)
+	setupCode := e.logs.get("setupCode")
+	if len(setupCode) != 19 {
+		t.Fatalf("setup code %q was not logged at start", setupCode)
+	}
+	st, err := e.app.GetAuthStatus(e.ctx, "")
+	if err != nil || !st.Enabled || !st.SetupRequired {
+		t.Fatalf("status before setup %+v, %v", st, err)
+	}
+
+	// The setup code is required, and a wrong one counts as a failure.
+	in := app.SetupInput{Email: " Me@Example.COM ", Password: "correct horse", SetupCode: "AAAA-BBBB-CCCC-DDDD"}
+	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeValidation {
+		t.Fatalf("wrong setup code: %v", err)
+	}
+	in.SetupCode = strings.ToLower(strings.ReplaceAll(setupCode, "-", " "))
+	in.Password = "short"
+	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeValidation || !strings.Contains(err.Error(), "at least 8") {
+		t.Fatalf("short password: %v", err)
+	}
+	in.Password = "correct horse"
+	si, err := e.app.Setup(e.ctx, in, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if si.User.Email != "me@example.com" || si.Token == "" || !si.ExpiresAt.Equal(e.clock.Add(48*time.Hour)) {
+		t.Errorf("setup: %+v", si)
+	}
+	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeConflict {
+		t.Errorf("second setup: %v", err)
+	}
+
+	// The token is not stored as is.
+	var sessions []store.Session
+	_ = e.db.Read(e.ctx, func(tx store.Tx) error {
+		s, err := tx.GetSession(si.Token)
+		if err == nil {
+			sessions = append(sessions, s)
+		}
+		return nil
+	})
+	if len(sessions) != 0 {
+		t.Error("the session is stored under its token")
+	}
+
+	st, err = e.app.GetAuthStatus(e.ctx, si.Token)
+	if err != nil || st.SetupRequired || st.User == nil || st.User.Email != "me@example.com" {
+		t.Fatalf("status after setup %+v, %v", st, err)
+	}
+
+	// Sign in: the email is case-insensitive; wrong passwords and unknown
+	// accounts get the same answer.
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "wrong password"}, "c2"); code(err) != app.CodeUnauthorized {
+		t.Errorf("wrong password: %v", err)
+	}
+	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "nobody@example.com", Password: "correct horse"}, "c2"); code(err) != app.CodeUnauthorized {
+		t.Errorf("unknown account: %v", err)
+	}
+	si2, err := e.app.Login(e.ctx, app.LoginInput{Email: "ME@example.com", Password: "correct horse"}, "c2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if si2.Token == si.Token {
+		t.Error("two sign-ins share a token")
+	}
+
+	// Sign out ends that session only.
+	if err := e.app.Logout(e.ctx, si2.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, si2.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("after logout: %v", err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, si.Token); err != nil {
+		t.Errorf("other session after logout: %v", err)
+	}
+}
+
+func TestAuthSessionExpiry(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: "correct horse"}, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Within the first hour the expiry stays as it is.
+	*e.clock = e.clock.Add(30 * time.Minute)
+	s, err := e.app.Authenticate(e.ctx, si.Token)
+	if err != nil || s.Extended || !s.ExpiresAt.Equal(si.ExpiresAt) {
+		t.Fatalf("early check: %+v, %v", s, err)
+	}
+	// Later, a session in use is pushed back.
+	*e.clock = e.clock.Add(24 * time.Hour)
+	s, err = e.app.Authenticate(e.ctx, si.Token)
+	if err != nil || !s.Extended || !s.ExpiresAt.Equal(e.clock.Add(48*time.Hour)) {
+		t.Fatalf("later check: %+v, %v", s, err)
+	}
+	// An unused one ends.
+	*e.clock = e.clock.Add(48 * time.Hour)
+	if _, err := e.app.Authenticate(e.ctx, si.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("expired: %v", err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, "not-a-token"); code(err) != app.CodeUnauthorized {
+		t.Errorf("unknown token: %v", err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, ""); code(err) != app.CodeUnauthorized {
+		t.Errorf("no token: %v", err)
+	}
+}
+
+func TestAuthRateLimit(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	bad := app.LoginInput{Email: "me@example.com", Password: "wrong password"}
+	for range 10 {
+		if _, err := e.app.Login(e.ctx, bad, "attacker"); code(err) != app.CodeUnauthorized {
+			t.Fatalf("failure: %v", err)
+		}
+	}
+	good := app.LoginInput{Email: "me@example.com", Password: "correct horse"}
+	_, err := e.app.Login(e.ctx, good, "attacker")
+	if code(err) != app.CodeRateLimited {
+		t.Fatalf("11th attempt: %v", err)
+	}
+	if ae := app.AsError(err); ae.RetryAfter <= 0 || ae.RetryAfter > 15*time.Minute {
+		t.Errorf("retry after %v", ae.RetryAfter)
+	}
+	// Another client is not held back, and the limit lifts with time.
+	if _, err := e.app.Login(e.ctx, good, "owner"); err != nil {
+		t.Errorf("other client: %v", err)
+	}
+	*e.clock = e.clock.Add(15*time.Minute + time.Second)
+	if _, err := e.app.Login(e.ctx, good, "attacker"); err != nil {
+		t.Errorf("after the window: %v", err)
+	}
+}
+
+func TestAuthChangePassword(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "me@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	login := func(pw string) (app.SignIn, error) {
+		return e.app.Login(e.ctx, app.LoginInput{Email: "me@example.com", Password: pw}, "c")
+	}
+	a, _ := login("correct horse")
+	b, _ := login("correct horse")
+	err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "nope nope", NewPassword: "battery staple"}, "c")
+	if code(err) != app.CodeValidation {
+		t.Fatalf("wrong current password: %v", err)
+	}
+	if err := e.app.ChangePassword(e.ctx, a.Token, app.PasswordChange{CurrentPassword: "correct horse", NewPassword: "battery staple"}, "c"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, a.Token); err != nil {
+		t.Errorf("the changing session ended: %v", err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, b.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("another session survived: %v", err)
+	}
+	if _, err := login("correct horse"); code(err) != app.CodeUnauthorized {
+		t.Errorf("old password: %v", err)
+	}
+	if _, err := login("battery staple"); err != nil {
+		t.Errorf("new password: %v", err)
+	}
+}
+
+func TestAuthAccounts(t *testing.T) {
+	e := newAuthEnv(t, true)
+	if _, err := e.app.CreateUser(e.ctx, "not-an-email", "correct horse"); code(err) != app.CodeValidation {
+		t.Errorf("bad email: %v", err)
+	}
+	if _, err := e.app.CreateUser(e.ctx, "a@example.com", strings.Repeat("x", 73)); code(err) != app.CodeValidation {
+		t.Errorf("long password: %v", err)
+	}
+	if _, err := e.app.CreateUser(e.ctx, "A@example.com", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.CreateUser(e.ctx, "a@example.com", "correct horse"); code(err) != app.CodeConflict {
+		t.Errorf("duplicate: %v", err)
+	}
+	si, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@example.com", Password: "correct horse"}, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.SetUserPassword(e.ctx, "A@EXAMPLE.COM", "battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Authenticate(e.ctx, si.Token); code(err) != app.CodeUnauthorized {
+		t.Errorf("session survived a password reset: %v", err)
+	}
+	if err := e.app.SetUserPassword(e.ctx, "nobody@example.com", "battery staple"); code(err) != app.CodeNotFound {
+		t.Errorf("reset of no account: %v", err)
+	}
+	users, err := e.app.ListUsers(e.ctx)
+	if err != nil || len(users) != 1 || users[0].Email != "a@example.com" {
+		t.Fatalf("users %+v, %v", users, err)
+	}
+	if err := e.app.DeleteUser(e.ctx, "a@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// With no account left, setup is needed again, with a new code.
+	st, err := e.app.GetAuthStatus(e.ctx, "")
+	if err != nil || !st.SetupRequired {
+		t.Errorf("after deleting the last account: %+v, %v", st, err)
+	}
+}

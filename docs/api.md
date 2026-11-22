@@ -44,12 +44,14 @@ reports the current state (the item revision conflict described under
 | HTTP | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `bad_request` | Malformed JSON, bad query parameter, unreadable upload |
+| 401 | `unauthorized` | Sign-in is on and the request carries no valid session (see [Sign-in](#sign-in)), or a sign-in failed |
 | 403 | `forbidden` | The `Host` header is not an accepted name for this server, or a state-changing request was sent from a web page on another origin (see [Host and origin checks](#host-and-origin-checks)) |
 | 404 | `not_found` | Resource does not exist |
 | 405 | `bad_request` | The path exists but does not support this method; the `Allow` header lists the ones it does |
 | 409 | `conflict` | Request conflicts with current state (e.g. a collection cycle) |
 | 413 | `too_large` | Body or upload exceeds a limit |
 | 422 | `validation_failed` | Well-formed but invalid |
+| 429 | `rate_limited` | Too many failed sign-in attempts from this address; the `Retry-After` header gives the seconds to wait |
 | 502 | `upstream_error` | The AI provider or judge engine returned an error; `message` carries a safe summary |
 | 503 | `ai_unavailable` | AI features are switched off, or no default AI provider is chosen, or it is not ready |
 | 503 | `judge_unavailable` | No judge engine is configured, or it is unreachable |
@@ -57,9 +59,10 @@ reports the current state (the item revision conflict described under
 
 ### Host and origin checks
 
-Two checks protect an instance that has no authentication. Both apply to
+Two checks protect every instance, with sign-in on or off. Both apply to
 every request under `/api/` and to the MCP endpoint; the UI's static files
-are served for any host.
+are served for any host. With sign-in on, the stricter cross-origin check of
+[Sign-in](#sign-in) applies as well.
 
 1. **Host allow-list** (against DNS rebinding, applied first). The `Host`
    header must name the server: a loopback name or address (`localhost`,
@@ -79,6 +82,32 @@ are served for any host.
    or an origin whose host is listed in `CODEATROPHY_ALLOWED_HOSTS`. The
    origin is compared with this configured set, never with the request's
    own `Host` header. `Origin: null` is rejected.
+
+### Sign-in
+
+Sign-in is on unless the server runs with `CODEATROPHY_AUTH=off`. While it
+is on, every endpoint under `/api/v1` answers `401 unauthorized` to a
+request without a valid session, except `GET /health` and the endpoints
+under `/auth/` that the sign-in page needs (`GET /auth/session`,
+`POST /auth/login`, `POST /auth/setup`, `POST /auth/logout`). The UI's static
+files are public; the MCP endpoint has its own bearer token
+(`CODEATROPHY_MCP_TOKEN`), which it then requires.
+
+A session is a random token in the `codeatrophy_session` cookie
+(`HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` when the request
+came over HTTPS directly or with `X-Forwarded-Proto: https`). The server
+keeps only its SHA-256 hash. It lasts `CODEATROPHY_SESSION_TTL` (30 days by
+default) from its last use: a request made more than an hour after the
+expiry was last pushed back pushes it back again and renews the cookie.
+
+With sign-in on, requests other than `GET`, `HEAD` and `OPTIONS` also pass
+a cross-origin check against request forgery (Go's
+`http.CrossOriginProtection`): a browser request is refused with
+`403 forbidden` unless `Sec-Fetch-Site` is `same-origin` or `none`, or its
+`Origin` is listed in `CODEATROPHY_ALLOWED_ORIGINS` (which includes
+`CODEATROPHY_PUBLIC_URL`). Without `Sec-Fetch-Site` the `Origin` host must
+match the `Host` header. Requests with neither header (not from a browser)
+pass. This check applies to `POST /auth/login` too.
 
 ### Single-line fields
 
@@ -112,6 +141,66 @@ against (custom stdin).
 Language ids are canonical lower-case strings owned by the app: `c`, `cpp`,
 `csharp`, `go`, `java`, `javascript`, `kotlin`, `python`, `ruby`, `rust`,
 `typescript`. The set actually available is reported by `GET /meta`.
+
+## Health and sign-in
+
+### `GET /health`
+
+`200` with `{ "status": "ok" }` while the server is up. It needs no session
+and reads nothing; the container health check uses it.
+
+### `GET /auth/session`
+
+Whether sign-in is on and who is signed in, from the session cookie. Needs
+no session. An unknown or expired cookie is no error: `user` is `null` (and
+the cookie is cleared).
+
+```json
+{ "enabled": true, "setupRequired": false, "user": { "id": "...", "email": "me@example.com", "createdAt": "2026-11-22T04:00:00Z" } }
+```
+
+`enabled` is `false` when the server runs with `CODEATROPHY_AUTH=off`; then
+`setupRequired` is `false` and `user` is `null`, and the UI shows the app
+without asking anyone to sign in. `setupRequired` is `true` while no account
+exists.
+
+### `POST /auth/login`
+
+`{ "email": "...", "password": "..." }`. On success `200` with the
+`GET /auth/session` body and a new session cookie. The email is compared
+without regard to case. A wrong email or password is `401 unauthorized`,
+the same for both. Each address may fail 10 times in 15 minutes; past that
+every attempt, right or wrong, is `429 rate_limited` with `Retry-After`
+until the oldest failure is 15 minutes old. Behind a reverse proxy every
+client shares the proxy's address, and so the limit. With sign-in off it is
+`400 bad_request`.
+
+### `POST /auth/setup`
+
+Creates the first account and signs it in:
+`{ "email": "...", "password": "...", "setupCode": "ABCD-EFGH-IJKL-MNOP" }`.
+The setup code is printed in the server log (`setupCode`) at startup while
+no account exists; case, spaces and dashes in it are ignored. A wrong code is
+`422 validation_failed` on `setupCode` and counts as a failed attempt (see
+`POST /auth/login`). Once any account exists it is `409 conflict`. The email
+must be an address (at most 254 characters, stored in lower case); the
+password 8 characters to 72 bytes (`422 validation_failed` on `email` or
+`password`). Response as for `POST /auth/login`.
+
+### `POST /auth/logout`
+
+Ends the cookie's session, if any, and clears the cookie. `204`.
+
+### `POST /auth/password`
+
+Changes the signed-in account's password:
+`{ "currentPassword": "...", "newPassword": "..." }`. `204`, and every other
+session of the account ends. A wrong current password is
+`422 validation_failed` on `currentPassword` and counts as a failed attempt;
+a new password outside 8 characters to 72 bytes is `422` on `newPassword`.
+
+Other accounts are managed on the server with `codeatrophy user`
+(`list`, `add`, `password`, `delete`); every account sees the same library.
 
 ## Meta
 
@@ -233,7 +322,10 @@ to show.
   [custom test case prompt](#test-case-prompt).
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
-  from its own origin plus `mcp.path`.
+  from its own origin plus `mcp.path`. `mcp.authRequired` is `true` when
+  the endpoint asks for a bearer token: when `CODEATROPHY_MCP_TOKEN` is set,
+  and always while sign-in is on (without a token it then refuses every
+  request).
 - `ai.enabled` is `true` when AI features are switched on and a default
   provider is chosen and `ready` (see [AI settings](#ai-settings)); `providerId`, `providerName`, `kind` and
   `model` then describe it, `model` being the one in effect. When `false`,

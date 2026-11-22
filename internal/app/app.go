@@ -68,7 +68,9 @@ type Options struct {
 	AIQueue jobqueue.Queue
 	Version string
 	MCP     MCPInfo
-	Logger  *slog.Logger
+	// Auth configures sign-in to the web UI and the HTTP API.
+	Auth   AuthOptions
+	Logger *slog.Logger
 	// Now returns the current time; tests may override it.
 	Now func() time.Time
 	// HealthInterval is how often the judge engine is probed.
@@ -87,6 +89,8 @@ type App struct {
 	limits    domain.Limits
 	version   string
 	mcp       MCPInfo
+	authOpts  AuthOptions
+	authState authState
 	log       *slog.Logger
 	now       func() time.Time
 
@@ -121,6 +125,7 @@ func New(opts Options) *App {
 		limits:         opts.Limits,
 		version:        opts.Version,
 		mcp:            opts.MCP,
+		authOpts:       opts.Auth,
 		log:            opts.Logger,
 		now:            opts.Now,
 		workers:        opts.JudgeWorkers,
@@ -180,6 +185,9 @@ func New(opts Options) *App {
 	if a.version == "" {
 		a.version = "dev"
 	}
+	if a.authOpts.SessionTTL <= 0 {
+		a.authOpts.SessionTTL = DefaultSessionTTL
+	}
 	if a.engine != nil {
 		a.grader = grader.New(a.engine, opts.JudgeConcurrency)
 	}
@@ -198,6 +206,9 @@ func (a *App) Limits() domain.Limits { return a.limits }
 // workers, the AI queue and the engine health probe.
 func (a *App) Start(ctx context.Context) error {
 	if err := a.migrateLegacyAISettings(ctx); err != nil {
+		return err
+	}
+	if err := a.checkSetupAtStart(ctx); err != nil {
 		return err
 	}
 	if err := a.recoverSubmissions(ctx); err != nil {

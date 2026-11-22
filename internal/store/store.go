@@ -226,6 +226,25 @@ func UsageDay(t time.Time) int64 {
 	return sec / 86400
 }
 
+// User is an account that may sign in to the web UI. Email is stored in
+// lower case and is unique. PasswordHash is a bcrypt hash.
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Session is a signed-in browser session. ID is the SHA-256 hash (hex) of
+// the token in the browser's cookie; the token itself is never stored.
+type Session struct {
+	ID        string
+	UserID    string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
 // Store gives transactional access to the library.
 type Store interface {
 	// Read runs fn in a read-only transaction with a consistent snapshot.
@@ -405,6 +424,27 @@ type Tx interface {
 	ListDrafts(f DraftFilter) ([]Draft, error)
 	UpdateDraft(d *Draft) error
 	DeleteDraft(id string) (bool, error)
+
+	// Users, by email. InsertUser fails on an email already taken.
+	// DeleteUser removes the user's sessions too.
+	CountUsers() (int, error)
+	ListUsers() ([]User, error)
+	GetUser(id string) (User, error)
+	GetUserByEmail(email string) (User, error)
+	InsertUser(u *User) error
+	UpdateUserPassword(id, passwordHash string, at time.Time) error
+	DeleteUser(id string) (bool, error)
+
+	// Sessions. GetSession returns a session whatever its expiry; callers
+	// compare ExpiresAt. DeleteUserSessions removes every session of a user
+	// but except (which may be ""). DeleteExpiredSessions removes those
+	// that expired before the time.
+	InsertSession(s *Session) error
+	GetSession(id string) (Session, error)
+	ExtendSession(id string, expiresAt time.Time) error
+	DeleteSession(id string) error
+	DeleteUserSessions(userID, except string) error
+	DeleteExpiredSessions(before time.Time) error
 
 	// Settings are opaque key/value pairs.
 	GetSetting(key string) (string, bool, error)

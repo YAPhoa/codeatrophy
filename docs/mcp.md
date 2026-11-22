@@ -24,7 +24,7 @@ Clients that only speak stdio can bridge with
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `CODEATROPHY_MCP_ENABLED` | `true` | Set `false` to remove the endpoint |
-| `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` (the scheme name in any case) |
+| `CODEATROPHY_MCP_TOKEN` | unset | When set, requests must send `Authorization: Bearer <token>` (the scheme name in any case). Required while sign-in is on (`CODEATROPHY_AUTH`, on by default): without it every request is refused with `401` |
 | `CODEATROPHY_MCP_ALLOWED_ORIGINS` | unset | Extra `Origin` values to accept, comma-separated |
 | `CODEATROPHY_MCP_MAX_SESSIONS` | `100` | Most sessions open at once |
 | `CODEATROPHY_MCP_PRETTY_JSON` | `false` | Set `true` to indent the JSON of tool results, for reading them yourself; compact JSON costs a model fewer tokens |
@@ -45,8 +45,11 @@ origin checks" in `docs/api.md`), the Host check first:
   compared with that configured set, never with the request's own `Host`.
 
 `GET /api/v1/meta` reports the full endpoint URL as `mcp.url` when
-`CODEATROPHY_PUBLIC_URL` is set. Set a token before making the endpoint
-reachable from anywhere but the local machine.
+`CODEATROPHY_PUBLIC_URL` is set. Browser sign-in does not apply to MCP
+clients, which cannot enter a password; the token is their sign-in. So while
+sign-in is on the endpoint needs the token, and only with
+`CODEATROPHY_AUTH=off` may it run without one, which is fine only while it is
+reachable from the local machine alone.
 
 Sessions that have been idle for 30 minutes are closed; a client then starts
 a new one. When `CODEATROPHY_MCP_MAX_SESSIONS` sessions are open, a request

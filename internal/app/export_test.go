@@ -50,3 +50,7 @@ func (a *App) GenerateCode(ctx context.Context, in CodeInput) (CodeResponse, err
 	}
 	return t.run(ctx)
 }
+
+// FastPasswordHashes lowers the bcrypt work factor for the rest of the
+// test binary, so that tests that sign in run quickly.
+func FastPasswordHashes() { bcryptCost = 4 }

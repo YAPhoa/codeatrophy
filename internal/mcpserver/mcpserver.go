@@ -30,6 +30,10 @@ type Options struct {
 	Logger *slog.Logger
 	// Token, when non-empty, must be sent as a bearer token.
 	Token string
+	// RequireToken refuses every request while Token is empty. It is set
+	// when sign-in is on, so that the MCP endpoint is never the one open
+	// way into an instance that otherwise asks for a password.
+	RequireToken bool
 	// OriginAllowed decides whether a request's Origin header is acceptable.
 	OriginAllowed func(*http.Request) bool
 	// MaxSessions caps concurrent sessions (default DefaultMaxSessions).
@@ -117,6 +121,12 @@ func Handler(opts Options) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if opts.OriginAllowed != nil && !opts.OriginAllowed(r) {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		if opts.Token == "" && opts.RequireToken {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="codeatrophy"`)
+			http.Error(w, "the MCP endpoint needs a token while sign-in is on: set CODEATROPHY_MCP_TOKEN on the server "+
+				"and send it as \"Authorization: Bearer <token>\"", http.StatusUnauthorized)
 			return
 		}
 		if opts.Token != "" {

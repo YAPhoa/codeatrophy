@@ -51,6 +51,8 @@ type Server struct {
 	mcp     http.Handler
 	mcpPath string
 	web     http.Handler
+	// csrf checks state-changing requests when sign-in is on.
+	csrf *http.CrossOriginProtection
 }
 
 // New returns the root HTTP handler.
@@ -62,6 +64,12 @@ func New(opts Options) *Server {
 	}
 	if s.mcpPath == "" {
 		s.mcpPath = "/mcp"
+	}
+	s.csrf = http.NewCrossOriginProtection()
+	for _, o := range opts.AllowedOrigins {
+		if err := s.csrf.AddTrustedOrigin(o); err != nil {
+			s.log.Warn("ignoring an allowed origin", "origin", o, "error", err)
+		}
 	}
 	s.routes()
 	return s
@@ -79,6 +87,13 @@ func (s *Server) handle(pattern string, h func(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) routes() {
+	s.handle("GET /health", s.getHealth)
+	s.handle("GET /auth/session", s.getAuthSession)
+	s.handle("POST /auth/login", s.login)
+	s.handle("POST /auth/setup", s.setup)
+	s.handle("POST /auth/logout", s.logout)
+	s.handle("POST /auth/password", s.changePassword)
+
 	s.handle("GET /meta", s.getMeta)
 	s.handle("GET /stats", s.getStats)
 
@@ -234,6 +249,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !safeMethod(r.Method) && !s.originAllowed(r, s.origins) {
 			writeJSON(rec, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden,
 				Message: "cross-origin requests are not allowed; set CODEATROPHY_ALLOWED_ORIGINS to allow this origin"}})
+			return
+		}
+		if !s.authorize(rec, r) {
 			return
 		}
 		s.api.ServeHTTP(rec, r)

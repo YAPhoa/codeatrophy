@@ -111,6 +111,7 @@ var DownMigrations = map[int]string{
 		ALTER TABLE items DROP COLUMN updated_via;
 		ALTER TABLE items DROP COLUMN updated_client;
 		ALTER TABLE items DROP COLUMN updated_model;`,
+	18: `DROP TABLE sessions; DROP TABLE users;`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

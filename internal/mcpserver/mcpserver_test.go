@@ -1178,3 +1178,13 @@ func TestLimitsInOverviewAndSchemas(t *testing.T) {
 		t.Errorf("link_related does not use the configured limit")
 	}
 }
+
+// With sign-in on, an MCP endpoint without a token refuses every request.
+func TestRequireTokenWithoutToken(t *testing.T) {
+	h := mcpserver.Handler(mcpserver.Options{App: app.New(app.Options{Store: teststore.Open(t)}), RequireToken: true})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/mcp", strings.NewReader(`{}`)))
+	if rec.Code != 401 || !strings.Contains(rec.Body.String(), "CODEATROPHY_MCP_TOKEN") {
+		t.Errorf("%d %s", rec.Code, rec.Body.String())
+	}
+}

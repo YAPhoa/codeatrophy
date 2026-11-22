@@ -49,6 +49,12 @@ type Config struct {
 	MaxGeneratedTestCases int
 	MaxLargeTestCases     int
 
+	// Auth requires signing in to the web UI and the HTTP API
+	// (CODEATROPHY_AUTH, on by default).
+	Auth bool
+	// SessionTTL is how long a sign-in lasts without being used.
+	SessionTTL time.Duration
+
 	Judge JudgeConfig
 	AI    AIConfig
 	MCP   MCPConfig
@@ -194,6 +200,11 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	c.SQLiteImport = onOff("CODEATROPHY_SQLITE_IMPORT")
 	c.DBAutoMigrate = onOff("CODEATROPHY_DB_AUTO_MIGRATE")
+	c.Auth = onOff("CODEATROPHY_AUTH")
+	c.SessionTTL = getDur("CODEATROPHY_SESSION_TTL", 30*24*time.Hour)
+	if c.SessionTTL < 2*time.Hour {
+		errs = append(errs, fmt.Errorf("CODEATROPHY_SESSION_TTL: must be at least 2h"))
+	}
 	switch strings.ToLower(get("CODEATROPHY_LOG_LEVEL", "info")) {
 	case "debug":
 		c.LogLevel = slog.LevelDebug

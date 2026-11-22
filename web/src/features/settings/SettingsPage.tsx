@@ -5,6 +5,7 @@ import { ImportSection } from '../share/ImportPage';
 import { NotFoundPage } from '../../app/NotFoundPage';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { cx } from '../../ui/Button';
+import { AccountSection } from './AccountSection';
 import { AiActivitySection } from './AiActivitySection';
 import { AiSection } from './AiSection';
 import { SETTINGS_PAGES, findSettingsPage, movedSettingsPage, settingsLanding, settingsPath, type SettingsSlug } from './pages';
@@ -60,6 +61,7 @@ function SettingsCategory({ slug, label }: { slug: SettingsSlug; label: string }
           {slug === 'mcp' && <McpSection meta={meta} />}
           {slug === 'import' && <ImportSection />}
           {slug === 'export' && <ExportSection />}
+          {slug === 'account' && <AccountSection />}
         </div>
       </div>
     </div>

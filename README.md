@@ -52,6 +52,17 @@ docker compose up -d --build
 Open <http://localhost:8080>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
+The first visit asks you to create your account. It needs the one-time setup
+code the server prints in its log while no account exists:
+
+```sh
+docker compose logs app | grep setupCode
+```
+
+Enter it with the email and password you want to sign in with. A sign-in
+lasts 30 days from the last time you used the app in that browser. See
+[Signing in](#signing-in) to turn sign-in off or manage accounts.
+
 To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
 `codeatrophy-data` volumes).
 
@@ -80,7 +91,9 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_DB_AUTO_MIGRATE` | `on` | Apply schema migrations at startup; `off` leaves them to `db migrate` (see [Upgrading](#upgrading)) |
 | `CODEATROPHY_AI_PROVIDER` | unset | Initial default AI provider: the environment provider of `anthropic`, `gemini` or `openai_compatible` |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
-| `CODEATROPHY_MCP_TOKEN` | unset | Require a bearer token on `/mcp` |
+| `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](#signing-in)) |
+| `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
+| `CODEATROPHY_MCP_TOKEN` | unset | Bearer token for `/mcp`; required while sign-in is on |
 
 AI providers are normally set up in the UI under Settings. You can keep
 several, such as a work key, a personal one and a local model server, and
@@ -103,6 +116,47 @@ built-in presets (Interview practice, the default; Contest style; Study
 notes), which you can edit or delete like your own; deleted ones do not come
 back.
 
+## Signing in
+
+Sign-in is on by default. The web UI shows a sign-in page, and every API
+request needs a session, except the health check (`/api/v1/health`).
+
+- **First account.** While no account exists, the server logs a setup code
+  at startup (`setupCode=XXXX-XXXX-XXXX-XXXX`) and the UI asks for it with
+  the email and password of the first account. Without the code nobody who
+  merely reaches the server first can claim it. A new code is printed on
+  every start until the account exists.
+- **Staying signed in.** A sign-in lasts `CODEATROPHY_SESSION_TTL` (30 days)
+  and is renewed as you use the app, so you are asked again only after that
+  long away. Sign out from the sidebar or Settings → Account, where you can
+  also change your password (which signs out your other browsers).
+- **Accounts on the command line.** Every account sees the same library.
+
+  ```sh
+  docker compose exec app codeatrophy user list
+  docker compose exec app codeatrophy user add someone@example.com
+  docker compose exec app codeatrophy user password you@example.com   # forgotten password
+  docker compose exec app codeatrophy user delete someone@example.com
+  ```
+
+  `add` and `password` ask for the password on a terminal (add `-it` if
+  Compose does not give one) or read it from the first line of standard
+  input.
+- **Turning it off.** Set `CODEATROPHY_AUTH=off` to skip sign-in entirely,
+  for example on a machine only you use, or behind a reverse proxy that
+  already authenticates. Anyone who can reach the port can then use the app,
+  as before sign-in existed. The server logs a warning at startup.
+- **MCP.** Assistants cannot sign in with a password, so while sign-in is on
+  `/mcp` requires `CODEATROPHY_MCP_TOKEN` and refuses every request until it
+  is set. With sign-in off the token stays optional.
+
+Passwords are stored as bcrypt hashes. The session cookie is `HttpOnly` and
+`SameSite=Strict`, and `Secure` over HTTPS (also behind a proxy that sends
+`X-Forwarded-Proto: https`); the server keeps only a hash of it. Changes
+must come from the app's own pages (a cross-origin check), and each address
+gets 10 failed sign-ins per 15 minutes. Behind a reverse proxy all clients
+share the proxy's address and so that limit.
+
 ## Connecting an MCP client
 
 The MCP endpoint is `http://localhost:8080/mcp` (Streamable HTTP).
@@ -112,8 +166,10 @@ claude mcp add --transport http codeatrophy http://localhost:8080/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8080/mcp`. If you set `CODEATROPHY_MCP_TOKEN`,
-configure the client to send `Authorization: Bearer <token>`.
+`npx mcp-remote http://localhost:8080/mcp`. While sign-in is on, set
+`CODEATROPHY_MCP_TOKEN` on the server (`openssl rand -hex 32` makes one) and
+configure the client to send `Authorization: Bearer <token>`, for example
+`claude mcp add --transport http codeatrophy http://localhost:8080/mcp --header "Authorization: Bearer <token>"`.
 
 Over MCP the connected assistant does the writing; the server stores items,
 searches, and runs code to verify test cases. No AI provider needs to be
@@ -288,12 +344,14 @@ which an older Codeatrophy refuses to import; upgrade it first.
 
 ## Security
 
-- **No authentication.** Codeatrophy is a single-user app without login. The
-  Compose file publishes it on `127.0.0.1` only. Anyone who can reach the port
-  can read and change the library and run code on the judge. To expose it
-  beyond the local machine, put it behind a reverse proxy that authenticates,
-  and set `CODEATROPHY_PUBLIC_URL` to the public URL (its origin is then
-  allowed to make changes, and MCP clients are told the endpoint's URL).
+- **Sign-in.** The web UI and the API need a signed-in session, and `/mcp`
+  a bearer token (see [Signing in](#signing-in)). The Compose file still
+  publishes the app on `127.0.0.1` only. To expose it beyond the local
+  machine, serve it over HTTPS (a reverse proxy such as Nginx Proxy Manager
+  or Caddy), keep sign-in on, and set `CODEATROPHY_PUBLIC_URL` to the public
+  URL (its origin is then allowed to make changes, and MCP clients are told
+  the endpoint's URL). With `CODEATROPHY_AUTH=off` anyone who can reach the
+  port can read and change the library and run code on the judge.
   AI generations run in the background, but verification runs, bundle
   transfers and connection tests can take minutes: raise the proxy's read
   timeout to at least six minutes for `/api/v1/items/check`,

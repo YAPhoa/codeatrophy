@@ -253,6 +253,7 @@ var downMigrations = map[int]string{
 	16: `DROP TABLE working_copies;`,
 	17: `ALTER TABLE items DROP COLUMN created_via, DROP COLUMN created_client, DROP COLUMN created_model,
 		DROP COLUMN updated_via, DROP COLUMN updated_client, DROP COLUMN updated_model;`,
+	18: `DROP TABLE sessions; DROP TABLE users;`,
 }
 
 // undoMigrationsFrom takes the database back to the version before from.

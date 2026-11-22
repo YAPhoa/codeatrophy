@@ -37,7 +37,9 @@ export type ErrorCode =
   | 'upstream_error'
   | 'ai_unavailable'
   | 'judge_unavailable'
-  | 'internal';
+  | 'internal'
+  | 'unauthorized'
+  | 'rate_limited';
 
 export interface ErrorBody {
   error: {
@@ -1291,4 +1293,36 @@ export interface ImportResult {
   unchanged: number;
   collectionsCreated: number;
   warnings: string[];
+}
+
+// --- Sign-in ---------------------------------------------------------------
+
+/** An account that may sign in. Every account sees the same library. */
+export interface AuthUser {
+  id: string;
+  email: string;
+  createdAt: string;
+}
+
+/** `GET /auth/session`: whether sign-in is on, and who is signed in. */
+export interface AuthSession {
+  /** False when the server runs with `CODEATROPHY_AUTH=off`: nobody needs to sign in. */
+  enabled: boolean;
+  /** True while no account exists; the first is created with the setup code from the server log. */
+  setupRequired: boolean;
+  user: AuthUser | null;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface SetupRequest extends LoginRequest {
+  setupCode: string;
+}
+
+export interface PasswordChangeRequest {
+  currentPassword: string;
+  newPassword: string;
 }

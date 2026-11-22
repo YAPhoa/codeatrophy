@@ -4,6 +4,10 @@
 // and turns any non-2xx response (or transport failure) into an `ApiError`.
 
 import type {
+  AuthSession,
+  LoginRequest,
+  PasswordChangeRequest,
+  SetupRequest,
   AiCodeRequest,
   AiJob,
   AiJobDetail,
@@ -175,7 +179,16 @@ export const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'ai_unavailable',
   'judge_unavailable',
   'internal',
+  'unauthorized',
+  'rate_limited',
 ]);
+
+/**
+ * Fired on `window` when a request is refused because the session has ended
+ * (signed out elsewhere, expired, or the password was changed), so that the
+ * app can show the sign-in page.
+ */
+export const SIGNED_OUT_EVENT = 'codeatrophy:signed-out';
 
 async function toApiError(res: Response): Promise<ApiError> {
   let parsed: Partial<ErrorBody> | null = null;
@@ -218,7 +231,13 @@ export async function request<T>(method: string, path: string, opts: RequestOpti
     }
     throw new ApiError(0, 'network', 'The Codeatrophy server is not reachable.');
   }
-  if (!res.ok) throw await toApiError(res);
+  if (!res.ok) {
+    const err = await toApiError(res);
+    if (err.status === 401 && err.code === 'unauthorized' && !path.startsWith('/auth/') && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+    }
+    throw err;
+  }
   if (opts.as === 'blob') return { blob: await res.blob(), filename: filenameOf(res) } as T;
   if (res.status === 204) return undefined as T;
   try {
@@ -243,6 +262,17 @@ export interface Download {
 }
 
 export const api = {
+  /** Whether the server is up; needs no session. */
+  health: (signal?: AbortSignal) => request<{ status: string }>('GET', '/health', { signal }),
+  auth: {
+    session: (signal?: AbortSignal) => request<AuthSession>('GET', '/auth/session', { signal }),
+    login: (body: LoginRequest) => request<AuthSession>('POST', '/auth/login', { body }),
+    /** Creates the first account, with the setup code from the server log, and signs it in. */
+    setup: (body: SetupRequest) => request<AuthSession>('POST', '/auth/setup', { body }),
+    logout: () => request<void>('POST', '/auth/logout'),
+    /** Ends every other session of the account. */
+    changePassword: (body: PasswordChangeRequest) => request<void>('POST', '/auth/password', { body }),
+  },
   meta: (signal?: AbortSignal) => request<Meta>('GET', '/meta', { signal }),
   stats: (signal?: AbortSignal) => request<Stats>('GET', '/stats', { signal }),
 

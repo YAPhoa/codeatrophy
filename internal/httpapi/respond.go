@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"codeatrophy/internal/app"
 	"codeatrophy/internal/domain"
@@ -32,6 +33,8 @@ var statusByCode = map[app.Code]int{
 	app.CodeAIUnavailable:    http.StatusServiceUnavailable,
 	app.CodeJudgeUnavailable: http.StatusServiceUnavailable,
 	app.CodeInternal:         http.StatusInternalServerError,
+	app.CodeUnauthorized:     http.StatusUnauthorized,
+	app.CodeRateLimited:      http.StatusTooManyRequests,
 }
 
 type errorBody struct {
@@ -74,6 +77,9 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, ok := statusByCode[ae.Code]
 	if !ok {
 		status = http.StatusInternalServerError
+	}
+	if ae.Code == app.CodeRateLimited && ae.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int((ae.RetryAfter+time.Second-1)/time.Second)))
 	}
 	d := errorDetail{Code: ae.Code, Message: ae.Message}
 	if ae.Code == app.CodeValidation || (ae.Code == app.CodeConflict && len(ae.Fields) > 0) {

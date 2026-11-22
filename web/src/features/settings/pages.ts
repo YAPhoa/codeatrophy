@@ -14,6 +14,7 @@ export const SETTINGS_PAGES = [
   { slug: 'mcp', label: 'MCP server' },
   { slug: 'import', label: 'Import' },
   { slug: 'export', label: 'Export' },
+  { slug: 'account', label: 'Account' },
 ] as const;
 
 export type SettingsSlug = (typeof SETTINGS_PAGES)[number]['slug'];

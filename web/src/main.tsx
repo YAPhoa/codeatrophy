@@ -9,6 +9,7 @@ import { initTheme } from './lib/theme';
 import { applyCodeTheme } from './lib/codeThemes';
 import { initReadingSize } from './lib/readingSize';
 import { revealWhenSettled } from './lib/boot';
+import { AuthGate } from './app/AuthGate';
 import { ConfirmProvider } from './ui/Dialog';
 import { ToastProvider } from './ui/Toast';
 // IBM Plex Sans for the interface (--font-sans), bundled so every machine shows it.
@@ -23,6 +24,7 @@ import './styles/features.css';
 import './styles/solve.css';
 import './styles/solutions.css';
 import './styles/preferences.css';
+import './styles/auth.css';
 
 async function start() {
   // `npm run dev:mock` serves the UI against an in-memory implementation of
@@ -56,7 +58,9 @@ async function start() {
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <ConfirmProvider>
-            <RouterProvider router={router} />
+            <AuthGate>
+              <RouterProvider router={router} />
+            </AuthGate>
           </ConfirmProvider>
         </ToastProvider>
       </QueryClientProvider>

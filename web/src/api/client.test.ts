@@ -137,6 +137,8 @@ describe('request', () => {
       ai_unavailable: 503,
       judge_unavailable: 503,
       internal: 500,
+      unauthorized: 401,
+      rate_limited: 429,
     };
     expect([...KNOWN_CODES].sort()).toEqual(Object.keys(statusOf).sort());
     for (const [code, status] of Object.entries(statusOf)) {
