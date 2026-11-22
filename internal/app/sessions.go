@@ -114,6 +114,7 @@ func (a *App) EndSession(ctx context.Context, token, id string) (current bool, e
 	if err != nil {
 		return false, err
 	}
+	var ua string
 	err = a.store.Write(ctx, func(tx store.Tx) error {
 		ss, err := a.liveSessions(tx, s)
 		if err != nil {
@@ -121,12 +122,19 @@ func (a *App) EndSession(ctx context.Context, token, id string) (current bool, e
 		}
 		for _, x := range ss {
 			if id != "" && sessionPublicID(x.ID) == id {
-				current = x.ID == s.id
+				current, ua = x.ID == s.id, x.UserAgent
 				return tx.DeleteSession(x.ID)
 			}
 		}
 		return errNotFound("session")
 	})
+	if err == nil {
+		msg := "session ended"
+		if current {
+			msg = "signed out"
+		}
+		a.log.Info(msg, "account", s.User.Email, "browser", useragent.Describe(ua))
+	}
 	return current, err
 }
 
@@ -137,5 +145,21 @@ func (a *App) EndOtherSessions(ctx context.Context, token string) error {
 	if err != nil {
 		return err
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error { return tx.DeleteUserSessions(s.User.ID, s.id) })
+	n := 0
+	err = a.store.Write(ctx, func(tx store.Tx) error {
+		ss, err := a.liveSessions(tx, s)
+		if err != nil {
+			return err
+		}
+		for _, x := range ss {
+			if x.ID != s.id {
+				n++
+			}
+		}
+		return tx.DeleteUserSessions(s.User.ID, s.id)
+	})
+	if err == nil {
+		a.log.Info("other sessions ended", "account", s.User.Email, "count", n)
+	}
+	return err
 }

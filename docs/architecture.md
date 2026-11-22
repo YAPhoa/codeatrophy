@@ -984,7 +984,67 @@ The container's health check calls `GET /api/v1/health` on loopback with a
 loopback `Host`, so it passes whatever the allow-list holds and needs no
 session.
 
+### Response headers
+
+Every response has `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`. API and MCP responses add
+`Cache-Control: no-store` (API) and
+`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+The UI's responses add `X-Frame-Options: DENY` and this policy, so that a
+script slipped into rendered item text (Markdown, a Mermaid diagram) cannot
+run:
+
+```
+default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline';
+img-src 'self' data: https:; font-src 'self' data:; connect-src 'self';
+object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+- **Scripts** come only from the server, plus the inline theme boot script
+  of `index.html`. Its hash is not kept by hand: `internal/webui` computes
+  it at startup from the embedded `index.html` (SHA-256 of each inline
+  `<script>`'s text). The placeholder page has no inline script, so its
+  policy allows none.
+- **Styles** may be inline: Mermaid's SVG, set as markup, carries a
+  `<style>` element and style attributes, and d3, KaTeX and the app set
+  style attributes too. A style hash would switch `'unsafe-inline'` off,
+  so there is none.
+- **Images** from `https:` (shown on request) and `data:` URLs, as item
+  text allows; **fonts** from `data:` URLs, since the build inlines the
+  smallest KaTeX font.
+
+The Vite dev server sends no policy.
+
 Configuration is by environment variable, documented in `.env.example`.
+
+### Logging
+
+The server logs with `log/slog` to standard error, as text or JSON
+(`CODEATROPHY_LOG_LEVEL`, `CODEATROPHY_LOG_FORMAT`).
+
+- **Requests.** One line per request with method, path, status, bytes,
+  duration and client address (the one sign-in limits use, so behind a
+  trusted proxy the client's own). It is at debug, or at info with
+  `CODEATROPHY_ACCESS_LOG=on`; a server error is at warn either way, and
+  the health check stays at debug. A request that sends `X-Forwarded-For`
+  from a peer that is not a trusted proxy gets one warning per peer (for
+  up to 16 peers), the usual sign of a proxy missing from
+  `CODEATROPHY_TRUSTED_PROXIES`.
+- **Account events,** at info, logged by the application services so
+  every adapter shares them: sign-in (with client and browser), a failed
+  one, sign-out, a refused one over the failure limit (warn), password
+  changes, ended sessions, accounts created or deleted, MCP tokens created
+  or revoked (by name), and each MCP session with the client's reported
+  name and version. The `codeatrophy user` command runs in a process of
+  its own and reports what it did on its own output instead.
+- **Bundles.** Each export (item count) and import (created, updated,
+  skipped, duplicated, unchanged) at info.
+
+Never logged: passwords, session and MCP tokens or their hashes, cookies,
+device values, API keys, the database password, query strings, request
+and response bodies, and AI prompts and responses (the AI log in the
+database holds those). An email that matches no account is not logged on
+a failed sign-in.
 
 ## Out of scope for the first version
 

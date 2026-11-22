@@ -309,6 +309,20 @@ func recoverPanics(log *slog.Logger) mcp.Middleware {
 	}
 }
 
+// sessionStarted logs each session once, when its client has finished
+// the initialize handshake, with the client's name and version.
+func sessionStarted(a *app.App) func(context.Context, *mcp.InitializedRequest) {
+	return func(ctx context.Context, req *mcp.InitializedRequest) {
+		var client, version string
+		if req.Session != nil {
+			if p := req.Session.InitializeParams(); p != nil && p.ClientInfo != nil {
+				client, version = p.ClientInfo.Name, p.ClientInfo.Version
+			}
+		}
+		a.MCPSessionStarted(ctx, client, version)
+	}
+}
+
 // NewServer builds an MCP server over the application.
 func NewServer(opts Options) *mcp.Server {
 	a := opts.App
@@ -316,7 +330,7 @@ func NewServer(opts Options) *mcp.Server {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 	s := mcp.NewServer(&mcp.Implementation{Name: "codeatrophy", Version: a.Version()},
-		&mcp.ServerOptions{Instructions: instructions, Logger: opts.Logger})
+		&mcp.ServerOptions{Instructions: instructions, Logger: opts.Logger, InitializedHandler: sessionStarted(a)})
 	// recoverPanics comes first, so that it also covers actAs.
 	s.AddReceivingMiddleware(recoverPanics(opts.Logger), actAs(a))
 	t := &tools{app: a, pretty: opts.PrettyJSON, log: opts.Logger}

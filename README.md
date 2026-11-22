@@ -90,6 +90,8 @@ Everything is configured with environment variables, all documented in
 | `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
 | `CODEATROPHY_TRUSTED_PROXIES` | unset | Addresses or CIDR prefixes of reverse proxies whose `X-Forwarded-For` is believed (see [Signing in](#signing-in)) |
 | `CODEATROPHY_MCP_TOKEN` | unset | Server-wide bearer token for `/mcp`, besides the per-account tokens made in the UI |
+| `CODEATROPHY_LOG_LEVEL`, `CODEATROPHY_LOG_FORMAT` | `info`, `text` | Log level (`debug`, `info`, `warn`, `error`) and format (`text`, `json`) |
+| `CODEATROPHY_ACCESS_LOG` | `off` | Log every request (method, path, status, client) at info instead of debug |
 
 AI providers are normally set up in the UI under Settings. You can keep
 several, such as a work key, a personal one and a local model server, and
@@ -134,13 +136,23 @@ request needs a session, except the health check (`/api/v1/health`).
   ```sh
   docker compose exec app codeatrophy user list
   docker compose exec app codeatrophy user add someone@example.com
-  docker compose exec app codeatrophy user password you@example.com   # forgotten password
+  docker compose exec app codeatrophy user password you@example.com
   docker compose exec app codeatrophy user delete someone@example.com
   ```
 
   `add` and `password` ask for the password on a terminal (add `-it` if
   Compose does not give one) or read it from the first line of standard
   input.
+- **Forgotten password.** There is no reset by email. Whoever runs the
+  server sets a new password on the command line, which also signs that
+  account out everywhere:
+
+  ```sh
+  docker compose exec app codeatrophy user password you@example.com
+  ```
+
+  Without Compose, run `codeatrophy user password you@example.com` with the
+  server's environment.
 - **Turning it off.** Set `CODEATROPHY_AUTH=off` to skip sign-in entirely,
   for example on a machine only you use, or behind a reverse proxy that
   already authenticates. Anyone who can reach the port can then use the app,
@@ -162,7 +174,10 @@ gets 10 failed sign-ins per 15 minutes, and a browser that has signed in
 before has a count of its own, so someone guessing passwords cannot keep
 you out of a browser you use. Behind a reverse proxy every client has the
 proxy's address; set `CODEATROPHY_TRUSTED_PROXIES` to the proxy's address
-so that the server reads each client's own from `X-Forwarded-For`.
+so that the server reads each client's own from `X-Forwarded-For`. To
+check it, set `CODEATROPHY_ACCESS_LOG=on` and look at the `client` of each
+request in the log; a peer that sends `X-Forwarded-For` without being
+listed also gets a warning there.
 
 ## Connecting an MCP client
 

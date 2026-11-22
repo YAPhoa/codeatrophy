@@ -260,6 +260,22 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+// CODEATROPHY_ACCESS_LOG is off by default and takes on or off.
+func TestAccessLog(t *testing.T) {
+	if c, err := LoadFrom(env(nil)); err != nil || c.AccessLog {
+		t.Errorf("default: %v %v", c.AccessLog, err)
+	}
+	for v, want := range map[string]bool{"on": true, "TRUE": true, "1": true, "off": false, "no": false} {
+		if c, err := LoadFrom(env(map[string]string{"CODEATROPHY_ACCESS_LOG": v})); err != nil || c.AccessLog != want {
+			t.Errorf("%s: %v %v", v, c.AccessLog, err)
+		}
+	}
+	if _, err := LoadFrom(env(map[string]string{"CODEATROPHY_ACCESS_LOG": "verbose"})); err == nil ||
+		!strings.Contains(err.Error(), "CODEATROPHY_ACCESS_LOG") {
+		t.Errorf("a bad value: %v", err)
+	}
+}
+
 // CODEATROPHY_TRUSTED_PROXIES takes addresses and CIDR prefixes; none are
 // trusted by default.
 func TestTrustedProxies(t *testing.T) {

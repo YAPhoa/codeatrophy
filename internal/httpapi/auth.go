@@ -44,10 +44,7 @@ func sessionToken(r *http.Request) string {
 // Without trusted proxies, every client behind a reverse proxy has the
 // proxy's address.
 func (s *Server) clientAddr(r *http.Request) string {
-	peer := r.RemoteAddr
-	if h, _, err := net.SplitHostPort(peer); err == nil {
-		peer = h
-	}
+	peer := peerAddr(r)
 	if !s.trustedProxy(peer) {
 		return peer
 	}
@@ -74,6 +71,44 @@ func (s *Server) clientAddr(r *http.Request) string {
 		}
 	}
 	return addr
+}
+
+// peerAddr is the address of the other end of a request's connection.
+func peerAddr(r *http.Request) string {
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return h
+	}
+	return r.RemoteAddr
+}
+
+// maxProxyHints bounds how many peers hintUntrustedProxy warns about.
+const maxProxyHints = 16
+
+// hintUntrustedProxy warns, once per peer, about a request that sends
+// X-Forwarded-For from a peer that is not a trusted proxy: most likely a
+// reverse proxy missing from CODEATROPHY_TRUSTED_PROXIES. Past
+// maxProxyHints peers it stays quiet.
+func (s *Server) hintUntrustedProxy(r *http.Request) {
+	if r.Header.Get("X-Forwarded-For") == "" {
+		return
+	}
+	peer := peerAddr(r)
+	if s.trustedProxy(peer) {
+		return
+	}
+	s.hintMu.Lock()
+	if s.hinted == nil {
+		s.hinted = map[string]bool{}
+	}
+	first := !s.hinted[peer] && len(s.hinted) < maxProxyHints
+	if first {
+		s.hinted[peer] = true
+	}
+	s.hintMu.Unlock()
+	if first {
+		s.log.Warn("ignoring X-Forwarded-For from a peer not in CODEATROPHY_TRUSTED_PROXIES; "+
+			"clients behind it are logged and rate-limited as the peer", "peer", peer)
+	}
 }
 
 func (s *Server) trustedProxy(addr string) bool {

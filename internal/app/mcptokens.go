@@ -105,6 +105,7 @@ func (a *App) CreateMCPToken(ctx context.Context, session string, in MCPTokenInp
 	if err != nil {
 		return MCPTokenCreated{}, err
 	}
+	a.log.Info("mcp token created", "account", s.User.Email, "name", name)
 	return MCPTokenCreated{MCPToken: mcpToken(t), Token: token}, nil
 }
 
@@ -115,19 +116,25 @@ func (a *App) DeleteMCPToken(ctx context.Context, session, id string) error {
 	if err != nil {
 		return err
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error {
+	var name string
+	err = a.store.Write(ctx, func(tx store.Tx) error {
 		ts, err := tx.ListMCPTokens(s.User.ID)
 		if err != nil {
 			return err
 		}
 		for _, t := range ts {
 			if id != "" && mcpToken(t).ID == id {
+				name = t.Name
 				_, err := tx.DeleteMCPToken(s.User.ID, t.ID)
 				return err
 			}
 		}
 		return errNotFound("MCP token")
 	})
+	if err == nil {
+		a.log.Info("mcp token revoked", "account", s.User.Email, "name", name)
+	}
+	return err
 }
 
 // AuthenticateMCPToken returns the account an MCP bearer token belongs to,
@@ -162,4 +169,24 @@ func (a *App) AuthenticateMCPToken(ctx context.Context, token string) (AuthUser,
 		}
 	}
 	return authUser(u), nil
+}
+
+// MCPSessionStarted logs that an MCP client has opened a session, acting
+// for the account of ctx. client and version are what the client says it
+// is, and are not verified.
+func (a *App) MCPSessionStarted(ctx context.Context, client, version string) {
+	text := func(s string) string {
+		if c := domain.CleanSourceText(s); c != nil {
+			return *c
+		}
+		return ""
+	}
+	args := []any{"client", text(client), "version", text(version)}
+	if id := accountOf(ctx); id != store.Unowned {
+		var u store.User
+		if err := a.store.Read(ctx, func(tx store.Tx) (err error) { u, err = tx.GetUser(id); return }); err == nil {
+			args = append(args, "account", u.Email)
+		}
+	}
+	a.log.Info("mcp session started", args...)
 }

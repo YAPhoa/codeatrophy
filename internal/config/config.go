@@ -32,10 +32,13 @@ type Config struct {
 	SQLiteImport bool
 	// DBAutoMigrate applies pending schema migrations at startup; without
 	// it the server only starts on a database at its schema version.
-	DBAutoMigrate  bool
-	SecretKey      string
-	LogLevel       slog.Level
-	LogFormat      string
+	DBAutoMigrate bool
+	SecretKey     string
+	LogLevel      slog.Level
+	LogFormat     string
+	// AccessLog logs every request at info rather than debug
+	// (CODEATROPHY_ACCESS_LOG, off by default).
+	AccessLog      bool
 	AllowedOrigins []string
 	// PublicURL is the externally visible base URL, e.g. https://code.example.com.
 	PublicURL string
@@ -196,19 +199,24 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 				"or unset for SQLite"))
 		}
 	}
-	onOff := func(key string) bool {
-		switch strings.ToLower(get(key, "on")) {
+	onOff := func(key string, def bool) bool {
+		d := "off"
+		if def {
+			d = "on"
+		}
+		switch strings.ToLower(get(key, d)) {
 		case "on", "true", "1", "yes":
 			return true
 		case "off", "false", "0", "no":
 			return false
 		}
 		errs = append(errs, fmt.Errorf("%s: must be on or off", key))
-		return true
+		return def
 	}
-	c.SQLiteImport = onOff("CODEATROPHY_SQLITE_IMPORT")
-	c.DBAutoMigrate = onOff("CODEATROPHY_DB_AUTO_MIGRATE")
-	c.Auth = onOff("CODEATROPHY_AUTH")
+	c.SQLiteImport = onOff("CODEATROPHY_SQLITE_IMPORT", true)
+	c.DBAutoMigrate = onOff("CODEATROPHY_DB_AUTO_MIGRATE", true)
+	c.Auth = onOff("CODEATROPHY_AUTH", true)
+	c.AccessLog = onOff("CODEATROPHY_ACCESS_LOG", false)
 	c.SessionTTL = getDur("CODEATROPHY_SESSION_TTL", 30*24*time.Hour)
 	if c.SessionTTL < 2*time.Hour {
 		errs = append(errs, fmt.Errorf("CODEATROPHY_SESSION_TTL: must be at least 2h"))

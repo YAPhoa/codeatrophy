@@ -391,15 +391,20 @@ func TestErrorShapesAndRouting(t *testing.T) {
 	if r := c.expect("GET", "/items/123/edit", "", 200); !strings.Contains(string(r.body), "<title>UI</title>") {
 		t.Error("a client route should reach the UI")
 	}
-	// Security headers: API responses are never cached, the UI is never framed.
-	for _, path := range []string{api + "/meta", api + "/nope"} {
+	// Security headers: API responses are never cached and load nothing, the
+	// UI is never framed and keeps the policy its handler sets.
+	for _, path := range []string{api + "/meta", api + "/nope", "/mcp"} {
 		h := c.do("GET", path, "").header
 		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" ||
-			h.Get("Cache-Control") != "no-store" || h.Get("X-Frame-Options") != "" {
+			h.Get("X-Frame-Options") != "" || h.Get("Content-Security-Policy") != "default-src 'none'; frame-ancestors 'none'" {
 			t.Errorf("%s headers: %v", path, h)
 		}
+		if path != "/mcp" && h.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: Cache-Control %q", path, h.Get("Cache-Control"))
+		}
 	}
-	if h := c.do("GET", "/", "").header; h.Get("X-Frame-Options") != "DENY" || h.Get("X-Content-Type-Options") != "nosniff" {
+	if h := c.do("GET", "/", "").header; h.Get("X-Frame-Options") != "DENY" || h.Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.HasPrefix(h.Get("Content-Security-Policy"), "default-src 'self'; ") {
 		t.Errorf("UI headers: %v", h)
 	}
 }

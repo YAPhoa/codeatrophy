@@ -72,7 +72,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	ae := app.AsError(err)
 	if ae.Code == app.CodeInternal {
-		s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+		s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "client", s.clientAddr(r), "error", err)
 	}
 	status, ok := statusByCode[ae.Code]
 	if !ok {
@@ -180,10 +180,12 @@ func queryList(r *http.Request, name string) []string {
 	return out
 }
 
-// statusRecorder captures the response status for logging.
+// statusRecorder captures the response status and size for logging.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	// bytes counts the body bytes written.
+	bytes int64
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -197,7 +199,9 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	if s.status == 0 {
 		s.status = http.StatusOK
 	}
-	return s.ResponseWriter.Write(b)
+	n, err := s.ResponseWriter.Write(b)
+	s.bytes += int64(n)
+	return n, err
 }
 
 func (s *statusRecorder) Flush() {

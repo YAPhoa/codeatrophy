@@ -17,6 +17,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/useragent"
 )
 
 // Sign-in for the web UI. Accounts are kept in the store with bcrypt
@@ -229,7 +230,7 @@ func (a *App) Setup(ctx context.Context, in SetupInput, userAgent string) (SignI
 		return SignIn{}, err
 	}
 	out.Device = a.newDevice(u.ID)
-	a.log.Info("first account created", "email", email)
+	a.log.Info("first account created", "account", email, "browser", useragent.Describe(userAgent))
 	return out, nil
 }
 
@@ -252,10 +253,18 @@ func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient, user
 	email := normalizeEmail(in.Email)
 	deviceUser, device := a.openDevice(client.Device)
 	bucket := "addr:" + client.Addr
+	checkRate := func() error {
+		err := a.checkLoginRate(bucket)
+		if err != nil {
+			a.log.Warn("sign-in refused: too many failed attempts", "client", client.Addr,
+				"knownBrowser", strings.HasPrefix(bucket, "device:"))
+		}
+		return err
+	}
 	if deviceUser == "" {
 		// Checked before the lookup, so that a client over the limit
 		// costs no database read.
-		if err := a.checkLoginRate(bucket); err != nil {
+		if err := checkRate(); err != nil {
 			return SignIn{}, err
 		}
 	}
@@ -268,7 +277,7 @@ func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient, user
 		if err == nil && u.ID == deviceUser {
 			bucket = "device:" + device
 		}
-		if err := a.checkLoginRate(bucket); err != nil {
+		if err := checkRate(); err != nil {
 			return SignIn{}, err
 		}
 	}
@@ -278,7 +287,13 @@ func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient, user
 	}
 	if bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil || u.ID == "" || len(in.Password) > MaxPasswordBytes {
 		a.recordLoginFailure(bucket)
-		a.log.Info("failed sign-in", "client", client.Addr, "knownBrowser", strings.HasPrefix(bucket, "device:"))
+		// The account only when one has that email: what was typed may be
+		// anything, a password included.
+		args := []any{"client", client.Addr, "knownBrowser", strings.HasPrefix(bucket, "device:")}
+		if u.ID != "" {
+			args = append([]any{"account", u.Email}, args...)
+		}
+		a.log.Info("failed sign-in", args...)
 		return SignIn{}, errUnauthorized("the email or password is incorrect")
 	}
 	a.resetLoginFailures(bucket)
@@ -295,6 +310,7 @@ func (a *App) Login(ctx context.Context, in LoginInput, client LoginClient, user
 		return SignIn{}, err
 	}
 	out.Device = a.newDevice(u.ID)
+	a.log.Info("signed in", "account", u.Email, "client", client.Addr, "browser", useragent.Describe(userAgent))
 	return out, nil
 }
 
@@ -418,7 +434,28 @@ func (a *App) Logout(ctx context.Context, token string) error {
 	if token == "" {
 		return nil
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error { return tx.DeleteSession(sessionID(token)) })
+	var (
+		email, ua string
+		ended     bool
+	)
+	err := a.store.Write(ctx, func(tx store.Tx) error {
+		id := sessionID(token)
+		s, err := tx.GetSession(id)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		ended, ua = true, s.UserAgent
+		if u, err := tx.GetUser(s.UserID); err == nil {
+			email = u.Email
+		}
+		return tx.DeleteSession(id)
+	})
+	if err == nil && ended {
+		a.log.Info("signed out", "account", email, "browser", useragent.Describe(ua))
+	}
+	return err
 }
 
 // ChangePassword changes the password of the account signed in with token
@@ -435,12 +472,16 @@ func (a *App) ChangePassword(ctx context.Context, token string, in PasswordChang
 	if err != nil {
 		return err
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error {
+	err = a.store.Write(ctx, func(tx store.Tx) error {
 		if err := tx.UpdateUserPassword(s.User.ID, hash, a.now().UTC()); err != nil {
 			return err
 		}
 		return tx.DeleteUserSessions(s.User.ID, sessionID(token))
 	})
+	if err == nil {
+		a.log.Info("password changed", "account", s.User.Email)
+	}
+	return err
 }
 
 // Account management for the command line.
@@ -478,6 +519,9 @@ func (a *App) CreateUser(ctx context.Context, email, password string) (AuthUser,
 		}
 		return insertUser(tx, &u)
 	})
+	if err == nil {
+		a.log.Info("account created", "account", email)
+	}
 	return authUser(u), err
 }
 
@@ -506,7 +550,7 @@ func (a *App) SetUserPassword(ctx context.Context, email, password string) error
 	if err != nil {
 		return err
 	}
-	return a.store.Write(ctx, func(tx store.Tx) error {
+	err = a.store.Write(ctx, func(tx store.Tx) error {
 		u, err := tx.GetUserByEmail(normalizeEmail(email))
 		if err != nil {
 			return notFoundAs(err, "account")
@@ -516,11 +560,15 @@ func (a *App) SetUserPassword(ctx context.Context, email, password string) error
 		}
 		return tx.DeleteUserSessions(u.ID, "")
 	})
+	if err == nil {
+		a.log.Info("password changed", "account", normalizeEmail(email))
+	}
+	return err
 }
 
 // DeleteUser removes an account and its sessions.
 func (a *App) DeleteUser(ctx context.Context, email string) error {
-	return a.store.Write(ctx, func(tx store.Tx) error {
+	err := a.store.Write(ctx, func(tx store.Tx) error {
 		u, err := tx.GetUserByEmail(normalizeEmail(email))
 		if err != nil {
 			return notFoundAs(err, "account")
@@ -528,6 +576,10 @@ func (a *App) DeleteUser(ctx context.Context, email string) error {
 		_, err = tx.DeleteUser(u.ID)
 		return err
 	})
+	if err == nil {
+		a.log.Info("account deleted", "account", normalizeEmail(email))
+	}
+	return err
 }
 
 // Validation and hashing.

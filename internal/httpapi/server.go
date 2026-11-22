@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"codeatrophy/internal/app"
@@ -39,6 +40,9 @@ type Options struct {
 	// X-Forwarded-For header names the client, for limiting failed
 	// sign-ins per client rather than per proxy.
 	TrustedProxies []netip.Prefix
+	// AccessLog logs each request at info rather than debug (requests
+	// answered with a server error are logged at warn either way).
+	AccessLog bool
 	// MCP is mounted at MCPPath when non-nil.
 	MCP     http.Handler
 	MCPPath string
@@ -59,13 +63,19 @@ type Server struct {
 	// csrf checks state-changing requests when sign-in is on.
 	csrf *http.CrossOriginProtection
 	// proxies are the trusted reverse proxies (Options.TrustedProxies).
-	proxies []netip.Prefix
+	proxies   []netip.Prefix
+	accessLog bool
+	// hinted are the peers already warned about for sending
+	// X-Forwarded-For without being trusted proxies.
+	hintMu sync.Mutex
+	hinted map[string]bool
 }
 
 // New returns the root HTTP handler.
 func New(opts Options) *Server {
 	s := &Server{app: opts.App, log: opts.Logger, origins: opts.AllowedOrigins, hosts: opts.AllowedHosts, mcp: opts.MCP,
-		mcpPath: opts.MCPPath, web: opts.Web, api: http.NewServeMux(), proxies: opts.TrustedProxies}
+		mcpPath: opts.MCPPath, web: opts.Web, api: http.NewServeMux(), proxies: opts.TrustedProxies,
+		accessLog: opts.AccessLog}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
 	}
@@ -230,19 +240,28 @@ func (s *Server) apiFallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	rec := &statusRecorder{ResponseWriter: w}
+	s.hintUntrustedProxy(r)
+	client := s.clientAddr(r)
 	defer func() {
 		if p := recover(); p != nil {
-			s.log.Error("panic serving request", "path", r.URL.Path, "panic", p, "stack", string(debug.Stack()))
+			s.log.Error("panic serving request", "method", r.Method, "path", r.URL.Path, "client", client, "panic", p,
+				"stack", string(debug.Stack()))
 			if rec.status == 0 {
 				writeJSON(rec, http.StatusInternalServerError, errorBody{Error: errorDetail{Code: app.CodeInternal, Message: "internal server error"}})
 			}
 		}
+		// The path only: a query string may carry something secret.
 		level := slog.LevelDebug
-		if rec.status >= 500 {
+		switch {
+		case rec.status >= 500:
 			level = slog.LevelWarn
+		case s.accessLog && r.URL.Path != Prefix+"/health":
+			// The health check is polled (Docker's healthcheck): it stays
+			// at debug.
+			level = slog.LevelInfo
 		}
 		s.log.Log(r.Context(), level, "request", "method", r.Method, "path", r.URL.Path, "status", rec.status,
-			"duration", time.Since(start).Round(time.Millisecond))
+			"bytes", rec.bytes, "duration", time.Since(start).Round(time.Millisecond), "client", client)
 	}()
 	h := rec.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -251,6 +270,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	isAPI := path == "/api" || strings.HasPrefix(path, "/api/")
 	isMCP := path == s.mcpPath || strings.HasPrefix(path, s.mcpPath+"/")
+	if isAPI || isMCP {
+		// JSON, event streams and downloads: nothing in them is to load or
+		// run anything. The UI's policy is set by its handler.
+		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+	}
 	if (isAPI || isMCP) && !HostAllowed(r.Host, s.hosts) {
 		writeJSON(rec, http.StatusForbidden, errorBody{Error: errorDetail{Code: app.CodeForbidden, Message: hostMessage(r.Host)}})
 		return

@@ -195,6 +195,7 @@ func (a *App) Export(ctx context.Context, in ExportInput) (ExportResult, error) 
 	if err := bundle.Write(&buf, b); err != nil {
 		return ExportResult{}, err
 	}
+	a.log.Info("bundle exported", "scope", scope, "items", len(b.Items), "collections", len(b.Collections), "bytes", buf.Len())
 	return ExportResult{Filename: bundle.Slug(b.Meta.Name) + ".codeatrophy.zip", Data: buf.Bytes(), Items: len(b.Items)}, nil
 }
 
@@ -613,6 +614,9 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 	if err != nil {
 		return ImportResult{}, err
 	}
+	a.log.Info("bundle imported", "strategy", strategy, "created", res.Created, "updated", res.Updated,
+		"skipped", res.Skipped, "duplicated", res.Duplicated, "unchanged", res.Unchanged,
+		"collectionsCreated", res.CollectionsCreated, "warnings", len(res.Warnings))
 	return res, nil
 }
 
