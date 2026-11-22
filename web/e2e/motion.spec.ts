@@ -142,10 +142,12 @@ test('motion: a toast rises in, makes room in the stack, and plays its exit', as
   const arriving: string[] = [];
   await expect.poll(async () => (arriving.push(...(await recorded(page))), arriving)).toEqual(expect.arrayContaining(['toast-in on div.toast.toast-success', 'toast-make-room on div.toast-slot']));
 
-  // Dismissed, it stays for its exit and is out of reach meanwhile.
+  // Dismissed, it stays for its exit and is out of reach meanwhile. The
+  // exit is timed in script, so whether it is inert is read in the page as it starts.
+  const leavingSlots = await recordMatches(page, '.toast-slot.is-leaving', (el) => el.getAttribute('inert'));
   await toast.getByRole('button', { name: 'Dismiss' }).click();
-  await expect(page.locator('.toast-slot.is-leaving')).toHaveAttribute('inert', '');
   await expect(toast).toHaveCount(0);
+  expect(await leavingSlots()).toEqual(['']);
   const leaving = await recorded(page);
   expect(leaving).toContain('toast-out on div.toast.toast-success');
   expect(leaving).toContain('toast-collapse on div.toast-slot.is-leaving');
