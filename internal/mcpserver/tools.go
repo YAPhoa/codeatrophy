@@ -42,8 +42,20 @@ type textResult string
 // API's, since every summary is paid for in a model's context.
 const searchLimit = 20
 
+// run_code waits defaultWaitSeconds for a verdict unless told otherwise, and
+// at most maxWaitSeconds.
+const (
+	defaultWaitSeconds = 120
+	maxWaitSeconds     = 600
+)
+
 // fullDesc describes the full argument of the tools that offer it.
-const fullDesc = "Return test data up to 16 KiB whole instead of shortening it above 2 KiB"
+var fullDesc = fmt.Sprintf("Return test data up to %d KiB whole instead of shortening it above %d KiB",
+	fullElideBytes>>10, elideBytes>>10)
+
+// echoElided is the size above which the tools that write test cases
+// shorten the data they return.
+var echoElided = fmt.Sprintf("%d bytes", echoElideBytes)
 
 func ptr(b bool) *bool { return &b }
 
@@ -390,7 +402,7 @@ func (t *tools) register(s *mcp.Server) {
 			"ids":          arrayOf(str("Item id"), "Items to change"),
 			"action":       enumStr("Action", "delete", "addTags", "removeTags", "setStatus", "setFavorite", "addToCollection", "removeFromCollection"),
 			"tags":         arrayOf(maxLen(str("Tag"), domain.MaxTagChars), "For addTags and removeTags"),
-			"status":       enumStr("For setStatus", "todo", "in_progress", "done"),
+			"status":       enumOf("For setStatus", domain.Statuses),
 			"favorite":     boolean("For setFavorite"),
 			"collectionId": str("For addToCollection and removeFromCollection"),
 		}, "ids", "action")), destructive, func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -558,7 +570,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	// Test cases and execution.
 	t.add(s, "add_test_cases", "Add test cases",
-		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Give a large case as a generator instead of stdin. Returns the problem's test cases, with test data over 512 bytes shortened.",
+		"Append test cases to a problem, or replace all of them with replace: true. May set the reference solution in the same call (item content: pass expectedRevision then; for a function problem, only the solution part). Give a large case as a generator instead of stdin. Returns the problem's test cases, with test data over "+echoElided+" shortened.",
 		tracked(object(props{
 			"itemId":            str("Problem id"),
 			"cases":             arrayOf(testCaseSchema(generatorDesc), "Test cases to add"),
@@ -581,7 +593,7 @@ func (t *tools) register(s *mcp.Server) {
 		})
 
 	t.add(s, "update_test_case", "Update test case",
-		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it; setting stdin without a generator drops the generator. Returns the case, with test data over 512 bytes shortened.",
+		"Change one test case (partial). Changing stdin or expectedStdout resets verified unless you set it; setting stdin without a generator drops the generator. Returns the case, with test data over "+echoElided+" shortened.",
 		tracked(object(props{
 			"id":             str("Test case id"),
 			"name":           maxLen(str("Name"), domain.MaxTestCaseNameChars),
@@ -697,7 +709,7 @@ func (t *tools) register(s *mcp.Server) {
 			"source":         str(solutionSource),
 			"mode":           enumStr("run (default): the sample cases, or stdin; submit: all cases", "run", "submit"),
 			"stdin":          nullableStr("Custom input for a run; omit to use the sample cases"),
-			"timeoutSeconds": integer("How long to wait for the verdict (default 120, max 600)"),
+			"timeoutSeconds": integer(fmt.Sprintf("How long to wait for the verdict (default %d, max %d)", defaultWaitSeconds, maxWaitSeconds)),
 			"full":           boolean(fullDesc),
 		}, "itemId", "language", "source"), additive, func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
@@ -713,9 +725,9 @@ func (t *tools) register(s *mcp.Server) {
 			if err != nil {
 				return nil, err
 			}
-			timeout := 120
+			timeout := defaultWaitSeconds
 			if in.TimeoutSeconds > 0 {
-				timeout = min(in.TimeoutSeconds, 600)
+				timeout = min(in.TimeoutSeconds, maxWaitSeconds)
 			}
 			wctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 			defer cancel()

@@ -49,6 +49,24 @@ func enumStr(desc string, values ...string) map[string]any {
 	return m
 }
 
+// enumOf is enumStr over a list of the domain's values, then extra.
+func enumOf[T ~string](desc string, values []T, extra ...string) map[string]any {
+	out := make([]string, 0, len(values)+len(extra))
+	for _, v := range values {
+		out = append(out, string(v))
+	}
+	return enumStr(desc, append(out, extra...)...)
+}
+
+// difficultyOrNull is the enum of a difficulty that may be cleared.
+func difficultyOrNull() []any {
+	out := make([]any, 0, len(domain.Difficulties)+1)
+	for _, d := range domain.Difficulties {
+		out = append(out, string(d))
+	}
+	return append(out, nil)
+}
+
 func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
@@ -137,10 +155,10 @@ func itemFieldProps(lim domain.Limits) props {
 		"title":      maxLen(str(fmt.Sprintf("1-%d characters", domain.MaxTitleChars)), domain.MaxTitleChars),
 		"summary":    maxLen(str("One sentence"), domain.MaxSummaryChars),
 		"body":       str("Markdown body, in the format of get_authoring_guide"),
-		"difficulty": map[string]any{"type": []any{"string", "null"}, "enum": []any{"easy", "medium", "hard", nil}},
+		"difficulty": map[string]any{"type": []any{"string", "null"}, "enum": difficultyOrNull()},
 		"tags": maxItems(arrayOf(maxLen(str("Lower-case tag"), domain.MaxTagChars),
 			fmt.Sprintf("Replaces all tags (at most %d, 1-%d characters each)", domain.MaxTags, domain.MaxTagChars)), domain.MaxTags),
-		"status":   enumStr("Personal progress", "todo", "in_progress", "done"),
+		"status":   enumOf("Personal progress", domain.Statuses),
 		"favorite": boolean("Personal favorite flag"),
 		"notes":    maxLen(str("The user's private Markdown notes, at most limits.maxNotesChars characters (get_overview)"), lim.MaxNotesChars),
 		"source": object(props{
@@ -150,8 +168,8 @@ func itemFieldProps(lim domain.Limits) props {
 		"problem": object(props{
 			"interface":         enumStr("What the solver writes: program (a full program, the default) or function (only a function or class, run inside the harness)", "program", "function"),
 			"harness":           harnessSchema(),
-			"timeLimitMs":       integer("100-30000"),
-			"memoryLimitKb":     integer("16384-2097152"),
+			"timeLimitMs":       integer(fmt.Sprintf("%d-%d", domain.MinTimeLimitMs, domain.MaxTimeLimitMs)),
+			"memoryLimitKb":     integer(fmt.Sprintf("%d-%d", domain.MinMemoryLimitKb, domain.MaxMemoryLimitKb)),
 			"compare":           enumStr("Output comparison", "tokens", "exact"),
 			"starterCode":       map[string]any{"type": "object", "description": "Starter code keyed by language id (for a function problem, the stub); replaces all starter code", "additionalProperties": map[string]any{"type": "string"}},
 			"referenceSolution": map[string]any{"anyOf": []any{solutionSchema(), map[string]any{"type": "null"}}},
@@ -166,8 +184,8 @@ func itemQueryProps() props {
 		"q":            str("Full-text search over title, summary, body and tags"),
 		"id":           arrayOf(str("Item id"), "Only these items (any of them)"),
 		"type":         enumStr("Item type", "problem", "reading"),
-		"status":       arrayOf(enumStr("", "todo", "in_progress", "done"), "Any of these statuses"),
-		"difficulty":   arrayOf(enumStr("", "easy", "medium", "hard", "none"), "Any of these difficulties"),
+		"status":       arrayOf(enumOf("", domain.Statuses), "Any of these statuses"),
+		"difficulty":   arrayOf(enumOf("", domain.Difficulties, "none"), "Any of these difficulties"),
 		"tag":          arrayOf(str("Tag"), "Items must carry all of these tags"),
 		"collectionId": str("Members of this collection"),
 		"recursive":    boolean("With collectionId, include descendant collections"),
@@ -176,7 +194,7 @@ func itemQueryProps() props {
 		"favorite":     boolean("Filter by favorite flag"),
 		"sort":         enumStr("Sort order (default updated)", "updated", "created", "title", "difficulty", "position", "relevance"),
 		"order":        enumStr("Direction", "asc", "desc"),
-		"limit":        integer(fmt.Sprintf("Page size, 1-200 (default %d)", searchLimit)),
+		"limit":        integer(fmt.Sprintf("Page size, 1-%d (default %d)", domain.MaxPageSize, searchLimit)),
 		"offset":       integer("Offset for pagination"),
 	}
 }
