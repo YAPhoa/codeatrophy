@@ -841,12 +841,15 @@ test('settings: each category is its own page, and a link to an old section stil
   await expect(nav.getByRole('link', { name: 'Judge' })).not.toHaveAttribute('aria-current');
   await expect(page.getByRole('heading', { name: 'Judge' })).toHaveCount(0);
 
-  // The sidebar marks Settings on every one of its pages, and its entry opens the first.
+  // The sidebar marks Settings on every one of its pages, and its entry
+  // opens the page last shown in this browser.
   const settings = page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toHaveAttribute('aria-current', 'page');
+  await page.getByRole('complementary', { name: 'Navigation' }).getByRole('link', { name: /^Readings/ }).click();
+  await expect(page).not.toHaveURL(/\/settings/);
   await settings.click();
-  await expect(page).toHaveURL(/\/settings\/ai$/);
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('AI providers');
+  await expect(page).toHaveURL(/\/settings\/styles$/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Writing styles');
   await expect(settings).toHaveAttribute('aria-current', 'page');
 
   // Appearance is part of Preferences; its old address still arrives there.
