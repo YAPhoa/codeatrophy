@@ -1,73 +1,70 @@
 # Codeatrophy
 
 Codeatrophy is a self-hosted, AI-assisted library for coding challenges and
-technical readings. Keep the problems you want to practise and the notes you
-want to keep in one place, organise them with collections and tags, and solve
-problems in the browser against your own test cases.
+technical readings. Instead of letting AI do all the coding while your skills
+go rusty, work with it to stay sharp: turn notes or rough questions into
+problems and readings, organise everything with collections and tags, and
+solve challenges yourself in the browser.
 
 ![Drafting a problem with AI from a one-line note, reviewing the draft, and saving it to the library](docs/images/drafting-demo.gif)
 
-## What you can do with it
+## What it does
 
-- **Connect your favourite harness.** The library has an MCP server: add it
-  to Claude Code, Claude Desktop or any other MCP client with one command, and
-  the assistant you already use reads, writes and tests items in your library.
-  No AI provider has to be set up in the app for this.
-- **Point the agent at a document.** Give it a chapter, an article, lecture
-  notes or a list of problems and ask for the items: it writes the readings
-  and the problems, and checks each problem's test cases by running a
-  reference solution on the judge.
-- **Make your own collections.** Have the agent file what it wrote into a
-  collection (a topic, a course, an interview plan), or build collections by
-  hand, nest them and reorder them. Export one as a bundle to share it.
-- **Draft from a rough note.** In the app, paste a half-remembered problem
-  and get a complete draft to review before it is saved.
-- **Have it written your way.** A new instance comes with three writing
-  styles (Interview practice, Contest style, Study notes): standing
-  instructions for how an item is laid out and worded, followed by the agent
-  you connect and by the app's own drafting alike. Edit them, or add your
-  own, under Settings → Styles.
-- **Practise.** Solve in the browser against the test cases, and keep your
-  status, notes and favourites on each item.
+- **Problems and readings in one place.** Write entries in Markdown (with
+  math and Mermaid diagrams), tag them, set difficulty, and track your status,
+  personal notes, and favourites.
+- **Run and submit in the browser.** Test your code directly on the platform
+  as you work, then submit it for a verdict against the problem's test cases.
+  Codeatrophy handles execution in a sandboxed runner powered by
+  [Judge0](https://github.com/judge0/judge0), so you can practise end-to-end
+  without switching to a separate editor or terminal.
+- **Organise and share.** Group problems and readings into nested,
+  reorderable collections for a course, topic, or interview plan. Export parts
+  of your library to share with other people, or import problem sets and notes
+  shared by others.
+- **Consistent writing styles.** Fresh installs come with three presets
+  (*Interview practice*, *Contest style*, and *Study notes*) that control how
+  items are structured and worded. Edit them or add your own under
+  **Settings → Styles**.
 
-[MCP server](docs/mcp.md) has the command that connects a client.
+## Working with AI
 
-## Features
+Codeatrophy works with AI in two ways, both optional:
 
-- **Problems and readings** in Markdown (with math and Mermaid diagrams), with
-  tags, collections, difficulty and personal progress.
-- **A judge built in.** Problems carry stdin/stdout test cases; "Run" and
-  "Submit" execute your code in a sandbox ([Judge0](https://github.com/judge0/judge0))
-  in C, C++, C#, Go, Java, JavaScript, Kotlin, Python, Ruby, Rust and TypeScript.
-  A problem is either a full program or *solution only*, as on interview
-  sites: you write just the function or class, and hidden per-language
-  runner code turns it into a program; error messages point at your own
-  lines.
-- **AI drafting (optional).** Paste a half-remembered description and get a
-  complete, reviewable item with the assumptions listed — solution-only or a
-  full program, whichever fits — whose examples have already been checked by
-  running the model's own reference solution; generate test cases whose
-  expected outputs come from actually running a reference solution, and
-  optionally one large case built by a generator program, so that a solution
-  of the wrong complexity fails; derive
-  easier, harder or twisted variants. Works with Anthropic or any
-  OpenAI-compatible endpoint, including local models. Every request's
-  tokens are counted per provider, and an activity log keeps what was sent
-  and what came back.
-- **An MCP server** so an AI assistant (Claude Code, Claude Desktop, ...) can
-  read, write and test items in your library directly.
-- **Portable bundles.** Export any part of the library as a zip of plain
-  JSON, Markdown and source files, and import it elsewhere without
-  duplicates.
+### 1. Connect your own coding agent via MCP
 
-It runs as a Docker Compose stack: one Go server (web UI, HTTP API and MCP
-endpoint), its PostgreSQL database, and the Judge0 containers. The server
-can keep the library in a single SQLite file instead.
+Codeatrophy includes an [MCP server](docs/mcp.md). Connect OpenCode, Claude
+Code, Codex, Claude Desktop, or another MCP client with one command, with no
+LLM API keys configured in the app.
+
+From your agent, you can:
+
+- Read, write, test, and organise items directly in your library.
+- Point it at a chapter, article, lecture notes, or problem list to generate
+  structured readings and coding problems.
+- Check each problem's test cases by running a reference solution on the
+  judge and file the finished items into a collection.
+
+### 2. Draft directly in the app
+
+Configure an Anthropic, Gemini, or OpenAI-compatible provider (including local
+models) to use the built-in drafting tools in the web UI:
+
+- **Turn rough prompts into full items.** Start from a half-remembered topic
+  or incomplete interview question and get a complete, reviewable problem or
+  reading you can practise with.
+- **Generate test cases and variants.** Build test cases from a reference
+  solution (with an optional large case to catch solutions of the wrong time
+  complexity), or derive easier, harder, and modified variants of an existing
+  problem.
+
+Both the MCP tools and the in-app drafter follow the writing styles you have
+configured.
 
 ## Quick start
 
-Requirements: Docker with Compose v2.24 or later. The judge needs a
-privileged container (see [Security](docs/security.md)).
+Requirements: Docker with Compose v2.24 or later. The judge needs a privileged
+container (see [Security](docs/security.md)).
 
 ```sh
 git clone https://github.com/YAPhoa/codeatrophy.git
@@ -78,23 +75,32 @@ docker compose up -d
 
 This pulls the published image, for amd64 or arm64, of the release the
 checkout names (`main` is always the latest release); nothing is built.
-Open <http://localhost:8484>. The first start takes a minute while Judge0
-initialises its database; the judge shows as unavailable until then.
 
-The first visit asks you to create your account: choose the email and
-password you want to sign in with. A sign-in lasts 30 days from the last time you used the app in that browser. See
-[Signing in](docs/signing-in.md) to turn sign-in off or manage accounts.
+Open <http://localhost:8484>. On the first start, Judge0 takes about a minute
+to initialise its database; the judge shows as unavailable until that
+finishes.
 
-To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
-`codeatrophy-data` volumes). To move to a later release, see
-[Upgrading](docs/storage.md#upgrading).
+Your first visit asks you to create an account. Sessions stay active for 30
+days from the last time you used the app in that browser. See
+[Signing in](docs/signing-in.md) to manage accounts or turn sign-in off.
+
+To stop:
+
+```sh
+docker compose down
+```
+
+Your data stays in the `codeatrophy-db` and `codeatrophy-data` volumes. To
+move to a later release, see [Upgrading](docs/storage.md#upgrading).
 
 ### Without the judge
 
-Set `CODEATROPHY_JUDGE_ENGINE=none` and remove `judge0` from
-`COMPOSE_PROFILES` in `.env`. The Judge0 containers are then not started and
-the UI hides run and submit; the library, AI drafting, bundles and MCP keep
-working.
+If you only want the library, notes, sharing, AI drafting, and MCP:
+
+1. Set `CODEATROPHY_JUDGE_ENGINE=none` in `.env`.
+2. Remove `judge0` from `COMPOSE_PROFILES` in `.env`.
+
+The Judge0 containers will not start, and the UI will hide Run and Submit.
 
 ### Building from source
 
@@ -106,29 +112,30 @@ back.
 
 ## Judge engine
 
-"Run" and "Submit" hand your code to a judge engine: a sandboxed runner that
-executes one program on one input under a time and a memory limit. Choosing
-the test cases, comparing output and giving the verdict is Codeatrophy's own
-work, so the engine is a part that can be replaced.
+When you Run or Submit code, Codeatrophy sends it to a sandboxed runner under
+a time and memory limit. Choosing test cases, comparing outputs, and giving
+verdicts all happen inside Codeatrophy, so the engine itself can be swapped
+out.
 
-This version uses [Judge0](https://github.com/judge0/judge0), run as
-containers of its own. It is the engine of the current iteration, with limits
-worth knowing: its toolchains are old (for example Python 3.8, GCC 9, Go
-1.13, Java 13, Node 12), and its sandbox needs a privileged container (see
-[Security](docs/security.md)).
+This version uses [Judge0](https://github.com/judge0/judge0) in separate
+containers. Two limits worth knowing before running it:
 
-A later iteration may replace it with a judge written for Codeatrophy and
-shaped to what the app needs. Problems, test cases and bundles do not depend
-on which engine runs them. "Judge engines" in
-[`docs/architecture.md`](docs/architecture.md#judge-engines) has the interface
-an engine implements.
+- Its toolchains are old (for example Python 3.8, GCC 9, Go 1.13, Java 13,
+  Node 12).
+- Its sandbox needs a privileged container (see
+  [Security](docs/security.md)).
+
+A future version may replace Judge0 with a judge built specifically for
+Codeatrophy. Problems, test cases, and exported bundles do not depend on which
+engine runs them. See "Judge engines" in
+[`docs/architecture.md`](docs/architecture.md#judge-engines) for the
+interface.
 
 ## Configuration
 
 Everything is configured with environment variables, all documented in
 [`.env.example`](.env.example). [`docs/configuration.md`](docs/configuration.md)
-lists the ones most installations set and covers AI providers and style
-presets.
+covers the common settings, AI providers, and style presets.
 
 ## Documentation
 
@@ -136,7 +143,7 @@ Running an instance:
 
 | Document | Contents |
 | --- | --- |
-| [Configuration](docs/configuration.md) | The common environment variables, AI providers, style presets |
+| [Configuration](docs/configuration.md) | Common environment variables, AI providers, style presets |
 | [Signing in](docs/signing-in.md) | Accounts, sessions, turning sign-in off, tokens for MCP |
 | [Storage](docs/storage.md) | PostgreSQL or SQLite, upgrading, database commands, backup and restore |
 | [Security](docs/security.md) | Exposing an instance, host and origin checks, AI provider addresses, the judge |
@@ -146,54 +153,52 @@ Working on the code:
 
 | Document | Contents |
 | --- | --- |
-| [Architecture](docs/architecture.md) | The components and how they fit together |
-| [HTTP API](docs/api.md) | The API reference; the contract between server and UI |
-| [Bundle format](docs/bundle-format.md) | The import and export format |
-| [Web UI](web/README.md) | The UI's scripts, API mock, structure and conventions |
-| [Contributing](CONTRIBUTING.md) | The rules for every change |
+| [Architecture](docs/architecture.md) | Components and how they fit together |
+| [HTTP API](docs/api.md) | API reference; the contract between server and UI |
+| [Bundle format](docs/bundle-format.md) | Import and export format |
+| [Web UI](web/README.md) | UI scripts, API mock, structure, and conventions |
+| [Contributing](CONTRIBUTING.md) | Rules for every change |
 
 ## Development
 
-Layout: `cmd/` and `internal/` hold the Go server, `web/` the React UI,
-`docs/` the documents listed above. Start with
-[`docs/architecture.md`](docs/architecture.md); the HTTP API in
-[`docs/api.md`](docs/api.md) is the contract between server and UI.
+`cmd/` and `internal/` hold the Go server, `web/` holds the React UI, and
+`docs/` holds the documents listed above. Start with
+[`docs/architecture.md`](docs/architecture.md); [`docs/api.md`](docs/api.md)
+defines the contract between server and UI.
 
 ```sh
 make help          # all targets
 make test          # Go tests (SQLite)
 make test-postgres # Go tests on PostgreSQL, against a throwaway server in Docker
-make lint          # go vet, gofmt check, UI lint and type check
+make lint          # go vet, gofmt check, UI lint, and type check
 make web-dev-mock  # UI dev server with an in-memory API mock
 make run           # server on 127.0.0.1:8484 with data in ./data
 make build         # UI + server binary with the UI embedded (bin/codeatrophy)
-make up            # the whole Compose stack, the app built from this checkout
+make up            # build the image from this checkout and start the Compose stack
 ```
 
-The Makefile uses Go and npm from your machine when they are installed and
-otherwise runs them in the official Docker images, so Docker alone is enough.
-A server binary built without the UI (`make build-server`, or plain
-`go build ./...`) serves a placeholder page; the Docker image always
-contains the UI.
+The Makefile uses Go and npm from your machine when installed and otherwise
+runs them in official Docker images, so Docker alone is enough. Building just
+the server (`make build-server` or `go build ./...`) serves a placeholder page
+instead of the UI; the Docker image always embeds the UI.
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the rules for a change: how large a
-commit may be, the checks to run, and what must change together.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the rules every change must
+follow.
 
 ## License
 
 Copyright (C) 2026 YAPhoa
 
 Codeatrophy is licensed under the GNU Affero General Public License v3.0 only
-(SPDX: `AGPL-3.0-only`); see [`LICENSE`](LICENSE). In plain terms: if you run a
-modified version as a network service, you must offer its source code to that
-service's users.
+(`AGPL-3.0-only`); see [`LICENSE`](LICENSE). If you run a modified version as a
+network service, you must offer its source code to that service's users.
 
 Judge0 is separate software under its own license (GPL-3.0). Codeatrophy runs
-it as an independent service, reached over HTTP; none of its code is included
-in this project.
+it as an independent service over HTTP; none of its code is included in this
+project.
 
 The web UI bundles two fonts under the SIL Open Font License 1.1: IBM Plex Sans
-(Copyright 2019 IBM Corp.), installed from the `@fontsource-variable/ibm-plex-sans`
-package, and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors),
-cut down to ASCII for the wordmark, with its license in
+(Copyright 2019 IBM Corp.), installed from `@fontsource-variable/ibm-plex-sans`,
+and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors), cut
+down to ASCII for the wordmark, with its license in
 [`web/src/assets/fonts/JetBrainsMono-OFL.txt`](web/src/assets/fonts/JetBrainsMono-OFL.txt).
