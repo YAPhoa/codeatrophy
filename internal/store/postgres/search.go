@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"unicode"
 
 	_ "modernc.org/sqlite" // FTS5 tokenizer
+
+	"codeatrophy/internal/store"
 )
 
 // Search follows the SQLite store's FTS5 rules exactly: the text of each
@@ -114,16 +115,9 @@ func searchTexts(texts ...string) ([]string, error) {
 }
 
 // searchTerms turns free text into the substrings an item must contain,
-// one per query word. Words without a letter or digit are skipped, as the
-// SQLite store's ftsQuery skips them.
+// one per word of store.SearchWords.
 func searchTerms(q string) ([]string, error) {
-	var words []string
-	for _, w := range strings.FieldsFunc(q, unicode.IsSpace) {
-		if strings.IndexFunc(w, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0 {
-			words = append(words, w)
-		}
-	}
-	toks, err := tokenize(words)
+	toks, err := tokenize(store.SearchWords(q))
 	if err != nil {
 		return nil, err
 	}

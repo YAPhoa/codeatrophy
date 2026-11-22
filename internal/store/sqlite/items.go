@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -475,18 +474,12 @@ func (t *tx) eachRow(q string, args []any, fn func(*sql.Rows) error) error {
 	return rows.Err()
 }
 
-// ftsQuery turns free text into an FTS5 query: every whitespace-separated
-// word becomes a quoted prefix term, and all terms must match.
+// ftsQuery turns free text into an FTS5 query: every word of
+// store.SearchWords becomes a quoted prefix term, and all terms must match.
 func ftsQuery(q string) string {
 	var terms []string
-	for _, w := range strings.FieldsFunc(q, unicode.IsSpace) {
-		w = strings.ReplaceAll(w, `"`, `""`)
-		// Skip words that consist only of punctuation; the tokenizer would
-		// produce no tokens for them.
-		if strings.IndexFunc(w, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) < 0 {
-			continue
-		}
-		terms = append(terms, `"`+w+`"*`)
+	for _, w := range store.SearchWords(q) {
+		terms = append(terms, `"`+strings.ReplaceAll(w, `"`, `""`)+`"*`)
 	}
 	return strings.Join(terms, " ")
 }
