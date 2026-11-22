@@ -2457,7 +2457,7 @@ is sent, and with none the test is made without a key.
 
 The server does not connect to an address the egress policy refuses (cloud
 metadata and link-local addresses always; loopback and private ones with
-`CODEATROPHY_AI_BLOCK_PRIVATE`; see the README's Security section), and does
+`CODEATROPHY_AI_BLOCK_PRIVATE`; see [Security](security.md)), and does
 not follow a redirect to another origin. Either is reported like an
 unreachable service, in `error` or `modelsError`, for example
 `could not reach the AI provider: 169.254.169.254 is a cloud metadata
