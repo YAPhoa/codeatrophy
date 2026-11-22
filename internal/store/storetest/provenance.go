@@ -67,3 +67,18 @@ func testItemProvenance(t *testing.T, db store.Store) {
 		t.Errorf("list: %+v", list)
 	}
 }
+
+// sourceText shows a change source as "via client model", "-" for a
+// missing one, or "nobody".
+func sourceText(c *domain.ChangeSource) string {
+	if c == nil {
+		return "nobody"
+	}
+	opt := func(p *string) string {
+		if p == nil {
+			return "-"
+		}
+		return *p
+	}
+	return c.Via + " " + opt(c.Client) + " " + opt(c.Model)
+}

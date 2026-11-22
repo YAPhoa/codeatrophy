@@ -262,6 +262,8 @@ func (db *DB) checkVersion(ctx context.Context) error {
 	switch last := latest[len(latest)-1]; {
 	case current > last:
 		return newerError(current, last)
+	case store.TooOld(current):
+		return store.OlderSchemaError(current)
 	case current < last:
 		return migrationNeeded(current)
 	}
@@ -284,6 +286,9 @@ func (db *DB) migrate(ctx context.Context) error {
 	latest := migs[len(migs)-1].version
 	if current > latest {
 		return newerError(current, latest)
+	}
+	if store.TooOld(current) {
+		return store.OlderSchemaError(current)
 	}
 	if current > 0 && current < latest {
 		if err := db.backup(ctx, current); err != nil {

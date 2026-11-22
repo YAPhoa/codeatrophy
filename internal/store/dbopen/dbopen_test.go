@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -20,7 +19,6 @@ import (
 	"codeatrophy/internal/store/dbopen"
 	"codeatrophy/internal/store/postgres/pgtest"
 	"codeatrophy/internal/store/sqlite"
-	"codeatrophy/internal/store/sqlite/sqlitetest"
 	"codeatrophy/internal/store/storetest"
 )
 
@@ -129,46 +127,35 @@ func db2(t *testing.T, url string) dbopen.DB {
 	return db
 }
 
-// A SQLite database of an older schema version is migrated, then imported
-// whole, and PostgreSQL then takes the provider kind a migration added.
-func TestImportOfAnOlderSQLiteDatabase(t *testing.T) {
+// A SQLite database from before 1.0.0 is not imported: startup stops with
+// what to do, and neither database is changed.
+func TestImportOfAPre100SQLiteDatabase(t *testing.T) {
 	url := pgtest.URL(t)
 	path, _ := sqliteLibrary(t, t.TempDir())
-	// Back to version 7: without a tags table, with an ai_providers that
-	// knew two kinds and no effort levels, and with solutions that have no
-	// last run, AI jobs nor drafts.
-	lite, err := sqlite.Open(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	storetest.ClearNewerData(t, lite) // older schemas lack some of it
-	want := storetest.Dump(t, lite)
-	if err := lite.Close(); err != nil {
-		t.Fatal(err)
-	}
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlitetest.UndoMigrationsFrom(t, raw, 8)
+	if _, err := raw.Exec(`DELETE FROM schema_migrations WHERE version > 10`); err != nil {
+		t.Fatal(err)
+	}
 	raw.Close()
-	if st, err := sqlite.Inspect(context.Background(), path); err != nil || st.Version != 7 {
-		t.Fatalf("the SQLite database is at %+v %v", st, err)
+	before, _ := os.ReadFile(path)
+	_, err = dbopen.Open(context.Background(), dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true,
+		Logger: slog.New(slog.DiscardHandler)})
+	if !errors.Is(err, store.ErrOlderSchema) || !strings.Contains(err.Error(), "nothing was imported") ||
+		!strings.Contains(err.Error(), "upgrade it with Codeatrophy 1.0.0 first") {
+		t.Fatalf("open: %v", err)
 	}
-	db, logs := open(t, dbopen.Config{DatabaseURL: url, SQLitePath: path, SQLiteImport: true})
-	defer db.Close()
-	if !strings.Contains(logs, "0008_gemini_provider_kind.sql") || !strings.Contains(logs, "0009_tags.sql") ||
-		!strings.Contains(logs, "0010_ai_provider_effort.sql") || !strings.Contains(logs, "0011_solution_last_run.sql") ||
-		!strings.Contains(logs, "0012_ai_jobs.sql") || !strings.Contains(logs, "0013_test_case_generator.sql") ||
-		!strings.Contains(logs, "0014_item_links.sql") ||
-		!strings.Contains(logs, "imported the SQLite database") {
-		t.Errorf("logs:\n%s", logs)
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Errorf("the SQLite file was changed or moved: %v", err)
 	}
-	storetest.SameDump(t, "after the import", want, storetest.Dump(t, db))
-	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
-	storetest.Write(t, db, func(tx store.Tx) error {
-		return tx.InsertAIProvider(&store.AIProvider{ID: "g", Name: "Gemini", Kind: "gemini", CreatedAt: now, UpdatedAt: now})
-	})
+	if m := migrated(t, path); len(m) != 0 {
+		t.Errorf("renamed: %v", m)
+	}
+	if empty, err := dbcopy.Empty(context.Background(), db2(t, url)); err != nil || !empty {
+		t.Errorf("PostgreSQL is not empty: %v", err)
+	}
 }
 
 func TestImportCanBeTurnedOff(t *testing.T) {

@@ -187,6 +187,9 @@ func runMigrate(ctx context.Context, w io.Writer, t dbopen.Target, log *slog.Log
 	if st.Version > st.Latest {
 		return fmt.Errorf("the database is newer than this server: %w", store.ErrNewerSchema)
 	}
+	if store.TooOld(st.Version) {
+		return store.OlderSchemaError(st.Version)
+	}
 	if len(st.Pending) == 0 {
 		fmt.Fprintln(w, "Nothing to do: the database is up to date.")
 		return nil
@@ -230,6 +233,8 @@ func printStatus(w io.Writer, st store.Status, atStart bool) {
 		version = "none (no schema yet)"
 	case st.Version > st.Latest:
 		version += " (newer than this server: upgrade the server)"
+	case store.TooOld(st.Version):
+		version += " (from before Codeatrophy 1.0.0: upgrade it with 1.0.0 first)"
 	}
 	fmt.Fprintf(tw, "Schema version:\t%s\n", version)
 	fmt.Fprintf(tw, "Expected version:\t%d (this server)\n", st.Latest)

@@ -148,29 +148,6 @@ func testUsersAndSessions(t *testing.T, db store.Store) {
 	}
 }
 
-// Migration 18 adds the accounts and sessions: a database at version 17
-// keeps every row, and afterwards accounts can be added.
-func testAuthMigration(t *testing.T, h MigrationHarness) {
-	want, db := h.rerun(t, 18, func(db MigrationDB) {
-		Populate(t, db)
-	}, func(db MigrationDB) {
-		if err := h.Exec(db, `SELECT COUNT(*) FROM users`); err == nil {
-			t.Error("version 17 has a users table")
-		}
-	}, Dump)
-	SameDump(t, "after migration 18", want, Dump(t, db))
-	Write(t, db, func(tx store.Tx) error {
-		u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
-		if err := tx.InsertUser(&u); err != nil {
-			return err
-		}
-		return tx.InsertSession(&store.Session{ID: "s", UserID: "u", CreatedAt: now, ExpiresAt: now})
-	})
-	h.rejects(t, db, map[string]string{
-		"a session of no user": `INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('x', 'nobody', 0, 0)`,
-	})
-}
-
 // MCP tokens belong to one user, go with it, and are deleted only by it.
 func testMCPTokens(t *testing.T, db store.Store) {
 	ctx := context.Background()
@@ -227,75 +204,5 @@ func testMCPTokens(t *testing.T, db store.Store) {
 	Write(t, db, func(tx store.Tx) error { _, err := tx.DeleteUser("u1"); return err })
 	if err := db.Read(ctx, func(tx store.Tx) error { _, err := tx.GetMCPToken("t2"); return err }); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a token outlived its user: %v", err)
-	}
-}
-
-// Migration 19 adds the MCP tokens: a database at version 18 keeps every
-// row, and afterwards tokens can be added.
-func testMCPTokensMigration(t *testing.T, h MigrationHarness) {
-	want, db := h.rerun(t, 19, func(db MigrationDB) {
-		Populate(t, db)
-		Write(t, db, func(tx store.Tx) error {
-			u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
-			if err := tx.InsertUser(&u); err != nil {
-				return err
-			}
-			return tx.ClaimUnowned("u")
-		})
-	}, func(db MigrationDB) {
-		if err := h.Exec(db, `SELECT COUNT(*) FROM mcp_tokens`); err == nil {
-			t.Error("version 18 has an mcp_tokens table")
-		}
-	}, Dump)
-	SameDump(t, "after migration 19", want, Dump(t, db))
-	Write(t, db, func(tx store.Tx) error {
-		return tx.InsertMCPToken(&store.MCPToken{ID: "t", UserID: "u", Name: "Laptop", Hint: "ab12", CreatedAt: now})
-	})
-	h.rejects(t, db, map[string]string{
-		"a token of no user": `INSERT INTO mcp_tokens (id, user_id, name, hint, created_at) VALUES ('x', 'nobody', 'n', 'h', 0)`,
-	})
-}
-
-// Migration 22 adds a session's User-Agent and last use: sessions that
-// exist keep every column, with no User-Agent and last used when they
-// started, and new ones store both.
-func testSessionDetailsMigration(t *testing.T, h MigrationHarness) {
-	skip := map[string][]string{"sessions": {"user_agent", "last_used_at"}}
-	want, db := h.rerun(t, 22, func(db MigrationDB) {
-		Populate(t, db)
-		Write(t, db, func(tx store.Tx) error {
-			u := store.User{ID: "u", Email: "me@example.com", PasswordHash: "h", CreatedAt: now, UpdatedAt: now}
-			if err := tx.InsertUser(&u); err != nil {
-				return err
-			}
-			for i, id := range []string{"s1", "s2"} {
-				at := now.Add(time.Duration(i) * time.Hour)
-				s := store.Session{ID: id, UserID: "u", CreatedAt: at, ExpiresAt: at.Add(24 * time.Hour),
-					UserAgent: "Firefox", LastUsedAt: at.Add(5 * time.Hour)}
-				if err := tx.InsertSession(&s); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}, func(db MigrationDB) {
-		if err := h.Exec(db, `SELECT user_agent FROM sessions`); err == nil {
-			t.Error("version 21 has sessions.user_agent")
-		}
-	}, func(t *testing.T, b store.Bulk) map[string][]string { return DumpWithout(t, b, skip) })
-	SameDump(t, "after migration 22", want, DumpWithout(t, db, skip))
-	for i, id := range []string{"s1", "s2"} {
-		s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession(id) })
-		if at := now.Add(time.Duration(i) * time.Hour); s.UserAgent != "" || !s.LastUsedAt.Equal(at) || !s.CreatedAt.Equal(at) {
-			t.Errorf("%s after migrating: %+v", id, s)
-		}
-	}
-	Write(t, db, func(tx store.Tx) error {
-		return tx.InsertSession(&store.Session{ID: "s3", UserID: "u", CreatedAt: now, ExpiresAt: now,
-			UserAgent: "Chrome", LastUsedAt: now.Add(time.Minute)})
-	})
-	if s := Read(t, db, func(tx store.Tx) (store.Session, error) { return tx.GetSession("s3") }); s.UserAgent != "Chrome" ||
-		!s.LastUsedAt.Equal(now.Add(time.Minute)) {
-		t.Errorf("new session: %+v", s)
 	}
 }

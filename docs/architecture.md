@@ -232,6 +232,12 @@ reference intact.
 - A database whose version is newer than the server knows is not opened:
   startup fails with "this database was last used by a newer Codeatrophy;
   upgrade the server", and nothing is written.
+- Nor is a database from before 1.0.0, at a version between 1 and 21: the
+  server migrates only from the schema of 1.0.0 (`store.BaselineVersion`)
+  on. Startup fails with the database's version and "upgrade it with
+  Codeatrophy 1.0.0 first", and nothing is written, no backup either.
+  `db status` shows such a database as from before 1.0.0 with nothing
+  pending, and `db migrate` refuses it.
 - Before migrating an existing SQLite database, the server writes a
   consistent copy next to it (`VACUUM INTO`), named after the version it was
   at (`codeatrophy.db.backup-v4-<timestamp>`), and keeps the three newest.

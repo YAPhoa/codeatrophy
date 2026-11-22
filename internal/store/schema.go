@@ -11,6 +11,27 @@ import (
 // newer than this server knows. The database is left unchanged.
 var ErrNewerSchema = errors.New("this database was last used by a newer Codeatrophy; upgrade the server")
 
+// ErrOlderSchema is returned when opening a database last used by a
+// Codeatrophy older than 1.0.0, which this server cannot migrate. The
+// database is left unchanged.
+var ErrOlderSchema = errors.New("this database was last used by a Codeatrophy older than 1.0.0; " +
+	"upgrade it with Codeatrophy 1.0.0 first, then with this version")
+
+// BaselineVersion is the schema version of Codeatrophy 1.0.0, the oldest
+// this server migrates a database from.
+const BaselineVersion = 22
+
+// TooOld reports whether a database at the schema version is one this
+// server cannot migrate: it has a schema, older than BaselineVersion.
+func TooOld(version int) bool { return version > 0 && version < BaselineVersion }
+
+// OlderSchemaError is the error for a database at a version that is
+// TooOld. It matches ErrOlderSchema.
+func OlderSchemaError(version int) error {
+	return fmt.Errorf("database schema version %d is older than this server can migrate (%d, of Codeatrophy 1.0.0): %w",
+		version, BaselineVersion, ErrOlderSchema)
+}
+
 // SchemaVersion is the logical schema version this server expects. Every
 // backend keeps its own numbered migrations, and the latest migration of
 // each must bring its database to this version: a schema change adds one
@@ -134,7 +155,8 @@ type Status struct {
 	Version int
 	// Latest is the version this server's migrations reach.
 	Latest int
-	// Pending are the names of the migrations not applied yet.
+	// Pending are the names of the migrations not applied yet; none for a
+	// database that is TooOld.
 	Pending []string
 	// Counts are the row counts of the logical tables that exist.
 	Counts []TableCount

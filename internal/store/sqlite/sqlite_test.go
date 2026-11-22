@@ -17,8 +17,6 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
-	"codeatrophy/internal/store/sqlite/sqlitetest"
-	"codeatrophy/internal/store/storetest"
 )
 
 func openTest(t *testing.T) *DB {
@@ -61,12 +59,6 @@ func clearStylePresets(t *testing.T, db *DB) {
 	}
 }
 
-// undoMigrationsFrom takes the database back to the version before from.
-func undoMigrationsFrom(t *testing.T, db *DB, from int) {
-	t.Helper()
-	sqlitetest.UndoMigrationsFrom(t, db.writer, from)
-}
-
 // addMigration adds a migration after the latest one, as a later release
 // would, until the test ends.
 func addMigration(t *testing.T, name, query string) {
@@ -91,26 +83,29 @@ func addMigration(t *testing.T, name, query string) {
 // laterMigration is the name of the migration addMigration adds.
 var laterMigration = fmt.Sprintf("%04d_later.sql", store.SchemaVersion+1)
 
-// The built-in presets are seeded once, and only into an empty table.
-func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
-	// An instance that already had presets when the seeding migration ran
-	// gets none of the built-in ones.
-	db := openTest(t)
-	clearStylePresets(t, db)
-	undoMigrationsFrom(t, db, 5)
-	write(t, db, func(tx store.Tx) error {
-		return tx.InsertStylePreset(&domain.StylePreset{ID: "mine", Name: "Mine", Instructions: "x", CreatedAt: now, UpdatedAt: now})
-	})
-	if err := db.migrate(context.Background()); err != nil {
+// setVersion makes the database at path record that migrations 1 to v ran,
+// as one last used by an older Codeatrophy does.
+func setVersion(t *testing.T, path string, v int) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	list := read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() })
-	if len(list) != 1 || list[0].ID != "mine" {
-		t.Errorf("existing presets: %+v", list)
+	defer raw.Close()
+	if _, err := raw.Exec(`DELETE FROM schema_migrations`); err != nil {
+		t.Fatal(err)
 	}
+	for i := 1; i <= v; i++ {
+		if _, err := raw.Exec(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, 0)`,
+			i, fmt.Sprintf("%04d_old.sql", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
-	// A deleted built-in preset stays deleted after a restart, even when the
-	// table is empty again.
+// A deleted built-in preset stays deleted after a restart, even when the
+// table is empty again.
+func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seed.db")
 	db2, err := Open(context.Background(), path)
 	if err != nil {
@@ -125,48 +120,6 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 	defer db2.Close()
 	if list := read(t, db2, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() }); len(list) != 0 {
 		t.Errorf("deleted presets came back: %+v", list)
-	}
-}
-
-// Migration 15 refreshes the presets migration 5 seeds: a database seeded
-// before it holds the current built-in presets afterwards.
-func TestBuiltinStylePresetsAreRefreshed(t *testing.T) {
-	db := openTest(t)
-	clearStylePresets(t, db)
-	undoMigrationsFrom(t, db, 5)
-	if err := db.migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	list := read(t, db, func(tx store.Tx) ([]domain.StylePreset, error) { return tx.ListStylePresets() })
-	if len(list) != len(store.BuiltinStylePresets) {
-		t.Fatalf("%d presets", len(list))
-	}
-	for i, p := range list {
-		if b := store.BuiltinStylePresets[i]; p.Name != b.Name || p.Instructions != b.Instructions || p.IsDefault != b.IsDefault {
-			t.Errorf("%s differs from store.BuiltinStylePresets", p.Name)
-		}
-	}
-	checkPresetMigrations(t, "0005_builtin_style_presets.sql", "0015_refresh_builtin_style_presets.sql")
-}
-
-// checkPresetMigrations checks that the seeding migration holds the seeded
-// text of every built-in preset and the refreshing one both texts.
-func checkPresetMigrations(t *testing.T, seeding, refreshing string) {
-	t.Helper()
-	seed, err := embeddedMigrations.ReadFile("migrations/" + seeding)
-	if err != nil {
-		t.Fatal(err)
-	}
-	refresh, err := embeddedMigrations.ReadFile("migrations/" + refreshing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, b := range storetest.SeededStylePresets {
-		quoted := "'" + b.Instructions + "'"
-		if !strings.Contains(string(seed), quoted) || !strings.Contains(string(refresh), quoted) ||
-			!strings.Contains(string(refresh), "'"+store.BuiltinStylePresets[i].Instructions+"'") {
-			t.Errorf("%s: the migrations' text differs from the tests' copy", b.Name)
-		}
 	}
 }
 
@@ -370,37 +323,39 @@ func TestOpenWithoutMigrating(t *testing.T) {
 	db.Close()
 }
 
-// sqliteObjects lists the names of a table's triggers and indexes.
-func sqliteObjects(t *testing.T, db *DB, table string) string {
-	t.Helper()
-	var names string
-	if err := db.writer.QueryRow(`SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master
-		WHERE tbl_name = ? ORDER BY name)`, table).Scan(&names); err != nil {
+// A database from before 1.0.0, at a version between 1 and 21, is refused,
+// migrating or not, and left exactly as it was: nothing is applied and no
+// backup is written.
+func TestOlderSchemaIsRefused(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codeatrophy.db")
+	db, err := Open(ctx, path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return names
-}
-
-// Each migration run again keeps the library, and SQLite keeps the
-// triggers and indexes of the tables it rebuilds.
-func TestMigrationsKeepData(t *testing.T) {
-	storetest.RunMigrations(t, storetest.MigrationHarness{
-		New: func(t *testing.T) string { return filepath.Join(t.TempDir(), "codeatrophy.db") },
-		Open: func(t *testing.T, path string) storetest.MigrationDB {
-			db, err := Open(context.Background(), path)
-			if err != nil {
-				t.Fatal(err)
+	write(t, db, func(tx store.Tx) error { return tx.SetSetting("k", "v") })
+	db.Close()
+	for _, v := range []int{1, 10, store.BaselineVersion - 1} {
+		setVersion(t, path, v)
+		before, _ := os.ReadFile(path)
+		for _, opts := range []Options{{}, {NoMigrate: true}} {
+			_, err := OpenWith(ctx, path, opts)
+			if !errors.Is(err, store.ErrOlderSchema) || errors.Is(err, store.ErrMigrationNeeded) ||
+				!strings.Contains(err.Error(), fmt.Sprintf("schema version %d is older", v)) ||
+				!strings.Contains(err.Error(), "upgrade it with Codeatrophy 1.0.0 first") {
+				t.Errorf("version %d, NoMigrate %v: %v", v, opts.NoMigrate, err)
 			}
-			t.Cleanup(func() { db.Close() })
-			return db
-		},
-		UndoFrom: func(t *testing.T, db storetest.MigrationDB, from int) { undoMigrationsFrom(t, db.(*DB), from) },
-		Exec: func(db storetest.MigrationDB, q string) error {
-			_, err := db.(*DB).writer.Exec(q)
-			return err
-		},
-		Objects: func(t *testing.T, db storetest.MigrationDB, table string) string {
-			return sqliteObjects(t, db.(*DB), table)
-		},
-	})
+		}
+		if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+			t.Errorf("version %d: the database was changed", v)
+		}
+		if m, _ := filepath.Glob(filepath.Join(dir, "*.backup-v*")); len(m) != 0 {
+			t.Errorf("version %d: a backup was written: %v", v, m)
+		}
+		st, err := Inspect(ctx, path)
+		if err != nil || st.Version != v || len(st.Pending) != 0 {
+			t.Errorf("version %d: inspect %+v %v", v, st, err)
+		}
+	}
 }

@@ -323,7 +323,7 @@ func Inspect(ctx context.Context, rawURL string, opts Options) (store.Status, er
 			}
 		}
 		for _, m := range migs {
-			if m.version > st.Version {
+			if m.version > st.Version && !store.TooOld(st.Version) {
 				st.Pending = append(st.Pending, m.name)
 			}
 		}

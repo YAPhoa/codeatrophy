@@ -33,6 +33,13 @@ is quick for a personal library of thousands of items.
    after the version it was at (`codeatrophy.db.backup-v5-<time>`), and
    keeps the three newest; PostgreSQL gets no automatic backup.
 
+**From before 1.0.0.** A release after 1.0.0 migrates only a database that
+Codeatrophy 1.0.0 or later has already brought to its schema. Upgrade an
+older install to 1.0.0 first (`git checkout v1.0.0`, then step 3), let it
+start once, and then go on to the newer release. A newer release refuses
+an older database, says so and changes nothing; `db status` shows it as
+"from before Codeatrophy 1.0.0".
+
 **Published images.** Releases now come as a published image,
 `ghcr.io/yaphoa/codeatrophy`, which `docker compose pull` fetches. The
 image an install built before, `codeatrophy:0.1.0`, is no longer used;

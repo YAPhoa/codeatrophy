@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
@@ -331,86 +330,4 @@ func deleteWorkingCopy(db store.Store, account, itemID, language string) (ok boo
 		return err
 	})
 	return ok, err
-}
-
-// Migration 20 makes personal data per account: what a library holds goes
-// to its oldest account, or to none (Unowned) while it has no account, and
-// every other row is kept.
-func testPerAccountMigration(t *testing.T, h MigrationHarness) {
-	for _, withAccounts := range []bool{false, true} {
-		t.Run(fmt.Sprint("accounts=", withAccounts), func(t *testing.T) {
-			owner := store.Unowned
-			want, db := h.rerun(t, 20, func(db MigrationDB) {
-				Populate(t, db)
-				if !withAccounts {
-					return
-				}
-				owner = "old"
-				Write(t, db, func(tx store.Tx) error {
-					for i, id := range []string{"new", "old"} {
-						at := now.Add(time.Duration(1-i) * time.Hour)
-						u := store.User{ID: id, Email: id + "@example.com", PasswordHash: "h", CreatedAt: at, UpdatedAt: at}
-						if err := tx.InsertUser(&u); err != nil {
-							return err
-						}
-					}
-					return tx.ClaimUnowned("old")
-				})
-			}, func(db MigrationDB) {
-				if err := h.Exec(db, `SELECT COUNT(*) FROM item_states`); err == nil {
-					t.Error("version 19 has an item_states table")
-				}
-				if err := h.Exec(db, `SELECT status, favorite, notes FROM items`); err != nil {
-					t.Errorf("version 19 has no personal state on items: %v", err)
-				}
-			}, Dump)
-			SameDump(t, "after migration 20", want, Dump(t, db))
-			for _, table := range store.PersonalTables {
-				if n := countWhere(t, db, table, owner); n == 0 {
-					t.Errorf("%s has no rows of %q", table, owner)
-				}
-			}
-			if _, ok, _ := getSetting(db, store.PreferencesKey(owner)); !ok {
-				t.Errorf("no preferences for %q", owner)
-			}
-			h.rejects(t, db, map[string]string{
-				"a state of no item": `INSERT INTO item_states (user_id, item_id, status) VALUES ('u', 'nothing', 'done')`,
-			})
-		})
-	}
-}
-
-// Migration 21 makes collections per account: they go to the oldest
-// account, or to none while there is no account, with their memberships.
-func testCollectionsPerAccountMigration(t *testing.T, h MigrationHarness) {
-	for _, withAccounts := range []bool{false, true} {
-		t.Run(fmt.Sprint("accounts=", withAccounts), func(t *testing.T) {
-			owner := store.Unowned
-			want, db := h.rerun(t, 21, func(db MigrationDB) {
-				Populate(t, db)
-				if !withAccounts {
-					return
-				}
-				owner = "old"
-				Write(t, db, func(tx store.Tx) error {
-					for i, id := range []string{"new", "old"} {
-						at := now.Add(time.Duration(1-i) * time.Hour)
-						u := store.User{ID: id, Email: id + "@example.com", PasswordHash: "h", CreatedAt: at, UpdatedAt: at}
-						if err := tx.InsertUser(&u); err != nil {
-							return err
-						}
-					}
-					return tx.ClaimUnowned("old")
-				})
-			}, func(db MigrationDB) {
-				if err := h.Exec(db, `SELECT user_id FROM collections`); err == nil {
-					t.Error("version 20 has collections.user_id")
-				}
-			}, Dump)
-			SameDump(t, "after migration 21", want, Dump(t, db))
-			if n, all := countWhere(t, db, "collections", owner), countRows(t, db, "collections"); n == 0 || n != all {
-				t.Errorf("%d of %d collections belong to %q", n, all, owner)
-			}
-		})
-	}
 }

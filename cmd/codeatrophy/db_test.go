@@ -63,12 +63,12 @@ func TestDBMigrateOutput(t *testing.T) {
 }
 
 func TestDBStatusOfABehindDatabase(t *testing.T) {
-	st := store.Status{Backend: "SQLite", Location: "/data/x.db", Exists: true, Version: 5, Latest: 6,
-		Pending: []string{"0006_problem_interface.sql"}}
+	st := store.Status{Backend: "SQLite", Location: "/data/x.db", Exists: true, Version: 22, Latest: 23,
+		Pending: []string{"0023_later.sql"}}
 	var out bytes.Buffer
 	printStatus(&out, st, false)
-	for _, want := range []string{"Schema version: 5", "Expected version: 6 (this server)",
-		"Pending migrations: 0006_problem_interface.sql (applied by codeatrophy db migrate)"} {
+	for _, want := range []string{"Schema version: 22 Expected", "Expected version: 23 (this server)",
+		"Pending migrations: 0023_later.sql (applied by codeatrophy db migrate)"} {
 		if !strings.Contains(words(out.String()), want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}
@@ -114,6 +114,44 @@ func TestDBMigrateRefusesANewerSchema(t *testing.T) {
 	}
 }
 
+// A database from before 1.0.0 is refused with what to do, nothing is
+// applied, and its status says so.
+func TestDBMigrateRefusesAPre100Database(t *testing.T) {
+	ctx := context.Background()
+	quiet := slog.New(slog.DiscardHandler)
+	tg := dbopen.Target{SQLitePath: filepath.Join(t.TempDir(), "x.db")}
+	var out bytes.Buffer
+	if err := runMigrate(ctx, &out, tg, quiet); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", tg.SQLitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version > 10`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	out.Reset()
+	err = runMigrate(ctx, &out, tg, quiet)
+	if !errors.Is(err, store.ErrOlderSchema) || !strings.Contains(out.String(), "schema version 10") ||
+		strings.Contains(out.String(), "Pending") || strings.Contains(out.String(), "Applied") {
+		t.Errorf("a database from before 1.0.0: %v\n%s", err, out.String())
+	}
+	st, err := dbopen.Inspect(ctx, tg)
+	if err != nil || st.Version != 10 {
+		t.Fatalf("inspect: %+v %v", st, err)
+	}
+	out.Reset()
+	printStatus(&out, st, false)
+	for _, want := range []string{"Schema version: 10 (from before Codeatrophy 1.0.0: upgrade it with 1.0.0 first)",
+		"Pending migrations: none"} {
+		if !strings.Contains(words(out.String()), want) {
+			t.Errorf("status: missing %q in:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestDBStatusBranches(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, store.Status{Backend: "SQLite", Location: "/data/new.db", Latest: 6,
@@ -129,10 +167,10 @@ func TestDBStatusBranches(t *testing.T) {
 		t.Errorf("rows without counts:\n%s", out.String())
 	}
 	out.Reset()
-	printStatus(&out, store.Status{Backend: "PostgreSQL", Location: "postgres://db/x", Exists: true, Version: 6, Latest: 6,
+	printStatus(&out, store.Status{Backend: "PostgreSQL", Location: "postgres://db/x", Exists: true, Version: 22, Latest: 22,
 		Counts: []store.TableCount{{Table: "items", Rows: 3}, {Table: "test_cases", Rows: 12}}}, false)
 	got := words(out.String())
-	for _, want := range []string{"Schema version: 6", "Pending migrations: none", "Rows: items 3 test_cases 12"} {
+	for _, want := range []string{"Schema version: 22 Expected", "Pending migrations: none", "Rows: items 3 test_cases 12"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}

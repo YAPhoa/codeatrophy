@@ -333,6 +333,8 @@ func (db *DB) checkVersion(ctx context.Context) error {
 	switch {
 	case current > latest:
 		return newerError(current, latest)
+	case store.TooOld(current):
+		return store.OlderSchemaError(current)
 	case current < latest:
 		e := &store.MigrationNeededError{Version: current, Expected: latest}
 		for _, m := range migs {
@@ -380,6 +382,9 @@ func (db *DB) migrate(ctx context.Context) error {
 	latest := migs[len(migs)-1].version
 	if current > latest {
 		return newerError(current, latest)
+	}
+	if store.TooOld(current) {
+		return store.OlderSchemaError(current)
 	}
 	for _, m := range migs {
 		if m.version <= current {

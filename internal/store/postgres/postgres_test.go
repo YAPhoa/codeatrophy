@@ -108,26 +108,6 @@ func TestBuiltinStylePresetsAreSeededOnce(t *testing.T) {
 	}
 }
 
-// The migrations hold the seeded text of every built-in preset, and the
-// refreshing one the current text too.
-func TestBuiltinStylePresetMigrations(t *testing.T) {
-	seed, err := embeddedMigrations.ReadFile("migrations/0005_initial_schema.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	refresh, err := embeddedMigrations.ReadFile("migrations/0015_refresh_builtin_style_presets.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, b := range storetest.SeededStylePresets {
-		quoted := "'" + b.Instructions + "'"
-		if !strings.Contains(string(seed), quoted) || !strings.Contains(string(refresh), quoted) ||
-			!strings.Contains(string(refresh), "'"+store.BuiltinStylePresets[i].Instructions+"'") {
-			t.Errorf("%s: the migrations' text differs from the tests' copy", b.Name)
-		}
-	}
-}
-
 // The database refuses to change a provider's kind, even when asked
 // directly.
 func TestAIProviderKindIsImmutable(t *testing.T) {
@@ -267,94 +247,50 @@ func addMigration(t *testing.T, name, query string) {
 // laterMigration is the name of the migration addMigration adds.
 var laterMigration = fmt.Sprintf("%04d_later.sql", store.SchemaVersion+1)
 
-// downMigrations undo a migration, so that tests can run it again on a
-// database that already holds data.
-var downMigrations = map[int]string{
-	// The check of version 7 knew two kinds.
-	8: `ALTER TABLE ai_providers DROP CONSTRAINT ai_providers_kind_check;
-		ALTER TABLE ai_providers ADD CONSTRAINT ai_providers_kind_check CHECK (kind IN ('anthropic', 'openai_compatible'));`,
-	9:  `ALTER TABLE item_tags DROP CONSTRAINT item_tags_tag_fkey; DROP TABLE tags;`,
-	10: `ALTER TABLE ai_providers DROP COLUMN effort;`,
-	11: `ALTER TABLE solutions DROP COLUMN last_run_passed, DROP COLUMN last_run_total, DROP COLUMN last_run_time_ms,
-		DROP COLUMN last_run_memory_kb, DROP COLUMN last_run_at;`,
-	12: `DROP TABLE ai_jobs; DROP TABLE drafts;`,
-	13: `ALTER TABLE test_cases DROP COLUMN generator_language, DROP COLUMN generator_source;`,
-	14: `DROP TABLE item_links; DROP TABLE deleted_items;
-		ALTER TABLE items ADD CONSTRAINT items_variant_of_fkey
-			FOREIGN KEY (variant_of) REFERENCES items (id) ON DELETE SET NULL DEFERRABLE;`,
-	16: `DROP TABLE working_copies;`,
-	17: `ALTER TABLE items DROP COLUMN created_via, DROP COLUMN created_client, DROP COLUMN created_model,
-		DROP COLUMN updated_via, DROP COLUMN updated_client, DROP COLUMN updated_model;`,
-	18: `DROP TABLE sessions; DROP TABLE users;`,
-	19: `DROP TABLE mcp_tokens;`,
-	20: `ALTER TABLE items ADD COLUMN status text COLLATE "C" NOT NULL DEFAULT 'todo',
-			ADD COLUMN favorite boolean NOT NULL DEFAULT false, ADD COLUMN notes bytea NOT NULL DEFAULT '';
-		UPDATE items SET status = s.status, favorite = s.favorite, notes = s.notes FROM item_states s
-			WHERE s.item_id = items.id AND s.user_id = COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
-		ALTER TABLE items ALTER COLUMN status DROP DEFAULT;
-		DROP TABLE item_states;
-		DELETE FROM working_copies WHERE user_id <> COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
-		DROP INDEX working_copies_item_id;
-		ALTER TABLE working_copies DROP CONSTRAINT working_copies_pkey, ADD PRIMARY KEY (item_id, language);
-		DROP INDEX submissions_user_item, drafts_user_updated, ai_jobs_user_newest, ai_log_user_newest;
-		ALTER TABLE working_copies DROP COLUMN user_id;
-		ALTER TABLE submissions DROP COLUMN user_id;
-		ALTER TABLE drafts DROP COLUMN user_id;
-		ALTER TABLE ai_jobs DROP COLUMN user_id;
-		ALTER TABLE ai_log DROP COLUMN user_id;
-		UPDATE settings SET key = 'preferences' WHERE key = 'preferences:' || COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
-		DELETE FROM settings WHERE key LIKE 'preferences:%';`,
-	21: `DROP INDEX collections_user_parent; ALTER TABLE collections DROP COLUMN user_id;`,
-	22: `ALTER TABLE sessions DROP COLUMN user_agent, DROP COLUMN last_used_at;`,
-}
-
-// undoMigrationsFrom takes the database back to the version before from.
-func undoMigrationsFrom(t *testing.T, db *DB, from int) {
-	t.Helper()
-	for v := store.SchemaVersion; v >= from; v-- {
-		if down, ok := downMigrations[v]; ok {
-			if _, err := db.pool.Exec(down); err != nil {
-				t.Fatal(err)
+// A database from before 1.0.0, at a version between 5 (the first
+// PostgreSQL had) and 21, is refused, migrating or not, and left as it
+// was: nothing is applied.
+func TestOlderSchemaIsRefused(t *testing.T) {
+	ctx := context.Background()
+	url := pgtest.URL(t)
+	db := open(t, url, nil)
+	if err := db.Write(ctx, func(tx store.Tx) error { return tx.SetSetting("k", "v") }); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() string {
+		var s string
+		if err := db.pool.QueryRow(`SELECT (SELECT string_agg(version || ' ' || name, ', ' ORDER BY version) FROM schema_migrations)
+			|| ' / ' || (SELECT string_agg(relname, ',' ORDER BY relname) FROM pg_class WHERE relnamespace = current_schema()::regnamespace)
+			|| ' / ' || (SELECT string_agg(key || '=' || value, ',') FROM settings)`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	for _, v := range []int{5, 10, store.BaselineVersion - 1} {
+		if _, err := db.pool.Exec(`DELETE FROM schema_migrations`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.pool.Exec(`INSERT INTO schema_migrations (version, name, applied_at)
+			SELECT i, lpad(i::text, 4, '0') || '_old.sql', 0 FROM generate_series(5, $1::integer) AS i`, v); err != nil {
+			t.Fatal(err)
+		}
+		before := snapshot()
+		for _, noMigrate := range []bool{false, true} {
+			_, err := Open(ctx, url, Options{NoMigrate: noMigrate})
+			if !errors.Is(err, store.ErrOlderSchema) || errors.Is(err, store.ErrMigrationNeeded) ||
+				!strings.Contains(err.Error(), fmt.Sprintf("schema version %d is older", v)) ||
+				!strings.Contains(err.Error(), "upgrade it with Codeatrophy 1.0.0 first") {
+				t.Errorf("version %d, NoMigrate %v: %v", v, noMigrate, err)
 			}
 		}
+		if after := snapshot(); after != before {
+			t.Errorf("version %d: the database was changed:\n  %s\nwas\n  %s", v, after, before)
+		}
+		st, err := Inspect(ctx, url, Options{})
+		if err != nil || st.Version != v || len(st.Pending) != 0 {
+			t.Errorf("version %d: inspect %+v %v", v, st, err)
+		}
 	}
-	if _, err := db.pool.Exec(`DELETE FROM schema_migrations WHERE version >= $1`, from); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// pgObjects lists a table's indexes, triggers and constraints, with the
-// constraints' definitions.
-func pgObjects(t *testing.T, db *DB, table string) string {
-	t.Helper()
-	var s string
-	if err := db.pool.QueryRow(`SELECT COALESCE(string_agg(o, ', ' ORDER BY o), '') FROM (
-			SELECT 'index ' || indexname AS o FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1
-			UNION ALL SELECT 'trigger ' || tgname FROM pg_trigger WHERE tgrelid = to_regclass($1) AND NOT tgisinternal
-			UNION ALL SELECT 'constraint ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
-				WHERE conrelid = to_regclass($1)) objects`, table).Scan(&s); err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-// Each migration run again keeps the library, and leaves each table's
-// indexes, triggers and constraints as a new database has them.
-func TestMigrationsKeepData(t *testing.T) {
-	storetest.RunMigrations(t, storetest.MigrationHarness{
-		New: func(t *testing.T) string { return pgtest.URL(t) },
-		Open: func(t *testing.T, url string) storetest.MigrationDB {
-			return open(t, url, nil)
-		},
-		UndoFrom: func(t *testing.T, db storetest.MigrationDB, from int) { undoMigrationsFrom(t, db.(*DB), from) },
-		Exec: func(db storetest.MigrationDB, q string) error {
-			_, err := db.(*DB).pool.Exec(q)
-			return err
-		},
-		Objects: func(t *testing.T, db storetest.MigrationDB, table string) string {
-			return pgObjects(t, db.(*DB), table)
-		},
-	})
 }
 
 // appendSetting adds s to the comma-separated setting "order": a
