@@ -54,7 +54,7 @@ initialises its database; the judge shows as unavailable until then.
 
 The first visit asks you to create your account: choose the email and
 password you want to sign in with. A sign-in lasts 30 days from the last time you used the app in that browser. See
-[Signing in](#signing-in) to turn sign-in off or manage accounts.
+[Signing in](docs/signing-in.md) to turn sign-in off or manage accounts.
 
 To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
 `codeatrophy-data` volumes).
@@ -86,9 +86,9 @@ Everything is configured with environment variables, all documented in
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | unset | Keys of the environment providers, for unattended setups |
 | `CODEATROPHY_AI_BLOCK_PRIVATE` | `false` | Also refuse loopback and private addresses as AI provider base URLs (see [Security](#security)) |
 | `CODEATROPHY_AI_ALLOWED_HOSTS` | unset | Host names, addresses or CIDR prefixes AI providers may reach whatever the rules say |
-| `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](#signing-in)) |
+| `CODEATROPHY_AUTH` | `on` | Require signing in to the web UI and API; `off` skips it (see [Signing in](docs/signing-in.md)) |
 | `CODEATROPHY_SESSION_TTL` | `720h` | How long a sign-in lasts without being used |
-| `CODEATROPHY_TRUSTED_PROXIES` | unset | Addresses or CIDR prefixes of reverse proxies whose `X-Forwarded-For` is believed (see [Signing in](#signing-in)) |
+| `CODEATROPHY_TRUSTED_PROXIES` | unset | Addresses or CIDR prefixes of reverse proxies whose `X-Forwarded-For` is believed (see [Signing in](docs/signing-in.md)) |
 | `CODEATROPHY_MCP_TOKEN` | unset | Server-wide bearer token for `/mcp`, besides the per-account tokens made in the UI |
 | `CODEATROPHY_LOG_LEVEL`, `CODEATROPHY_LOG_FORMAT` | `info`, `text` | Log level (`debug`, `info`, `warn`, `error`) and format (`text`, `json`) |
 | `CODEATROPHY_ACCESS_LOG` | `off` | Log every request (method, path, status, client) at info instead of debug |
@@ -113,73 +113,6 @@ languages. One preset can be the default. A new instance starts with three
 built-in presets (Interview practice, the default; Contest style; Study
 notes), which you can edit or delete like your own; deleted ones do not come
 back.
-
-## Signing in
-
-Sign-in is on by default. The web UI shows a sign-in page, and every API
-request needs a session, except the health checks (`/api/v1/health` and
-`/api/v1/health/ready`). Uptime monitors should poll `/api/v1/health/ready`,
-which also checks the database.
-
-- **First account.** While no account exists, the sign-in page offers to
-  create one with an email and password. Whoever gets there first creates
-  it, so do it right after the first start, or create it on the server
-  instead with `codeatrophy user add`. Once an account exists, the page only
-  signs in.
-- **Staying signed in.** A sign-in lasts `CODEATROPHY_SESSION_TTL` (30 days)
-  and is renewed as you use the app, so you are asked again only after that
-  long away. Sign out from the sidebar or Settings → Account, where you can
-  also change your password (which signs out your other browsers).
-- **Accounts on the command line.** Accounts share one library. Each keeps
-  its own progress (status, favorites, notes), collections, code,
-  submissions, drafts, AI history and preferences, and deleting an account
-  deletes those.
-
-  ```sh
-  docker compose exec app codeatrophy user list
-  docker compose exec app codeatrophy user add someone@example.com
-  docker compose exec app codeatrophy user password you@example.com
-  docker compose exec app codeatrophy user delete someone@example.com
-  ```
-
-  `add` and `password` ask for the password on a terminal (add `-it` if
-  Compose does not give one) or read it from the first line of standard
-  input.
-- **Forgotten password.** There is no reset by email. Whoever runs the
-  server sets a new password on the command line, which also signs that
-  account out everywhere:
-
-  ```sh
-  docker compose exec app codeatrophy user password you@example.com
-  ```
-
-  Without Compose, run `codeatrophy user password you@example.com` with the
-  server's environment.
-- **Turning it off.** Set `CODEATROPHY_AUTH=off` to skip sign-in entirely,
-  for example on a machine only you use, or behind a reverse proxy that
-  already authenticates. Anyone who can reach the port can then use the app,
-  as before sign-in existed, and it keeps the progress of the oldest
-  account (or of none, until one is created). The server logs a warning at
-  startup.
-- **MCP.** Assistants cannot sign in with a password, so while sign-in is on
-  `/mcp` needs a bearer token: make one per machine or assistant under
-  Settings → MCP server → Tokens (shown once, with the command that
-  connects Claude Code), and revoke it there. `CODEATROPHY_MCP_TOKEN` adds a
-  server-wide token for unattended setups. With sign-in off that is the only
-  token, and optional.
-
-Passwords are stored as bcrypt hashes. The session cookie is `HttpOnly` and
-`SameSite=Strict`, and `Secure` over HTTPS (also behind a proxy that sends
-`X-Forwarded-Proto: https`); the server keeps only a hash of it. Changes
-must come from the app's own pages (a cross-origin check). Each client
-gets 10 failed sign-ins per 15 minutes, and a browser that has signed in
-before has a count of its own, so someone guessing passwords cannot keep
-you out of a browser you use. Behind a reverse proxy every client has the
-proxy's address; set `CODEATROPHY_TRUSTED_PROXIES` to the proxy's address
-so that the server reads each client's own from `X-Forwarded-For`. To
-check it, set `CODEATROPHY_ACCESS_LOG=on` and look at the `client` of each
-request in the log; a peer that sends `X-Forwarded-For` without being
-listed also gets a warning there.
 
 ## Connecting an MCP client
 
@@ -373,7 +306,7 @@ which an older Codeatrophy refuses to import; upgrade it first.
 ## Security
 
 - **Sign-in.** The web UI and the API need a signed-in session, and `/mcp`
-  a bearer token (see [Signing in](#signing-in)). The Compose file still
+  a bearer token (see [Signing in](docs/signing-in.md)). The Compose file still
   publishes the app on `127.0.0.1` only. To expose it beyond the local
   machine, serve it over HTTPS (a reverse proxy such as Nginx Proxy Manager
   or Caddy), keep sign-in on, and set `CODEATROPHY_PUBLIC_URL` to the public
