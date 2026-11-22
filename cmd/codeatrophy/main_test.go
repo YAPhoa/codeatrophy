@@ -64,3 +64,28 @@ func TestShutdownWithOpenMCPSession(t *testing.T) {
 		t.Fatalf("shutdown timed out after %v with an MCP session open", time.Since(start).Round(time.Millisecond))
 	}
 }
+
+// The start-up warning about the first account is for a server that
+// listens beyond loopback while sign-in is on and no account exists.
+func TestSetupExposed(t *testing.T) {
+	open := app.AuthStatus{Enabled: true, SetupRequired: true}
+	for _, tc := range []struct {
+		addr string
+		st   app.AuthStatus
+		want bool
+	}{
+		{"127.0.0.1:8484", open, false},
+		{"[::1]:8484", open, false},
+		{"localhost:8484", open, false},
+		{":8484", open, true},
+		{"0.0.0.0:8484", open, true},
+		{"[::]:8484", open, true},
+		{"192.168.1.20:8484", open, true},
+		{":8484", app.AuthStatus{}, false},              // sign-in off
+		{":8484", app.AuthStatus{Enabled: true}, false}, // an account exists
+	} {
+		if got := setupExposed(tc.addr, tc.st); got != tc.want {
+			t.Errorf("setupExposed(%q, %+v) = %v, want %v", tc.addr, tc.st, got, tc.want)
+		}
+	}
+}

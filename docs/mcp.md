@@ -15,11 +15,11 @@ transport.
 
 ```sh
 # Claude Code
-claude mcp add --transport http codeatrophy http://localhost:8080/mcp
+claude mcp add --transport http codeatrophy http://localhost:8484/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8080/mcp`.
+`npx mcp-remote http://localhost:8484/mcp`.
 
 | Variable | Default | Effect |
 | --- | --- | --- |

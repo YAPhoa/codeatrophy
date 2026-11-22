@@ -1013,7 +1013,7 @@ func (c *client) hostDo(method, path, host string, headers ...string) response {
 // request.
 func TestHostAllowList(t *testing.T) {
 	c := newServer(t, func(o *httpapi.Options) { o.AllowedHosts = []string{"lan.example", "box.home.arpa"} })
-	for _, host := range []string{"localhost", "localhost:8081", "127.0.0.1:9", "[::1]:8080", "app.localhost", "lan.example:8080", "BOX.home.arpa"} {
+	for _, host := range []string{"localhost", "localhost:8081", "127.0.0.1:9", "[::1]:8484", "app.localhost", "lan.example:8484", "BOX.home.arpa"} {
 		if r := c.hostDo("GET", api+"/meta", host); r.status != 200 {
 			t.Errorf("%s: %d %s", host, r.status, r.body)
 		}
@@ -1035,7 +1035,7 @@ func TestHostAllowList(t *testing.T) {
 		t.Errorf("UI: %d", r.status)
 	}
 	// An allowed host's origin may write.
-	if r := c.do("POST", api+"/items", `{"type":"reading","title":"x"}`, "Origin", "http://lan.example:8080"); r.status != 201 {
+	if r := c.do("POST", api+"/items", `{"type":"reading","title":"x"}`, "Origin", "http://lan.example:8484"); r.status != 201 {
 		t.Errorf("allowed host origin: %d %s", r.status, r.body)
 	}
 	star := newServer(t, func(o *httpapi.Options) { o.AllowedHosts = []string{"*"} })

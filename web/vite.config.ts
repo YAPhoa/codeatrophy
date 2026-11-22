@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 
 // Where `npm run dev` forwards API and MCP requests. Override with
 // CODEATROPHY_BACKEND_URL when the server listens somewhere else.
-const backend = process.env.CODEATROPHY_BACKEND_URL ?? 'http://localhost:8080';
+const backend = process.env.CODEATROPHY_BACKEND_URL ?? 'http://localhost:8484';
 
 /**
  * Under the mock nothing is forwarded to a real server. The app's own client

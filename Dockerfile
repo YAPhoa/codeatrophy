@@ -29,10 +29,10 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/codeatrophy /usr/local/bin/codeatrophy
 COPY --from=build --chown=65532:65532 /out/data /data
 COPY LICENSE /usr/share/doc/codeatrophy/LICENSE
-ENV CODEATROPHY_ADDR=:8080 \
+ENV CODEATROPHY_ADDR=:8484 \
     CODEATROPHY_DATA_DIR=/data
 VOLUME ["/data"]
-EXPOSE 8080
+EXPOSE 8484
 USER 65532:65532
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/usr/local/bin/codeatrophy", "healthcheck"]

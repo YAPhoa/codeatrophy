@@ -15,11 +15,20 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
+	if c.Addr != "127.0.0.1:8484" || c.DataDir != "./data" || c.DBPath != "data/codeatrophy.db" || c.LogLevel != slog.LevelInfo ||
 		c.MaxImportBytes != 52428800 || c.MaxSourceBytes != 65536 || c.MaxNotesChars != 4000 || c.MaxLinksPerItem != 30 ||
 		c.MaxGeneratedTestCases != 30 || c.MaxLargeTestCases != 5 || c.Judge.Engine != "none" || c.Judge.Judge0Cgroups ||
 		!c.MCP.Enabled || c.AI.Timeout != 5*time.Minute || c.PublicURL != "" || c.AI.Provider != "" || c.AI.Workers != 2 {
 		t.Errorf("defaults: %+v", c)
+	}
+}
+
+// The binary listens on loopback unless told otherwise; the container sets
+// :8484 to listen on all its interfaces.
+func TestAddr(t *testing.T) {
+	c, err := LoadFrom(env(map[string]string{"CODEATROPHY_ADDR": ":8484"}))
+	if err != nil || c.Addr != ":8484" {
+		t.Errorf("addr %q, %v", c.Addr, err)
 	}
 }
 
@@ -145,7 +154,7 @@ func TestHostAllowList(t *testing.T) {
 		"CODEATROPHY_PUBLIC_URL":          "https://Code.Example.com:8443/",
 		"CODEATROPHY_ALLOWED_ORIGINS":     "http://dev.example:5173",
 		"CODEATROPHY_MCP_ALLOWED_ORIGINS": "https://mcp.example",
-		"CODEATROPHY_ALLOWED_HOSTS":       "nas.local, 192.168.1.20:8080, [fd00::1]",
+		"CODEATROPHY_ALLOWED_HOSTS":       "nas.local, 192.168.1.20:8484, [fd00::1]",
 		"CODEATROPHY_MCP_MAX_SESSIONS":    "7",
 	}))
 	if err != nil {

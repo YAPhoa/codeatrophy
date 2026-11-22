@@ -175,7 +175,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Addr:            get("CODEATROPHY_ADDR", ":8080"),
+		Addr:            get("CODEATROPHY_ADDR", "127.0.0.1:8484"),
 		DataDir:         get("CODEATROPHY_DATA_DIR", "./data"),
 		SecretKey:       getenv("CODEATROPHY_SECRET_KEY"),
 		LogFormat:       strings.ToLower(get("CODEATROPHY_LOG_FORMAT", "text")),

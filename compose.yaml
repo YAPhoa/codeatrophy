@@ -60,7 +60,7 @@ services:
       - path: .env
         required: false
     environment:
-      CODEATROPHY_ADDR: ":8080"
+      CODEATROPHY_ADDR: ":8484"
       # Holds secret.key, and the SQLite database when that is used.
       CODEATROPHY_DATA_DIR: /data
       CODEATROPHY_DATABASE_URL: ${CODEATROPHY_DATABASE_URL-postgres://codeatrophy:${CODEATROPHY_POSTGRES_PASSWORD:-codeatrophy-postgres}@db:5432/codeatrophy?sslmode=disable}
@@ -70,7 +70,7 @@ services:
     ports:
       # Loopback only by default: the app can execute code. Expose it only
       # over HTTPS with sign-in on (CODEATROPHY_AUTH).
-      - "${CODEATROPHY_BIND_ADDRESS:-127.0.0.1}:${CODEATROPHY_HOST_PORT:-8080}:8080"
+      - "${CODEATROPHY_BIND_ADDRESS:-127.0.0.1}:${CODEATROPHY_HOST_PORT:-8484}:8484"
     volumes:
       - codeatrophy-data:/data
     networks:

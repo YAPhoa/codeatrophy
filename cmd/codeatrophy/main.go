@@ -219,6 +219,11 @@ func serve() error {
 	log.Info("codeatrophy started", "version", version, "addr", ln.Addr().String(), "data", cfg.DataDir,
 		"secretKey", keySource, "database", db.Backend(), "judge", cfg.Judge.Engine, "mcp", cfg.MCP.Enabled,
 		"ui", webui.Built())
+	if st, err := a.GetAuthStatus(ctx, ""); err == nil && setupExposed(cfg.Addr, st) {
+		log.Warn("until the first account exists, anyone who can reach this address can create it: create it now "+
+			"in the web UI or with \"codeatrophy user add <email>\". This is fine when the port is published only "+
+			"on localhost, as Compose does by default", "addr", ln.Addr().String())
+	}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
@@ -271,11 +276,29 @@ func shutdown(srv *http.Server, timeout time.Duration, log *slog.Logger) bool {
 	return true
 }
 
+// setupExposed reports whether the first account is still to be created
+// while the server listens beyond loopback, where anyone who reaches it
+// could create that account.
+func setupExposed(addr string, st app.AuthStatus) bool {
+	if !st.Enabled || !st.SetupRequired {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
+}
+
 // healthcheck requests /api/v1/health from the local server.
 func healthcheck() error {
 	addr := os.Getenv("CODEATROPHY_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = "127.0.0.1:8484"
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {

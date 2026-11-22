@@ -1302,7 +1302,7 @@ func TestHostBehindSameHostProxy(t *testing.T) {
 	}{
 		{"codeatrophy.example", true},
 		{"codeatrophy.example:443", true},
-		{"codeatrophy.localhost:8080", true},
+		{"codeatrophy.localhost:8484", true},
 		{"evil.example", false},
 	} {
 		c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)

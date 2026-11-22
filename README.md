@@ -49,7 +49,7 @@ cp .env.example .env      # adjust if you like; the defaults work
 docker compose up -d --build
 ```
 
-Open <http://localhost:8080>. The first start takes a minute while Judge0
+Open <http://localhost:8484>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
 The first visit asks you to create your account: choose the email and
@@ -73,7 +73,7 @@ Everything is configured with environment variables, all documented in
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODEATROPHY_HOST_PORT` | `8080` | Port on the host |
+| `CODEATROPHY_HOST_PORT` | `8484` | Port on the host |
 | `CODEATROPHY_BIND_ADDRESS` | `127.0.0.1` | Host address to publish on |
 | `CODEATROPHY_PUBLIC_URL` | unset | URL the instance is reached at, when not `localhost` |
 | `CODEATROPHY_ALLOWED_HOSTS` | unset | Extra host names or addresses the server answers to (see [Security](#security)) |
@@ -183,17 +183,17 @@ listed also gets a warning there.
 
 ## Connecting an MCP client
 
-The MCP endpoint is `http://localhost:8080/mcp` (Streamable HTTP).
+The MCP endpoint is `http://localhost:8484/mcp` (Streamable HTTP).
 
 ```sh
-claude mcp add --transport http codeatrophy http://localhost:8080/mcp
+claude mcp add --transport http codeatrophy http://localhost:8484/mcp
 ```
 
 Clients that only speak stdio can bridge with
-`npx mcp-remote http://localhost:8080/mcp`. While sign-in is on, make a
+`npx mcp-remote http://localhost:8484/mcp`. While sign-in is on, make a
 token under Settings → MCP server → Tokens; the UI shows the command with
 the token filled in, such as
-`claude mcp add --transport http codeatrophy http://localhost:8080/mcp --header "Authorization: Bearer cat_..."`.
+`claude mcp add --transport http codeatrophy http://localhost:8484/mcp --header "Authorization: Bearer cat_..."`.
 
 Over MCP the connected assistant does the writing; the server stores items,
 searches, and runs code to verify test cases. No AI provider needs to be
@@ -226,6 +226,10 @@ is quick for a personal library of thousands of items.
    a SQLite database it also writes a copy next to it, named after the
    version it was at (`codeatrophy.db.backup-v5-<time>`), and keeps the
    three newest; PostgreSQL gets no automatic backup.
+
+**Default port 8484.** The default port changed from 8080 to 8484. To keep
+reaching an existing install on 8080, set `CODEATROPHY_HOST_PORT=8080` in
+`.env`. The port inside the container changes either way, which is harmless.
 
 **Judge0's database on PostgreSQL 18.** Judge0's database moved to a new
 volume, `judge0-db-18`, and starts empty (it holds nothing the app needs).
@@ -463,7 +467,7 @@ make test          # Go tests (SQLite)
 make test-postgres # Go tests on PostgreSQL, against a throwaway server in Docker
 make lint          # go vet, gofmt check, UI lint and type check
 make web-dev-mock  # UI dev server with an in-memory API mock
-make run           # server on :8080 with data in ./data
+make run           # server on 127.0.0.1:8484 with data in ./data
 make build         # UI + server binary with the UI embedded (bin/codeatrophy)
 make up            # the whole Compose stack
 ```

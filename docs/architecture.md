@@ -888,7 +888,11 @@ of the routes; the `codeatrophy user` command uses the same services.
   reaches the server first can claim it, which the operator closes by
   creating the account right after the first start (or with
   `codeatrophy user add`); the server logs a warning on each start until
-  then.
+  then, a stronger one when it listens beyond loopback. The bare binary
+  listens on `127.0.0.1:8484` by default; the container listens on `:8484`
+  and Compose publishes it on loopback. `/auth/setup` is not limited to
+  loopback clients: under Compose the browser's requests arrive from the
+  Docker network's gateway.
 - **Sessions.** A session is 32 random bytes, sent as an `HttpOnly`,
   `SameSite=Strict` cookie; the store keeps only its SHA-256 hash
   (`sessions`), so a database leak yields no usable cookie. A session lasts

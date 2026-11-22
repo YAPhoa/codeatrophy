@@ -252,10 +252,10 @@ describe('describeError', () => {
 
 describe('mcpConnection', () => {
   it('builds the endpoint and commands', () => {
-    const c = mcpConnection(mcpUrl({ path: '/mcp', url: null }, 'http://localhost:8080/'), false);
-    expect(c.url).toBe('http://localhost:8080/mcp');
-    expect(c.claudeCommand).toBe('claude mcp add --transport http codeatrophy http://localhost:8080/mcp');
-    expect(c.stdioCommand).toBe('npx mcp-remote http://localhost:8080/mcp');
+    const c = mcpConnection(mcpUrl({ path: '/mcp', url: null }, 'http://localhost:8484/'), false);
+    expect(c.url).toBe('http://localhost:8484/mcp');
+    expect(c.claudeCommand).toBe('claude mcp add --transport http codeatrophy http://localhost:8484/mcp');
+    expect(c.stdioCommand).toBe('npx mcp-remote http://localhost:8484/mcp');
   });
 
   it('adds a bearer header with a placeholder for the token when one is required', () => {
@@ -268,8 +268,8 @@ describe('mcpConnection', () => {
 
 describe('mcpUrl', () => {
   it('prefers the public URL the operator configured over the page origin', () => {
-    expect(mcpUrl({ path: '/mcp', url: 'https://library.example.org/base/mcp' }, 'http://10.0.0.5:8080')).toBe('https://library.example.org/base/mcp');
-    expect(mcpUrl({ path: '/mcp', url: null }, 'http://10.0.0.5:8080')).toBe('http://10.0.0.5:8080/mcp');
+    expect(mcpUrl({ path: '/mcp', url: 'https://library.example.org/base/mcp' }, 'http://10.0.0.5:8484')).toBe('https://library.example.org/base/mcp');
+    expect(mcpUrl({ path: '/mcp', url: null }, 'http://10.0.0.5:8484')).toBe('http://10.0.0.5:8484/mcp');
   });
 });
 

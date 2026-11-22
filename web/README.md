@@ -27,7 +27,7 @@ Requires Node 22 and npm 10.
 | `npm test` | Unit tests (Vitest); `npm run test:watch` to keep them running |
 | `npm run test:e2e` | Browser smoke tests (Playwright) against the mock — see below |
 
-`npm run dev` expects the backend at `http://localhost:8080`. Point it
+`npm run dev` expects the backend at `http://localhost:8484`. Point it
 elsewhere with an environment variable:
 
 ```sh

@@ -11,7 +11,7 @@ The server has its own **authoring guide**: call `get_authoring_guide` before yo
 
 ## Before anything else
 
-1. **Check the tools are there.** If no Codeatrophy tools are available, say so and give the one-line fix rather than improvising: `claude mcp add --transport http codeatrophy http://localhost:8080/mcp` (the address is wherever their instance runs). Do not write the problem into the chat as a substitute unless they ask for that.
+1. **Check the tools are there.** If no Codeatrophy tools are available, say so and give the one-line fix rather than improvising: `claude mcp add --transport http codeatrophy http://localhost:8484/mcp` (the address is wherever their instance runs). Do not write the problem into the chat as a substitute unless they ask for that.
 2. **Call `get_overview` first.** It tells you which collections and tags already exist, which languages the judge can run and in which versions, how big the library is, the user's test-case preferences and the server's limits. Everything below leans on it: reusing a tag beats inventing a near-duplicate, and code you write has to run on the versions listed, which can be old.
 
 ## The user's preferences
