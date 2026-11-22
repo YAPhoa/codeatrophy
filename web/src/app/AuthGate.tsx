@@ -83,7 +83,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-type FieldErrors = Partial<Record<'email' | 'password' | 'confirm' | 'setupCode', string>>;
+type FieldErrors = Partial<Record<'email' | 'password' | 'confirm', string>>;
 
 /** The server's per-field messages, worded for the form ("is required" → "Required."). */
 function fieldErrors(err: ApiError): FieldErrors {
@@ -91,7 +91,7 @@ function fieldErrors(err: ApiError): FieldErrors {
   for (const [field, msg] of Object.entries(err.fields)) {
     const text = String(msg);
     const sentence = text.charAt(0).toUpperCase() + text.slice(1) + '.';
-    if (field === 'email' || field === 'password' || field === 'setupCode') out[field] = sentence;
+    if (field === 'email' || field === 'password') out[field] = sentence;
   }
   return out;
 }
@@ -102,15 +102,13 @@ function capitalise(s: string): string {
 
 /**
  * The sign-in page: the mark, the name and one small card, centred. While no
- * account exists it creates the first one instead, which needs the setup code
- * the server logs.
+ * account exists it creates the first one instead.
  */
 export function SignInPage({ setup, onSignedIn }: { setup: boolean; onSignedIn: (s: AuthSession) => void }) {
   useDocumentTitle(setup ? 'Create your account' : 'Sign in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [setupCode, setSetupCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<FieldErrors>({});
@@ -125,7 +123,7 @@ export function SignInPage({ setup, onSignedIn }: { setup: boolean; onSignedIn: 
     }
     setBusy(true);
     try {
-      const next = setup ? await api.auth.setup({ email, password, setupCode }) : await api.auth.login({ email, password });
+      const next = setup ? await api.auth.setup({ email, password }) : await api.auth.login({ email, password });
       onSignedIn(next);
     } catch (err) {
       setBusy(false);
@@ -160,46 +158,15 @@ export function SignInPage({ setup, onSignedIn }: { setup: boolean; onSignedIn: 
         </div>
         <form className="card signin-card" onSubmit={submit} noValidate>
           <h1 className="signin-title">{setup ? 'Create your account' : 'Sign in'}</h1>
-          {setup && (
-            <p className="signin-lead">
-              No account exists yet. Paste the setup code from the server log (look for <code translate="no">setupCode</code>) and choose the email and password you will sign in with.
-            </p>
-          )}
+          {setup && <p className="signin-lead">No account exists yet. Choose the email and password you will sign in with.</p>}
           {error && (
             <Callout tone="danger" role="alert">
               {error}
             </Callout>
           )}
-          {setup && (
-            <Field label="Setup code" error={fields.setupCode}>
-              {(p) => (
-                <input
-                  {...p}
-                  className="input mono"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
-                  value={setupCode}
-                  onChange={(e) => setSetupCode(e.target.value)}
-                  required
-                  autoFocus
-                />
-              )}
-            </Field>
-          )}
           <Field label="Email" error={fields.email}>
             {(p) => (
-              <input
-                {...p}
-                className="input"
-                type="email"
-                autoComplete={setup ? 'email' : 'username'}
-                spellCheck={false}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus={!setup}
-              />
+              <input {...p} className="input" type="email" autoComplete={setup ? 'email' : 'username'} spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
             )}
           </Field>
           <Field label="Password" error={fields.password} hint={setup ? 'At least 8 characters.' : undefined}>

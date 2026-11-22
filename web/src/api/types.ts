@@ -1308,7 +1308,7 @@ export interface AuthUser {
 export interface AuthSession {
   /** False when the server runs with `CODEATROPHY_AUTH=off`: nobody needs to sign in. */
   enabled: boolean;
-  /** True while no account exists; the first is created with the setup code from the server log. */
+  /** True while no account exists; the sign-in page then creates the first one. */
   setupRequired: boolean;
   user: AuthUser | null;
 }
@@ -1318,9 +1318,7 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface SetupRequest extends LoginRequest {
-  setupCode: string;
-}
+export type SetupRequest = LoginRequest;
 
 export interface PasswordChangeRequest {
   currentPassword: string;

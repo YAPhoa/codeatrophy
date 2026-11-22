@@ -67,9 +67,6 @@ func TestAuthOff(t *testing.T) {
 	if err != nil || st.Enabled || st.SetupRequired || st.User != nil {
 		t.Fatalf("status %+v, %v", st, err)
 	}
-	if e.logs.get("setupCode") != "" {
-		t.Error("a setup code was logged with sign-in off")
-	}
 	if _, err := e.app.Login(e.ctx, app.LoginInput{Email: "a@b.c", Password: "whatever1"}, "c"); code(err) != app.CodeBadRequest {
 		t.Errorf("login with sign-in off: %v", err)
 	}
@@ -77,34 +74,24 @@ func TestAuthOff(t *testing.T) {
 
 func TestAuthSetupAndLogin(t *testing.T) {
 	e := newAuthEnv(t, true)
-	setupCode := e.logs.get("setupCode")
-	if len(setupCode) != 19 {
-		t.Fatalf("setup code %q was not logged at start", setupCode)
-	}
 	st, err := e.app.GetAuthStatus(e.ctx, "")
 	if err != nil || !st.Enabled || !st.SetupRequired {
 		t.Fatalf("status before setup %+v, %v", st, err)
 	}
 
-	// The setup code is required, and a wrong one counts as a failure.
-	in := app.SetupInput{Email: " Me@Example.COM ", Password: "correct horse", SetupCode: "AAAA-BBBB-CCCC-DDDD"}
-	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeValidation {
-		t.Fatalf("wrong setup code: %v", err)
-	}
-	in.SetupCode = strings.ToLower(strings.ReplaceAll(setupCode, "-", " "))
-	in.Password = "short"
-	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeValidation || !strings.Contains(err.Error(), "at least 8") {
+	in := app.SetupInput{Email: " Me@Example.COM ", Password: "short"}
+	if _, err := e.app.Setup(e.ctx, in); code(err) != app.CodeValidation || !strings.Contains(err.Error(), "at least 8") {
 		t.Fatalf("short password: %v", err)
 	}
 	in.Password = "correct horse"
-	si, err := e.app.Setup(e.ctx, in, "c1")
+	si, err := e.app.Setup(e.ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if si.User.Email != "me@example.com" || si.Token == "" || !si.ExpiresAt.Equal(e.clock.Add(48*time.Hour)) {
 		t.Errorf("setup: %+v", si)
 	}
-	if _, err := e.app.Setup(e.ctx, in, "c1"); code(err) != app.CodeConflict {
+	if _, err := e.app.Setup(e.ctx, in); code(err) != app.CodeConflict {
 		t.Errorf("second setup: %v", err)
 	}
 

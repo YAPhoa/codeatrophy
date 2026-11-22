@@ -52,15 +52,8 @@ docker compose up -d --build
 Open <http://localhost:8080>. The first start takes a minute while Judge0
 initialises its database; the judge shows as unavailable until then.
 
-The first visit asks you to create your account. It needs the one-time setup
-code the server prints in its log while no account exists:
-
-```sh
-docker compose logs app | grep setupCode
-```
-
-Enter it with the email and password you want to sign in with. A sign-in
-lasts 30 days from the last time you used the app in that browser. See
+The first visit asks you to create your account: choose the email and
+password you want to sign in with. A sign-in lasts 30 days from the last time you used the app in that browser. See
 [Signing in](#signing-in) to turn sign-in off or manage accounts.
 
 To stop: `docker compose down` (your data stays in the `codeatrophy-db` and
@@ -121,11 +114,11 @@ back.
 Sign-in is on by default. The web UI shows a sign-in page, and every API
 request needs a session, except the health check (`/api/v1/health`).
 
-- **First account.** While no account exists, the server logs a setup code
-  at startup (`setupCode=XXXX-XXXX-XXXX-XXXX`) and the UI asks for it with
-  the email and password of the first account. Without the code nobody who
-  merely reaches the server first can claim it. A new code is printed on
-  every start until the account exists.
+- **First account.** While no account exists, the sign-in page offers to
+  create one with an email and password. Whoever gets there first creates
+  it, so do it right after the first start, or create it on the server
+  instead with `codeatrophy user add`. Once an account exists, the page only
+  signs in.
 - **Staying signed in.** A sign-in lasts `CODEATROPHY_SESSION_TTL` (30 days)
   and is renewed as you use the app, so you are asked again only after that
   long away. Sign out from the sidebar or Settings → Account, where you can

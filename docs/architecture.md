@@ -846,14 +846,17 @@ The web UI and the HTTP API require a signed-in session unless the operator
 sets `CODEATROPHY_AUTH=off`. Accounts (`users`) hold an email and a bcrypt
 password hash; every account sees the same library, since accounts decide
 only who may sign in. The rules live in the application services
-(`internal/app/auth.go`): validation, the one-time setup code for the first
-account, sign-in with a per-address limit on failures, sessions, password
+(`internal/app/auth.go`): validation, creating the first account,
+sign-in with a per-address limit on failures, sessions, password
 changes. The HTTP adapter maps them onto a cookie and gates `/api/` in front
 of the routes; the `codeatrophy user` command uses the same services.
 
-- **First account.** While no account exists the server generates a setup
-  code in memory and logs it; `POST /auth/setup` needs it, so reaching the
-  server first is not enough to claim it.
+- **First account.** While no account exists, `POST /auth/setup` creates
+  one with an email and password; once any exists it is refused. Whoever
+  reaches the server first can claim it, which the operator closes by
+  creating the account right after the first start (or with
+  `codeatrophy user add`); the server logs a warning on each start until
+  then.
 - **Sessions.** A session is 32 random bytes, sent as an `HttpOnly`,
   `SameSite=Strict` cookie; the store keeps only its SHA-256 hash
   (`sessions`), so a database leak yields no usable cookie. A session lasts

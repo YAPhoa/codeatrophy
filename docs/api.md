@@ -179,11 +179,8 @@ client shares the proxy's address, and so the limit. With sign-in off it is
 ### `POST /auth/setup`
 
 Creates the first account and signs it in:
-`{ "email": "...", "password": "...", "setupCode": "ABCD-EFGH-IJKL-MNOP" }`.
-The setup code is printed in the server log (`setupCode`) at startup while
-no account exists; case, spaces and dashes in it are ignored. A wrong code is
-`422 validation_failed` on `setupCode` and counts as a failed attempt (see
-`POST /auth/login`). Once any account exists it is `409 conflict`. The email
+`{ "email": "...", "password": "..." }`. Once any account exists it is
+`409 conflict`. The email
 must be an address (at most 254 characters, stored in lower case); the
 password 8 characters to 72 bytes (`422 validation_failed` on `email` or
 `password`). Response as for `POST /auth/login`.

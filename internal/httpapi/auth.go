@@ -137,7 +137,7 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	out, err := s.app.Setup(r.Context(), in, clientKey(r))
+	out, err := s.app.Setup(r.Context(), in)
 	if err != nil {
 		return err
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -24,9 +22,8 @@ import (
 
 // Sign-in for the web UI. Accounts are kept in the store with bcrypt
 // password hashes; a signed-in browser holds a random session token whose
-// SHA-256 hash is the session's id in the store. The first account is
-// created in the UI with a one-time setup code that the server logs, so
-// that nobody who merely reaches the server first can claim it. Every
+// SHA-256 hash is the session's id in the store. While no account exists,
+// the UI creates the first one with just an email and a password. Every
 // account sees the same library: accounts only decide who may sign in.
 
 // Default and bounds of the auth settings.
@@ -71,8 +68,8 @@ type AuthUser struct {
 type AuthStatus struct {
 	// Enabled is false when sign-in is turned off (CODEATROPHY_AUTH=off).
 	Enabled bool `json:"enabled"`
-	// SetupRequired is true while no account exists: the first one is
-	// created with the setup code from the server log.
+	// SetupRequired is true while no account exists: the sign-in page
+	// then creates the first one.
 	SetupRequired bool `json:"setupRequired"`
 	// User is the signed-in account, or nil.
 	User *AuthUser `json:"user"`
@@ -102,9 +99,8 @@ type LoginInput struct {
 
 // SetupInput creates the first account.
 type SetupInput struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	SetupCode string `json:"setupCode"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 // PasswordChange changes the signed-in account's password.
@@ -115,9 +111,8 @@ type PasswordChange struct {
 
 // authState is the mutable part of sign-in kept in memory.
 type authState struct {
-	mu        sync.Mutex
-	setupCode string
-	failures  map[string][]time.Time
+	mu       sync.Mutex
+	failures map[string][]time.Time
 }
 
 // AuthEnabled reports whether the API requires a signed-in session.
@@ -142,7 +137,6 @@ func (a *App) GetAuthStatus(ctx context.Context, token string) (AuthStatus, erro
 	}
 	if n == 0 {
 		st.SetupRequired = true
-		a.ensureSetupCode()
 		return st, nil
 	}
 	if token != "" {
@@ -155,24 +149,8 @@ func (a *App) GetAuthStatus(ctx context.Context, token string) (AuthStatus, erro
 	return st, nil
 }
 
-// ensureSetupCode makes a setup code and logs it, once, while no account
-// exists.
-func (a *App) ensureSetupCode() {
-	a.authState.mu.Lock()
-	defer a.authState.mu.Unlock()
-	if a.authState.setupCode != "" {
-		return
-	}
-	b := make([]byte, 10) // 80 bits
-	_, _ = rand.Read(b)
-	raw := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
-	a.authState.setupCode = raw[0:4] + "-" + raw[4:8] + "-" + raw[8:12] + "-" + raw[12:16]
-	a.log.Warn("no account exists yet: open the web UI and create the first one with this setup code",
-		"setupCode", a.authState.setupCode)
-}
-
-// checkSetupAtStart logs the setup code when sign-in is on and no account
-// exists.
+// checkSetupAtStart logs that sign-in is off, or that the first account
+// is still to be created.
 func (a *App) checkSetupAtStart(ctx context.Context) error {
 	if !a.authOpts.Enabled {
 		a.log.Warn("sign-in is turned off (CODEATROPHY_AUTH=off): anyone who can reach this server can use it")
@@ -183,44 +161,16 @@ func (a *App) checkSetupAtStart(ctx context.Context) error {
 		return err
 	}
 	if n == 0 {
-		a.ensureSetupCode()
+		a.log.Warn("no account exists yet: open the web UI to create the first one")
 	}
 	return nil
 }
 
-func normalizeSetupCode(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToUpper(s) {
-		if r != '-' && !unicode.IsSpace(r) {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// Setup creates the first account and signs it in. It needs the setup
-// code from the server log, and fails once any account exists.
-func (a *App) Setup(ctx context.Context, in SetupInput, client string) (SignIn, error) {
+// Setup creates the first account and signs it in. It fails once any
+// account exists.
+func (a *App) Setup(ctx context.Context, in SetupInput) (SignIn, error) {
 	if !a.authOpts.Enabled {
 		return SignIn{}, errBadRequest("sign-in is turned off on this server")
-	}
-	if err := a.checkLoginRate(client); err != nil {
-		return SignIn{}, err
-	}
-	a.authState.mu.Lock()
-	code := a.authState.setupCode
-	a.authState.mu.Unlock()
-	got := normalizeSetupCode(in.SetupCode)
-	if code == "" || subtle.ConstantTimeCompare([]byte(got), []byte(normalizeSetupCode(code))) != 1 {
-		var n int
-		if err := a.store.Read(ctx, func(tx store.Tx) (err error) { n, err = tx.CountUsers(); return }); err != nil {
-			return SignIn{}, err
-		}
-		if n > 0 {
-			return SignIn{}, errConflict("an account already exists; sign in instead", nil)
-		}
-		a.recordLoginFailure(client)
-		return SignIn{}, errField("setupCode", "is not the setup code in the server log")
 	}
 	email, err := validateCredentials(in.Email, in.Password)
 	if err != nil {
@@ -250,10 +200,6 @@ func (a *App) Setup(ctx context.Context, in SetupInput, client string) (SignIn, 
 	if err != nil {
 		return SignIn{}, err
 	}
-	a.authState.mu.Lock()
-	a.authState.setupCode = ""
-	a.authState.mu.Unlock()
-	a.resetLoginFailures(client)
 	a.log.Info("first account created", "email", email)
 	return out, nil
 }

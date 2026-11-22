@@ -35,8 +35,8 @@ Every account sees the same library. With Compose:
 
   docker compose exec app codeatrophy user password you@example.com
 
-The first account is normally created in the web UI with the setup code the
-server logs at startup; "add" creates it without one.
+The first account is normally created on the web UI's sign-in page; "add"
+creates it from the server instead.
 `
 
 func userCommand(args []string) error {

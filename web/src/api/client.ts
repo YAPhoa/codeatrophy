@@ -269,7 +269,7 @@ export const api = {
   auth: {
     session: (signal?: AbortSignal) => request<AuthSession>('GET', '/auth/session', { signal }),
     login: (body: LoginRequest) => request<AuthSession>('POST', '/auth/login', { body }),
-    /** Creates the first account, with the setup code from the server log, and signs it in. */
+    /** Creates the first account and signs it in; refused once any account exists. */
     setup: (body: SetupRequest) => request<AuthSession>('POST', '/auth/setup', { body }),
     logout: () => request<void>('POST', '/auth/logout'),
     /** Ends every other session of the account. */
