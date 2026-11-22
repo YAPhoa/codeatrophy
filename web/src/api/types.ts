@@ -79,6 +79,13 @@ export interface Meta {
   limits: Limits;
 }
 
+/** `GET /health/ready`: `503` with `status: 'unavailable'` while the database is down. The judge never makes it unavailable. */
+export interface Readiness {
+  status: 'ok' | 'unavailable';
+  database: 'ok' | 'down';
+  judge: 'ok' | 'down' | 'none';
+}
+
 export interface Range {
   min: number;
   max: number;

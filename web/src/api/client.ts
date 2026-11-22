@@ -58,6 +58,7 @@ import type {
   ItemSummary,
   List,
   Meta,
+  Readiness,
   Page,
   Preferences,
   PreferencesUpdate,
@@ -267,6 +268,8 @@ export interface Download {
 export const api = {
   /** Whether the server is up; needs no session. */
   health: (signal?: AbortSignal) => request<{ status: string }>('GET', '/health', { signal }),
+  /** Whether the server can serve the library (its database answers); needs no session. */
+  ready: (signal?: AbortSignal) => request<Readiness>('GET', '/health/ready', { signal }),
   auth: {
     session: (signal?: AbortSignal) => request<AuthSession>('GET', '/auth/session', { signal }),
     login: (body: LoginRequest) => request<AuthSession>('POST', '/auth/login', { body }),

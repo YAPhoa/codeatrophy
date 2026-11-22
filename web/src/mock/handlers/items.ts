@@ -789,6 +789,7 @@ export function itemRoutes(db: MockDb): [string, string, Handler][] {
   return [
     ['GET', '/meta', () => ok(db.meta())],
     ['GET', '/health', () => ok({ status: 'ok' })],
+    ['GET', '/health/ready', () => ok({ status: 'ok', database: 'ok', judge: db.meta().judge.enabled ? (db.meta().judge.healthy ? 'ok' : 'down') : 'none' })],
     ['GET', '/stats', () => stats(db)],
     ['GET', '/items', (req) => listItems(db, req)],
     ['POST', '/items', (req) => createItem(db, req)],
