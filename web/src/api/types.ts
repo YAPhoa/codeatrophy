@@ -1297,7 +1297,7 @@ export interface ImportResult {
 
 // --- Sign-in ---------------------------------------------------------------
 
-/** An account that may sign in. Accounts share the library and keep their own progress, code, drafts, AI history and preferences. */
+/** An account that may sign in. Accounts share the library and keep their own progress, collections, code, drafts, AI history and preferences. */
 export interface AuthUser {
   id: string;
   email: string;

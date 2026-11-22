@@ -32,7 +32,7 @@ export function AccountSection() {
             Signed in as <strong>{session.user.email}</strong>. A sign-in lasts until you have not used the app here for a while, or until you sign out.
           </p>
           <p className="settings-lead">
-            Other accounts on this server share the library. Your progress (status, favorites, notes), code, submissions, drafts, AI jobs and log, and preferences are yours alone.
+            Other accounts on this server share the library. Your progress (status, favorites, notes), collections, code, submissions, drafts, AI jobs and log, and preferences are yours alone.
           </p>
           <div className="account-row">
             <Button icon={<LogOut size={16} />} onClick={() => void signOut()}>

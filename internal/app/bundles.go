@@ -14,6 +14,8 @@ import (
 	"codeatrophy/internal/bundle"
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+
+	"github.com/google/uuid"
 )
 
 // ExportInput is the body of POST /export.
@@ -325,8 +327,10 @@ type itemPlan struct {
 	changes []string
 }
 
-// plan compares the bundle with the library by id.
-func (a *App) plan(ctx context.Context, tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]bool, error) {
+// plan compares the bundle with the library by id: its items with the
+// shared library, its collections with the account's (see
+// accountCollectionID).
+func (a *App) plan(ctx context.Context, tx store.Tx, b *bundle.Bundle) ([]itemPlan, map[string]collectionMatch, error) {
 	plans := make([]itemPlan, 0, len(b.Items))
 	for _, it := range b.Items {
 		if err := ctx.Err(); err != nil {
@@ -367,13 +371,51 @@ func (a *App) plan(ctx context.Context, tx store.Tx, b *bundle.Bundle) ([]itemPl
 	for _, c := range all {
 		have[c.ID] = true
 	}
-	existing := map[string]bool{}
+	colls := make(map[string]collectionMatch, len(b.Collections))
 	for _, c := range b.Collections {
-		if have[c.ID] {
-			existing[c.ID] = true
+		mine := accountCollectionID(ctx, c.ID)
+		switch {
+		case have[c.ID]:
+			colls[c.ID] = collectionMatch{ID: c.ID, Exists: true}
+		case have[mine]:
+			colls[c.ID] = collectionMatch{ID: mine, Exists: true}
+		default:
+			id, err := freeCollectionID(tx, c.ID, mine)
+			if err != nil {
+				return nil, nil, err
+			}
+			colls[c.ID] = collectionMatch{ID: id}
 		}
 	}
-	return plans, existing, nil
+	return plans, colls, nil
+}
+
+// collectionMatch is the local collection a bundle collection imports
+// into, and whether it exists.
+type collectionMatch struct {
+	ID     string
+	Exists bool
+}
+
+// accountCollectionID is the id a bundle collection takes in the account's
+// library when another account already has a collection with its own id.
+// Collections are personal but their ids are unique on the server, so the
+// importing account gets an id derived from the bundle's: importing the
+// same bundle again finds it.
+func accountCollectionID(ctx context.Context, id string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("codeatrophy collection\x00"+accountOf(ctx)+"\x00"+id)).String()
+}
+
+// freeCollectionID returns the first of ids that no account's collection
+// has, or a new id.
+func freeCollectionID(tx store.Tx, ids ...string) (string, error) {
+	for _, id := range ids {
+		taken, err := tx.CollectionIDTaken(id)
+		if err != nil || !taken {
+			return id, err
+		}
+	}
+	return newID(), nil
 }
 
 // PreviewImport reports what importing the bundle would do. Nothing is
@@ -393,7 +435,7 @@ func (a *App) PreviewImport(ctx context.Context, data []byte) (ImportPreview, er
 		out.Bundle.CreatedAt = &t
 	}
 	err = a.store.Read(ctx, func(tx store.Tx) error {
-		plans, existing, err := a.plan(ctx, tx, b)
+		plans, colls, err := a.plan(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -411,7 +453,7 @@ func (a *App) PreviewImport(ctx context.Context, data []byte) (ImportPreview, er
 		}
 		for _, c := range b.Collections {
 			state := "new"
-			if existing[c.ID] {
+			if colls[c.ID].Exists {
 				state = "existing"
 			}
 			out.Collections = append(out.Collections, PreviewCollection{ID: c.ID, Name: c.Name, State: state, ItemCount: len(c.ItemIDs)})
@@ -435,7 +477,7 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 	}
 	res := ImportResult{Warnings: warnings}
 	err = a.store.Write(ctx, func(tx store.Tx) error {
-		plans, existing, err := a.plan(ctx, tx, b)
+		plans, colls, err := a.plan(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -539,17 +581,20 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 			for _, iid := range c.ItemIDs {
 				members = append(members, finalID[iid])
 			}
-			if existing[c.ID] {
-				if err := tx.AddCollectionItems(c.ID, members); err != nil {
+			match := colls[c.ID]
+			if match.Exists {
+				if err := tx.AddCollectionItems(match.ID, members); err != nil {
 					return err
 				}
 				continue
 			}
-			parent := c.ParentID
-			if parent != nil && !existing[*parent] && !created[*parent] {
-				parent = nil
+			var parent *string
+			if c.ParentID != nil {
+				if pm, ok := colls[*c.ParentID]; ok && (pm.Exists || created[*c.ParentID]) {
+					parent = &pm.ID
+				}
 			}
-			nc := domain.Collection{ID: c.ID, Name: c.Name, Description: c.Description, ParentID: parent,
+			nc := domain.Collection{ID: match.ID, Name: c.Name, Description: c.Description, ParentID: parent,
 				Position: childCount[parentKey(parent)], CreatedAt: now, UpdatedAt: now}
 			if err := tx.InsertCollection(&nc); err != nil {
 				return err
@@ -558,7 +603,7 @@ func (a *App) Import(ctx context.Context, data []byte, strategy string) (ImportR
 			created[c.ID] = true
 			res.CollectionsCreated++
 			if len(members) > 0 {
-				if err := tx.AddCollectionItems(c.ID, members); err != nil {
+				if err := tx.AddCollectionItems(match.ID, members); err != nil {
 					return err
 				}
 			}

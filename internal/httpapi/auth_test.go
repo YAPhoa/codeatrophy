@@ -277,6 +277,19 @@ func TestPersonalDataPerAccount(t *testing.T) {
 	you.expect("GET", api+"/drafts/"+draft, "", 404)
 	you.expect("DELETE", api+"/drafts/"+draft, "", 404)
 	me.expect("GET", api+"/drafts/"+draft, "", 200)
+
+	_, body = me.expect("POST", api+"/collections", `{"name":"Mine"}`, 201)
+	coll := body[strings.Index(body, `"id":"`)+6:]
+	coll = coll[:strings.Index(coll, `"`)]
+	me.expect("PATCH", api+"/items/"+id, `{"collectionIds":["`+coll+`"]}`, 200)
+	if _, body = you.expect("GET", api+"/collections", "", 200); strings.Contains(body, coll) {
+		t.Errorf("the other account lists my collection: %s", body)
+	}
+	you.expect("GET", api+"/collections/"+coll, "", 404)
+	you.expect("PATCH", api+"/items/"+id, `{"collectionIds":["`+coll+`"]}`, 422)
+	if _, body = you.expect("GET", api+"/items/"+id, "", 200); strings.Contains(body, coll) {
+		t.Errorf("the other account sees my item's collection: %s", body)
+	}
 }
 
 // With sign-in off, requests act for the oldest account; while there is

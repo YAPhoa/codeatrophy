@@ -63,7 +63,8 @@ token is one of:
   for unattended setups.
 
 A session acts for its token's account: the item status, favorites and
-notes it reads and sets, and the submissions it reads, are that account's
+notes it reads and sets, its collections, and the submissions it reads, are
+that account's
 (see "Personal data" in `docs/api.md`); `CODEATROPHY_MCP_TOKEN` acts for the
 oldest account. A session stays with the account that opened it: a request
 with another account's token is refused.

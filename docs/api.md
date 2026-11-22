@@ -112,13 +112,16 @@ pass. This check applies to `POST /auth/login` too.
 
 ### Personal data
 
-Accounts share one library: items, test cases, solutions, collections, tags,
-AI providers, style presets and settings. What a person does with the
-library is their account's own:
+Accounts share one library: items, test cases, solutions, tags, AI
+providers, style presets and settings. What a person does with the library
+is their account's own:
 
 - an item's `status`, `favorite` and `notes` (and the `lastVerdict`, the
   status filters and counts of `GET /items`, `GET /items/facets` and
   `GET /stats`, which follow from them),
+- [collections](#collections), and so an item's `collectionIds`, the
+  `collection` and `uncollected` filters, the collection counts of
+  `GET /stats` and what an export of scope `collection` can name,
 - [working copies](#working-copies) and [submissions](#submissions),
 - [drafts](#drafts), [AI jobs](#ai-jobs) and the [AI activity log](#ai-activity-log),
 - [preferences](#preferences).
@@ -126,9 +129,10 @@ library is their account's own:
 A request acts for the signed-in account; over MCP, for the account whose
 token it sends. With sign-in off, or with `CODEATROPHY_MCP_TOKEN`, it acts
 for the oldest account, or, while there is none, for no account: what is
-kept then goes to the first account created. Another account's submission,
-draft, AI job or AI log entry answers `404 not_found`, as one that does not
-exist. Deleting an account (`codeatrophy user delete`) deletes its personal
+kept then goes to the first account created. Another account's collection,
+submission, draft, AI job or AI log entry answers `404 not_found`, as one
+that does not exist (and `422` where it is named in a field, such as
+`collectionIds`). Deleting an account (`codeatrophy user delete`) deletes its personal
 data.
 
 ### Single-line fields
@@ -1155,9 +1159,13 @@ for a reading.
 `position` orders a collection among its siblings. `itemCount` counts direct
 members only.
 
+Collections are [personal](#personal-data): each account has its own tree,
+and puts shared items into it. Another account's collection is not found,
+and is never listed.
+
 | Endpoint | Behaviour |
 | --- | --- |
-| `GET /collections` | `{ "items": [Collection] }` — every collection, flat, ordered by `parentId` then `position`; the client builds the tree. Not paginated |
+| `GET /collections` | `{ "items": [Collection] }` — every collection of the account, flat, ordered by `parentId` then `position`; the client builds the tree. Not paginated |
 | `POST /collections` | Body `{ "name", "description"?, "parentId"? }`; appended after its siblings. `201` `Collection` |
 | `GET /collections/{id}` | `Collection` |
 | `PATCH /collections/{id}` | Body: any of `name`, `description`, `parentId`, `position`. Moving under itself or a descendant is `409 conflict`. Setting `position` inserts at that index among the (new) siblings and renumbers them. Returns `Collection` |

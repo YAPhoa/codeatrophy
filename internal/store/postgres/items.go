@@ -318,7 +318,8 @@ func (t *tx) DeleteItem(id string, at time.Time) (bool, error) {
 }
 
 func (t *tx) SetItemCollections(itemID string, collectionIDs []string) error {
-	rows, err := t.query(`SELECT collection_id FROM collection_items WHERE item_id = $1`, itemID)
+	rows, err := t.query(`SELECT ci.collection_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
+		WHERE ci.item_id = $1 AND c.user_id = $2`, itemID, t.account())
 	if err != nil {
 		return err
 	}
@@ -376,7 +377,8 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 		return err
 	}
 	if err := t.eachRow(`SELECT ci.item_id, ci.collection_id FROM collection_items ci
-		JOIN collections c ON c.id = ci.collection_id WHERE ci.item_id = ANY($1) ORDER BY c.seq`, []any{ids},
+		JOIN collections c ON c.id = ci.collection_id WHERE ci.item_id = ANY($1) AND c.user_id = $2 ORDER BY c.seq`,
+		[]any{ids, t.account()},
 		func(r *sql.Rows) error {
 			var id, cid string
 			if err := r.Scan(&id, &cid); err != nil {
@@ -523,11 +525,13 @@ func itemFilterSQL(f store.ItemFilter, account string) (itemFilter, error) {
 	}
 	q.from += stateJoin(q.p.add(account))
 	if f.CollectionID != "" && !f.Recursive {
-		q.from += ` JOIN collection_items ci ON ci.item_id = i.id AND ci.collection_id = ` + q.p.add(f.CollectionID)
+		q.from += ` JOIN collection_items ci ON ci.item_id = i.id AND ci.collection_id =
+			(SELECT id FROM collections WHERE id = ` + q.p.add(f.CollectionID) + ` AND user_id = ` + q.p.add(account) + `)`
 	}
 	if f.CollectionID != "" && f.Recursive {
 		where = append(where, `i.id IN (SELECT item_id FROM collection_items WHERE collection_id IN (
-			WITH RECURSIVE d(id) AS (SELECT `+q.p.add(f.CollectionID)+`::text COLLATE "C" UNION
+			WITH RECURSIVE d(id) AS (SELECT id FROM collections WHERE id = `+q.p.add(f.CollectionID)+`
+				AND user_id = `+q.p.add(account)+` UNION
 			SELECT c.id FROM collections c JOIN d ON c.parent_id = d.id)
 			SELECT id FROM d))`)
 	}
@@ -562,7 +566,8 @@ func itemFilterSQL(f store.ItemFilter, account string) (itemFilter, error) {
 		where = append(where, `EXISTS (SELECT 1 FROM item_tags t WHERE t.item_id = i.id AND t.tag = `+q.p.add(tag)+`)`)
 	}
 	if f.Uncollected {
-		where = append(where, `NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id)`)
+		where = append(where, `NOT EXISTS (SELECT 1 FROM collection_items x JOIN collections xc ON xc.id = x.collection_id
+			WHERE x.item_id = i.id AND xc.user_id = `+q.p.add(account)+`)`)
 	}
 	if f.VariantOf != "" {
 		where = append(where, `i.variant_of = `+q.p.add(f.VariantOf))
@@ -750,12 +755,13 @@ func (t *tx) Stats() (domain.Stats, error) {
 	}
 	// The conditions ListItems applies for its Favorite and Uncollected filters.
 	if err := t.queryRow(`SELECT COUNT(*) FILTER (WHERE ps.favorite = true),
-		COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM collection_items x WHERE x.item_id = i.id))
+		COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM collection_items x JOIN collections xc ON xc.id = x.collection_id
+			WHERE x.item_id = i.id AND xc.user_id = $1))
 		FROM items i`+stateJoin("$1"), t.account()).
 		Scan(&s.Items.Favorites, &s.Items.Uncollected); err != nil {
 		return s, err
 	}
-	if err := t.queryRow(`SELECT COUNT(*) FROM collections`).Scan(&s.Collections); err != nil {
+	if err := t.queryRow(`SELECT COUNT(*) FROM collections WHERE user_id = $1`, t.account()).Scan(&s.Collections); err != nil {
 		return s, err
 	}
 	if err := t.queryRow(`SELECT COUNT(DISTINCT tag) FROM item_tags`).Scan(&s.Tags); err != nil {

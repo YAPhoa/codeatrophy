@@ -72,6 +72,7 @@ func RunMigrations(t *testing.T, h MigrationHarness) {
 		{"0018Auth", testAuthMigration},
 		{"0019MCPTokens", testMCPTokensMigration},
 		{"0020PerAccount", testPerAccountMigration},
+		{"0021CollectionsPerAccount", testCollectionsPerAccountMigration},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })

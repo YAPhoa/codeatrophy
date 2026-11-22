@@ -315,7 +315,11 @@ Strategies for `changed` items:
   alone.
 
 Collections are matched by id and created when missing, preserving the
-bundle's nesting. For a collection that already exists, its name, description
+bundle's nesting. Collections belong to the account that imports (items are
+shared by every account on the instance): when another account on the
+instance already has a collection with a bundle collection's id, the
+importing account's copy takes an id derived from its account and that id,
+which a later import of the bundle matches in the same way. For a collection that already exists, its name, description
 and place in the tree are left as they are locally, and bundle members that
 are not yet members are appended in bundle order. Items imported under the
 `duplicate` strategy take the place of their originals in bundle collections,

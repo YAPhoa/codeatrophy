@@ -288,3 +288,57 @@ func TestImportRejectsBadArchives(t *testing.T) {
 	_, err = e.app.PreviewImport(e.ctx, big)
 	wantCode(t, err, app.CodeTooLarge)
 }
+
+// Collections are personal, but their ids are unique on the server: an
+// account importing a bundle whose collections another account has on this
+// server gets them under ids of its own, nested and filled as in the
+// bundle, and importing it again finds them.
+func TestImportCollectionsOfAnotherAccount(t *testing.T) {
+	e := newEnv(t)
+	dp, easy, p, r, _ := e.library(t)
+	data := e.export(t, `{"scope":"all"}`)
+	other := app.WithAccount(e.ctx, "other")
+
+	pre := must(e.app.PreviewImport(other, data))
+	for _, c := range pre.Collections {
+		if c.State != "new" {
+			t.Errorf("preview for the other account: %s is %s", c.Name, c.State)
+		}
+	}
+	res := must(e.app.Import(other, data, "skip"))
+	if res.CollectionsCreated != 2 || res.Unchanged != 3 {
+		t.Errorf("import: %+v", res)
+	}
+	mine := must(e.app.ListCollections(other)).Items
+	byName := map[string]domain.Collection{}
+	for _, c := range mine {
+		byName[c.Name] = c
+	}
+	gotDP, gotEasy := byName["DP"], byName["Easy"]
+	if len(mine) != 2 || gotDP.ID == "" || gotDP.ID == dp.ID || gotEasy.ID == easy.ID ||
+		gotEasy.ParentID == nil || *gotEasy.ParentID != gotDP.ID {
+		t.Fatalf("the other account's collections: %+v", mine)
+	}
+	if ids := must(e.app.CollectionItemIDs(other, gotEasy.ID)).ItemIDs; fmt.Sprint(ids) != fmt.Sprint([]string{p.ID, r.ID}) {
+		t.Errorf("Easy holds %v", ids)
+	}
+	if got := must(e.app.GetItem(other, p.ID)).CollectionIDs; fmt.Sprint(got) != fmt.Sprint([]string{gotDP.ID, gotEasy.ID}) {
+		t.Errorf("the item's collections for the other account: %v", got)
+	}
+	if got := must(e.app.GetItem(e.ctx, p.ID)).CollectionIDs; fmt.Sprint(got) != fmt.Sprint([]string{dp.ID, easy.ID}) {
+		t.Errorf("the item's collections for the first account: %v", got)
+	}
+	if n := len(must(e.app.ListCollections(e.ctx)).Items); n != 2 {
+		t.Errorf("the first account has %d collections", n)
+	}
+
+	pre = must(e.app.PreviewImport(other, data))
+	for _, c := range pre.Collections {
+		if c.State != "existing" {
+			t.Errorf("preview of a second import: %s is %s", c.Name, c.State)
+		}
+	}
+	if res := must(e.app.Import(other, data, "skip")); res.CollectionsCreated != 0 {
+		t.Errorf("a second import created %d collections", res.CollectionsCreated)
+	}
+}

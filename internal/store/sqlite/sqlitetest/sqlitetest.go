@@ -141,6 +141,7 @@ var DownMigrations = map[int]string{
 		ALTER TABLE ai_log DROP COLUMN user_id;
 		UPDATE settings SET key = 'preferences' WHERE key = 'preferences:' || COALESCE((SELECT id FROM users ORDER BY created_at, id LIMIT 1), '');
 		DELETE FROM settings WHERE key LIKE 'preferences:%';`,
+	21: `DROP INDEX collections_user_parent; ALTER TABLE collections DROP COLUMN user_id;`,
 }
 
 // Execer runs SQL directly on a database, such as a *sql.DB.

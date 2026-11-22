@@ -876,9 +876,9 @@ of the routes; the `codeatrophy user` command uses the same services.
 
 #### Personal data
 
-The library (items and their content, test cases, solutions, collections,
-tags, AI providers, style presets) is shared. An item's status, favorite and
-notes, working copies, submissions, drafts, AI jobs, the AI log and
+The library (items and their content, test cases, solutions, tags, AI
+providers, style presets) is shared. An item's status, favorite and notes,
+collections, working copies, submissions, drafts, AI jobs, the AI log and
 preferences belong to an account:
 
 - **Which account.** The adapters put the account a request acts for in its
@@ -896,10 +896,16 @@ preferences belong to an account:
 - **Other records** carry a `user_id`, which the services set and check:
   lists take the account, and a record of another account read by id is
   not found. Preferences are the setting `preferences:<user id>`.
+- **Collections** carry a `user_id` too, and the stores scope every
+  collection read and write, an item's `collectionIds` and the collection
+  filters and counts to the context's account. Their ids stay unique on the
+  server, so an import that brings a collection another account already
+  has gives it an id derived from the account and the bundle's id
+  (`accountCollectionID`), which a second import of the bundle finds.
 - **No account yet.** The account `''` (`store.Unowned`) holds what is kept
   while no account exists, as with sign-in off from the start. The first
-  account created takes it over in the same transaction, and migration 20
-  gave existing data to the oldest account. Deleting an account deletes its
+  account created takes it over in the same transaction, and migrations 20
+  and 21 gave existing data to the oldest account. Deleting an account deletes its
   personal data.
 
 The UI's static files stay public; `GET /api/v1/auth/session` tells the UI

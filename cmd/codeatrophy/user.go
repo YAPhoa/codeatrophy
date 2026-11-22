@@ -32,7 +32,8 @@ These work on the configured database (CODEATROPHY_DATABASE_URL, or else
 CODEATROPHY_DB_PATH). add and password ask for the password twice on a
 terminal; otherwise they read it from the first line of standard input.
 Accounts share one library; each keeps its own progress (status,
-favorites, notes), code, submissions, drafts, AI history and preferences.
+favorites, notes), collections, code, submissions, drafts, AI history and
+preferences.
 With Compose:
 
   docker compose exec app codeatrophy user password you@example.com

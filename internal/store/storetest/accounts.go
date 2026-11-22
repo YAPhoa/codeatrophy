@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -152,6 +153,73 @@ func testPersonalData(t *testing.T, db store.Store) {
 		}
 		return nil
 	})
+
+	// Collections: each account sees its own, and an item's memberships,
+	// the collection filters and the stats count its own collections only.
+	for _, account := range []string{"u1", "u2"} {
+		write(account, func(tx store.Tx) error {
+			c := domain.Collection{ID: "c-" + account, Name: account, CreatedAt: now, UpdatedAt: now}
+			if err := tx.InsertCollection(&c); err != nil {
+				return err
+			}
+			item := "p"
+			if account == "u2" {
+				item = "q"
+			}
+			return tx.SetItemCollections(item, []string{c.ID})
+		})
+	}
+	collections := func(account string) string {
+		var out string
+		read(account, func(tx store.Tx) error {
+			cs, err := tx.ListCollections()
+			if err != nil {
+				return err
+			}
+			p, err := tx.GetItem("p")
+			if err != nil {
+				return err
+			}
+			_, inOwn, err := tx.ListItems(store.ItemFilter{CollectionID: "c-" + account})
+			if err != nil {
+				return err
+			}
+			_, inOther, err := tx.ListItems(store.ItemFilter{CollectionID: "c-u1", Recursive: true})
+			if err != nil {
+				return err
+			}
+			_, uncollected, err := tx.ListItems(store.ItemFilter{Uncollected: true})
+			if err != nil {
+				return err
+			}
+			st, err := tx.Stats()
+			if err != nil {
+				return err
+			}
+			_, getErr := tx.GetCollection("c-u1")
+			taken, err := tx.CollectionIDTaken("c-u1")
+			if err != nil {
+				return err
+			}
+			names := []string{}
+			for _, c := range cs {
+				names = append(names, c.Name)
+			}
+			out = fmt.Sprintf("%v p=%v own=%d c-u1=%d uncollected=%d stats=%d/%d get=%v taken=%v", names, p.CollectionIDs,
+				inOwn, inOther, uncollected, st.Collections, st.Items.Uncollected, getErr, taken)
+			return nil
+		})
+		return out
+	}
+	if got, want := collections("u1"), `[u1] p=[c-u1] own=1 c-u1=1 uncollected=1 stats=1/1 get=<nil> taken=true`; got != want {
+		t.Errorf("u1's collections: %s\nwant %s", got, want)
+	}
+	if got, want := collections("u2"), `[u2] p=[] own=1 c-u1=0 uncollected=1 stats=1/1 get=not found taken=true`; got != want {
+		t.Errorf("u2's collections: %s\nwant %s", got, want)
+	}
+	if err := db.Write(as("u2"), func(tx store.Tx) error { return tx.DeleteCollection("c-u1") }); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("u2 deleting u1's collection: %v", err)
+	}
 
 	// Deleting an account removes its personal data, and only its.
 	write("u1", func(tx store.Tx) error {
@@ -308,6 +376,41 @@ func testPerAccountMigration(t *testing.T, h MigrationHarness) {
 			h.rejects(t, db, map[string]string{
 				"a state of no item": `INSERT INTO item_states (user_id, item_id, status) VALUES ('u', 'nothing', 'done')`,
 			})
+		})
+	}
+}
+
+// Migration 21 makes collections per account: they go to the oldest
+// account, or to none while there is no account, with their memberships.
+func testCollectionsPerAccountMigration(t *testing.T, h MigrationHarness) {
+	for _, withAccounts := range []bool{false, true} {
+		t.Run(fmt.Sprint("accounts=", withAccounts), func(t *testing.T) {
+			owner := store.Unowned
+			want, db := h.rerun(t, 21, func(db MigrationDB) {
+				Populate(t, db)
+				if !withAccounts {
+					return
+				}
+				owner = "old"
+				Write(t, db, func(tx store.Tx) error {
+					for i, id := range []string{"new", "old"} {
+						at := now.Add(time.Duration(1-i) * time.Hour)
+						u := store.User{ID: id, Email: id + "@example.com", PasswordHash: "h", CreatedAt: at, UpdatedAt: at}
+						if err := tx.InsertUser(&u); err != nil {
+							return err
+						}
+					}
+					return tx.ClaimUnowned("old")
+				})
+			}, func(db MigrationDB) {
+				if err := h.Exec(db, `SELECT user_id FROM collections`); err == nil {
+					t.Error("version 20 has collections.user_id")
+				}
+			}, Dump)
+			SameDump(t, "after migration 21", want, Dump(t, db))
+			if n, all := countWhere(t, db, "collections", owner), countRows(t, db, "collections"); n == 0 || n != all {
+				t.Errorf("%d of %d collections belong to %q", n, all, owner)
+			}
 		})
 	}
 }

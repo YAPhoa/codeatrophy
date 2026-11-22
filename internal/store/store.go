@@ -340,8 +340,15 @@ type Tx interface {
 	// SetTestCasePositions renumbers the item's cases in the given order.
 	SetTestCasePositions(itemID string, ids []string) error
 
-	// Collections, ordered by parent and position.
+	// Collections, ordered by parent and position: those of the account in
+	// the transaction's context (see AccountOf), which inserts write to.
+	// Another account's collection is not found, and an item's
+	// collectionIds and the collection filters and counts of items take
+	// the account's collections only. CollectionIDTaken reports whether any
+	// account has a collection with that id. The membership methods take a
+	// collection the caller found.
 	ListCollections() ([]domain.Collection, error)
+	CollectionIDTaken(id string) (bool, error)
 	GetCollection(id string) (domain.Collection, error)
 	InsertCollection(c *domain.Collection) error
 	UpdateCollection(c *domain.Collection) error

@@ -124,8 +124,9 @@ request needs a session, except the health check (`/api/v1/health`).
   long away. Sign out from the sidebar or Settings → Account, where you can
   also change your password (which signs out your other browsers).
 - **Accounts on the command line.** Accounts share one library. Each keeps
-  its own progress (status, favorites, notes), code, submissions, drafts, AI
-  history and preferences, and deleting an account deletes those.
+  its own progress (status, favorites, notes), collections, code,
+  submissions, drafts, AI history and preferences, and deleting an account
+  deletes those.
 
   ```sh
   docker compose exec app codeatrophy user list

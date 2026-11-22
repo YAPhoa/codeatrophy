@@ -136,8 +136,8 @@ func scanCollection(sc interface{ Scan(...any) error }) (domain.Collection, erro
 }
 
 func (t *tx) ListCollections() ([]domain.Collection, error) {
-	rows, err := t.query(`SELECT ` + collectionColumns + ` FROM collections c
-		ORDER BY c.parent_id IS NOT NULL, c.parent_id, c.position, c.seq`)
+	rows, err := t.query(`SELECT `+collectionColumns+` FROM collections c WHERE c.user_id = ?
+		ORDER BY c.parent_id IS NOT NULL, c.parent_id, c.position, c.seq`, t.account())
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,8 @@ func (t *tx) ListCollections() ([]domain.Collection, error) {
 }
 
 func (t *tx) GetCollection(id string) (domain.Collection, error) {
-	c, err := scanCollection(t.queryRow(`SELECT `+collectionColumns+` FROM collections c WHERE c.id = ?`, id))
+	c, err := scanCollection(t.queryRow(`SELECT `+collectionColumns+` FROM collections c WHERE c.id = ? AND c.user_id = ?`,
+		id, t.account()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, store.ErrNotFound
 	}
@@ -162,15 +163,16 @@ func (t *tx) GetCollection(id string) (domain.Collection, error) {
 }
 
 func (t *tx) InsertCollection(c *domain.Collection) error {
-	_, err := t.exec(`INSERT INTO collections (id, name, description, parent_id, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, c.ID, c.Name, c.Description, nullStr(c.ParentID), c.Position,
-		toUnix(c.CreatedAt), toUnix(c.UpdatedAt))
+	_, err := t.exec(`INSERT INTO collections (id, name, description, parent_id, position, created_at, updated_at,
+		user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, c.ID, c.Name, c.Description, nullStr(c.ParentID), c.Position,
+		toUnix(c.CreatedAt), toUnix(c.UpdatedAt), t.account())
 	return err
 }
 
 func (t *tx) UpdateCollection(c *domain.Collection) error {
 	res, err := t.exec(`UPDATE collections SET name = ?, description = ?, parent_id = ?, position = ?, updated_at = ?
-		WHERE id = ?`, c.Name, c.Description, nullStr(c.ParentID), c.Position, toUnix(c.UpdatedAt), c.ID)
+		WHERE id = ? AND user_id = ?`, c.Name, c.Description, nullStr(c.ParentID), c.Position, toUnix(c.UpdatedAt), c.ID,
+		t.account())
 	if err != nil {
 		return err
 	}
@@ -181,7 +183,7 @@ func (t *tx) UpdateCollection(c *domain.Collection) error {
 }
 
 func (t *tx) DeleteCollection(id string) error {
-	res, err := t.exec(`DELETE FROM collections WHERE id = ?`, id)
+	res, err := t.exec(`DELETE FROM collections WHERE id = ? AND user_id = ?`, id, t.account())
 	if err != nil {
 		return err
 	}
@@ -189,6 +191,12 @@ func (t *tx) DeleteCollection(id string) error {
 		return store.ErrNotFound
 	}
 	return nil
+}
+
+func (t *tx) CollectionIDTaken(id string) (bool, error) {
+	var n int
+	err := t.queryRow(`SELECT COUNT(*) FROM collections WHERE id = ?`, id).Scan(&n)
+	return n > 0, err
 }
 
 func (t *tx) CollectionItemIDs(id string) ([]string, error) {
