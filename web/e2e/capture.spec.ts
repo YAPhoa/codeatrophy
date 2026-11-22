@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { open, SEED, TWO_SUM_TEXT } from './support';
+import { mockApi, open, SEED, TWO_SUM_TEXT } from './support';
 
 test('capture: drafting with AI keeps the text in view on the way to the draft', async ({ page }) => {
   await open(page, '/new');
@@ -50,11 +50,7 @@ test('generate tests: the model choice is there from the first frame, not added 
 /** What the draft on screen was last asked for, as the server keeps it. */
 async function askedFor(page: Page): Promise<Record<string, unknown>> {
   const id = new URL(page.url()).pathname.split('/').pop()!;
-  return page.evaluate(async (draftId) => {
-    const mock = (window as unknown as { __codeatrophyMock: { fetch: (url: string) => Promise<Response> } }).__codeatrophyMock;
-    const draft = (await (await mock.fetch(`/api/v1/drafts/${draftId}`)).json()) as { request: Record<string, unknown> };
-    return draft.request;
-  }, id);
+  return (await mockApi<{ request: Record<string, unknown> }>(page, `/drafts/${id}`)).request;
 }
 
 test('capture: a draft asks for as many test cases as the preference says, or as chosen', async ({ page }) => {
