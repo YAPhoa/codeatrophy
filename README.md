@@ -66,6 +66,35 @@ Set `CODEATROPHY_JUDGE_ENGINE=none` and remove `judge0` from
 the UI hides run and submit; the library, AI drafting, bundles and MCP keep
 working.
 
+## Configuration
+
+Everything is configured with environment variables, all documented in
+[`.env.example`](.env.example). [`docs/configuration.md`](docs/configuration.md)
+lists the ones most installations set and covers AI providers and style
+presets.
+
+## Documentation
+
+Running an instance:
+
+| Document | Contents |
+| --- | --- |
+| [Configuration](docs/configuration.md) | The common environment variables, AI providers, style presets |
+| [Signing in](docs/signing-in.md) | Accounts, sessions, turning sign-in off, tokens for MCP |
+| [Storage](docs/storage.md) | PostgreSQL or SQLite, upgrading, database commands, backup and restore |
+| [Security](docs/security.md) | Exposing an instance, host and origin checks, AI provider addresses, the judge |
+| [MCP server](docs/mcp.md) | Connecting an AI assistant, its tools and prompts |
+
+Working on the code:
+
+| Document | Contents |
+| --- | --- |
+| [Architecture](docs/architecture.md) | The components and how they fit together |
+| [HTTP API](docs/api.md) | The API reference; the contract between server and UI |
+| [Bundle format](docs/bundle-format.md) | The import and export format |
+| [Web UI](web/README.md) | The UI's scripts, API mock, structure and conventions |
+| [Contributing](CONTRIBUTING.md) | The rules for every change |
+
 ## Development
 
 Layout: `cmd/` and `internal/` hold the Go server, `web/` the React UI,

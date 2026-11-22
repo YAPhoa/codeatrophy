@@ -30,6 +30,10 @@ database.
 - `docs/api.md` — HTTP API reference; the contract between server and UI
 - `docs/mcp.md` — MCP server: connecting a client, tools, prompts
 - `docs/bundle-format.md` — the import/export bundle format
+- `docs/configuration.md` — environment variables, AI providers, style presets
+- `docs/signing-in.md` — accounts, sessions, turning sign-in off, MCP tokens
+- `docs/storage.md` — PostgreSQL or SQLite, upgrading, database commands, backups
+- `docs/security.md` — exposing an instance and what protects it
 - `web/README.md` — the UI: scripts, the API mock, structure, conventions
 
 ## Working on the code
