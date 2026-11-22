@@ -366,19 +366,6 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 	}
 	for _, ch := range chunks(ids, 500) {
 		ph, args := placeholders(len(ch)), anyArgs(ch)
-		if err := t.eachRow(`SELECT id, COUNT(*) FROM (SELECT item_a AS id FROM item_links WHERE item_a IN (`+ph+`)
-			UNION ALL SELECT item_b FROM item_links WHERE item_b IN (`+ph+`)) GROUP BY id`, append(args, args...),
-			func(r *sql.Rows) error {
-				var id string
-				var n int
-				if err := r.Scan(&id, &n); err != nil {
-					return err
-				}
-				byID[id].LinkCount = n
-				return nil
-			}); err != nil {
-			return err
-		}
 		if err := t.eachRow(`SELECT item_id, tag FROM item_tags WHERE item_id IN (`+ph+`) ORDER BY tag`, args,
 			func(r *sql.Rows) error {
 				var id, tag string
@@ -403,41 +390,34 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 			}); err != nil {
 			return err
 		}
-		if err := t.eachRow(`SELECT variant_of, COUNT(*) FROM items WHERE variant_of IN (`+ph+`) GROUP BY variant_of`, args,
-			func(r *sql.Rows) error {
-				var id string
-				var n int
-				if err := r.Scan(&id, &n); err != nil {
-					return err
-				}
-				byID[id].VariantCount = n
-				return nil
-			}); err != nil {
-			return err
+		counts := []struct {
+			q    string
+			args []any
+			set  func(*domain.ItemSummary, int)
+		}{
+			{`SELECT variant_of, COUNT(*) FROM items WHERE variant_of IN (` + ph + `) GROUP BY variant_of`, args,
+				func(s *domain.ItemSummary, n int) { s.VariantCount = n }},
+			{`SELECT id, COUNT(*) FROM (SELECT item_a AS id FROM item_links WHERE item_a IN (` + ph + `)
+				UNION ALL SELECT item_b FROM item_links WHERE item_b IN (` + ph + `)) GROUP BY id`,
+				append(args[:len(args):len(args)], args...),
+				func(s *domain.ItemSummary, n int) { s.LinkCount = n }},
+			{`SELECT item_id, COUNT(*) FROM test_cases WHERE item_id IN (` + ph + `) GROUP BY item_id`, args,
+				func(s *domain.ItemSummary, n int) { s.TestCaseCount = n }},
+			{`SELECT item_id, COUNT(*) FROM solutions WHERE item_id IN (` + ph + `) GROUP BY item_id`, args,
+				func(s *domain.ItemSummary, n int) { s.SolutionCount = n }},
 		}
-		if err := t.eachRow(`SELECT item_id, COUNT(*) FROM test_cases WHERE item_id IN (`+ph+`) GROUP BY item_id`, args,
-			func(r *sql.Rows) error {
+		for _, c := range counts {
+			if err := t.eachRow(c.q, c.args, func(r *sql.Rows) error {
 				var id string
 				var n int
 				if err := r.Scan(&id, &n); err != nil {
 					return err
 				}
-				byID[id].TestCaseCount = n
+				c.set(byID[id], n)
 				return nil
 			}); err != nil {
-			return err
-		}
-		if err := t.eachRow(`SELECT item_id, COUNT(*) FROM solutions WHERE item_id IN (`+ph+`) GROUP BY item_id`, args,
-			func(r *sql.Rows) error {
-				var id string
-				var n int
-				if err := r.Scan(&id, &n); err != nil {
-					return err
-				}
-				byID[id].SolutionCount = n
-				return nil
-			}); err != nil {
-			return err
+				return err
+			}
 		}
 		if err := t.eachRow(`SELECT s.item_id, s.verdict FROM submissions s WHERE s.item_id IN (`+ph+`)
 			AND s.seq = (SELECT MAX(s2.seq) FROM submissions s2 WHERE s2.item_id = s.item_id AND s2.user_id = ?
