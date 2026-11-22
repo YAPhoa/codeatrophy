@@ -27,6 +27,43 @@ async function shownFirst(page: Page, expected: string[]) {
   expect(await titles(page).evaluateAll((els, n) => els.slice(0, n).map((e) => e.textContent), expected.length)).toEqual(expected);
 }
 
+/**
+ * Type `text` in the search box and open the sidebar's view `link` at once.
+ * The search's delayed write is held, then let go once the address has
+ * changed and before the page has drawn it: on a slow machine it comes due
+ * just then.
+ */
+async function searchAsViewOpens(page: Page, text: string, link: RegExp) {
+  const search = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
+  const view = await nav(page).getByRole('link', { name: link }).elementHandle();
+  const timers = await search.evaluate(
+    async (box: HTMLInputElement, { view, text }) => {
+      const held: { run: () => void; id: number }[] = [];
+      const setTimeout = window.setTimeout;
+      window.setTimeout = ((run: () => void, ms?: number) => {
+        const id = setTimeout(run, ms);
+        held.push({ run, id });
+        return id;
+      }) as typeof window.setTimeout;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(box, text);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      for (let i = 0; i < 100 && held.length === 0; i++) await Promise.resolve();
+      window.setTimeout = setTimeout;
+      if (held.length !== 1) return held.length;
+      // A new history entry, even at the same address.
+      const entry = (history.state as { key?: string } | null)?.key;
+      (view as HTMLElement).click();
+      for (let i = 0; i < 100 && (history.state as { key?: string } | null)?.key === entry; i++) await Promise.resolve();
+      window.clearTimeout(held[0]!.id);
+      held[0]!.run();
+      return held.length;
+    },
+    { view, text },
+  );
+  // The write was the one timer the search set.
+  expect(timers).toBe(1);
+}
+
 test('sort: chosen in a view, it is there again on return and after a reload, and each view has its own', async ({ page }) => {
   await open(page, '/problems');
   const byTitle = await firstTitles(page, 'type=problem&sort=title');
@@ -183,6 +220,41 @@ test('sort: a search sorts by relevance, whatever is remembered, and a sort chos
   await page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox').fill('');
   await nav(page).getByRole('link', { name: /^All items/ }).click();
   await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('sort: a search cleared as the view is opened again, written before the page draws it, leaves the view as opened', async ({ page }) => {
+  await open(page, '/');
+  await column(page, 'title').click();
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+  const search = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
+  await search.fill('graph');
+  await expect(page).toHaveURL(/q=graph/);
+  await column(page, 'difficulty').click();
+  await expect(column(page, 'difficulty')).toHaveAttribute('aria-pressed', 'true');
+
+  // The box is cleared and All items clicked at once, the search's write coming due before the page draws it.
+  await searchAsViewOpens(page, '', /^All items/);
+
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+  await expect(search).toHaveValue('');
+  expect(params(page)).toEqual({});
+});
+
+test('sort: a search typed as the view is opened again, written before the page draws it, is dropped with it', async ({ page }) => {
+  await open(page, '/');
+  await column(page, 'title').click();
+  await nav(page).getByRole('link', { name: /^Tags/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /Tags/ })).toBeVisible();
+  await nav(page).getByRole('link', { name: /^All items/ }).click();
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+  expect(params(page)).toEqual({});
+  const search = page.getByRole('search', { name: 'Filter items' }).getByRole('searchbox');
+
+  // At the address the link leads to: the view is opened again all the same.
+  await searchAsViewOpens(page, 'graph', /^All items/);
+  await expect(search).toHaveValue('');
+  await expect(column(page, 'title')).toHaveAttribute('aria-pressed', 'true');
+  expect(params(page)).toEqual({});
 });
 
 test('sort: one last used more than 30 days ago is forgotten, as is the old shared one', async ({ page }) => {

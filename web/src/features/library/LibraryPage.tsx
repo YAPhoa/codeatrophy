@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronRight, Download, Folder, FolderPlus, FolderSearch, GripVertical, Inbox, MoreHorizontal, Pencil, Plus, SearchX, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../../api/client';
@@ -108,10 +108,19 @@ function useSkeletonReveal(pending: boolean, skeletonShown: boolean): 'cross' | 
   return reveal;
 }
 
+/** The history state of a change made with the page's own controls, to tell it from a view opened by a link. */
+const OWN_CHANGE = 'library-controls';
+
 /** The library: every item, or one collection, with search, filters, sorting and bulk actions. */
 export function LibraryPage() {
   // The view is the path; the query string narrows it.
-  const { pathname } = useLocation();
+  const { pathname, key, state } = useLocation();
+  const navigationType = useNavigationType();
+  // Each time a view is opened, by a link or by Back and Forward, is a visit
+  // of its own, even at the address already shown; a change made with the
+  // page's own controls stays in the visit.
+  const [visit, setVisit] = useState({ key, visit: key });
+  if (visit.key !== key) setVisit({ key, visit: navigationType === 'REPLACE' && state === OWN_CHANGE ? visit.visit : key });
   const route: LibraryRoute = libraryRouteAt(pathname) ?? { view: 'all', collectionId: null };
   const collectionId = route.collectionId;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -137,7 +146,7 @@ export function LibraryPage() {
       if (change.remember !== undefined) rememberSort(scope, change.remember);
       // Drawn at once rather than in a transition: until the page shows the
       // URL's filters, the next change would be made from the previous ones.
-      setSearchParams(filtersToSearch(change.url, collectionId), { replace: true, flushSync: true });
+      setSearchParams(filtersToSearch(change.url, collectionId), { replace: true, flushSync: true, state: OWN_CHANGE });
     },
     [filters, urlFilters, collectionId, scope, remembered, setSearchParams],
   );
@@ -179,7 +188,7 @@ export function LibraryPage() {
   // A page past the end (items deleted, a link kept from a longer list) shows the last one instead.
   const pastEnd = query.isSuccess && !query.isPlaceholderData && page > pageCount;
   useEffect(() => {
-    if (pastEnd) setSearchParams((sp) => withPage(sp, pageCount), { replace: true });
+    if (pastEnd) setSearchParams((sp) => withPage(sp, pageCount), { replace: true, state: OWN_CHANGE });
   }, [pastEnd, pageCount, setSearchParams]);
 
   // Another page starts at the list's top: brought into view if it is scrolled past.
@@ -591,7 +600,7 @@ export function LibraryPage() {
               onChange={setFilters}
               tags={tags}
               collectionId={collectionId}
-              view={scope}
+              visit={visit.visit}
               searchRef={searchRef}
               className={cx(barSwapped && 'is-swapped-in')}
             >
@@ -723,7 +732,7 @@ export function LibraryPage() {
                   pageSize={pageSize}
                   onPageSize={(size) => {
                     setPageSize(size);
-                    setSearchParams((sp) => withPage(sp, 1), { replace: true });
+                    setSearchParams((sp) => withPage(sp, 1), { replace: true, state: OWN_CHANGE });
                   }}
                 />
               </div>

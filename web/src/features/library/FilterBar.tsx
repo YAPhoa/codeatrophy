@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ChevronDown, Search, X } from 'lucide-react';
+import { useLocation } from 'react-router';
 import { useItemFacets } from '../../api/queries';
 import { ITEM_STATUSES, type Difficulty, type ItemType, type Tag } from '../../api/types';
 import { DIFFICULTY_LABEL, STATUS_LABEL } from '../../lib/format';
@@ -24,8 +25,8 @@ interface FilterBarProps {
   onChange: (next: LibraryFilters) => void;
   tags: readonly Tag[];
   collectionId: string | null;
-  /** Which view of the library this is (its path); a search typed in one view is not carried into another. */
-  view: string;
+  /** Which visit of a view this is (see LibraryPage); a search typed in one is not carried into the next. */
+  visit: string;
   searchRef: RefObject<HTMLInputElement | null>;
   /** Extra view-specific controls, placed after the standard filters. */
   children?: ReactNode;
@@ -63,41 +64,45 @@ function FilterButton({ label, count, children }: { label: string; count: number
  * sidebar, but in a collection and in Favorites here; Favorites in the
  * sidebar; the list's head sorts it.
  */
-export function FilterBar({ filters, onChange, tags, collectionId, view, searchRef, children, className }: FilterBarProps) {
+export function FilterBar({ filters, onChange, tags, collectionId, visit, searchRef, children, className }: FilterBarProps) {
   // The search text is debounced into the URL so typing does not fire a
-  // request per keystroke. It belongs to the view it was typed in: another
-  // view shows its own search, and a write still pending is dropped, so it
-  // cannot land in the next view's URL.
-  const [typed, setTyped] = useState({ view, text: filters.q });
+  // request per keystroke. It belongs to the visit it was typed in: a view
+  // opened again, or another one, shows its own search, and a write still
+  // pending is dropped, so it cannot land in the next visit's URL.
+  const [typed, setTyped] = useState({ visit, text: filters.q });
   let text = typed.text;
-  if (typed.view !== view) {
+  if (typed.visit !== visit) {
     text = filters.q;
-    setTyped({ view, text });
+    setTyped({ visit, text });
   }
-  const setText = (next: string) => setTyped({ view, text: next });
+  const setText = (next: string) => setTyped({ visit, text: next });
   const lastPushed = useRef(filters.q);
   useEffect(() => {
     if (filters.q === lastPushed.current) return;
     lastPushed.current = filters.q;
-    setTyped({ view, text: filters.q });
-  }, [filters.q, view]);
+    setTyped({ visit, text: filters.q });
+  }, [filters.q, visit]);
   // What is set when the write happens, not when typing began, is what it keeps.
   const latest = useRef({ filters, onChange });
   useEffect(() => {
     latest.current = { filters, onChange };
   });
+  // The history entry on screen. The router writes the address at once but
+  // draws the page for it later: a write due in between would be made from
+  // the filters of the page before, over the one just opened.
+  const { key } = useLocation();
   useEffect(() => {
     if (text === lastPushed.current) return;
-    // Each view has its own path: a navigation already under way, not yet
-    // on screen to cancel this, leaves it unwritten too.
-    const path = window.location.pathname;
     const t = window.setTimeout(() => {
-      if (window.location.pathname !== path) return;
+      // The router keeps the entry's key in the history state (`default` for the first page).
+      const current = (window.history.state as { key?: string } | null)?.key ?? 'default';
+      // Not drawn yet: a visit drops the write once it is, a change made on the page writes it again.
+      if (current !== key) return;
       lastPushed.current = text;
       latest.current.onChange({ ...latest.current.filters, q: text });
     }, 220);
     return () => window.clearTimeout(t);
-  }, [text, view]);
+  }, [text, key]);
 
   // Eager, so a menu opens on its counts; each dimension's counts ignore its own filter.
   const facets = useItemFacets(useMemo(() => toListParams(filters, collectionId), [filters, collectionId])).data;
