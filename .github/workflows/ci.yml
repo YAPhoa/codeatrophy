@@ -69,8 +69,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build
-        run: docker build -t codeatrophy:ci .
+      # The release publishes the image for both platforms. A container
+      # builder builds them together whatever image store Docker uses.
+      - name: Build for linux/amd64 and linux/arm64
+        run: |
+          docker buildx create --use
+          docker buildx build --platform linux/amd64,linux/arm64 .
+      - name: Load the linux/amd64 image
+        run: docker buildx build --platform linux/amd64 --load -t codeatrophy:ci .
       - name: The container starts and answers its health check
         run: |
           docker run -d --name app codeatrophy:ci
