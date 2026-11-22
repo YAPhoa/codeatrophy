@@ -22,9 +22,6 @@ type DB interface {
 	store.Bulk
 }
 
-// EnvPostgresURL names the variable with the test server's URL.
-const EnvPostgresURL = pgtest.EnvURL
-
 // Postgres reports whether a PostgreSQL test server is configured.
 func Postgres() bool { return pgtest.Available() }
 
