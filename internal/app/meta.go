@@ -259,13 +259,14 @@ func testCasePreferences(p Preferences) OverviewPreferences {
 	return out
 }
 
-// TestCasePreferences returns the user's test case preferences.
-func (a *App) TestCasePreferences(ctx context.Context) (OverviewPreferences, error) {
+// TestCasePreferences returns the user's test case preferences, or their
+// defaults if the preferences cannot be read.
+func (a *App) TestCasePreferences(ctx context.Context) OverviewPreferences {
 	p, err := a.GetPreferences(ctx)
 	if err != nil {
-		return OverviewPreferences{}, err
+		p = renderPreferences(nil, a.limits)
 	}
-	return testCasePreferences(p), nil
+	return testCasePreferences(p)
 }
 
 // Overview returns statistics, the collection tree, tags, the judge's

@@ -727,7 +727,7 @@ func TestConfiguredGenerationLimits(t *testing.T) {
 	if p := must(e.app.GetPreferences(e.ctx)); p["generatedTestCases"] != 6 || p["largeTestCaseCount"] != 2 {
 		t.Errorf("clamped: %v", p)
 	}
-	if p := must(e.app.TestCasePreferences(e.ctx)); p.GeneratedTestCases != 6 || p.LargeTestCaseCount != 2 {
+	if p := e.app.TestCasePreferences(e.ctx); p.GeneratedTestCases != 6 || p.LargeTestCaseCount != 2 {
 		t.Errorf("clamped for MCP: %+v", p)
 	}
 	if p := must(e.app.UpdatePreferences(e.ctx, json.RawMessage(`{"hideTestCases":false}`))); p["generatedTestCases"] != 6 {
