@@ -99,9 +99,21 @@ const MARK = 'abcdefghijabcdefghij';
  * Every element holding a long value whose content is wider than its box
  * though it neither scrolls nor clips: something spills out of it. Code
  * editors scroll their own content and are left out.
+ *
+ * Looked at as the next frame is painted, after the resize observers of
+ * what is on the page already: resize observers are called in the order
+ * they were made. The library fits each row's tags in one, just before paint
+ * (ItemRow.tsx); between rows arriving and that frame every chip is there,
+ * which no frame shows.
  */
 async function overflowing(page: Page): Promise<string[]> {
-  return page.evaluate((mark) => {
+  return page.evaluate(async (mark) => {
+    await new Promise<void>((painted) =>
+      new ResizeObserver((_, observer) => {
+        observer.disconnect();
+        painted();
+      }).observe(document.body),
+    );
     const found: string[] = [];
     for (const el of document.body.querySelectorAll<HTMLElement>('*')) {
       if (!(el instanceof HTMLElement) || el.closest('.cm-editor') || !el.textContent?.includes(mark)) continue;
@@ -249,6 +261,9 @@ test('long text: the AI provider card, a confirm dialog and a toast', async ({ p
   await dialog.getByRole('button', { name: 'Delete reading' }).click();
   const toast = page.locator('.toast-message').filter({ hasText: LONG.cap });
   await expect(toast).toBeVisible();
+  // Deleting goes back to the library, whose rows come in as the toast
+  // shows; they are looked at once they are there, as they are painted.
+  await expect(page.locator('.item-row').first()).toBeVisible();
   await expectNoOverflow(page, 'a toast');
   // The pointer travels to the toast once it is in place, as a hand moves
   // it. Moved there in one jump, from where the page changed under it, it
