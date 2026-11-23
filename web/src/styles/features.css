@@ -147,7 +147,7 @@
   font-weight: 600;
   text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .table td {
@@ -3310,7 +3310,7 @@ button.case-chip:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 /* A remark after a label, in ordinary type. */
@@ -3551,7 +3551,7 @@ button.case-chip:hover {
   font-size: calc(var(--text-xs) * var(--reading-scale));
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .reader-outline a {
@@ -4241,7 +4241,7 @@ button.case-chip:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .import-counts dd {
@@ -4778,7 +4778,7 @@ button.log-row:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .log-what {

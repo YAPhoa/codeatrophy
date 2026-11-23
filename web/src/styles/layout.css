@@ -434,7 +434,7 @@
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .nav-heading h2 {
@@ -891,7 +891,7 @@ button.nav-twisty:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .palette-group:first-child .palette-group-label {
@@ -917,7 +917,7 @@ button.nav-twisty:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .shortcuts dl {

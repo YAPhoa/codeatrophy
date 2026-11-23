@@ -940,7 +940,7 @@ button.chip:hover {
   font-weight: 600;
   color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .popover-panel {
@@ -1813,7 +1813,7 @@ button.chip:hover {
   color: var(--text-2);
   text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-caps);
 }
 
 .diff-table th + th {
