@@ -37,6 +37,12 @@ any project; the second is what this one adds.
 7. **Nothing speculative.** No option, abstraction, flag or setting for a
    need nobody has yet. No dead code and no commented-out code; git keeps
    what was removed.
+
+   Repetition is removed for the same reason, not on sight. Share code when
+   the copies state one rule that has to change everywhere at once; leave
+   it when they only look alike and could change apart. A helper that needs
+   a flag or a parameter for each caller, or a test that is only understood
+   beside its builder, costs more than the lines it saves.
 8. **A new dependency arrives in its own commit**, with the reason the
    existing code could not do the job in the message, and a licence the
    project can carry.
