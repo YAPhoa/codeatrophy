@@ -128,7 +128,9 @@ it does nothing else, and its message has a line saying which rule and why:
 Over the size limit: renames the package in every import, nothing else.
 ```
 
-An exception that keeps coming back means the rule is wrong. Change it here.
+An exception that keeps coming back means the rule is wrong. Change it here,
+and keep the numbers: rules are cited by number, so a new rule takes the
+next free one, and none is renumbered or reused.
 
 ## This project
 
