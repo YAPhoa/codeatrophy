@@ -7,13 +7,13 @@ import { finePointer } from '../../lib/pointer';
 import { pickLanguage } from '../../lib/codeStore';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatBytes, plural } from '../../lib/format';
-import { byteLength, charCount, fieldMessage } from '../../lib/itemForm';
+import { byteLength, fieldMessage } from '../../lib/itemForm';
 import { Button } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { useConfirm } from '../../ui/Dialog';
 import { Checkbox, SelectField, TextAreaField, TextField } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
-import { WriteProblems } from './parts';
+import { NotesHint, WriteProblems } from './parts';
 import { lineCount, serverFieldErrors, solutionLanguageOptions, touchesReference, useSolutionWrite, validateSolution } from './solutionWrites';
 
 interface SolutionFormProps {
@@ -118,7 +118,6 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
     onCancel();
   };
 
-  const notesCount = charCount(notes);
   const notesLimit = limits?.maxSolutionNotesChars;
   const replaces = reference && reference.id !== solution?.id ? reference : null;
 
@@ -182,12 +181,7 @@ export function SolutionForm({ item, solution, reference, onSaved, onCancel, onD
         onChange={setNotes}
         rows={4}
         error={shown.notes}
-        hint={
-          <>
-            Markdown. The idea, the complexity, what to remember next time.
-            {notesLimit !== undefined && notesCount > notesLimit * 0.8 && ` ${notesCount.toLocaleString()} of ${notesLimit.toLocaleString()} characters.`}
-          </>
-        }
+        hint={<NotesHint notes={notes} limit={notesLimit} />}
         placeholder="e.g. O(n) time, O(n) space. Store each value’s index and look up the complement…"
       />
 

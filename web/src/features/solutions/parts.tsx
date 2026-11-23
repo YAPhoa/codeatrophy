@@ -1,10 +1,22 @@
 import type { ReactNode } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Limits } from '../../api/types';
+import { charCount } from '../../lib/itemForm';
 import { Button } from '../../ui/Button';
 import { InfoTip } from '../../ui/InfoTip';
 import { Badge, Callout, ErrorCallout } from '../../ui/misc';
 import { isSolutionLimitError, type SolutionWrite } from './solutionWrites';
+
+/** The hint under a solution's notes; once they near `limit`, how much of it they use. */
+export function NotesHint({ notes, limit }: { notes: string; limit: number | undefined }) {
+  const count = charCount(notes);
+  return (
+    <>
+      Markdown. The idea, the complexity, what to remember next time.
+      {limit !== undefined && count > limit * 0.8 && ` ${count.toLocaleString()} of ${limit.toLocaleString()} characters.`}
+    </>
+  );
+}
 
 /** The marker of the solution that is run to verify expected outputs, with an "i" that says so. */
 export function ReferenceBadge() {

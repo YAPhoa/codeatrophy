@@ -3,14 +3,14 @@ import { Link, useNavigate } from 'react-router';
 import { api } from '../../api/client';
 import { useLimits, useMeta, useSolutions } from '../../api/queries';
 import type { Item, Solution } from '../../api/types';
-import { charCount, fieldMessage } from '../../lib/itemForm';
+import { fieldMessage } from '../../lib/itemForm';
 import { languageLabel } from '../../lib/languages';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Checkbox, TextAreaField, TextField } from '../../ui/Field';
 import { Callout } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
-import { WriteProblems } from './parts';
+import { NotesHint, WriteProblems } from './parts';
 import { defaultSolutionName, describeRunFigures, serverFieldErrors, touchesReference, useSolutionWrite, validateSolution, type RunFigures } from './solutionWrites';
 
 export interface SaveSolutionDialogProps {
@@ -158,12 +158,7 @@ function SaveSolution({ item, onClose, initial, accepted, onSaved }: SaveSolutio
           onChange={setNotes}
           rows={3}
           error={notesError}
-          hint={
-            <>
-              Markdown. The idea, the complexity, what to remember next time.
-              {notesLimit !== undefined && charCount(notes) > notesLimit * 0.8 && ` ${charCount(notes).toLocaleString()} of ${notesLimit.toLocaleString()} characters.`}
-            </>
-          }
+          hint={<NotesHint notes={notes} limit={notesLimit} />}
         />
         <Checkbox
           checked={isReference}
