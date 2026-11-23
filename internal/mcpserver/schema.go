@@ -80,11 +80,7 @@ func arrayOf(items map[string]any, desc string) map[string]any {
 }
 
 func languageEnum(desc string) map[string]any {
-	ids := make([]string, len(domain.Languages))
-	for i, l := range domain.Languages {
-		ids[i] = l.ID
-	}
-	return enumStr(desc, ids...)
+	return enumStr(desc, domain.LanguageIDs()...)
 }
 
 var expectedRevision = integer("The revision you last read; if the item has changed since, nothing is written (conflict)")

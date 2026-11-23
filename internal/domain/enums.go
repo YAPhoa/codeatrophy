@@ -148,6 +148,15 @@ var Languages = []Language{
 	{"typescript", "TypeScript", "ts"},
 }
 
+// LanguageIDs returns the ids of Languages, in its order.
+func LanguageIDs() []string {
+	out := make([]string, len(Languages))
+	for i, l := range Languages {
+		out[i] = l.ID
+	}
+	return out
+}
+
 // LookupLanguage returns the canonical language with the given id.
 func LookupLanguage(id string) (Language, bool) {
 	for _, l := range Languages {

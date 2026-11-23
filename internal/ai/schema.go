@@ -54,14 +54,6 @@ func nullable(s map[string]any) map[string]any {
 	return map[string]any{"anyOf": []any{s, map[string]any{"type": "null"}}}
 }
 
-func languageIDs() []string {
-	out := make([]string, len(domain.Languages))
-	for i, l := range domain.Languages {
-		out[i] = l.ID
-	}
-	return out
-}
-
 // largeCasesSchema is the list of generators of large test cases, asked
 // for only when a generation wants n of them (n > 0).
 func largeCasesSchema(n int) map[string]any {
@@ -72,7 +64,7 @@ func largeCasesSchema(n int) map[string]any {
 	return array(obj(map[string]any{
 		"name":      str("What the input is, e.g. \"30,000 values in runs of three\""),
 		"rationale": str("Which slow or wrong solution this input exposes, one sentence"),
-		"language":  enum("Language id of the generator; one the judge runs", languageIDs()...),
+		"language":  enum("Language id of the generator; one the judge runs", domain.LanguageIDs()...),
 		"source":    str("Complete program that reads nothing and prints the stdin of one large test case"),
 	}), desc)
 }
@@ -82,16 +74,16 @@ func largeCasesSchema(n int) map[string]any {
 // cases > 0 its test cases say how many to give (see DraftPrompt.TestCases).
 func DraftSchema(large, cases int) map[string]any {
 	starter := obj(map[string]any{
-		"language": enum("Language id", languageIDs()...),
+		"language": enum("Language id", domain.LanguageIDs()...),
 		"source":   str("Program problem: starter code that reads the input. Function problem: the stub the solver fills in"),
 	})
 	harness := obj(map[string]any{
-		"language": enum("Language id", languageIDs()...),
+		"language": enum("Language id", domain.LanguageIDs()...),
 		"prefix":   str("Code before the solver's code: imports, helper type definitions (Python: first line `from __future__ import annotations`)"),
 		"suffix":   str("Code after the solver's code: reads one JSON value per line per argument, calls the solution, prints the result as compact JSON"),
 	})
 	reference := obj(map[string]any{
-		"language": enum("Language id; for a function problem one that has a harness", languageIDs()...),
+		"language": enum("Language id; for a function problem one that has a harness", domain.LanguageIDs()...),
 		"source":   str("Program problem: a complete program. Function problem: only the solution part, as a solver would write it"),
 	})
 	problem := obj(map[string]any{
