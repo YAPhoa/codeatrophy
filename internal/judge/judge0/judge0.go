@@ -207,9 +207,10 @@ var (
 	multiFileRe = regexp.MustCompile(`^Multi-file program`)
 )
 
-var displayNames = map[string]string{
-	"c": "C", "cpp": "C++", "csharp": "C#", "go": "Go", "java": "Java", "javascript": "JavaScript",
-	"kotlin": "Kotlin", "python": "Python", "ruby": "Ruby", "rust": "Rust", "typescript": "TypeScript",
+// displayName is the name of a language id, as the app writes it.
+func displayName(id string) string {
+	l, _ := domain.LookupLanguage(id)
+	return l.Name
 }
 
 // Languages implements judge.Engine.
@@ -259,7 +260,7 @@ func (e *Engine) catalog(ctx context.Context) (*catalog, error) {
 		if m := versionRe.FindStringSubmatch(names[p.id]); m != nil {
 			version = m[1]
 		}
-		c.langs = append(c.langs, judge.Language{ID: p.id, Name: displayNames[p.id], Version: version})
+		c.langs = append(c.langs, judge.Language{ID: p.id, Name: displayName(p.id), Version: version})
 	}
 
 	var conf struct {
@@ -414,7 +415,7 @@ func (e *Engine) buildRequest(c *catalog, req judge.ExecRequest) (submissionRequ
 		if e.usesMultiFile(c, req.Language) {
 			if len(req.Source) > c.extractKb*1024 {
 				return out, fmt.Errorf("judge0: the program is %d bytes; Judge0 runs %s programs of at most %d bytes",
-					len(req.Source), displayNames[req.Language], c.extractKb*1024)
+					len(req.Source), displayName(req.Language), c.extractKb*1024)
 			}
 			files, err := jvmProject(c, req)
 			if err != nil {
