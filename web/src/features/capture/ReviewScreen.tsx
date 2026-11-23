@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowLeft, RefreshCw, Save, ShieldCheck, Square, Trash2, X } from 'lucide-react';
 import type { AiSettings, AppliedStyle, Collection, DraftCheck, GenerationUsage, StylePreset } from '../../api/types';
 import { useLimits, useMeta } from '../../api/queries';
@@ -6,6 +6,7 @@ import { describeDraftCheck } from '../../lib/checks';
 import { plural } from '../../lib/format';
 import { MOD } from '../../lib/hotkeys';
 import { discardableCases, type FormErrors, type ItemFormState } from '../../lib/itemForm';
+import { useNow } from '../../lib/useNow';
 import { Button, cx } from '../../ui/Button';
 import { Collapse, ExpandChevron } from '../../ui/Collapse';
 import { ErrorCallout, Kbd, Spinner } from '../../ui/misc';
@@ -71,11 +72,7 @@ interface ReviewScreenProps {
 
 /** A check under way: how many cases, for how long, and a way to stop it. */
 function CheckProgress({ total, startedAt, onCancel }: { total: number; startedAt: number | null; onCancel: () => void }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, []);
+  const now = useNow();
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
     <div className="check-progress">

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useMemo, type RefObject } from 'react';
 import { Link, useLocation } from 'react-router';
 import { AlertCircle, CheckCircle2, ChevronDown, CircleSlash, Clock, Sparkles, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { isActiveJob, useDrafts } from '../../api/queries';
 import type { AiJobStatus } from '../../api/types';
 import { cx, IconButton } from '../../ui/Button';
+import { useNow } from '../../lib/useNow';
 import { Spinner } from '../../ui/misc';
 import { Popover } from '../../ui/Popover';
 import { OUTCOME, useJobs } from './JobsContext';
@@ -23,18 +24,6 @@ function StatusIcon({ status }: { status: AiJobStatus }) {
     case 'cancelled':
       return <CircleSlash size={14} className="job-icon" aria-hidden="true" />;
   }
-}
-
-/** A clock for the elapsed times, ticking only while something runs. */
-function useNow(ticking: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!ticking) return;
-    setNow(Date.now());
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [ticking]);
-  return now;
 }
 
 /** The rows, mounted only while the list is open, so the clock ticks only then. */

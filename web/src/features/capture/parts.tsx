@@ -4,6 +4,7 @@ import { Check, PenLine, Sparkles, Square } from 'lucide-react';
 import type { AppliedStyle, GenerationUsage } from '../../api/types';
 import { aiLogPath } from '../../lib/aiLog';
 import { describeUsage, plural } from '../../lib/format';
+import { useNow } from '../../lib/useNow';
 import { Button, cx } from '../../ui/Button';
 
 /**
@@ -49,11 +50,7 @@ function GeneratingMark() {
 
 /** In-progress state of a long AI call: what is happening, for how long, and a way out. */
 export function GeneratingPanel({ title, startedAt, onCancel, children }: { title: string; startedAt: number | null; onCancel: () => void; children?: ReactNode }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, []);
+  const now = useNow();
   const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   return (
     <div className="generating">
