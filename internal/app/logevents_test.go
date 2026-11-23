@@ -53,6 +53,49 @@ func (l *jsonLog) find(t *testing.T, msg string) map[string]any {
 
 const firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
+// Every start warns while no account exists that the first one is still to
+// be created, and stops once one does; with sign-in off, every start warns
+// of that instead.
+func TestStartupWarnings(t *testing.T) {
+	ctx := context.Background()
+	db := teststore.Open(t)
+	box, err := secrets.NewBox(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func(auth bool) (*app.App, *jsonLog) {
+		t.Helper()
+		logs := &jsonLog{}
+		a := app.New(app.Options{Store: db, Secrets: box, HealthInterval: time.Hour,
+			Logger: slog.New(slog.NewJSONHandler(logs, nil)), Auth: app.AuthOptions{Enabled: auth}})
+		if err := a.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(a.Stop)
+		return a, logs
+	}
+	const noAccount = "no account exists yet: open the web UI to create the first one"
+	const signInOff = "sign-in is turned off (CODEATROPHY_AUTH=off): anyone who can reach this server can use it"
+
+	a, logs := start(true)
+	if r := logs.find(t, noAccount); r == nil || r["level"] != "WARN" {
+		t.Errorf("first start: %s", logs)
+	}
+	if _, err := a.CreateUser(ctx, "me@example.com", "first-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	a.Stop()
+	a, logs = start(true)
+	if s := logs.String(); strings.Contains(s, noAccount) || strings.Contains(s, signInOff) {
+		t.Errorf("a start with an account: %s", logs)
+	}
+	a.Stop()
+	_, logs = start(false)
+	if r := logs.find(t, signInOff); r == nil || r["level"] != "WARN" || strings.Contains(logs.String(), noAccount) {
+		t.Errorf("a start with sign-in off: %s", logs)
+	}
+}
+
 // Account events are logged with the account and never with a password,
 // a token or a token's hash.
 func TestAccountEventsAreLogged(t *testing.T) {

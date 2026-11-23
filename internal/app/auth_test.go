@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -19,32 +17,9 @@ import (
 
 func init() { app.FastPasswordHashes() }
 
-// logCapture records the attributes of every log record.
-type logCapture struct {
-	mu    sync.Mutex
-	attrs map[string]string
-}
-
-func (l *logCapture) Enabled(context.Context, slog.Level) bool { return true }
-func (l *logCapture) Handle(_ context.Context, r slog.Record) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	r.Attrs(func(a slog.Attr) bool { l.attrs[a.Key] = a.Value.String(); return true })
-	return nil
-}
-func (l *logCapture) WithAttrs([]slog.Attr) slog.Handler { return l }
-func (l *logCapture) WithGroup(string) slog.Handler      { return l }
-
-func (l *logCapture) get(key string) string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.attrs[key]
-}
-
 type authEnv struct {
 	app   *app.App
 	db    store.Store
-	logs  *logCapture
 	clock *time.Time
 	ctx   context.Context
 }
@@ -52,14 +27,13 @@ type authEnv struct {
 func newAuthEnv(t *testing.T, enabled bool) *authEnv {
 	t.Helper()
 	db := teststore.Open(t)
-	logs := &logCapture{attrs: map[string]string{}}
 	clock := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
-	e := &authEnv{db: db, logs: logs, clock: &clock, ctx: context.Background()}
+	e := &authEnv{db: db, clock: &clock, ctx: context.Background()}
 	box, err := secrets.NewBox(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.app = app.New(app.Options{Store: db, Logger: slog.New(logs), Now: func() time.Time { return *e.clock },
+	e.app = app.New(app.Options{Store: db, Now: func() time.Time { return *e.clock },
 		Secrets: box, Auth: app.AuthOptions{Enabled: enabled, SessionTTL: 48 * time.Hour}, HealthInterval: time.Hour})
 	if err := e.app.Start(e.ctx); err != nil {
 		t.Fatal(err)
