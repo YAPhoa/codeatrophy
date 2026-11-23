@@ -369,10 +369,7 @@ func HostAllowed(hostport string, allowed []string) bool {
 	if host == "" {
 		return false
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+	if isLoopbackHost(host) {
 		return true
 	}
 	for _, a := range allowed {
@@ -381,6 +378,17 @@ func HostAllowed(hostport string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// isLoopbackHost reports whether a host name or address, without a port or
+// brackets, names this machine: localhost, a name under .localhost, or a
+// loopback address.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func hostMessage(host string) string {
@@ -414,10 +422,7 @@ func OriginAllowed(r *http.Request, allowedOrigins, allowedHosts []string) bool 
 			return true
 		}
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+	if isLoopbackHost(host) {
 		return true
 	}
 	o := strings.TrimRight(origin, "/")
