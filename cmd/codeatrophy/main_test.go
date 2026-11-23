@@ -6,12 +6,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"codeatrophy/internal/app"
+	"codeatrophy/internal/httpapi"
 	"codeatrophy/internal/mcpserver"
 	"codeatrophy/internal/secrets"
 	"codeatrophy/internal/store/teststore"
@@ -86,6 +89,24 @@ func TestSetupExposed(t *testing.T) {
 	} {
 		if got := setupExposed(tc.addr, tc.st); got != tc.want {
 			t.Errorf("setupExposed(%q, %+v) = %v, want %v", tc.addr, tc.st, got, tc.want)
+		}
+	}
+}
+
+// The healthcheck reads CODEATROPHY_ADDR as the server does, spaces around
+// it ignored, and asks the server for its health under a loopback name.
+func TestHealthcheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != httpapi.Prefix+"/health" || !strings.HasPrefix(r.Host, "localhost:") {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	for _, v := range []string{addr, " " + addr + " \n"} {
+		t.Setenv("CODEATROPHY_ADDR", v)
+		if err := healthcheck(); err != nil {
+			t.Errorf("CODEATROPHY_ADDR=%q: %v", v, err)
 		}
 	}
 }

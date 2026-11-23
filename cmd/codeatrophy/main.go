@@ -297,7 +297,7 @@ func setupExposed(addr string, st app.AuthStatus) bool {
 
 // healthcheck requests /api/v1/health from the local server.
 func healthcheck() error {
-	addr := os.Getenv("CODEATROPHY_ADDR")
+	addr := strings.TrimSpace(os.Getenv("CODEATROPHY_ADDR"))
 	if addr == "" {
 		addr = config.DefaultAddr
 	}
