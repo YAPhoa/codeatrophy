@@ -94,7 +94,7 @@ func (a *App) Meta(ctx context.Context) (Meta, error) {
 	}
 	path := a.mcp.Path
 	if path == "" {
-		path = "/mcp"
+		path = DefaultMCPPath
 	}
 	m := MetaMCP{Enabled: a.mcp.Enabled, Path: path, AuthRequired: a.mcp.AuthRequired}
 	if a.mcp.Enabled && a.mcp.PublicURL != "" {

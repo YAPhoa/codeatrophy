@@ -176,7 +176,7 @@ func serve() error {
 		JudgeConcurrency: cfg.Judge.Concurrency,
 		AIWorkers:        cfg.AI.Workers,
 		Version:          version,
-		MCP: app.MCPInfo{Enabled: cfg.MCP.Enabled, Path: "/mcp", AuthRequired: cfg.MCP.Token != "" || cfg.Auth,
+		MCP: app.MCPInfo{Enabled: cfg.MCP.Enabled, Path: app.DefaultMCPPath, AuthRequired: cfg.MCP.Token != "" || cfg.Auth,
 			PublicURL: cfg.PublicURL},
 		Auth:   app.AuthOptions{Enabled: cfg.Auth, SessionTTL: cfg.SessionTTL},
 		Logger: log,
@@ -209,7 +209,7 @@ func serve() error {
 	}
 	handler := httpapi.New(httpapi.Options{
 		App: a, Logger: log, AllowedOrigins: cfg.AllowedOrigins, AllowedHosts: hosts,
-		TrustedProxies: cfg.TrustedProxies, AccessLog: cfg.AccessLog, MCP: mcpHandler, MCPPath: "/mcp",
+		TrustedProxies: cfg.TrustedProxies, AccessLog: cfg.AccessLog, MCP: mcpHandler, MCPPath: app.DefaultMCPPath,
 		Web: webui.Handler(),
 	})
 	srv := newHTTPServer(cfg.Addr, handler, mcpEndpoint, log)

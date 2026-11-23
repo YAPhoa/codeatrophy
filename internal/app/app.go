@@ -41,6 +41,10 @@ type AIEnv struct {
 	Timeout          time.Duration
 }
 
+// DefaultMCPPath is where the MCP endpoint is served unless MCPInfo.Path
+// says otherwise.
+const DefaultMCPPath = "/mcp"
+
 // MCPInfo describes the MCP endpoint for the meta endpoint.
 type MCPInfo struct {
 	Enabled      bool

@@ -81,7 +81,7 @@ func New(opts Options) *Server {
 		s.log = slog.New(slog.DiscardHandler)
 	}
 	if s.mcpPath == "" {
-		s.mcpPath = "/mcp"
+		s.mcpPath = app.DefaultMCPPath
 	}
 	s.csrf = http.NewCrossOriginProtection()
 	for _, o := range opts.AllowedOrigins {
