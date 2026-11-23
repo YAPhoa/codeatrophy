@@ -1111,9 +1111,14 @@ describe('solutions', () => {
     const flaky = await api.solutions.create(twoSum, { name: 'Flaky judge', language: 'python', source: 'print(1)  # MOCK:IE' });
     await api.testCases.verify(twoSum, false, flaky.id);
     expect((await api.solutions.list(twoSum)).items.find((s) => s.id === flaky.id)!.lastRun).toBeNull();
+    // A fresh server seeds its dates from the clock, so the run to keep is
+    // read from it, not from the server before.
     start({ judge: 'down' });
+    const bruteRun = async () => (await api.solutions.list(twoSum)).items.find((s) => s.id === brute!.id)!.lastRun;
+    const before = await bruteRun();
+    expect(before).not.toBeNull();
     await failure(api.testCases.verify(twoSum, false, brute!.id));
-    expect((await api.solutions.list(twoSum)).items.find((s) => s.id === brute!.id)!.lastRun).toEqual(brute!.lastRun);
+    expect(await bruteRun()).toEqual(before);
   });
 
   it('takes the last run of a solution saved from a submission of its code, and only then', async () => {
