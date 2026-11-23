@@ -16,9 +16,6 @@ type Opt[T any] struct {
 // Some returns a present, non-null Opt.
 func Some[T any](v T) Opt[T] { return Opt[T]{Set: true, Val: v} }
 
-// Null returns a present, null Opt.
-func Null[T any]() Opt[T] { return Opt[T]{Set: true, Null: true} }
-
 // UnmarshalJSON implements json.Unmarshaler.
 func (o *Opt[T]) UnmarshalJSON(b []byte) error {
 	o.Set = true
