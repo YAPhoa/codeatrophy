@@ -79,7 +79,7 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 			return err
 		}
 		if len(existing) >= domain.MaxSolutionsPerItem {
-			return errConflict(fmt.Sprintf("a problem can keep at most %d solutions", domain.MaxSolutionsPerItem), nil)
+			return errTooManySolutions()
 		}
 		before := refOf(&it)
 		if s.IsReference {
@@ -93,6 +93,11 @@ func (a *App) CreateSolution(ctx context.Context, itemID string, in domain.ItemS
 		return a.solutionsChanged(ctx, tx, &it, before)
 	})
 	return s, err
+}
+
+// errTooManySolutions refuses a solution beyond domain.MaxSolutionsPerItem.
+func errTooManySolutions() error {
+	return errConflict(fmt.Sprintf("a problem can keep at most %d solutions", domain.MaxSolutionsPerItem), nil)
 }
 
 // UpdateSolution applies a partial update to a saved solution.
@@ -203,7 +208,7 @@ func (a *App) writeReference(tx store.Tx, itemID string, ref *domain.Solution) e
 		}
 	}
 	if len(sols) >= domain.MaxSolutionsPerItem {
-		return errConflict(fmt.Sprintf("a problem can keep at most %d solutions", domain.MaxSolutionsPerItem), nil)
+		return errTooManySolutions()
 	}
 	s := domain.ItemSolution{ID: newID(), ItemID: itemID, Name: domain.ReferenceSolutionName, Language: ref.Language,
 		Source: ref.Source, IsReference: true, CreatedAt: now, UpdatedAt: now}
