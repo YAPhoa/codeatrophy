@@ -32,6 +32,12 @@ const (
 	MaxNotesCharsCeiling = 100000
 )
 
+// The defaults of Limits.MaxImportBytes and Limits.MaxSourceBytes.
+const (
+	DefaultMaxImportBytes = 50 << 20
+	DefaultMaxSourceBytes = 64 << 10
+)
+
 // Limits are the instance-configurable size limits.
 type Limits struct {
 	MaxImportBytes int64

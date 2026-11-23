@@ -185,8 +185,8 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		AllowedOrigins:  list("CODEATROPHY_ALLOWED_ORIGINS"),
 		PublicURL:       strings.TrimRight(get("CODEATROPHY_PUBLIC_URL", ""), "/"),
 		AllowedHosts:    list("CODEATROPHY_ALLOWED_HOSTS"),
-		MaxImportBytes:  int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", 50<<20)),
-		MaxSourceBytes:  getInt("CODEATROPHY_MAX_SOURCE_BYTES", 64<<10),
+		MaxImportBytes:  int64(getInt("CODEATROPHY_MAX_IMPORT_BYTES", domain.DefaultMaxImportBytes)),
+		MaxSourceBytes:  getInt("CODEATROPHY_MAX_SOURCE_BYTES", domain.DefaultMaxSourceBytes),
 		MaxNotesChars:   getInt("CODEATROPHY_MAX_NOTES_CHARS", domain.DefaultMaxNotesChars),
 		MaxLinksPerItem: getInt("CODEATROPHY_MAX_LINKS_PER_ITEM", domain.DefaultMaxLinksPerItem),
 

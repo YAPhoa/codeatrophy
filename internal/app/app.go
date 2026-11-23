@@ -179,7 +179,7 @@ func New(opts Options) *App {
 		a.defaults = map[string]ProviderDefaults{}
 	}
 	if a.limits.MaxSourceBytes == 0 {
-		a.limits.MaxSourceBytes = 64 << 10
+		a.limits.MaxSourceBytes = domain.DefaultMaxSourceBytes
 	}
 	if a.limits.MaxNotesChars == 0 {
 		a.limits.MaxNotesChars = domain.DefaultMaxNotesChars
@@ -194,7 +194,7 @@ func New(opts Options) *App {
 		a.limits.MaxLargeTestCases = domain.DefaultMaxLargeTestCases
 	}
 	if a.limits.MaxImportBytes == 0 {
-		a.limits.MaxImportBytes = 50 << 20
+		a.limits.MaxImportBytes = domain.DefaultMaxImportBytes
 	}
 	if a.version == "" {
 		a.version = "dev"
