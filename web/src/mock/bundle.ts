@@ -5,8 +5,10 @@
 import type {
   CompareMode,
   Difficulty,
+  HarnessCode,
   ItemSource,
   ItemType,
+  ProblemInterface,
   TestOrigin,
 } from '../api/types';
 import { LIMITS } from './db';
@@ -16,7 +18,8 @@ import type { ZipEntry } from './zip';
 import { readZip, writeZip, ZipError } from './zip';
 
 export const BUNDLE_FORMAT = 'codeatrophy.bundle';
-export const BUNDLE_FORMAT_VERSION = 1;
+/** The newest format version the mock reads. */
+export const BUNDLE_FORMAT_VERSION = 2;
 
 export interface BundleTestCase {
   name: string;
@@ -40,6 +43,10 @@ export interface BundleProblem {
   memoryLimitKb: number;
   compare: CompareMode;
   starterCode: Record<string, string>;
+  /** `function` for a solution-only problem, which only format version 2 carries; `program` when absent. Always set when read. */
+  interface?: ProblemInterface;
+  /** The runner code per language of a `function` problem. Always set when read: `{}` for a `program` problem. */
+  harness?: Record<string, HarnessCode>;
 }
 
 export interface BundleItem {
@@ -100,6 +107,11 @@ export interface BundleData {
 /** Thrown when an archive is not an acceptable bundle; the message is safe to show. */
 export class BundleError extends Error {}
 
+/** The oldest format version that can carry `items`: 2 once a problem is solution-only. */
+export function requiredVersion(items: readonly BundleItem[]): number {
+  return items.some((item) => item.problem?.interface === 'function') ? 2 : 1;
+}
+
 /** JSON with object keys sorted and no insignificant whitespace. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -126,12 +138,19 @@ export function contentHash(item: Omit<BundleItem, 'id' | 'createdAt' | 'updated
     body: item.body,
   };
   if (item.type === 'problem' && item.problem) {
-    doc.problem = {
+    const problem: Record<string, unknown> = {
       timeLimitMs: item.problem.timeLimitMs,
       memoryLimitKb: item.problem.memoryLimitKb,
       compare: item.problem.compare,
       starterCode: item.problem.starterCode,
     };
+    // Version 2: a solution-only problem adds its interface and runner code. A
+    // program hashes as in version 1, so version 1 hashes stay valid.
+    if (item.problem.interface === 'function') {
+      problem.interface = 'function';
+      problem.harness = Object.fromEntries(Object.entries(item.problem.harness ?? {}).map(([language, h]) => [language, { prefix: h.prefix, suffix: h.suffix }]));
+    }
+    doc.problem = problem;
     // Solutions left out of the export are left out of the hash too.
     if (item.solutions) {
       doc.solutions = item.solutions.map((s) => ({
@@ -188,12 +207,25 @@ export function buildBundleZip(data: BundleData): Uint8Array<ArrayBuffer> {
         starter[language] = `starter/${language}.${extensionOf(language)}`;
         add(`${dir}/${starter[language]}`, source);
       }
-      meta.problem = {
+      const problem: Record<string, unknown> = {
         timeLimitMs: item.problem.timeLimitMs,
         memoryLimitKb: item.problem.memoryLimitKb,
         compare: item.problem.compare,
         starter,
       };
+      // Only a solution-only problem has these, and its runner in harness/.
+      if (item.problem.interface === 'function') {
+        const harness: Record<string, { prefix: string; suffix: string }> = {};
+        for (const [language, code] of Object.entries(item.problem.harness ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
+          const files = { prefix: `harness/${language}-prefix.${extensionOf(language)}`, suffix: `harness/${language}-suffix.${extensionOf(language)}` };
+          add(`${dir}/${files.prefix}`, code.prefix);
+          add(`${dir}/${files.suffix}`, code.suffix);
+          harness[language] = files;
+        }
+        problem.interface = 'function';
+        problem.harness = harness;
+      }
+      meta.problem = problem;
       // Written even when the list is empty, so that "has no solutions" and
       // "exported without solutions" stay distinguishable to a reader.
       if (item.solutions) {
@@ -229,7 +261,7 @@ export function buildBundleZip(data: BundleData): Uint8Array<ArrayBuffer> {
 
   const manifest = {
     format: BUNDLE_FORMAT,
-    formatVersion: data.formatVersion ?? BUNDLE_FORMAT_VERSION,
+    formatVersion: data.formatVersion ?? requiredVersion(data.items),
     name: data.name,
     description: data.description ?? '',
     author: data.author ?? '',
@@ -284,6 +316,66 @@ const unixLines = (value: string) => value.replace(/\r\n?/g, '\n');
 
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+
+/**
+ * Read `problem.interface` and `problem.harness` into `problem`. They mean
+ * nothing in a version 1 bundle. Returns false when the item cannot be
+ * imported faithfully: an unknown interface or a malformed harness would
+ * make a problem that cannot be solved.
+ */
+function readInterface(
+  version: number,
+  dir: string,
+  raw: Record<string, unknown>,
+  problem: BundleProblem,
+  read: (path: string) => string | undefined,
+  warnings: string[],
+): boolean {
+  const iface = raw.interface ?? null;
+  if (version < 2) {
+    if (iface !== null && iface !== 'program') warnings.push(`${dir}/item.json: problem.interface is not part of bundle format version 1; ignored, the problem is a full program`);
+    return true;
+  }
+  if (iface !== null) {
+    if (typeof iface !== 'string') {
+      warnings.push(`${dir}/item.json: problem.interface must be a string; item skipped`);
+      return false;
+    }
+    if (iface !== 'program' && iface !== 'function') {
+      warnings.push(`${dir}/item.json: unknown problem.interface ${JSON.stringify(iface)}; item skipped`);
+      return false;
+    }
+    problem.interface = iface;
+  }
+  const harness = raw.harness ?? null;
+  if (harness === null) return true;
+  const parts = isRecord(harness) ? Object.entries(harness) : null;
+  if (parts === null || parts.some(([, h]) => !isRecord(h) || [h.prefix, h.suffix].some((p) => p != null && typeof p !== 'string'))) {
+    warnings.push(`${dir}/item.json: problem.harness is malformed; item skipped`);
+    return false;
+  }
+  if (problem.interface !== 'function') {
+    if (parts.length > 0) warnings.push(`${dir}/item.json: problem.harness given for a full-program problem; ignored`);
+    return true;
+  }
+  for (const [language, h] of parts.sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (!isLanguage(language)) {
+      warnings.push(`${dir}/item.json: unknown language ${JSON.stringify(language)} in harness; ignored`);
+      continue;
+    }
+    // An empty or absent path is an empty part.
+    const part = (path: unknown) => (typeof path === 'string' && path !== '' ? read(`${dir}/${path}`) : '');
+    const prefix = part((h as Record<string, unknown>).prefix);
+    const suffix = part((h as Record<string, unknown>).suffix);
+    const tooLarge = (code: string) => new TextEncoder().encode(code).length > LIMITS.maxSourceBytes;
+    if (prefix === undefined || suffix === undefined || tooLarge(prefix) || tooLarge(suffix)) {
+      warnings.push(`${dir}/item.json: the ${language} harness is incomplete; ${language} cannot be used for this problem`);
+      continue;
+    }
+    problem.harness = { ...problem.harness, [language]: { prefix, suffix } };
+  }
+  return true;
+}
 
 /**
  * Read an item's `solutions/solutions.json`. Its absence means the bundle
@@ -477,7 +569,10 @@ export async function parseBundleZip(bytes: Uint8Array): Promise<ParsedBundle> {
         memoryLimitKb: typeof problem.memoryLimitKb === 'number' ? problem.memoryLimitKb : 262144,
         compare: problem.compare === 'exact' ? 'exact' : 'tokens',
         starterCode,
+        interface: 'program',
+        harness: {},
       };
+      if (!readInterface(formatVersion, dir, problem, item.problem, read, warnings)) continue;
       item.solutions = readSolutions(dir, read, readJson, warnings);
       const tests = readJson(`${dir}/tests/tests.json`);
       if (tests === null) warnings.push(`${dir}/tests/tests.json: malformed; test cases ignored`);

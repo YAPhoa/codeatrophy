@@ -8,7 +8,7 @@ import { functionKit, KIT_LANGUAGES } from './harness';
 import { buildBundleZip, createMockServer, optionsFromFlags, parseBundleZip, seedIds } from './index';
 import { TLE_GRACE_MS } from './judge';
 import { MERGE_K_LISTS_JAVA, MERGE_K_LISTS_REFERENCE } from './seed/mergeKLists';
-import { readZip } from './zip';
+import { readZip, writeZip } from './zip';
 
 let server: MockServer;
 
@@ -3853,7 +3853,8 @@ describe('export and import', () => {
     expect(blob.size).toBeGreaterThan(1000);
 
     const preview = await api.bundle.preview(new File([blob], filename!));
-    expect(preview.bundle).toMatchObject({ name: 'Codeatrophy library', formatVersion: 1 });
+    // The seed has a solution-only problem, which needs format version 2.
+    expect(preview.bundle).toMatchObject({ name: 'Codeatrophy library', formatVersion: 2 });
     expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 25 });
     expect(preview.collections).toHaveLength(8);
     expect(preview.collections.every((c) => c.state === 'existing')).toBe(true);
@@ -4266,10 +4267,95 @@ describe('export and import', () => {
     expect(notZip.status).toBe(422);
     expect(notZip.code).toBe('validation_failed');
 
-    const future = buildBundleZip({ name: 'Future', formatVersion: 2, items: [] });
+    const future = buildBundleZip({ name: 'Future', formatVersion: 3, items: [] });
     const err = await failure(api.bundle.import(zipFile(future), 'skip'));
     expect(err.status).toBe(422);
     expect(err.message).toMatch(/newer/);
+  });
+});
+
+describe('bundle format version 2', () => {
+  const { mergeKLists, twoSum } = seedIds.items;
+  const exported = async (id: string) =>
+    new Uint8Array(await (await api.bundle.export({ scope: 'items', itemIds: [id], includeSolutions: true, includeHiddenTests: true })).blob.arrayBuffer());
+  const text = (entries: { path: string; data: Uint8Array }[], suffix: string) => new TextDecoder().decode(entries.find((e) => e.path.endsWith(suffix))!.data);
+
+  it('writes a solution-only problem as version 2, with its interface and harness files', async () => {
+    const local = (await api.items.get(mergeKLists)).problem!;
+    const entries = await readZip(await exported(mergeKLists));
+    expect(JSON.parse(text(entries, 'bundle.json')).formatVersion).toBe(2);
+    const problem = JSON.parse(text(entries, '/item.json')).problem;
+    expect(problem.interface).toBe('function');
+    expect(Object.keys(problem.harness).sort()).toEqual(Object.keys(local.harness).sort());
+    for (const [language, code] of Object.entries(local.harness)) {
+      expect(problem.harness[language]).toEqual({ prefix: `harness/${language}-prefix.${language === 'python' ? 'py' : 'java'}`, suffix: `harness/${language}-suffix.${language === 'python' ? 'py' : 'java'}` });
+      expect(text(entries, `/harness/${language}-prefix.${language === 'python' ? 'py' : 'java'}`)).toBe(code.prefix);
+      expect(text(entries, `/harness/${language}-suffix.${language === 'python' ? 'py' : 'java'}`)).toBe(code.suffix);
+    }
+  });
+
+  it('writes version 1, with no interface or harness, when no problem is solution-only', async () => {
+    const entries = await readZip(await exported(twoSum));
+    expect(JSON.parse(text(entries, 'bundle.json')).formatVersion).toBe(1);
+    const problem = JSON.parse(text(entries, '/item.json')).problem;
+    expect(problem).not.toHaveProperty('interface');
+    expect(problem).not.toHaveProperty('harness');
+    expect(entries.some((e) => e.path.includes('/harness/'))).toBe(false);
+  });
+
+  it('round-trips a solution-only problem: unchanged here, the same problem in another library', async () => {
+    const local = await api.items.get(mergeKLists);
+    const bytes = await exported(mergeKLists);
+    const preview = await api.bundle.preview(zipFile(bytes));
+    expect(preview.counts).toEqual({ new: 0, changed: 0, unchanged: 1 });
+    expect(preview.warnings).toEqual([]);
+
+    start(optionsFromFlags(['empty', 'instant']));
+    expect((await api.bundle.import(zipFile(bytes), 'skip')).created).toBe(1);
+    const imported = await api.items.get(mergeKLists);
+    expect(imported.problem).toMatchObject({ interface: 'function', harness: local.problem!.harness, starterCode: local.problem!.starterCode });
+  });
+
+  it('tells a changed harness apart, and an overwrite brings it in', async () => {
+    const bundledItem = await bundled(mergeKLists);
+    const harness = { ...bundledItem.problem!.harness, python: { prefix: '# changed', suffix: '' } };
+    const bytes = buildBundleZip({ name: 'Changed', items: [{ ...bundledItem, problem: { ...bundledItem.problem!, harness } }] });
+    const preview = await api.bundle.preview(zipFile(bytes));
+    expect(preview.items[0]).toMatchObject({ state: 'changed', changes: ['harness'] });
+    await api.bundle.import(zipFile(bytes), 'overwrite');
+    expect((await api.items.get(mergeKLists)).problem!.harness.python).toEqual({ prefix: '# changed', suffix: '' });
+  });
+
+  it('reads a version 1 bundle as full programs, whatever its items say', async () => {
+    const bundledItem = await bundled(mergeKLists);
+    const parsed = await parseBundleZip(buildBundleZip({ name: 'Old', formatVersion: 1, items: [bundledItem] }));
+    expect(parsed.items[0]!.problem).toMatchObject({ interface: 'program', harness: {} });
+    expect(parsed.warnings).toContainEqual(expect.stringMatching(/problem\.interface is not part of bundle format version 1; ignored, the problem is a full program/));
+    // A local solution-only problem differs from that copy of it.
+    const preview = await api.bundle.preview(zipFile(buildBundleZip({ name: 'Old', formatVersion: 1, items: [bundledItem] })));
+    expect(preview.items[0]).toMatchObject({ state: 'changed', changes: ['interface', 'harness'] });
+  });
+
+  it('skips an item whose interface it does not know, and a harness language whose files are missing', async () => {
+    const entries = await readZip(await exported(mergeKLists));
+    const edit = (mutate: (problem: Record<string, unknown>) => void, drop?: string) => {
+      const out = entries
+        .filter((e) => drop === undefined || !e.path.endsWith(drop))
+        .map((e) => {
+          if (!e.path.endsWith('/item.json')) return e;
+          const meta = JSON.parse(new TextDecoder().decode(e.data));
+          mutate(meta.problem);
+          return { path: e.path, data: new TextEncoder().encode(JSON.stringify(meta)) };
+        });
+      return writeZip(out);
+    };
+    const unknown = await parseBundleZip(edit((p) => (p.interface = 'class')));
+    expect(unknown.items).toEqual([]);
+    expect(unknown.warnings).toEqual([expect.stringMatching(/unknown problem\.interface "class"; item skipped/)]);
+
+    const missing = await parseBundleZip(edit(() => undefined, '/harness/java-suffix.java'));
+    expect(Object.keys(missing.items[0]!.problem!.harness!)).toEqual(['python']);
+    expect(missing.warnings).toContainEqual(expect.stringMatching(/the java harness is incomplete; java cannot be used for this problem/));
   });
 });
 

@@ -33,6 +33,8 @@ function toBundleItem(db: MockDb, item: StoredItem, includeSolutions: boolean, i
           memoryLimitKb: item.problem.memoryLimitKb,
           compare: item.problem.compare,
           starterCode: { ...item.problem.starterCode },
+          interface: item.problem.interface,
+          harness: item.problem.interface === 'function' ? structuredClone(item.problem.harness) : {},
         }
       : null,
     // Left out entirely, rather than written as an empty list, when not exported.
@@ -177,7 +179,7 @@ function classify(db: MockDb, incoming: BundleItem): ImportItemState {
 }
 
 const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
-const sortedEntries = (record: Record<string, string> | undefined) => Object.entries(record ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+const sortedEntries = <T>(record: Record<string, T> | undefined) => Object.entries(record ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
 
 /**
  * The content fields in which a bundled item differs from the local one, in
@@ -206,6 +208,8 @@ function changesOf(db: MockDb, bundled: BundleItem): string[] {
     ],
     ['compare', local.problem?.compare === incoming.problem?.compare],
     ['starterCode', sameJson(sortedEntries(local.problem?.starterCode), sortedEntries(incoming.problem?.starterCode))],
+    ['interface', (local.problem?.interface ?? 'program') === (incoming.problem?.interface ?? 'program')],
+    ['harness', sameJson(sortedEntries(local.problem?.harness), sortedEntries(incoming.problem?.harness))],
     ['solutions', sameJson(solutions(local), solutions(incoming))],
     ['testCases', sameJson(cases(local), cases(incoming))],
   ];
@@ -265,7 +269,7 @@ function createFromBundle(db: MockDb, incoming: BundleItem, id: string): StoredI
     notes: '',
     rawInput: null,
     source: { ...incoming.source },
-    // The bundle format has no place for the interface or the harness: an imported problem is a program.
+    // A version 1 bundle's problem is a program; a version 2 one brings its interface and harness.
     problem: incoming.problem ? { ...structuredClone(DEFAULT_PROBLEM), ...structuredClone(incoming.problem) } : null,
     variantOf: incoming.variantOf,
     revision: 1,
@@ -289,7 +293,7 @@ function overwrite(db: MockDb, local: StoredItem, incoming: BundleItem): void {
   local.tags = [...incoming.tags];
   local.source = { ...incoming.source };
   local.variantOf = incoming.variantOf;
-  // The local interface and harness stay: the bundle does not carry them.
+  // The bundle's interface and harness replace the local ones, as its starter code does: a version 1 bundle's problem is a program.
   if (incoming.problem && local.problem) local.problem = { ...local.problem, ...structuredClone(incoming.problem) };
   // Solutions are replaced by the bundle's; a bundle exported without
   // solutions must not erase the local ones.
