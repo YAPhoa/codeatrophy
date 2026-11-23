@@ -212,7 +212,13 @@ test('notes: long notes scroll inside a capped box', async ({ page }) => {
   const long = Array.from({ length: 80 }, (_, i) => `Line ${i + 1}`).join('\n\n');
   await mockApi(page, `/items/${id}`, { method: 'PATCH', body: { notes: long } });
   await page.getByRole('link', { name: 'CAP Theorem Notes', exact: true }).click();
-  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  // The reader opens the pane by itself when the item it mounts with has
+  // notes, and that copy may come before or after the notes set above. It
+  // decides once, as it mounts, so a click is needed only when it did not.
+  const toggle = page.getByRole('button', { name: 'Notes', exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   const panel = page.getByRole('complementary', { name: 'Private notes' });
   const preview = panel.locator('.notes-preview');
   await expect(preview).toContainText('Line 80');
