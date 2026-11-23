@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/grader"
@@ -441,6 +442,11 @@ func TestAuthTokenAndHTTPErrors(t *testing.T) {
 	}
 	if _, err := New(Config{}); err == nil {
 		t.Error("URL is required")
+	}
+	// A long error body is cut short at a character boundary.
+	err := httpStatusError(500, []byte("a"+strings.Repeat("é", 300)))
+	if msg := err.Error(); !utf8.ValidString(msg) || len(msg) > len("HTTP 500: ")+300 || len(msg) < len("HTTP 500: ")+297 {
+		t.Errorf("a long body: %d bytes, valid UTF-8 %v", len(msg), utf8.ValidString(msg))
 	}
 }
 

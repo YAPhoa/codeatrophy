@@ -660,7 +660,7 @@ func (e *Engine) executeChunk(ctx context.Context, c *catalog, reqs []judge.Exec
 	for _, cr := range created {
 		if tok, _ := cr["token"].(string); tok == "" {
 			b, _ := json.Marshal(cr)
-			return abandon(fmt.Errorf("judge0: batch submission rejected: %s", truncate(string(b), 300)))
+			return abandon(fmt.Errorf("judge0: batch submission rejected: %s", domain.Truncate(string(b), 300)))
 		}
 	}
 	pending := len(reqs)
@@ -841,7 +841,7 @@ func (e *Engine) do(ctx context.Context, method, p string, in, out any) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("judge0: %s %s: HTTP %d: %s", method, stripQuery(p), resp.StatusCode,
-			truncate(strings.TrimSpace(string(data)), 300))
+			domain.Truncate(strings.TrimSpace(string(data)), 300))
 	}
 	if out == nil {
 		return nil
@@ -866,14 +866,7 @@ func (e *Engine) newRequest(ctx context.Context, method, p string, body io.Reade
 }
 
 func httpStatusError(code int, body []byte) error {
-	return fmt.Errorf("HTTP %d: %s", code, truncate(strings.TrimSpace(string(body)), 300))
-}
-
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
+	return fmt.Errorf("HTTP %d: %s", code, domain.Truncate(strings.TrimSpace(string(body)), 300))
 }
 
 func stripQuery(p string) string {

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"codeatrophy/internal/domain"
 )
 
 // Provider ids.
@@ -153,7 +155,7 @@ func Redact(s string, secrets ...string) string {
 		}
 	}
 	if len(s) > 500 {
-		s = s[:500] + "…"
+		s = domain.Truncate(s, 500) + "…"
 	}
 	return s
 }
