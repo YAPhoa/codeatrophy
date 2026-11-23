@@ -444,49 +444,6 @@ func (t *tx) queryRow(q string, args ...any) *sql.Row {
 	return t.tx.QueryRowContext(t.ctx, q, args...)
 }
 
-// Time helpers: timestamps are stored as Unix seconds.
-
-func toUnix(t time.Time) int64 { return t.UTC().Unix() }
-
-func fromUnix(s int64) time.Time { return time.Unix(s, 0).UTC() }
-
-func nullUnix(p *time.Time) any {
-	if p == nil {
-		return nil
-	}
-	return toUnix(*p)
-}
-
-func nullStr(p *string) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
-func nullInt(p *int) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
-func strPtr(ns sql.NullString) *string {
-	if !ns.Valid {
-		return nil
-	}
-	s := ns.String
-	return &s
-}
-
-func intPtr(ni sql.NullInt64) *int {
-	if !ni.Valid {
-		return nil
-	}
-	v := int(ni.Int64)
-	return &v
-}
-
 func boolInt(b bool) int {
 	if b {
 		return 1

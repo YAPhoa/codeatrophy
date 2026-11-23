@@ -6,6 +6,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const solutionColumns = `id, item_id, name, language, source, notes, is_reference, created_at, updated_at,
@@ -21,10 +22,10 @@ func scanSolution(sc interface{ Scan(...any) error }) (domain.ItemSolution, erro
 	err := sc.Scan(&s.ID, &s.ItemID, &s.Name, &s.Language, &s.Source, &s.Notes, &ref, &created, &updated,
 		&passed, &total, &timeMs, &memKb, &ranAt)
 	s.IsReference = ref != 0
-	s.CreatedAt, s.UpdatedAt = fromUnix(created), fromUnix(updated)
+	s.CreatedAt, s.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	if ranAt.Valid {
-		s.LastRun = &domain.SolutionRun{Passed: int(passed.Int64), Total: int(total.Int64), TimeMs: intPtr(timeMs),
-			MemoryKb: intPtr(memKb), RanAt: fromUnix(ranAt.Int64)}
+		s.LastRun = &domain.SolutionRun{Passed: int(passed.Int64), Total: int(total.Int64), TimeMs: sqlrow.IntPtr(timeMs),
+			MemoryKb: sqlrow.IntPtr(memKb), RanAt: sqlrow.FromUnix(ranAt.Int64)}
 	}
 	return s, err
 }
@@ -34,7 +35,7 @@ func lastRunArgs(r *domain.SolutionRun) []any {
 	if r == nil {
 		return []any{nil, nil, nil, nil, nil}
 	}
-	return []any{r.Passed, r.Total, nullInt(r.TimeMs), nullInt(r.MemoryKb), toUnix(r.RanAt)}
+	return []any{r.Passed, r.Total, sqlrow.NullInt(r.TimeMs), sqlrow.NullInt(r.MemoryKb), sqlrow.ToUnix(r.RanAt)}
 }
 
 func (t *tx) ListSolutions(itemID string) ([]domain.ItemSolution, error) {
@@ -64,13 +65,13 @@ func (t *tx) GetSolution(id string) (domain.ItemSolution, error) {
 
 func (t *tx) InsertSolution(s *domain.ItemSolution) error {
 	args := append([]any{s.ID, s.ItemID, s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference),
-		toUnix(s.CreatedAt), toUnix(s.UpdatedAt)}, lastRunArgs(s.LastRun)...)
+		sqlrow.ToUnix(s.CreatedAt), sqlrow.ToUnix(s.UpdatedAt)}, lastRunArgs(s.LastRun)...)
 	_, err := t.exec(`INSERT INTO solutions (`+solutionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 	return err
 }
 
 func (t *tx) UpdateSolution(s *domain.ItemSolution) error {
-	args := append([]any{s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference), toUnix(s.UpdatedAt)},
+	args := append([]any{s.Name, s.Language, s.Source, s.Notes, boolInt(s.IsReference), sqlrow.ToUnix(s.UpdatedAt)},
 		lastRunArgs(s.LastRun)...)
 	res, err := t.exec(`UPDATE solutions SET name = ?, language = ?, source = ?, notes = ?, is_reference = ?, updated_at = ?,
 		last_run_passed = ?, last_run_total = ?, last_run_time_ms = ?, last_run_memory_kb = ?, last_run_at = ?

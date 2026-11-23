@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const mcpTokenColumns = `id, user_id, name, hint, created_at, last_used_at`
@@ -22,9 +23,9 @@ func scanMCPToken(row interface{ Scan(...any) error }) (store.MCPToken, error) {
 		}
 		return t, err
 	}
-	t.CreatedAt = fromUnix(created)
+	t.CreatedAt = sqlrow.FromUnix(created)
 	if used.Valid {
-		u := fromUnix(used.Int64)
+		u := sqlrow.FromUnix(used.Int64)
 		t.LastUsedAt = &u
 	}
 	return t, nil
@@ -53,12 +54,12 @@ func (t *tx) GetMCPToken(id string) (store.MCPToken, error) {
 
 func (t *tx) InsertMCPToken(m *store.MCPToken) error {
 	_, err := t.exec(`INSERT INTO mcp_tokens (`+mcpTokenColumns+`) VALUES (?, ?, ?, ?, ?, ?)`,
-		m.ID, m.UserID, m.Name, m.Hint, toUnix(m.CreatedAt), nullUnix(m.LastUsedAt))
+		m.ID, m.UserID, m.Name, m.Hint, sqlrow.ToUnix(m.CreatedAt), sqlrow.NullUnix(m.LastUsedAt))
 	return err
 }
 
 func (t *tx) TouchMCPToken(id string, at time.Time) error {
-	_, err := t.exec(`UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?`, toUnix(at), id)
+	_, err := t.exec(`UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?`, sqlrow.ToUnix(at), id)
 	return err
 }
 

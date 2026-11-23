@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 // The AI activity log: the index row in ai_log, the compressed request and
@@ -28,18 +29,18 @@ func scanAILogEntry(sc interface{ Scan(...any) error }) (store.AILogEntry, error
 		&e.Status, &errMsg, &e.DurationMs, &in, &out, &reasoning, &cacheR, &cacheW, &e.UserID); err != nil {
 		return e, err
 	}
-	e.CreatedAt = fromUnix(created)
-	e.ItemID, e.Title, e.Error = strPtr(itemID), strPtr(title), strPtr(errMsg)
-	e.InputTokens, e.OutputTokens, e.ReasoningTokens = intPtr(in), intPtr(out), intPtr(reasoning)
-	e.CacheReadTokens, e.CacheWriteTokens = intPtr(cacheR), intPtr(cacheW)
+	e.CreatedAt = sqlrow.FromUnix(created)
+	e.ItemID, e.Title, e.Error = sqlrow.StrPtr(itemID), sqlrow.StrPtr(title), sqlrow.StrPtr(errMsg)
+	e.InputTokens, e.OutputTokens, e.ReasoningTokens = sqlrow.IntPtr(in), sqlrow.IntPtr(out), sqlrow.IntPtr(reasoning)
+	e.CacheReadTokens, e.CacheWriteTokens = sqlrow.IntPtr(cacheR), sqlrow.IntPtr(cacheW)
 	return e, nil
 }
 
 func (t *tx) InsertAILogEntry(e store.AILogEntry, b store.AILogBody) error {
 	if _, err := t.exec(`INSERT INTO ai_log (`+aiLogColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, toUnix(e.CreatedAt), e.Operation, nullStr(e.ItemID), nullStr(e.Title), e.ProviderID, e.ProviderName, e.Kind,
-		e.Model, e.Status, nullStr(e.Error), e.DurationMs, nullInt(e.InputTokens), nullInt(e.OutputTokens),
-		nullInt(e.ReasoningTokens), nullInt(e.CacheReadTokens), nullInt(e.CacheWriteTokens), e.UserID); err != nil {
+		e.ID, sqlrow.ToUnix(e.CreatedAt), e.Operation, sqlrow.NullStr(e.ItemID), sqlrow.NullStr(e.Title), e.ProviderID, e.ProviderName, e.Kind,
+		e.Model, e.Status, sqlrow.NullStr(e.Error), e.DurationMs, sqlrow.NullInt(e.InputTokens), sqlrow.NullInt(e.OutputTokens),
+		sqlrow.NullInt(e.ReasoningTokens), sqlrow.NullInt(e.CacheReadTokens), sqlrow.NullInt(e.CacheWriteTokens), e.UserID); err != nil {
 		return err
 	}
 	var hash any
@@ -81,7 +82,7 @@ func (t *tx) ListAILog(f store.AILogFilter) ([]store.AILogEntry, int, error) {
 		return nil, 0, err
 	}
 	if c := f.Before; c != nil {
-		at := toUnix(c.CreatedAt)
+		at := sqlrow.ToUnix(c.CreatedAt)
 		where = append(where, "(created_at < "+arg(at)+" OR (created_at = "+arg(at)+" AND id < "+arg(c.ID)+"))")
 	}
 	q := `SELECT ` + aiLogColumns + ` FROM ai_log WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at DESC, id DESC`
@@ -145,7 +146,7 @@ func (t *tx) GetAILogEntry(id string) (store.AILogEntry, store.AILogBody, error)
 func (t *tx) DeleteAILog(userID string, before *time.Time) error {
 	cond, args := ` WHERE user_id = ?`, []any{userID}
 	if before != nil {
-		cond, args = cond+` AND created_at < ?`, append(args, toUnix(*before))
+		cond, args = cond+` AND created_at < ?`, append(args, sqlrow.ToUnix(*before))
 	}
 	if _, err := t.exec(`DELETE FROM ai_log_bodies WHERE entry_id IN (SELECT id FROM ai_log`+cond+`)`, args...); err != nil {
 		return err

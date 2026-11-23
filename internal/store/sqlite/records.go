@@ -26,7 +26,7 @@ func scanTestCase(sc interface{ Scan(...any) error }) (domain.TestCase, error) {
 		&verified, &created, &updated, &genLang, &genSrc)
 	tc.IsSample, tc.Verified = sample != 0, verified != 0
 	tc.Generator = generatorOf(genLang, genSrc)
-	tc.CreatedAt, tc.UpdatedAt = fromUnix(created), fromUnix(updated)
+	tc.CreatedAt, tc.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return tc, err
 }
 
@@ -59,7 +59,7 @@ func (t *tx) InsertTestCase(tc *domain.TestCase) error {
 	lang, src := generatorCols(tc.Generator)
 	_, err := t.exec(`INSERT INTO test_cases (`+testCaseColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tc.ID, tc.ItemID, tc.Position, tc.Name, tc.Stdin, tc.ExpectedStdout, boolInt(tc.IsSample), tc.Origin,
-		boolInt(tc.Verified), toUnix(tc.CreatedAt), toUnix(tc.UpdatedAt), lang, src)
+		boolInt(tc.Verified), sqlrow.ToUnix(tc.CreatedAt), sqlrow.ToUnix(tc.UpdatedAt), lang, src)
 	return err
 }
 
@@ -84,7 +84,7 @@ func (t *tx) UpdateTestCase(tc *domain.TestCase) error {
 	res, err := t.exec(`UPDATE test_cases SET position = ?, name = ?, stdin = ?, expected_stdout = ?, is_sample = ?,
 		origin = ?, verified = ?, updated_at = ?, generator_language = ?, generator_source = ? WHERE id = ?`,
 		tc.Position, tc.Name, tc.Stdin, tc.ExpectedStdout, boolInt(tc.IsSample), tc.Origin, boolInt(tc.Verified),
-		toUnix(tc.UpdatedAt), lang, src, tc.ID)
+		sqlrow.ToUnix(tc.UpdatedAt), lang, src, tc.ID)
 	if err != nil {
 		return err
 	}
@@ -131,8 +131,8 @@ func scanCollection(sc interface{ Scan(...any) error }) (domain.Collection, erro
 		created, updated int64
 	)
 	err := sc.Scan(&c.ID, &c.Name, &c.Description, &parent, &c.Position, &created, &updated, &c.ItemCount)
-	c.ParentID = strPtr(parent)
-	c.CreatedAt, c.UpdatedAt = fromUnix(created), fromUnix(updated)
+	c.ParentID = sqlrow.StrPtr(parent)
+	c.CreatedAt, c.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return c, err
 }
 
@@ -165,14 +165,14 @@ func (t *tx) GetCollection(id string) (domain.Collection, error) {
 
 func (t *tx) InsertCollection(c *domain.Collection) error {
 	_, err := t.exec(`INSERT INTO collections (id, name, description, parent_id, position, created_at, updated_at,
-		user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, c.ID, c.Name, c.Description, nullStr(c.ParentID), c.Position,
-		toUnix(c.CreatedAt), toUnix(c.UpdatedAt), t.account())
+		user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, c.ID, c.Name, c.Description, sqlrow.NullStr(c.ParentID), c.Position,
+		sqlrow.ToUnix(c.CreatedAt), sqlrow.ToUnix(c.UpdatedAt), t.account())
 	return err
 }
 
 func (t *tx) UpdateCollection(c *domain.Collection) error {
 	res, err := t.exec(`UPDATE collections SET name = ?, description = ?, parent_id = ?, position = ?, updated_at = ?
-		WHERE id = ? AND user_id = ?`, c.Name, c.Description, nullStr(c.ParentID), c.Position, toUnix(c.UpdatedAt), c.ID,
+		WHERE id = ? AND user_id = ?`, c.Name, c.Description, sqlrow.NullStr(c.ParentID), c.Position, sqlrow.ToUnix(c.UpdatedAt), c.ID,
 		t.account())
 	if err != nil {
 		return err
@@ -262,17 +262,17 @@ func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, erro
 	)
 	err := sc.Scan(&s.ID, &s.ItemID, &s.Mode, &s.Language, &s.Source, &stdin, &caseIDs, &s.Status, &verdict, &s.PassedCount,
 		&s.TotalCount, &timeMs, &memKb, &s.CompileOutput, &errMsg, &created, &finished, &s.LineOffset, &harness, &s.UserID)
-	s.Stdin = strPtr(stdin)
+	s.Stdin = sqlrow.StrPtr(stdin)
 	_ = json.Unmarshal([]byte(caseIDs), &s.CaseIDs)
 	if verdict.Valid {
 		v := domain.Verdict(verdict.String)
 		s.Verdict = &v
 	}
-	s.TimeMs, s.MemoryKb = intPtr(timeMs), intPtr(memKb)
-	s.Error = strPtr(errMsg)
-	s.CreatedAt = fromUnix(created)
+	s.TimeMs, s.MemoryKb = sqlrow.IntPtr(timeMs), sqlrow.IntPtr(memKb)
+	s.Error = sqlrow.StrPtr(errMsg)
+	s.CreatedAt = sqlrow.FromUnix(created)
 	if finished.Valid {
-		f := fromUnix(finished.Int64)
+		f := sqlrow.FromUnix(finished.Int64)
 		s.FinishedAt = &f
 	}
 	if harness.Valid {
@@ -300,9 +300,9 @@ func (t *tx) InsertSubmission(s *domain.Submission) error {
 	}
 	caseIDs, _ := json.Marshal(ids)
 	_, err := t.exec(`INSERT INTO submissions (`+submissionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.ItemID, s.Mode, s.Language, s.Source, nullStr(s.Stdin), string(caseIDs), s.Status, verdictArg(s.Verdict), s.PassedCount,
-		s.TotalCount, nullInt(s.TimeMs), nullInt(s.MemoryKb), s.CompileOutput, nullStr(s.Error), toUnix(s.CreatedAt),
-		nullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness), s.UserID)
+		s.ID, s.ItemID, s.Mode, s.Language, s.Source, sqlrow.NullStr(s.Stdin), string(caseIDs), s.Status, verdictArg(s.Verdict), s.PassedCount,
+		s.TotalCount, sqlrow.NullInt(s.TimeMs), sqlrow.NullInt(s.MemoryKb), s.CompileOutput, sqlrow.NullStr(s.Error), sqlrow.ToUnix(s.CreatedAt),
+		sqlrow.NullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness), s.UserID)
 	return err
 }
 
@@ -333,9 +333,9 @@ func (t *tx) GetSubmission(id string) (domain.Submission, error) {
 			&timeMs, &memKb); err != nil {
 			return err
 		}
-		res.TestCaseID, res.ExpectedStdout = strPtr(tcID), strPtr(expected)
+		res.TestCaseID, res.ExpectedStdout = sqlrow.StrPtr(tcID), sqlrow.StrPtr(expected)
 		res.IsSample = sample != 0
-		res.TimeMs, res.MemoryKb = intPtr(timeMs), intPtr(memKb)
+		res.TimeMs, res.MemoryKb = sqlrow.IntPtr(timeMs), sqlrow.IntPtr(memKb)
 		s.Results = append(s.Results, res)
 		return nil
 	})
@@ -375,8 +375,8 @@ func (t *tx) ListSubmissions(userID, itemID string, mode domain.SubmissionMode, 
 func (t *tx) UpdateSubmission(s *domain.Submission) error {
 	res, err := t.exec(`UPDATE submissions SET status = ?, verdict = ?, passed_count = ?, total_count = ?, time_ms = ?,
 		memory_kb = ?, compile_output = ?, error = ?, finished_at = ? WHERE id = ?`,
-		s.Status, verdictArg(s.Verdict), s.PassedCount, s.TotalCount, nullInt(s.TimeMs), nullInt(s.MemoryKb),
-		s.CompileOutput, nullStr(s.Error), nullUnix(s.FinishedAt), s.ID)
+		s.Status, verdictArg(s.Verdict), s.PassedCount, s.TotalCount, sqlrow.NullInt(s.TimeMs), sqlrow.NullInt(s.MemoryKb),
+		s.CompileOutput, sqlrow.NullStr(s.Error), sqlrow.NullUnix(s.FinishedAt), s.ID)
 	if err != nil {
 		return err
 	}
@@ -389,8 +389,8 @@ func (t *tx) UpdateSubmission(s *domain.Submission) error {
 func (t *tx) AddSubmissionResult(submissionID string, index int, r domain.SubmissionResult) error {
 	_, err := t.exec(`INSERT OR REPLACE INTO submission_results (submission_id, idx, test_case_id, name, is_sample, verdict,
 		stdin, expected_stdout, stdout, stderr, time_ms, memory_kb) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		submissionID, index, nullStr(r.TestCaseID), r.Name, boolInt(r.IsSample), string(r.Verdict), r.Stdin,
-		nullStr(r.ExpectedStdout), r.Stdout, r.Stderr, nullInt(r.TimeMs), nullInt(r.MemoryKb))
+		submissionID, index, sqlrow.NullStr(r.TestCaseID), r.Name, boolInt(r.IsSample), string(r.Verdict), r.Stdin,
+		sqlrow.NullStr(r.ExpectedStdout), r.Stdout, r.Stderr, sqlrow.NullInt(r.TimeMs), sqlrow.NullInt(r.MemoryKb))
 	return err
 }
 

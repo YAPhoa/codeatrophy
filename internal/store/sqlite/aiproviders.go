@@ -6,6 +6,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const aiProviderColumns = `id, name, kind, model, base_url, api_key, api_key_origin, effort, created_at, updated_at`
@@ -17,7 +18,7 @@ func scanAIProvider(sc interface{ Scan(...any) error }) (store.AIProvider, error
 		created, updated int64
 	)
 	err := sc.Scan(&p.ID, &p.Name, &p.Kind, &p.Model, &p.BaseURL, &p.APIKey, &p.APIKeyOrigin, &effort, &created, &updated)
-	p.Effort, p.CreatedAt, p.UpdatedAt = effort.String, fromUnix(created), fromUnix(updated)
+	p.Effort, p.CreatedAt, p.UpdatedAt = effort.String, sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return p, err
 }
 
@@ -57,14 +58,14 @@ func (t *tx) GetAIProvider(id string) (store.AIProvider, error) {
 func (t *tx) InsertAIProvider(p *store.AIProvider) error {
 	_, err := t.exec(`INSERT INTO ai_providers (id, name, name_key, kind, model, base_url, api_key, api_key_origin,
 		effort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.ID, p.Name, domain.AIProviderNameKey(p.Name),
-		p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), toUnix(p.CreatedAt), toUnix(p.UpdatedAt))
+		p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), sqlrow.ToUnix(p.CreatedAt), sqlrow.ToUnix(p.UpdatedAt))
 	return err
 }
 
 func (t *tx) UpdateAIProvider(p *store.AIProvider) error {
 	res, err := t.exec(`UPDATE ai_providers SET name = ?, name_key = ?, model = ?, base_url = ?, api_key = ?,
 		api_key_origin = ?, effort = ?, updated_at = ? WHERE id = ?`, p.Name, domain.AIProviderNameKey(p.Name), p.Model,
-		p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), toUnix(p.UpdatedAt), p.ID)
+		p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), sqlrow.ToUnix(p.UpdatedAt), p.ID)
 	if err != nil {
 		return err
 	}
@@ -98,7 +99,7 @@ func (t *tx) RecordAIUsage(r store.AIUsageRecord) error {
 		failed = ai_usage.failed + excluded.failed, input_tokens = ai_usage.input_tokens + excluded.input_tokens,
 		output_tokens = ai_usage.output_tokens + excluded.output_tokens,
 		last_used_at = max(ai_usage.last_used_at, excluded.last_used_at)`,
-		r.ProviderID, store.UsageDay(r.At), failed, max(r.InputTokens, 0), max(r.OutputTokens, 0), toUnix(r.At))
+		r.ProviderID, store.UsageDay(r.At), failed, max(r.InputTokens, 0), max(r.OutputTokens, 0), sqlrow.ToUnix(r.At))
 	return err
 }
 
@@ -118,7 +119,7 @@ func (t *tx) AIUsage(since int64) (map[string]store.AIUsage, error) {
 			&u.AllTime.Requests, &u.AllTime.Failed, &u.AllTime.InputTokens, &u.AllTime.OutputTokens, &last); err != nil {
 			return err
 		}
-		u.LastUsedAt = fromUnix(last)
+		u.LastUsedAt = sqlrow.FromUnix(last)
 		out[id] = u
 		return nil
 	})
