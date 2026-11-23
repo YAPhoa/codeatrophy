@@ -7,7 +7,7 @@ import { NumberStepper } from '../../ui/Field';
  * "Test cases to generate" preference, within the server's bounds.
  */
 export function useTestCaseCount(choice: number | undefined): { count: number; max: number } {
-  const max = useMeta().data?.limits.maxGeneratedTestCases ?? 30;
+  const max = useMeta().data?.limits.maxGeneratedTestCases ?? Infinity;
   const preferred = usePreferences().generatedTestCases;
   return { count: Math.min(max, Math.max(1, choice || preferred)), max };
 }

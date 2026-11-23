@@ -128,8 +128,8 @@ export function PreferencesSection() {
   const reduceMotion = useReduceMotion();
   const textWidth = useTextWidth();
   const limits = useLimits();
-  const maxGenerated = limits?.maxGeneratedTestCases ?? 30;
-  const maxLarge = limits?.maxLargeTestCases ?? 5;
+  const maxGenerated = limits?.maxGeneratedTestCases ?? Infinity;
+  const maxLarge = limits?.maxLargeTestCases ?? Infinity;
 
   return (
     <section className="settings-section" aria-labelledby="preferences-title">

@@ -247,7 +247,7 @@ export function usePreferences(): Preferences {
  */
 export function useLargeTestCaseCount(): number {
   const count = usePreferences().largeTestCaseCount;
-  const max = useLimits()?.maxLargeTestCases ?? DEFAULT_PREFERENCES.largeTestCaseCount;
+  const max = useLimits()?.maxLargeTestCases ?? Infinity;
   return Math.min(max, Math.max(1, count));
 }
 

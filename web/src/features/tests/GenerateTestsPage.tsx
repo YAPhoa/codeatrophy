@@ -141,7 +141,7 @@ function Generator({ item }: { item: Item }) {
   const noRoom = storedSolution === null && limits !== undefined && item.solutionCount >= limits.maxSolutionsPerItem;
 
   // The count starts from the user's preference and can be changed for this run.
-  const maxCount = meta?.limits.maxGeneratedTestCases ?? 30;
+  const maxCount = meta?.limits.maxGeneratedTestCases ?? Infinity;
   const preferences = usePreferences();
   const [chosenCount, setCount] = useState<number | null>(null);
   const count = Math.min(maxCount, Math.max(1, chosenCount ?? preferences.generatedTestCases));

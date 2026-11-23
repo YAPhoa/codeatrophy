@@ -74,7 +74,7 @@ export function DraftReview(props: DraftReviewProps) {
   const preferences = usePreferences();
   const largeTestCases = preferences.largeTestCase ? largeCount : 0;
   // What the draft was asked for keeps being asked for.
-  const testCaseCount = revisionTestCaseCount(draft.request?.testCaseCount, content.testCaseCount, preferences.generatedTestCases, meta.data?.limits.maxGeneratedTestCases ?? 30);
+  const testCaseCount = revisionTestCaseCount(draft.request?.testCaseCount, content.testCaseCount, preferences.generatedTestCases, meta.data?.limits.maxGeneratedTestCases ?? Infinity);
 
   // A revision that could not start; one that started and failed is the draft's own error.
   const [askError, setAskError] = useState<unknown>(null);
