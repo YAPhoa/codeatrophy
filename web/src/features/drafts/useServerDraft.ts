@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, api } from '../../api/client';
+import { ApiError, api, fitsKeepalive } from '../../api/client';
 import { invalidateJobs, qk } from '../../api/queries';
 import type { Draft, DraftRequest, VariantRequest } from '../../api/types';
 import type { ItemFormState } from '../../lib/itemForm';
 import type { DraftContent } from './draftContent';
 import { DraftSaver } from './draftSaver';
-
-/** A save as the tab closes may only carry this much (browsers drop larger keepalive bodies). */
-const KEEPALIVE_LIMIT = 60_000;
 
 /** One short line for a draft reloaded because it changed elsewhere. */
 export const RELOADED_NOTICE = 'This draft changed elsewhere, so it was reloaded.';
@@ -95,7 +92,7 @@ export function useServerDraft(id: string, inherited: Partial<ItemFormState> = {
   useEffect(() => {
     const onHide = () => {
       const patch = saver.parting();
-      if (patch && JSON.stringify(patch).length < KEEPALIVE_LIMIT) void api.drafts.update(id, patch, { keepalive: true }).catch(() => undefined);
+      if (patch && fitsKeepalive(patch)) void api.drafts.update(id, patch, { keepalive: true }).catch(() => undefined);
     };
     window.addEventListener('pagehide', onHide);
     return () => {

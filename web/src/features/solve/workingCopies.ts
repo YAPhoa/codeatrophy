@@ -7,11 +7,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { setWorkingCopy } from '../../api/queries';
 import { clearUnsaved, writeUnsaved } from '../../lib/codeStore';
-import { byteLength } from '../../lib/text';
 import { WorkspaceSaver } from '../../lib/workspaceSaver';
-
-/** Browsers refuse a request that outlives the page when its body is over 64 KiB; this leaves room for the JSON around the code. */
-const KEEPALIVE_BYTES = 60_000;
 
 const savers = new Map<string, WorkspaceSaver>();
 
@@ -21,8 +17,8 @@ export function workspaceSaver(qc: QueryClient, itemId: string): WorkspaceSaver 
   if (!saver) {
     saver = new WorkspaceSaver(
       {
-        // Code too large for a request that outlives the page goes the ordinary way, and may not make it; it is kept here meanwhile.
-        put: (language, source, keepalive) => api.workspace.put(itemId, language, source, { keepalive: keepalive && byteLength(source) <= KEEPALIVE_BYTES }),
+        // Code too large for a request that outlives the page goes the ordinary way (`request` sees to it), and may not make it; it is kept here meanwhile.
+        put: (language, source, keepalive) => api.workspace.put(itemId, language, source, { keepalive }),
         remove: (language) => api.workspace.remove(itemId, language),
       },
       {

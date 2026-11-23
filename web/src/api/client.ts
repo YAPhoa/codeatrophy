@@ -84,6 +84,7 @@ import type {
   WorkingCopy,
   WorkingCopyInput,
 } from './types';
+import { byteLength } from '../lib/text';
 
 export const API_BASE = '/api/v1';
 
@@ -170,7 +171,8 @@ interface RequestOptions {
   signal?: AbortSignal;
   /**
    * Let the request outlive the page, for a last save as the tab closes.
-   * Browsers cap the body of such a request at 64 KiB and drop larger ones.
+   * Browsers refuse such a request whose body is over 64 KiB, so a larger
+   * one is sent the ordinary way, which may still make it.
    */
   keepalive?: boolean;
   /** How to read a successful response. Defaults to JSON (or nothing for 204). */
@@ -219,16 +221,22 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, 'unknown', `Unexpected response (HTTP ${res.status}).`);
 }
 
+/** The largest body, in bytes, of a request that outlives the page: browsers refuse a larger one. */
+const KEEPALIVE_MAX_BYTES = 64 * 1024;
+
+/** Whether `body`, sent as JSON, is small enough for a request that outlives the page. */
+export const fitsKeepalive = (body: unknown): boolean => byteLength(JSON.stringify(body)) <= KEEPALIVE_MAX_BYTES;
+
 export async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
   const url = API_BASE + path + buildQuery(opts.query);
   const init: RequestInit = { method, signal: opts.signal, headers: { Accept: 'application/json' } };
-  if (opts.keepalive) init.keepalive = true;
   if (opts.form) {
     init.body = opts.form;
   } else if (opts.body !== undefined) {
     init.body = JSON.stringify(opts.body);
     init.headers = { ...init.headers, 'Content-Type': 'application/json' };
   }
+  if (opts.keepalive && !(typeof init.body === 'string' && byteLength(init.body) > KEEPALIVE_MAX_BYTES)) init.keepalive = true;
   if (opts.as === 'blob') init.headers = { ...init.headers, Accept: 'application/zip, application/json' };
 
   let res: Response;

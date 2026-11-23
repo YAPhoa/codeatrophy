@@ -14,9 +14,6 @@ import { Spinner } from '../../ui/misc';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
-/** Browsers refuse a request that outlives the page when its body is over 64 KiB; this leaves room for the JSON around the text. */
-const KEEPALIVE_BYTES = 60_000;
-
 /**
  * Text left by notes that closed before their save came back, by item. Notes
  * opened again before then start from it, not from the item's older notes.
@@ -74,7 +71,7 @@ export function Notes({ item, onClose }: { item: Item; onClose?: () => void }) {
     inFlight.current = true;
     setState('saving');
     try {
-      const updated = await api.items.update(latest.current.id, { notes: value }, { keepalive: lastChance && new Blob([value]).size <= KEEPALIVE_BYTES });
+      const updated = await api.items.update(latest.current.id, { notes: value }, { keepalive: lastChance });
       latest.current.saved = value;
       if (unsaved.get(updated.id) === value) unsaved.delete(updated.id);
       qc.setQueryData(qk.item(updated.id), updated);

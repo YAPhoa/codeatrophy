@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorCode } from './types';
-import { ApiError, KNOWN_CODES, api, buildQuery, isAbort, jobError, request, setTransport, validationFields } from './client';
+import { ApiError, KNOWN_CODES, api, buildQuery, fitsKeepalive, isAbort, jobError, request, setTransport, validationFields } from './client';
 
 type Call = { url: string; init: RequestInit };
 
@@ -79,6 +79,28 @@ describe('request', () => {
       'PATCH /api/v1/drafts/d1 true',
       'PATCH /api/v1/drafts/d1 undefined',
     ]);
+  });
+
+  it('lets a request outlive the page only while its body fits in 64 KiB, measured in bytes', async () => {
+    const calls = stub(() => json({ id: '1' }));
+    // {"notes":"…"} is 12 bytes around the text; é is two bytes in UTF-8 and one UTF-16 unit.
+    await api.items.update('1', { notes: 'é'.repeat(32_762) }, { keepalive: true });
+    await api.items.update('1', { notes: 'é'.repeat(32_763) }, { keepalive: true });
+    await api.items.update('1', { notes: 'a'.repeat(65_524) }, { keepalive: true });
+    expect(calls.map((c) => [new TextEncoder().encode(c.init.body as string).length, c.init.keepalive])).toEqual([
+      [65_536, true],
+      [65_538, undefined],
+      [65_536, true],
+    ]);
+  });
+
+  it('says whether a body fits a request that outlives the page, in bytes', () => {
+    // Short in UTF-16 units, too large in bytes.
+    expect(fitsKeepalive({ content: { body: 'é'.repeat(40_000) } })).toBe(false);
+    // Past 60,000 units, still within 64 KiB.
+    expect(fitsKeepalive({ content: { body: 'a'.repeat(62_000) } })).toBe(true);
+    expect(fitsKeepalive({ notes: 'é'.repeat(32_762) })).toBe(true);
+    expect(fitsKeepalive({ notes: 'é'.repeat(32_763) })).toBe(false);
   });
 
   it('sends JSON under /api/v1 and parses the response', async () => {
