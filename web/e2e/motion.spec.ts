@@ -55,6 +55,18 @@ async function settled(page: Page) {
 
 test('motion: favourites and done items play nothing on load or on the way to them', async ({ page }) => {
   await recordAnimations(page);
+  // Whether the rows were in when the app was shown.
+  await page.addInitScript(() => {
+    let booting = false;
+    // On the document: the script runs before <html> is there.
+    new MutationObserver((_, observer) => {
+      if (document.documentElement.classList.contains('is-booting')) booting = true;
+      else if (booting) {
+        observer.disconnect();
+        (window as unknown as { __rowsAtReveal: boolean }).__rowsAtReveal = document.querySelector('.item-list:not(.item-skeleton) .item-row') !== null;
+      }
+    }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  });
   await open(page, '/');
   await settled(page);
   const row = page.locator('.item-row').filter({ has: page.getByRole('link', { name: 'Two Sum', exact: true }) });
@@ -62,10 +74,13 @@ test('motion: favourites and done items play nothing on load or on the way to th
   await expect(row.locator('.status-done')).toBeVisible();
   // A quiet moment, for anything late to start.
   await page.waitForTimeout(300);
-  // The app fades in once, whole; nothing in it moves on its own.
+  // The app fades in once, whole; nothing in it moves on its own. It waits
+  // for the rows only so long (lib/boot.ts): on a slow machine they come
+  // after it is shown, and the list fades in as one as they do.
   let all = await recorded(page);
   expect(entrances(all)).toEqual(['entrance on div#root.']);
-  expect(others(all)).toEqual([]);
+  const rowsAtReveal = await page.evaluate(() => (window as unknown as { __rowsAtReveal: boolean }).__rowsAtReveal);
+  expect(others(all)).toEqual(rowsAtReveal ? [] : ['fade-in on ul.item-list.is-arriving']);
 
   // Into the item and back: the same data, met again, stays still too. Only
   // each screen fades in as it opens.
