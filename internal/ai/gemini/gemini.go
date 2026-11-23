@@ -170,8 +170,11 @@ func (p *Provider) listPage(ctx context.Context, token string, budget *int64) (m
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, *budget+1))
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
 			return page, ai.Errorf(0, "the Gemini API did not list its models in time")
+		case errors.Is(err, context.Canceled):
+			return page, ai.Cancelled()
 		}
 		return page, ai.Errorf(0, "could not read the Gemini API's model list")
 	}

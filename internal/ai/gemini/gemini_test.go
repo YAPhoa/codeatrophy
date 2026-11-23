@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"codeatrophy/internal/ai"
 	"codeatrophy/internal/ai/aitest"
@@ -184,6 +186,28 @@ func TestListModelsErrors(t *testing.T) {
 	m.status, m.pages[""], m.pages["n"] = 0, half, half
 	if _, err := l.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Errorf("two halves: %v", err)
+	}
+}
+
+// cancelledBody is a response whose body fails as a read does once the
+// request's context is cancelled.
+type cancelledBody struct{}
+
+func (cancelledBody) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Request: r,
+		Body: io.NopCloser(iotest.ErrReader(fmt.Errorf("reading the body: %w", context.Canceled)))}, nil
+}
+
+// A request cancelled while its model list is read is reported as
+// cancelled, as one cancelled before an answer is.
+func TestListModelsCancelledWhileReading(t *testing.T) {
+	p, err := New(ai.Config{APIKey: key, HTTPClient: &http.Client{Transport: cancelledBody{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.(ai.ModelLister).ListModels(context.Background())
+	if err == nil || err.Error() != "the request was cancelled" {
+		t.Errorf("got %v", err)
 	}
 }
 
