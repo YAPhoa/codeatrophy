@@ -250,6 +250,12 @@ test('long text: the AI provider card, a confirm dialog and a toast', async ({ p
   const toast = page.locator('.toast-message').filter({ hasText: LONG.cap });
   await expect(toast).toBeVisible();
   await expectNoOverflow(page, 'a toast');
-  await toast.hover();
+  // The pointer travels to the toast once it is in place, as a hand moves
+  // it. Moved there in one jump, from where the page changed under it, it
+  // can arrive from an element Chrome sent no mouseout for, and React then
+  // fires no mouseenter.
+  await toast.evaluate((el) => Promise.all(el.closest('.toast-slot')!.getAnimations({ subtree: true }).map((a) => a.finished)));
+  const box = (await toast.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
   await expect(toast).toHaveAttribute('title', `Deleted “${LONG.cap}”`);
 });
