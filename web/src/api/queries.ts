@@ -13,8 +13,6 @@ import {
 import { api } from './client';
 import type { AiJob, AiLogFilters, DraftSummary, Item, ItemLinks, ItemListParams, ItemType, ItemStatus, ItemSummary, LinkedItem, Limits, List, Page, Preferences, PreferencesUpdate, WorkingCopy } from './types';
 
-export const PAGE_SIZE = 50;
-
 export const qk = {
   meta: ['meta'] as const,
   stats: ['stats'] as const,
