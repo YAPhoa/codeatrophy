@@ -85,7 +85,7 @@ bundle update existing items instead of duplicating them.
 | `cmd/codeatrophy` | Entry point: configuration, wiring, subcommands |
 | `internal/config` | Environment-based configuration |
 | `internal/domain` | Core types and validation; no I/O |
-| `internal/store` | Persistence interface and logical schema; `sqlite` and `postgres` implementations with their migrations; `dbcopy` (copying between stores), `dbopen` (choosing and opening the configured one); `storetest` (the conformance suite) |
+| `internal/store` | Persistence interface and logical schema; `sqlite` and `postgres` implementations with their migrations; `dbcopy` (copying between stores), `dbopen` (choosing and opening the configured one); `storetest` (the conformance suite); `internal/sqlrow` (Go code both SQL stores share: ending a transaction, walking rows, column values of optional fields) |
 | `internal/ai` | `Provider` interface, provider implementations, prompt and schema definitions |
 | `internal/judge` | `Engine` interface and engine implementations |
 | `internal/jobqueue` | `Queue` interface that schedules AI jobs, and its in-process implementation |

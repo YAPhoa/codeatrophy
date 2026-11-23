@@ -17,6 +17,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 	"codeatrophy/internal/store/storetest"
 )
 
@@ -235,7 +236,7 @@ func TestTablesMatchTheLogicalSchema(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			return scanStrings(rows)
+			return sqlrow.Strings(rows)
 		})
 		if strings.Join(cols, ",") != strings.Join(tb.Columns, ",") {
 			t.Errorf("%s: columns %v, want %v", tb.Name, cols, tb.Columns)

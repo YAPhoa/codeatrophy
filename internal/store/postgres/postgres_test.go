@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 	"codeatrophy/internal/store/postgres/pgtest"
 	"codeatrophy/internal/store/storetest"
 )
@@ -135,7 +136,7 @@ func TestTablesMatchTheLogicalSchema(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cols, err := scanStrings(rows)
+		cols, err := sqlrow.Strings(rows)
 		if err != nil {
 			t.Fatal(err)
 		}

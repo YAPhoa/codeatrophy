@@ -7,6 +7,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 // Test cases.
@@ -204,7 +205,7 @@ func (t *tx) CollectionItemIDs(id string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanStrings(rows)
+	return sqlrow.Strings(rows)
 }
 
 func (t *tx) SetCollectionItemIDs(id string, itemIDs []string) error {
@@ -404,5 +405,5 @@ func (t *tx) UnfinishedSubmissionIDs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanStrings(rows)
+	return sqlrow.Strings(rows)
 }

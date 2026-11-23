@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 //go:embed migrations/*.sql
@@ -213,7 +214,7 @@ func (db *DB) Write(ctx context.Context, fn func(store.Tx) error) error {
 // takes a connection, so queued writers cannot use up the pool, and keeps
 // the gate until its transaction has ended; it then waits on the advisory
 // write lock for writers of other processes.
-func (db *DB) run(ctx context.Context, readOnly bool, fn func(*tx) error) (err error) {
+func (db *DB) run(ctx context.Context, readOnly bool, fn func(*tx) error) error {
 	opts := &sql.TxOptions{}
 	if readOnly {
 		opts = &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead}
@@ -231,32 +232,15 @@ func (db *DB) run(ctx context.Context, readOnly bool, fn func(*tx) error) (err e
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer func() {
-		if p := recover(); p != nil {
-			_ = sqlTx.Rollback()
-			panic(p)
-		}
-		if err != nil {
-			_ = sqlTx.Rollback()
-			return
-		}
-		if cerr := sqlTx.Commit(); cerr != nil {
-			if ctx.Err() != nil {
-				// database/sql rolls the transaction back when its context
-				// ends; report that rather than the failed commit.
-				err = ctx.Err()
-				return
+	return sqlrow.InTx(ctx, sqlTx, func() error {
+		t := &tx{ctx: ctx, tx: sqlTx}
+		if !readOnly {
+			if _, err := t.exec(`SELECT pg_advisory_xact_lock($1)`, writeLock); err != nil {
+				return fmt.Errorf("write lock: %w", err)
 			}
-			err = fmt.Errorf("commit: %w", cerr)
 		}
-	}()
-	t := &tx{ctx: ctx, tx: sqlTx}
-	if !readOnly {
-		if _, err := t.exec(`SELECT pg_advisory_xact_lock($1)`, writeLock); err != nil {
-			return fmt.Errorf("write lock: %w", err)
-		}
-	}
-	return fn(t)
+		return fn(t)
+	})
 }
 
 type migration struct {

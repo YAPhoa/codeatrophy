@@ -11,6 +11,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const itemColumns = `i.seq, i.id, i.type, i.title, i.summary, i.body, i.difficulty, COALESCE(ps.status, 'todo'),
@@ -134,20 +135,7 @@ func (t *tx) AllItemIDs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanStrings(rows)
-}
-
-func scanStrings(rows *sql.Rows) ([]string, error) {
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
+	return sqlrow.Strings(rows)
 }
 
 func (t *tx) ExistingItemIDs(ids []string) (map[string]bool, error) {
@@ -159,7 +147,7 @@ func (t *tx) ExistingItemIDs(ids []string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	found, err := scanStrings(rows)
+	found, err := sqlrow.Strings(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +311,7 @@ func (t *tx) SetItemCollections(itemID string, collectionIDs []string) error {
 	if err != nil {
 		return err
 	}
-	current, err := scanStrings(rows)
+	current, err := sqlrow.Strings(rows)
 	if err != nil {
 		return err
 	}
@@ -434,17 +422,7 @@ func (t *tx) hydrate(items []*domain.ItemSummary) error {
 }
 
 func (t *tx) eachRow(q string, args []any, fn func(*sql.Rows) error) error {
-	rows, err := t.query(q, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		if err := fn(rows); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	return sqlrow.EachRow(t.ctx, t.tx, q, args, fn)
 }
 
 // searchColumns are the indexed columns with their relevance weights, as
@@ -732,7 +710,7 @@ func (t *tx) ItemIDsWithTag(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanStrings(rows)
+	return sqlrow.Strings(rows)
 }
 
 func (t *tx) Stats() (domain.Stats, error) {

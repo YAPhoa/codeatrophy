@@ -22,6 +22,7 @@ import (
 	_ "modernc.org/sqlite" // driver
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 //go:embed migrations/*.sql
@@ -138,31 +139,12 @@ func (db *DB) Write(ctx context.Context, fn func(store.Tx) error) error {
 	return db.run(ctx, db.writer, false, func(t *tx) error { return fn(t) })
 }
 
-func (db *DB) run(ctx context.Context, conn *sql.DB, readOnly bool, fn func(*tx) error) (err error) {
+func (db *DB) run(ctx context.Context, conn *sql.DB, readOnly bool, fn func(*tx) error) error {
 	sqlTx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer func() {
-		if p := recover(); p != nil {
-			_ = sqlTx.Rollback()
-			panic(p)
-		}
-		if err != nil {
-			_ = sqlTx.Rollback()
-			return
-		}
-		if cerr := sqlTx.Commit(); cerr != nil {
-			if ctx.Err() != nil {
-				// database/sql rolls the transaction back when its context
-				// ends; report that rather than the failed commit.
-				err = ctx.Err()
-				return
-			}
-			err = fmt.Errorf("commit: %w", cerr)
-		}
-	}()
-	return fn(&tx{ctx: ctx, tx: sqlTx})
+	return sqlrow.InTx(ctx, sqlTx, func() error { return fn(&tx{ctx: ctx, tx: sqlTx}) })
 }
 
 type migration struct {
