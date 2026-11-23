@@ -1,6 +1,11 @@
 package ai
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+
+	"codeatrophy/internal/domain"
+)
 
 // The authoring conventions are the rules every item follows, whether it was
 // drafted by the built-in AI features or written by an assistant over MCP.
@@ -188,10 +193,10 @@ prefix, the solver's code and the suffix, each starting on a new line:
   ` + "`data:image/...`" + ` URL. The text must make sense without it.
 `},
 	{heading: "## All items"},
-	{text: `- Title: short and specific (at most 200 characters).
+	{text: `- Title: short and specific (at most ` + strconv.Itoa(domain.MaxTitleChars) + ` characters).
 - Summary: one sentence saying what the item is about.
 - Tags: 1–6 lower-case topic labels such as "dynamic-programming", "graphs",
-  "hash-map", "concurrency" (at most 40 characters each). Prefer tags that
+  "hash-map", "concurrency" (at most ` + strconv.Itoa(domain.MaxTagChars) + ` characters each). Prefer tags that
   already exist in the library.
 - Difficulty: easy, medium or hard (or null for readings without one).
 - Never use an em dash in anything you write (title, summary, body, notes):
