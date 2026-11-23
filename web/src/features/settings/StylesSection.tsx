@@ -5,6 +5,7 @@ import { api, isApiError, validationFields } from '../../api/client';
 import { qk, useLimits, useStyles } from '../../api/queries';
 import type { StylePreset } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
+import { charCount } from '../../lib/text';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Checkbox, Field } from '../../ui/Field';
@@ -16,9 +17,6 @@ import { SYSTEM_PROMPT_ID, SystemPromptCards } from './SystemPromptCard';
 const EXAMPLE_NAME = 'LeetCode style';
 const EXAMPLE_INSTRUCTIONS =
   'Open with a short description of the task in two or three sentences. Then give Example blocks, each with Input, Output and a one-line Explanation. End with a Constraints list. Keep the tone neutral and direct. Starter code in Python and Go only.';
-
-/** Length as the server counts it: Unicode code points after trimming. */
-const length = (s: string) => Array.from(s.trim()).length;
 
 // Control characters other than newline and tab are rejected by the server.
 // eslint-disable-next-line no-control-regex
@@ -134,8 +132,8 @@ export function StylesSection() {
     });
   };
 
-  const nameLen = editing ? length(editing.name) : 0;
-  const textLen = editing ? length(editing.instructions) : 0;
+  const nameLen = editing ? charCount(editing.name.trim()) : 0;
+  const textLen = editing ? charCount(editing.instructions.trim()) : 0;
   const duplicate = editing ? list.some((s) => s.id !== editing.preset?.id && s.name.trim().toLowerCase() === editing.name.trim().toLowerCase()) : false;
   const nameError =
     nameLen > bounds.nameMax

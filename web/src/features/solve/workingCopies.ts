@@ -7,7 +7,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { setWorkingCopy } from '../../api/queries';
 import { clearUnsaved, writeUnsaved } from '../../lib/codeStore';
-import { byteLength } from '../../lib/itemForm';
+import { byteLength } from '../../lib/text';
 import { WorkspaceSaver } from '../../lib/workspaceSaver';
 
 /** Browsers refuse a request that outlives the page when its body is over 64 KiB; this leaves room for the JSON around the code. */

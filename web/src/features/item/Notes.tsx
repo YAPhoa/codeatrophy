@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { qk, useLimits } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { errorLine } from '../../lib/errors';
-import { charCount } from '../../lib/itemForm';
+import { charCount } from '../../lib/text';
 import { onPageHide } from '../../lib/pageHide';
 import { StatusSwap } from '../../ui/Animated';
 import { Button, cx, IconButton } from '../../ui/Button';

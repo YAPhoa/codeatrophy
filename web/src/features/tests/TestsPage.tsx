@@ -8,7 +8,7 @@ import type { Item, Solution, TestCase, VerifyResult } from '../../api/types';
 import { useDocumentTitle } from '../../app/useDocumentTitle';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { ORIGIN_LABEL, VERDICT_LABEL, formatBytes, plural } from '../../lib/format';
-import { byteLength } from '../../lib/itemForm';
+import { byteLength } from '../../lib/text';
 import { languageLabel } from '../../lib/languages';
 import { textFilename } from '../../lib/largeText';
 import { moveIndex } from '../../lib/tree';

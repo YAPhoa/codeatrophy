@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Limits } from '../../api/types';
-import { charCount } from '../../lib/itemForm';
+import { charCount } from '../../lib/text';
 import { Button } from '../../ui/Button';
 import { InfoTip } from '../../ui/InfoTip';
 import { Badge, Callout, ErrorCallout } from '../../ui/misc';

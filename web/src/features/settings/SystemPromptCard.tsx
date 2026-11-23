@@ -5,6 +5,7 @@ import { api, validationFields } from '../../api/client';
 import { qk, useLimits, useSystemPrompt, useTestCasePrompt } from '../../api/queries';
 import type { SystemPrompt, TestCasePrompt } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
+import { charCount } from '../../lib/text';
 import { Button, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
@@ -14,9 +15,6 @@ import { useToast } from '../../ui/Toast';
 
 /** The id the "Built-in conventions" style links to. */
 export const SYSTEM_PROMPT_ID = 'system-prompt';
-
-/** Length as the server counts it: Unicode code points after trimming. */
-const length = (s: string) => Array.from(s.trim()).length;
 
 // Control characters other than newline and tab are rejected by the server.
 // eslint-disable-next-line no-control-regex
@@ -145,7 +143,7 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
   useEffect(() => onDirty(kind.id, dirty), [onDirty, kind.id, dirty]);
   useEffect(() => () => onDirty(kind.id, false), [onDirty, kind.id]);
 
-  const textLen = draft === null ? 0 : length(draft);
+  const textLen = draft === null ? 0 : charCount(draft.trim());
   const textError =
     draft === null
       ? null

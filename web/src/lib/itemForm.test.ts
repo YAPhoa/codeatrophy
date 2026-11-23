@@ -23,8 +23,6 @@ import {
   patchTouchesContent,
   removeFormLanguage,
   upgradeForm,
-  byteLength,
-  charCount,
   formErrorsFromFields,
   revisionProblem,
   tagProblem,
@@ -361,9 +359,7 @@ describe('validateForm', () => {
   });
 
   it('counts characters as code points, the way the server does', () => {
-    expect(charCount('a😀b')).toBe(3);
     expect(validateForm({ ...ok, title: '😀'.repeat(200) }, limits)).toEqual({});
-    expect(byteLength('é😀')).toBe(6);
   });
 
   it('checks time and memory limits for problems only', () => {

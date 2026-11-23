@@ -24,6 +24,7 @@ import type {
   TestOrigin,
 } from '../api/types';
 import { formatBytes, formatNumber, withUnit } from './format';
+import { byteLength, charCount } from './text';
 import { isLargeText } from './largeText';
 
 export interface FormTestCase {
@@ -394,17 +395,6 @@ export function patchTouchesContent(patch: ItemPatch): boolean {
 export type FormErrors = Partial<
   Record<'title' | 'summary' | 'body' | 'timeLimitMs' | 'memoryLimitKb' | 'tags' | 'sourceUrl' | 'sourceNote' | 'code' | 'testCases', string>
 >;
-
-/** Length as the server counts it: in Unicode code points. */
-export const charCount = (s: string): number => {
-  let n = 0;
-  for (const _ of s) n++;
-  return n;
-};
-
-const encoder = new TextEncoder();
-/** Size in bytes once encoded as UTF-8. */
-export const byteLength = (s: string): number => encoder.encode(s).length;
 
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;

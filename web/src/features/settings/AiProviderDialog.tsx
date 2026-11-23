@@ -7,6 +7,7 @@ import type { AiEffort, AiProvider, AiProviderKind, AiSettings, AiTestResponse }
 import { errorLine, sentence } from '../../lib/errors';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { formatMs, plural, relativeTime } from '../../lib/format';
+import { charCount } from '../../lib/text';
 import { TextSwap } from '../../ui/Animated';
 import { Button, cx } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
@@ -19,7 +20,6 @@ import {
   KINDS,
   baseUrlProblem,
   baseUrlRequired,
-  charLength,
   createBody,
   effortTested,
   formOf,
@@ -197,7 +197,7 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
     nameMax: limits?.maxAiProviderNameChars ?? Infinity,
     modelMax: limits?.maxModelIdChars ?? Infinity,
   };
-  const nameLen = charLength(form.name);
+  const nameLen = charCount(form.name.trim());
   // A missing name is pointed out once the user has tried to save.
   const [attempted, setAttempted] = useState(false);
   const nameError = nameProblem(form.name, settings.providers, provider, bounds.nameMax) ?? (attempted && nameLen === 0 ? 'Give the provider a name.' : null);

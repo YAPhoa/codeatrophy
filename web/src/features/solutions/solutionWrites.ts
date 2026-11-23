@@ -10,7 +10,7 @@ import { qk, workspaceQuery } from '../../api/queries';
 import type { Item, Limits, Solution, SolutionPatch, SolutionRun, SubmissionSummary } from '../../api/types';
 import { readLegacy, readUnsaved, rememberLanguage, unsavedWins } from '../../lib/codeStore';
 import { formatBytes, formatMemoryKb, formatRunTime } from '../../lib/format';
-import { byteLength, charCount } from '../../lib/itemForm';
+import { byteLength, charCount } from '../../lib/text';
 import { LANGUAGES, languageLabel, languageName } from '../../lib/languages';
 import { useConfirm } from '../../ui/Dialog';
 import { useToast } from '../../ui/Toast';

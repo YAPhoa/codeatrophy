@@ -6,6 +6,7 @@
  */
 
 import type { AiEffort, AiModelsRequest, AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
+import { charCount } from '../../lib/text';
 import { hostOf, movesToAnotherServer, originOf } from './aiKeyBinding';
 import { endpointKey } from './modelCache';
 
@@ -116,9 +117,6 @@ export function suggestName(kind: AiProviderKind, baseUrl: string, providers: re
   }
 }
 
-/** Length as the server counts it: Unicode code points after trimming. */
-export const charLength = (text: string): number => Array.from(text.trim()).length;
-
 // What a single-line field rejects besides tabs and newlines.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
@@ -131,7 +129,7 @@ const LINE_BREAK = new RegExp(`[\\n\\r\\t${String.fromCharCode(0x2028, 0x2029)}]
  */
 export function nameProblem(name: string, providers: readonly AiProvider[], self: AiProvider | null, max: number): string | null {
   const text = name.trim();
-  const length = charLength(text);
+  const length = charCount(text);
   if (length > max) return `${length - max} over the ${max}-character limit.`;
   if (LINE_BREAK.test(text)) return 'A name is a single line, without tabs.';
   if (CONTROL.test(text)) return 'Contains a control character that cannot be saved.';
@@ -141,7 +139,7 @@ export function nameProblem(name: string, providers: readonly AiProvider[], self
 
 export function modelProblem(model: string, max: number): string | null {
   const text = model.trim();
-  const length = charLength(text);
+  const length = charCount(text);
   if (length > max) return `${length - max} over the ${max}-character limit.`;
   return LINE_BREAK.test(text) || CONTROL.test(text) ? 'A model name is a single line, without tabs or control characters.' : null;
 }
