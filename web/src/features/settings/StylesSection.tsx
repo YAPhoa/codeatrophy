@@ -13,6 +13,7 @@ import { ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
 import { SaveStatus, type SaveState } from './PreferencesSection';
 import { SYSTEM_PROMPT_ID, SystemPromptCards } from './SystemPromptCard';
+import { CharCount, overLimitMessage } from './textLimit';
 
 const EXAMPLE_NAME = 'LeetCode style';
 const EXAMPLE_INSTRUCTIONS =
@@ -145,7 +146,7 @@ export function StylesSection() {
               : null;
   const textError =
     textLen > bounds.instructionsMax
-      ? `${(textLen - bounds.instructionsMax).toLocaleString()} over the limit. Shorten it; nothing is cut off automatically.`
+      ? overLimitMessage(textLen, bounds.instructionsMax)
       : editing && hasDisallowedControl(editing.instructions.replace(/\r\n?/g, '\n'))
         ? 'Contains a control character that cannot be saved (often pasted from a terminal or PDF).'
         : attempted && textLen === 0
@@ -367,9 +368,7 @@ export function StylesSection() {
               hint={
                 <span className="style-counter">
                   <span>Layout, tone, starter languages. It cannot add or remove fields, or change the stdin/stdout convention.</span>
-                  <span className={cx('style-count', textLen > bounds.instructionsMax && 'is-over')}>
-                    {textLen.toLocaleString()} / {bounds.instructionsMax.toLocaleString()}
-                  </span>
+                  <CharCount count={textLen} max={bounds.instructionsMax} />
                 </span>
               }
             >

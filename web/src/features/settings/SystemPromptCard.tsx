@@ -6,12 +6,13 @@ import { qk, useLimits, useSystemPrompt, useTestCasePrompt } from '../../api/que
 import type { SystemPrompt, TestCasePrompt } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
 import { charCount, hasDisallowedControl } from '../../lib/text';
-import { Button, cx } from '../../ui/Button';
+import { Button } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
 import { useLeaveGuard } from '../../ui/LeaveGuard';
 import { Badge, ErrorCallout, ErrorState, PageLoading } from '../../ui/misc';
 import { useToast } from '../../ui/Toast';
+import { CharCount, overLimitMessage } from './textLimit';
 
 /** The id the "Built-in conventions" style links to. */
 export const SYSTEM_PROMPT_ID = 'system-prompt';
@@ -144,7 +145,7 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
     draft === null
       ? null
       : textLen > max
-        ? `${(textLen - max).toLocaleString()} over the limit. Shorten it; nothing is cut off automatically.`
+        ? overLimitMessage(textLen, max)
         : hasDisallowedControl(draft.replace(/\r\n?/g, '\n'))
           ? 'Contains a control character that cannot be saved.'
           : attempted && textLen === 0
@@ -277,11 +278,7 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
                   label={kind.section}
                   hideLabel
                   error={textError ?? serverError}
-                  hint={
-                    <span className={cx('style-count', textLen > max && 'is-over')}>
-                      {textLen.toLocaleString()} / {max.toLocaleString()}
-                    </span>
-                  }
+                  hint={<CharCount count={textLen} max={max} />}
                 >
                   {(a) => (
                     <textarea
