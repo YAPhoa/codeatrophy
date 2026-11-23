@@ -188,7 +188,7 @@ before any other work.
 | A bound on user input | The server, `limits` of `GET /meta`, and `Limits` in `web/src/api/types.ts`. The UI keeps no copies. |
 | An AI provider or judge engine | A new implementation of `ai.Provider` or `judge.Engine` in its own package, never a special case in a caller. |
 | The release version | Nothing else. It is written only as the default of `CODEATROPHY_VERSION` in `compose.yaml`, and changes alone, in the commit that gets the tag (see Releases). |
-| How the image is published | Both the staging job in `.github/workflows/ci.yml` and `.github/workflows/release.yml`, which build and label it the same way. |
+| How the image is published | `.github/publish-image.sh`, through which the staging job in `.github/workflows/ci.yml` and `.github/workflows/release.yml` both build and label it, each giving its own tags. |
 
 ### Code
 
