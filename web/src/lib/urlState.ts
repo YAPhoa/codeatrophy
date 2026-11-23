@@ -18,17 +18,15 @@ function write(key: string, value: string | null, push: boolean, setParams: SetU
       pending = null;
       // The page was left in the meantime: its parameters mean nothing where the user is now.
       if (window.location.pathname !== page) return;
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          for (const [k, v] of batch.changes) {
-            if (v === null) next.delete(k);
-            else next.set(k, v);
-          }
-          return next;
-        },
-        { replace: !batch.push },
-      );
+      // From the address as it is, not as the page last rendered it: the
+      // router renders a new address in a transition, and a write made before
+      // that render ends would otherwise undo the one before it.
+      const next = new URLSearchParams(window.location.search);
+      for (const [k, v] of batch.changes) {
+        if (v === null) next.delete(k);
+        else next.set(k, v);
+      }
+      setParams(next, { replace: !batch.push });
     });
   }
   pending.changes.set(key, value);

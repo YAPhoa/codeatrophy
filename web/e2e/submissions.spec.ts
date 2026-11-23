@@ -75,6 +75,33 @@ test('submissions: a past one opens in place of the list, at an address of its o
   await expect(page).not.toHaveURL(/submission=/);
 });
 
+test('submissions: one opened before the page has caught up with the tab keeps the tab in the address', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('link', { name: 'Two Sum', exact: true }).click();
+  // Its list loaded once, the tab has its rows as soon as it opens.
+  await page.getByRole('tab', { name: /^Submissions/ }).click();
+  const row = `history-row-${TWO_SUM_ACCEPTED}`;
+  await expect(history(page).locator(`[id="${row}"]`)).toBeVisible();
+  await page.getByRole('tab', { name: 'Description', exact: true }).click();
+  await expect(page).not.toHaveURL(/[?&]tab=/);
+
+  // The router shows a new address in a transition, which a busy machine can
+  // still be rendering when the next click comes. Clicked as soon as the
+  // address has the tab, and before any task runs, the row is opened while
+  // the page still renders the address it had.
+  const search = await page.evaluate(async (row) => {
+    [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent?.startsWith('Submissions'))!.click();
+    for (let i = 0; i < 1000 && !location.search.includes('tab=submissions'); i++) await Promise.resolve();
+    const search = location.search;
+    document.getElementById(row)!.click();
+    return search;
+  }, row);
+  expect(search).toContain('tab=submissions');
+  await expect(details(page).getByRole('heading', { name: 'Accepted', level: 2 })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`[?&]submission=${TWO_SUM_ACCEPTED}`));
+  await expect(page).toHaveURL(/[?&]tab=submissions/);
+});
+
 test('submissions: a link to one opens the Submissions tab on it, and one that does not exist says so', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await open(page, '/');
