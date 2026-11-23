@@ -132,6 +132,7 @@ describe('validation', () => {
     expect(modelProblem('', 200)).toBeNull();
     expect(modelProblem('m'.repeat(201), 200)).toMatch(/over the 200-character limit/);
     expect(modelProblem('a\tb', 200)).toMatch(/single line/);
+    for (const c of ['\u0085', '\u009b', '\u2028', '\u2029', '\u007f']) expect(modelProblem(`a${c}b`, 200)).toMatch(/single line/);
     expect(baseUrlProblem('', 'anthropic')).toBeNull();
     expect(baseUrlProblem('', 'gemini')).toBeNull();
     expect(baseUrlProblem('gateway.example.org', 'gemini')).toMatch(/http/);

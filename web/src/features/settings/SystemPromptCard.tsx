@@ -5,7 +5,7 @@ import { api, validationFields } from '../../api/client';
 import { qk, useLimits, useSystemPrompt, useTestCasePrompt } from '../../api/queries';
 import type { SystemPrompt, TestCasePrompt } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
-import { charCount } from '../../lib/text';
+import { charCount, hasDisallowedControl } from '../../lib/text';
 import { Button, cx } from '../../ui/Button';
 import { useConfirm } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
@@ -15,10 +15,6 @@ import { useToast } from '../../ui/Toast';
 
 /** The id the "Built-in conventions" style links to. */
 export const SYSTEM_PROMPT_ID = 'system-prompt';
-
-// Control characters other than newline and tab are rejected by the server.
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
 
 const normalise = (s: string) => s.replace(/\r\n?/g, '\n').trim();
 
@@ -149,7 +145,7 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
       ? null
       : textLen > max
         ? `${(textLen - max).toLocaleString()} over the limit. Shorten it; nothing is cut off automatically.`
-        : CONTROL.test(draft.replace(/\r\n?/g, '\n'))
+        : hasDisallowedControl(draft.replace(/\r\n?/g, '\n'))
           ? 'Contains a control character that cannot be saved.'
           : attempted && textLen === 0
             ? kind.emptyError

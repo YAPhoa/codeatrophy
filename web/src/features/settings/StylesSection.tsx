@@ -5,7 +5,7 @@ import { api, isApiError, validationFields } from '../../api/client';
 import { qk, useLimits, useStyles } from '../../api/queries';
 import type { StylePreset } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
-import { charCount } from '../../lib/text';
+import { charCount, hasDisallowedControl, isSingleLine } from '../../lib/text';
 import { Button, IconButton, cx } from '../../ui/Button';
 import { Dialog, useConfirm } from '../../ui/Dialog';
 import { Checkbox, Field } from '../../ui/Field';
@@ -17,10 +17,6 @@ import { SYSTEM_PROMPT_ID, SystemPromptCards } from './SystemPromptCard';
 const EXAMPLE_NAME = 'LeetCode style';
 const EXAMPLE_INSTRUCTIONS =
   'Open with a short description of the task in two or three sentences. Then give Example blocks, each with Input, Output and a one-line Explanation. End with a Constraints list. Keep the tone neutral and direct. Starter code in Python and Go only.';
-
-// Control characters other than newline and tab are rejected by the server.
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
 type Editing = { preset: StylePreset | null; name: string; instructions: string; isDefault: boolean } | null;
 
@@ -140,9 +136,9 @@ export function StylesSection() {
       ? `${nameLen - bounds.nameMax} over the ${bounds.nameMax}-character limit.`
       : duplicate
         ? 'Another style already has this name.'
-        : editing && /[\n\r\t]/.test(editing.name.trim())
+        : editing && /[\n\r\t\u2028\u2029]/.test(editing.name.trim())
           ? 'A name is a single line, without tabs.'
-          : editing && CONTROL.test(editing.name)
+          : editing && !isSingleLine(editing.name.trim())
             ? 'Contains a control character that cannot be saved.'
             : attempted && nameLen === 0
               ? 'Give the style a name.'
@@ -150,7 +146,7 @@ export function StylesSection() {
   const textError =
     textLen > bounds.instructionsMax
       ? `${(textLen - bounds.instructionsMax).toLocaleString()} over the limit. Shorten it; nothing is cut off automatically.`
-      : editing && CONTROL.test(editing.instructions.replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
+      : editing && hasDisallowedControl(editing.instructions.replace(/\r\n?/g, '\n'))
         ? 'Contains a control character that cannot be saved (often pasted from a terminal or PDF).'
         : attempted && textLen === 0
           ? 'Write the instructions the AI should follow.'

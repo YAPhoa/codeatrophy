@@ -6,7 +6,7 @@
  */
 
 import type { AiEffort, AiModelsRequest, AiProvider, AiProviderInput, AiProviderKind, AiProviderPatch, AiSettings, AiTestRequest } from '../../api/types';
-import { charCount } from '../../lib/text';
+import { charCount, isSingleLine } from '../../lib/text';
 import { hostOf, movesToAnotherServer, originOf } from './aiKeyBinding';
 import { endpointKey } from './modelCache';
 
@@ -117,10 +117,8 @@ export function suggestName(kind: AiProviderKind, baseUrl: string, providers: re
   }
 }
 
-// What a single-line field rejects besides tabs and newlines.
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
-const LINE_BREAK = new RegExp(`[\\n\\r\\t${String.fromCharCode(0x2028, 0x2029)}]`);
+// What breaks a single line, as against other control characters: they get a message of their own.
+const LINE_BREAK = /[\n\r\t\u2028\u2029]/;
 
 /**
  * Why a provider name cannot be saved, or `null`. An empty name is not a
@@ -132,7 +130,7 @@ export function nameProblem(name: string, providers: readonly AiProvider[], self
   const length = charCount(text);
   if (length > max) return `${length - max} over the ${max}-character limit.`;
   if (LINE_BREAK.test(text)) return 'A name is a single line, without tabs.';
-  if (CONTROL.test(text)) return 'Contains a control character that cannot be saved.';
+  if (!isSingleLine(text)) return 'Contains a control character that cannot be saved.';
   const clash = providers.some((p) => p.source === 'settings' && p.id !== self?.id && p.name.trim().toLowerCase() === text.toLowerCase());
   return clash && text !== '' ? 'Another provider already has this name.' : null;
 }
@@ -141,7 +139,7 @@ export function modelProblem(model: string, max: number): string | null {
   const text = model.trim();
   const length = charCount(text);
   if (length > max) return `${length - max} over the ${max}-character limit.`;
-  return LINE_BREAK.test(text) || CONTROL.test(text) ? 'A model name is a single line, without tabs or control characters.' : null;
+  return isSingleLine(text) ? null : 'A model name is a single line, without tabs or control characters.';
 }
 
 /** Why a base URL cannot be used, or `null`. Empty is fine where the kind has a server of its own. */

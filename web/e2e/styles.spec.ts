@@ -66,6 +66,23 @@ test('styles: editing does not change the choice, and a style is deleted from it
   expect(await storedDefault(page)).toBeNull();
 });
 
+test('styles: a name or instructions the server would refuse for a control character are refused here first', async ({ page }) => {
+  await open(page, '/settings/styles');
+  await group(page).getByRole('button', { name: 'Edit Terse contest style' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit style' });
+  const name = dialog.getByLabel('Name', { exact: true });
+  // The Unicode line separator breaks the line; a C1 control is a control character.
+  await name.fill('Terse\u2028contest');
+  await expect(dialog.getByText('A name is a single line, without tabs.')).toBeVisible();
+  await name.fill('Terse\u0085contest');
+  await expect(dialog.getByText('Contains a control character that cannot be saved.')).toBeVisible();
+  await name.fill('Terse contest');
+  await expect(dialog.getByText(/^Contains a control character/)).toHaveCount(0);
+  const instructions = dialog.getByLabel('Instructions', { exact: true });
+  await instructions.fill('Short statements.\u009b');
+  await expect(dialog.getByText(/^Contains a control character that cannot be saved \(often pasted/)).toBeVisible();
+});
+
 test('styles: with none saved, the example card shows instead of the list', async ({ page }) => {
   await open(page, '/settings/styles', 'fast,no-styles');
   await expect(page.getByText('No styles yet')).toBeVisible();

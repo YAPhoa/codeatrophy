@@ -374,6 +374,8 @@ describe('validateForm', () => {
     expect(validateForm({ ...ok, tags: ['x'.repeat(41)] }, limits).tags).toBeDefined();
     expect(validateForm({ ...ok, tags: ['a/b'] }, limits).tags).toMatch(/“\/”/);
     expect(tagProblem('tab\there', limits)).toMatch(/control/);
+    // As the server's IsSingleLine: C1 controls and the Unicode line and paragraph separators too.
+    for (const c of ['\u0085', '\u009b', '\u2028', '\u2029']) expect(tagProblem(`a${c}b`, limits)).toMatch(/control/);
     expect(tagProblem('dp', limits)).toBeNull();
   });
 

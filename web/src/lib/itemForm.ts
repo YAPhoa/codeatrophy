@@ -24,7 +24,7 @@ import type {
   TestOrigin,
 } from '../api/types';
 import { formatBytes, formatNumber, withUnit } from './format';
-import { byteLength, charCount } from './text';
+import { byteLength, charCount, isSingleLine } from './text';
 import { isLargeText } from './largeText';
 
 export interface FormTestCase {
@@ -396,13 +396,10 @@ export type FormErrors = Partial<
   Record<'title' | 'summary' | 'body' | 'timeLimitMs' | 'memoryLimitKb' | 'tags' | 'sourceUrl' | 'sourceNote' | 'code' | 'testCases', string>
 >;
 
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f]/;
-
 /** Why a tag would be rejected by the server, or `null` if it is fine. */
 export function tagProblem(tag: string, limits: Limits | undefined): string | null {
   if (tag.includes('/')) return 'A tag cannot contain “/”.';
-  if (CONTROL.test(tag)) return 'A tag cannot contain control characters.';
+  if (!isSingleLine(tag)) return 'A tag cannot contain control characters.';
   if (limits && charCount(tag) > limits.maxTagChars) return `Each tag can be at most ${limits.maxTagChars} characters.`;
   return null;
 }
