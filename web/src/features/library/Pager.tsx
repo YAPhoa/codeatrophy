@@ -1,7 +1,8 @@
 import { useId } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { PAGE_SIZES, pageList, withPage, type PageSize } from '../../lib/paging';
+import { useLimits } from '../../api/queries';
+import { pageList, pageSizes, withPage, type PageSize } from '../../lib/paging';
 import { cx } from '../../ui/Button';
 import { Select } from '../../ui/Select';
 
@@ -25,6 +26,7 @@ interface PagerProps {
 export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageSize }: PagerProps) {
   const [searchParams] = useSearchParams();
   const sizeId = useId();
+  const limits = useLimits();
   const to = (n: number) => ({ search: withPage(searchParams, n).toString() });
   // Previous and Next; at either end, a disabled button in the link's place.
   const step = (n: number, next: boolean) => {
@@ -52,7 +54,7 @@ export function Pager({ page, pageCount, offset, shown, total, pageSize, onPageS
           className="input-sm pager-size"
           value={String(pageSize)}
           onChange={(v) => onPageSize(Number(v) as PageSize)}
-          options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
+          options={pageSizes(limits?.maxPageSize).map((n) => ({ value: String(n), label: String(n) }))}
         />
         <label htmlFor={sizeId}>per page</label>
       </div>

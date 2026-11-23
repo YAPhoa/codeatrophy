@@ -8,6 +8,11 @@ import { readString, writeString } from './storage';
 
 export const PAGE_SIZES = [25, 50, 100, 200] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
+
+/** The page sizes to offer: those within the server's largest `limit` (`maxPageSize`), all of them until it is known. */
+export function pageSizes(maxPageSize: number | undefined): PageSize[] {
+  return PAGE_SIZES.filter((n) => maxPageSize === undefined || n <= maxPageSize);
+}
 const DEFAULT_PAGE_SIZE: PageSize = 50;
 
 /** The library's page size; another list passes a key of its own. */

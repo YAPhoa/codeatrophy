@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { withFakeLocalStorage } from '../test/fakeStorage';
-import { getPageSize, pageList, parsePage, setPageSize, withPage } from './paging';
+import { getPageSize, pageList, pageSizes, parsePage, setPageSize, withPage } from './paging';
 
 describe('pageList', () => {
   it('shows the ends, the current page and its neighbours, with gaps between', () => {
@@ -34,6 +34,15 @@ describe('the page in the URL', () => {
   it('is left out for the first page', () => {
     expect(withPage(new URLSearchParams('q=a&page=4'), 1).toString()).toBe('q=a');
     expect(withPage(new URLSearchParams('q=a'), 2).toString()).toBe('q=a&page=2');
+  });
+});
+
+describe('the page sizes offered', () => {
+  it('are those the server allows as a limit', () => {
+    expect(pageSizes(200)).toEqual([25, 50, 100, 200]);
+    expect(pageSizes(100)).toEqual([25, 50, 100]);
+    expect(pageSizes(60)).toEqual([25, 50]);
+    expect(pageSizes(undefined)).toEqual([25, 50, 100, 200]);
   });
 });
 
