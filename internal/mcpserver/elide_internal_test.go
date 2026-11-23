@@ -51,12 +51,17 @@ func TestElide(t *testing.T) {
 }
 
 func TestHeadKeepsWholeCharacters(t *testing.T) {
-	s := strings.Repeat("a", headBytes-1) + "é" + "tail"
-	h := head(s, headBytes)
-	if h != strings.Repeat("a", headBytes-1) || !utf8.ValidString(h) {
-		t.Errorf("head: %q", h[len(h)-5:])
+	s := strings.Repeat("a", headBytes-1) + "é" + strings.Repeat("b", elideBytes)
+	doc, _ := json.Marshal(map[string]any{"stdin": s})
+	out, err := elide(doc, elideBytes)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if head("short", headBytes) != "short" {
-		t.Error("a short string is its own head")
+	var got struct{ StdinHead string }
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if h := got.StdinHead; h != strings.Repeat("a", headBytes-1) || !utf8.ValidString(h) {
+		t.Errorf("head: %q", h[len(h)-5:])
 	}
 }

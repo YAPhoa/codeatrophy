@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"unicode/utf8"
+
+	"codeatrophy/internal/domain"
 )
 
 // Test data in tool results. A large test case's input runs to a megabyte,
@@ -93,7 +94,7 @@ func writeToken(dec *json.Decoder, out *bytes.Buffer, tok json.Token, limit int)
 					fmt.Fprintf(out, ":%d,", len(s))
 					writeString(out, key+"Head")
 					out.WriteByte(':')
-					writeString(out, head(s, headBytes))
+					writeString(out, domain.Truncate(s, headBytes))
 					continue
 				}
 				if err := writeToken(dec, out, vt, limit); err != nil {
@@ -136,16 +137,4 @@ func writeString(out *bytes.Buffer, s string) {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(s)
 	out.Truncate(out.Len() - 1) // the encoder's newline
-}
-
-// head is the first n bytes of s, cut back so as not to split a UTF-8
-// sequence.
-func head(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
 }
