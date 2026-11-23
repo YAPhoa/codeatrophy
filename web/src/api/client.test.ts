@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorCode } from './types';
-import { ApiError, KNOWN_CODES, api, buildQuery, isAbort, jobError, request, setTransport } from './client';
+import { ApiError, KNOWN_CODES, api, buildQuery, isAbort, jobError, request, setTransport, validationFields } from './client';
 
 type Call = { url: string; init: RequestInit };
 
@@ -40,6 +40,15 @@ describe('buildQuery', () => {
   it('returns an empty string when there is nothing to send', () => {
     expect(buildQuery(undefined)).toBe('');
     expect(buildQuery({ a: undefined })).toBe('');
+  });
+});
+
+describe('validationFields', () => {
+  it('is the fields of a validation_failed error, and none for anything else', () => {
+    expect(validationFields(new ApiError(400, 'validation_failed', 'invalid', { name: 'is required' }))).toEqual({ name: 'is required' });
+    expect(validationFields(new ApiError(409, 'conflict', 'changed', { revision: 4 }))).toEqual({});
+    expect(validationFields(new Error('boom'))).toEqual({});
+    expect(validationFields(null)).toEqual({});
   });
 });
 

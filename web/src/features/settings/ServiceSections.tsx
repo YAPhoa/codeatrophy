@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Plus } from 'lucide-react';
-import { api, isApiError } from '../../api/client';
+import { api, validationFields } from '../../api/client';
 import type { McpTokenCreated, Meta } from '../../api/types';
 import { useAuth } from '../../app/AuthGate';
 import { absoluteTime, relativeTime } from '../../lib/format';
@@ -156,8 +156,9 @@ function McpTokens({ url }: { url: string }) {
       void qc.invalidateQueries({ queryKey: TOKENS_KEY });
     },
     onError: (err) => {
-      if (isApiError(err) && err.code === 'validation_failed' && err.fields.name !== undefined) {
-        setNameError(`Name ${String(err.fields.name)}.`);
+      const problem = validationFields(err).name;
+      if (problem !== undefined) {
+        setNameError(`Name ${String(problem)}.`);
       } else {
         toast.error(err);
       }

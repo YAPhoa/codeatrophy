@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogOut, Monitor, Smartphone, Tablet } from 'lucide-react';
-import { api, isApiError } from '../../api/client';
+import { api, isApiError, validationFields } from '../../api/client';
 import type { BrowserSession } from '../../api/types';
 import { useAuth, useSignOut } from '../../app/AuthGate';
 import { absoluteTime, relativeTime } from '../../lib/format';
@@ -197,8 +197,9 @@ function PasswordForm() {
       void qc.invalidateQueries({ queryKey: SESSIONS_KEY });
       toast.success('Password changed. Other browsers signed in to this account were signed out.');
     } catch (err) {
-      if (isApiError(err) && err.code === 'validation_failed' && err.fields.newPassword !== undefined) {
-        const problem = String(err.fields.newPassword);
+      const newPassword = validationFields(err).newPassword;
+      if (newPassword !== undefined) {
+        const problem = String(newPassword);
         setErrors({ next: problem.charAt(0).toUpperCase() + problem.slice(1) + '.' });
       } else {
         setErrors({ form: isApiError(err) ? err.message : 'The password could not be changed.' });

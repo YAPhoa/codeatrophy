@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { PenLine, Pencil, Plus, Trash2 } from 'lucide-react';
-import { api, isApiError } from '../../api/client';
+import { api, isApiError, validationFields } from '../../api/client';
 import { qk, useLimits, useStyles } from '../../api/queries';
 import type { StylePreset } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
@@ -157,7 +157,7 @@ export function StylesSection() {
         : attempted && textLen === 0
           ? 'Write the instructions the AI should follow.'
           : null;
-  const serverFields = isApiError(error) && error.code === 'validation_failed' ? error.fields : {};
+  const serverFields = validationFields(error);
   const canSave = editing !== null && nameLen > 0 && textLen > 0 && !nameError && !textError;
 
   const save = async () => {
@@ -401,7 +401,7 @@ export function StylesSection() {
               onChange={(v) => setEditing({ ...editing, isDefault: v })}
               label="Use by default"
             />
-            {error != null && !(isApiError(error) && error.code === 'validation_failed' && (serverFields.name != null || serverFields.instructions != null)) && (
+            {error != null && !(serverFields.name != null || serverFields.instructions != null) && (
               <ErrorCallout error={error} title={isApiError(error) && error.code === 'conflict' ? 'Style limit reached' : 'Could not save the style'} />
             )}
           </form>

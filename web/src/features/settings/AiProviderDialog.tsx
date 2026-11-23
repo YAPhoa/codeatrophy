@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, KeyRound, PlugZap, Server } from 'lucide-react';
-import { api, isAbort, isApiError } from '../../api/client';
+import { api, isAbort, isApiError, validationFields } from '../../api/client';
 import { invalidateAi, useLimits } from '../../api/queries';
 import type { AiEffort, AiProvider, AiProviderKind, AiSettings, AiTestResponse } from '../../api/types';
 import { errorLine, sentence } from '../../lib/errors';
@@ -207,9 +207,8 @@ export function AiProviderDialog({ settings, provider, kind: initialKind = 'anth
   const dirty = patch === null || Object.keys(patch).length > 0;
   const canSave = nameLen > 0 && !nameError && !modelError && dirty;
 
-  const fieldsOf = (error: unknown) => (isApiError(error) && error.code === 'validation_failed' ? error.fields : {});
-  const saveFields = fieldsOf(saveError);
-  const testFields = fieldsOf(testError);
+  const saveFields = validationFields(saveError);
+  const testFields = validationFields(testError);
   const serverError = (field: 'name' | 'model' | 'baseUrl' | 'apiKey' | 'effort'): string | null => {
     const problem = saveFields[field] ?? testFields[field];
     return problem != null ? sentence(String(problem)) : null;

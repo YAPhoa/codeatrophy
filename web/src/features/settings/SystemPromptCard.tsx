@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
 import { Lock, Pencil, RotateCcw } from 'lucide-react';
-import { api, isApiError } from '../../api/client';
+import { api, validationFields } from '../../api/client';
 import { qk, useLimits, useSystemPrompt, useTestCasePrompt } from '../../api/queries';
 import type { SystemPrompt, TestCasePrompt } from '../../api/types';
 import { focusFirstInvalid } from '../../lib/focusInvalid';
@@ -156,7 +156,8 @@ function SystemPromptCard<T extends PromptText>({ kind, onDirty }: { kind: Promp
           : attempted && textLen === 0
             ? kind.emptyError
             : null;
-  const serverError = isApiError(error) && error.code === 'validation_failed' && error.fields.custom != null ? String(error.fields.custom) : null;
+  const serverProblem = validationFields(error).custom;
+  const serverError = serverProblem != null ? String(serverProblem) : null;
 
   const set = (next: T) => qc.setQueryData(kind.queryKey, next);
 

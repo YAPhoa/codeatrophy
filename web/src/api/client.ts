@@ -119,6 +119,11 @@ export function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
 }
 
+/** The per-field messages of a `validation_failed` error; none for any other error. */
+export function validationFields(err: unknown): Record<string, string | number> {
+  return isApiError(err) && err.code === 'validation_failed' ? err.fields : {};
+}
+
 /** The error a failed AI job ended with, as the request that started it would have thrown it. */
 export function jobError(error: AiJobError): ApiError {
   return new ApiError(0, error.code, error.message, error.fields ?? {});
