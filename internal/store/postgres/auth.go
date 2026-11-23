@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const userColumns = `id, email, password_hash, created_at, updated_at`
@@ -21,7 +22,7 @@ func scanUser(row interface{ Scan(...any) error }) (store.User, error) {
 		}
 		return u, err
 	}
-	u.CreatedAt, u.UpdatedAt = fromUnix(created), fromUnix(updated)
+	u.CreatedAt, u.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return u, nil
 }
 
@@ -58,12 +59,12 @@ func (t *tx) GetUserByEmail(email string) (store.User, error) {
 
 func (t *tx) InsertUser(u *store.User) error {
 	_, err := t.exec(`INSERT INTO users (`+userColumns+`) VALUES ($1, $2, $3, $4, $5)`,
-		u.ID, u.Email, u.PasswordHash, toUnix(u.CreatedAt), toUnix(u.UpdatedAt))
+		u.ID, u.Email, u.PasswordHash, sqlrow.ToUnix(u.CreatedAt), sqlrow.ToUnix(u.UpdatedAt))
 	return err
 }
 
 func (t *tx) UpdateUserPassword(id, passwordHash string, at time.Time) error {
-	res, err := t.exec(`UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`, passwordHash, toUnix(at), id)
+	res, err := t.exec(`UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`, passwordHash, sqlrow.ToUnix(at), id)
 	if err != nil {
 		return err
 	}
@@ -125,13 +126,13 @@ func scanSession(row interface{ Scan(...any) error }) (store.Session, error) {
 		}
 		return s, err
 	}
-	s.CreatedAt, s.ExpiresAt, s.LastUsedAt = fromUnix(created), fromUnix(expires), fromUnix(used)
+	s.CreatedAt, s.ExpiresAt, s.LastUsedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(expires), sqlrow.FromUnix(used)
 	return s, nil
 }
 
 func (t *tx) InsertSession(s *store.Session) error {
 	_, err := t.exec(`INSERT INTO sessions (`+sessionColumns+`) VALUES ($1, $2, $3, $4, $5, $6)`,
-		s.ID, s.UserID, toUnix(s.CreatedAt), toUnix(s.ExpiresAt), s.UserAgent, toUnix(s.LastUsedAt))
+		s.ID, s.UserID, sqlrow.ToUnix(s.CreatedAt), sqlrow.ToUnix(s.ExpiresAt), s.UserAgent, sqlrow.ToUnix(s.LastUsedAt))
 	return err
 }
 
@@ -158,7 +159,7 @@ func (t *tx) ListUserSessions(userID string) ([]store.Session, error) {
 }
 
 func (t *tx) ExtendSession(id string, usedAt, expiresAt time.Time) error {
-	_, err := t.exec(`UPDATE sessions SET last_used_at = $1, expires_at = $2 WHERE id = $3`, toUnix(usedAt), toUnix(expiresAt), id)
+	_, err := t.exec(`UPDATE sessions SET last_used_at = $1, expires_at = $2 WHERE id = $3`, sqlrow.ToUnix(usedAt), sqlrow.ToUnix(expiresAt), id)
 	return err
 }
 
@@ -178,6 +179,6 @@ func (t *tx) DeleteUserSessions(userID, except string) error {
 }
 
 func (t *tx) DeleteExpiredSessions(before time.Time) error {
-	_, err := t.exec(`DELETE FROM sessions WHERE expires_at < $1`, toUnix(before))
+	_, err := t.exec(`DELETE FROM sessions WHERE expires_at < $1`, sqlrow.ToUnix(before))
 	return err
 }

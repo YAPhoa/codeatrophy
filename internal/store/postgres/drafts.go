@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 // Drafts: one row each in drafts, the request, the generation and the
@@ -26,8 +27,8 @@ func scanDraft(sc interface{ Scan(...any) error }, extra ...any) (store.Draft, e
 	if err := sc.Scan(dest...); err != nil {
 		return d, err
 	}
-	d.CreatedAt, d.UpdatedAt = fromUnix(created), fromUnix(updated)
-	d.VariantOf, d.ClientTitle, d.JobID, d.Error = strPtr(variantOf), strPtr(clientTitle), strPtr(jobID), strPtr(errMsg)
+	d.CreatedAt, d.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
+	d.VariantOf, d.ClientTitle, d.JobID, d.Error = sqlrow.StrPtr(variantOf), sqlrow.StrPtr(clientTitle), sqlrow.StrPtr(jobID), sqlrow.StrPtr(errMsg)
 	return d, nil
 }
 
@@ -45,8 +46,8 @@ func decompressedOrNil(b []byte, id, what string) (*string, error) {
 func (t *tx) InsertDraft(d *store.Draft) error {
 	_, err := t.exec(`INSERT INTO drafts (`+draftColumns+`, request, generation, content)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		d.ID, toUnix(d.CreatedAt), toUnix(d.UpdatedAt), d.Kind, nullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle),
-		d.Revision, d.Edited, nullStr(d.JobID), nullText(d.Error), d.GenerationSeq, d.BasedOn,
+		d.ID, sqlrow.ToUnix(d.CreatedAt), sqlrow.ToUnix(d.UpdatedAt), d.Kind, sqlrow.NullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle),
+		d.Revision, d.Edited, sqlrow.NullStr(d.JobID), nullText(d.Error), d.GenerationSeq, d.BasedOn,
 		d.UserID, compressedOrNil(d.Request), compressedOrNil(d.Generation), compressedOrNil(d.Content))
 	return err
 }
@@ -94,8 +95,8 @@ func (t *tx) UpdateDraft(d *store.Draft) error {
 	res, err := t.exec(`UPDATE drafts SET updated_at = $1, variant_of = $2, title = $3, client_title = $4, revision = $5,
 		edited = $6, request = $7, job_id = $8, error = $9, generation = $10, generation_seq = $11, content = $12,
 		based_on = $13 WHERE id = $14`,
-		toUnix(d.UpdatedAt), nullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle), d.Revision, d.Edited,
-		compressedOrNil(d.Request), nullStr(d.JobID), nullText(d.Error), compressedOrNil(d.Generation), d.GenerationSeq,
+		sqlrow.ToUnix(d.UpdatedAt), sqlrow.NullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle), d.Revision, d.Edited,
+		compressedOrNil(d.Request), sqlrow.NullStr(d.JobID), nullText(d.Error), compressedOrNil(d.Generation), d.GenerationSeq,
 		compressedOrNil(d.Content), d.BasedOn, d.ID)
 	if err != nil {
 		return err

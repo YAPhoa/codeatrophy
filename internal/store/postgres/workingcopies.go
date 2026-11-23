@@ -3,6 +3,7 @@ package postgres
 import (
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 func (t *tx) ListWorkingCopies(userID, itemID string) ([]domain.WorkingCopy, error) {
@@ -21,7 +22,7 @@ func (t *tx) ListWorkingCopies(userID, itemID string) ([]domain.WorkingCopy, err
 		if err := rows.Scan(&w.UserID, &w.ItemID, &w.Language, &w.Source, &updated); err != nil {
 			return nil, err
 		}
-		w.UpdatedAt = fromUnix(updated)
+		w.UpdatedAt = sqlrow.FromUnix(updated)
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -37,7 +38,7 @@ func (t *tx) PutWorkingCopy(w *domain.WorkingCopy) error {
 		FROM items WHERE id = $4 AND type = $5
 		ON CONFLICT (user_id, item_id, language) DO UPDATE
 		SET source = excluded.source, updated_at = excluded.updated_at, write_seq = excluded.write_seq`,
-		w.Language, text(w.Source), toUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem), w.UserID)
+		w.Language, text(w.Source), sqlrow.ToUnix(w.UpdatedAt), w.ItemID, string(domain.TypeProblem), w.UserID)
 	if err != nil {
 		return err
 	}

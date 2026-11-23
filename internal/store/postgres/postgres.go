@@ -439,32 +439,7 @@ func (p *params) add(v any) string {
 	return "$" + strconv.Itoa(len(p.args))
 }
 
-// Value helpers. Timestamps are stored as Unix seconds; free text is bytea.
-
-func toUnix(t time.Time) int64 { return t.UTC().Unix() }
-
-func fromUnix(s int64) time.Time { return time.Unix(s, 0).UTC() }
-
-func nullUnix(p *time.Time) any {
-	if p == nil {
-		return nil
-	}
-	return toUnix(*p)
-}
-
-func nullStr(p *string) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
-func nullInt(p *int) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
+// Free text is bytea.
 
 // text returns s for a bytea column; never nil, which would be NULL.
 func text(s string) []byte {
@@ -480,20 +455,4 @@ func nullText(p *string) any {
 		return nil
 	}
 	return text(*p)
-}
-
-func strPtr(ns sql.NullString) *string {
-	if !ns.Valid {
-		return nil
-	}
-	s := ns.String
-	return &s
-}
-
-func intPtr(ni sql.NullInt64) *int {
-	if !ni.Valid {
-		return nil
-	}
-	v := int(ni.Int64)
-	return &v
 }

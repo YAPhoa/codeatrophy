@@ -48,11 +48,11 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 		d := domain.Difficulty(difficulty.String)
 		it.Difficulty = &d
 	}
-	it.RawInput = strPtr(rawInput)
-	it.Source = domain.Source{URL: strPtr(srcURL), Note: strPtr(srcNote)}
-	it.VariantOf = strPtr(variantOf)
-	it.CreatedAt = fromUnix(created)
-	it.UpdatedAt = fromUnix(updated)
+	it.RawInput = sqlrow.StrPtr(rawInput)
+	it.Source = domain.Source{URL: sqlrow.StrPtr(srcURL), Note: sqlrow.StrPtr(srcNote)}
+	it.VariantOf = sqlrow.StrPtr(variantOf)
+	it.CreatedAt = sqlrow.FromUnix(created)
+	it.UpdatedAt = sqlrow.FromUnix(updated)
 	if it.Type == domain.TypeProblem {
 		p := &domain.ProblemSpec{
 			TimeLimitMs:   int(timeLimit.Int64),
@@ -164,7 +164,7 @@ func sourceArgs(c *domain.ChangeSource) []any {
 	if c == nil {
 		return []any{nil, nil, nil}
 	}
-	return []any{c.Via, nullStr(c.Client), nullStr(c.Model)}
+	return []any{c.Via, sqlrow.NullStr(c.Client), sqlrow.NullStr(c.Model)}
 }
 
 // changeSource reads a change source from its columns: nil when via is
@@ -173,7 +173,7 @@ func changeSource(via, client, model sql.NullString) *domain.ChangeSource {
 	if !via.Valid {
 		return nil
 	}
-	return &domain.ChangeSource{Via: via.String, Client: strPtr(client), Model: strPtr(model)}
+	return &domain.ChangeSource{Via: via.String, Client: sqlrow.StrPtr(client), Model: sqlrow.StrPtr(model)}
 }
 
 func itemArgs(it *domain.Item) []any {
@@ -201,8 +201,8 @@ func itemArgs(it *domain.Item) []any {
 		harness = string(b)
 	}
 	return []any{
-		string(it.Type), it.Title, text(it.Summary), text(it.Body), difficulty, nullText(it.RawInput), nullStr(it.Source.URL), nullText(it.Source.Note), nullStr(it.VariantOf),
-		it.Revision, timeLimit, memLimit, compareMode, starter, toUnix(it.CreatedAt), toUnix(it.UpdatedAt), iface, harness,
+		string(it.Type), it.Title, text(it.Summary), text(it.Body), difficulty, nullText(it.RawInput), sqlrow.NullStr(it.Source.URL), nullText(it.Source.Note), sqlrow.NullStr(it.VariantOf),
+		it.Revision, timeLimit, memLimit, compareMode, starter, sqlrow.ToUnix(it.CreatedAt), sqlrow.ToUnix(it.UpdatedAt), iface, harness,
 	}
 }
 
@@ -295,7 +295,7 @@ func (t *tx) DeleteItem(id string, at time.Time) (bool, error) {
 	if _, err := t.exec(`INSERT INTO deleted_items (id, title, type, deleted_at)
 		SELECT id, title, type, $1 FROM items WHERE id = $2
 		ON CONFLICT (id) DO UPDATE SET title = excluded.title, type = excluded.type, deleted_at = excluded.deleted_at`,
-		toUnix(at), id); err != nil {
+		sqlrow.ToUnix(at), id); err != nil {
 		return false, err
 	}
 	// The search index row goes with the item.

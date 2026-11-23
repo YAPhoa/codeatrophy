@@ -7,6 +7,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 // linkedItemColumns describe the item or deleted item with the id in
@@ -24,7 +25,7 @@ func scanLinkedItem(sc interface{ Scan(...any) error }, first ...any) (domain.Li
 	if err := sc.Scan(append(first, &li.Available, &title, &typ, &status, &difficulty)...); err != nil {
 		return li, err
 	}
-	li.Title = strPtr(title)
+	li.Title = sqlrow.StrPtr(title)
 	if typ.Valid {
 		v := domain.ItemType(typ.String)
 		li.Type = &v
@@ -65,7 +66,7 @@ func (t *tx) ItemLinks(id string) ([]domain.LinkedItem, error) {
 			return err
 		}
 		li.ID = other
-		when := fromUnix(at)
+		when := sqlrow.FromUnix(at)
 		li.LinkedAt = &when
 		out = append(out, li)
 		return nil
@@ -79,7 +80,7 @@ func (t *tx) LinkItems(a, b string, at time.Time) (bool, error) {
 	}
 	lo, hi := store.LinkPair(a, b)
 	res, err := t.exec(`INSERT INTO item_links (item_a, item_b, created_at) VALUES ($1, $2, $3)
-		ON CONFLICT (item_a, item_b) DO NOTHING`, lo, hi, toUnix(at))
+		ON CONFLICT (item_a, item_b) DO NOTHING`, lo, hi, sqlrow.ToUnix(at))
 	if err != nil {
 		return false, err
 	}

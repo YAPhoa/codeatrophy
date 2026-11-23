@@ -6,6 +6,7 @@ import (
 
 	"codeatrophy/internal/domain"
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 const styleColumns = `id, name, instructions, is_default, created_at, updated_at`
@@ -16,7 +17,7 @@ func scanStyle(sc interface{ Scan(...any) error }) (domain.StylePreset, error) {
 		created, updated int64
 	)
 	err := sc.Scan(&p.ID, &p.Name, &p.Instructions, &p.IsDefault, &created, &updated)
-	p.CreatedAt, p.UpdatedAt = fromUnix(created), fromUnix(updated)
+	p.CreatedAt, p.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return p, err
 }
 
@@ -48,13 +49,13 @@ func (t *tx) GetStylePreset(id string) (domain.StylePreset, error) {
 func (t *tx) InsertStylePreset(p *domain.StylePreset) error {
 	_, err := t.exec(`INSERT INTO style_presets (id, name, name_key, instructions, is_default, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`, p.ID, p.Name, domain.StyleNameKey(p.Name), p.Instructions, p.IsDefault,
-		toUnix(p.CreatedAt), toUnix(p.UpdatedAt))
+		sqlrow.ToUnix(p.CreatedAt), sqlrow.ToUnix(p.UpdatedAt))
 	return err
 }
 
 func (t *tx) UpdateStylePreset(p *domain.StylePreset) error {
 	res, err := t.exec(`UPDATE style_presets SET name = $1, name_key = $2, instructions = $3, is_default = $4, updated_at = $5
-		WHERE id = $6`, p.Name, domain.StyleNameKey(p.Name), p.Instructions, p.IsDefault, toUnix(p.UpdatedAt), p.ID)
+		WHERE id = $6`, p.Name, domain.StyleNameKey(p.Name), p.Instructions, p.IsDefault, sqlrow.ToUnix(p.UpdatedAt), p.ID)
 	if err != nil {
 		return err
 	}

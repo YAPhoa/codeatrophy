@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"codeatrophy/internal/store"
+	"codeatrophy/internal/store/internal/sqlrow"
 )
 
 // AI jobs: one row each in ai_jobs, the request and the result compressed.
@@ -26,18 +27,10 @@ func scanAIJob(sc interface{ Scan(...any) error }, extra ...any) (store.AIJob, e
 	if err := sc.Scan(dest...); err != nil {
 		return j, err
 	}
-	j.CreatedAt = fromUnix(created)
-	j.ItemID, j.DraftID, j.Origin, j.Error = strPtr(itemID), strPtr(draftID), strPtr(origin), strPtr(errBody)
-	j.StartedAt, j.FinishedAt, j.PickedUpAt = timePtr(started), timePtr(finished), timePtr(pickedUp)
+	j.CreatedAt = sqlrow.FromUnix(created)
+	j.ItemID, j.DraftID, j.Origin, j.Error = sqlrow.StrPtr(itemID), sqlrow.StrPtr(draftID), sqlrow.StrPtr(origin), sqlrow.StrPtr(errBody)
+	j.StartedAt, j.FinishedAt, j.PickedUpAt = sqlrow.TimePtr(started), sqlrow.TimePtr(finished), sqlrow.TimePtr(pickedUp)
 	return j, nil
-}
-
-func timePtr(n sql.NullInt64) *time.Time {
-	if !n.Valid {
-		return nil
-	}
-	t := fromUnix(n.Int64)
-	return &t
 }
 
 func compressedOrNil(p *string) any {
@@ -49,8 +42,8 @@ func compressedOrNil(p *string) any {
 
 func (t *tx) InsertAIJob(j *store.AIJob) error {
 	_, err := t.exec(`INSERT INTO ai_jobs (`+aiJobColumns+`, request, result) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		j.ID, toUnix(j.CreatedAt), j.Kind, nullStr(j.ItemID), nullStr(j.DraftID), text(j.Title), j.Status, nullText(j.Origin), nullText(j.Error),
-		nullUnix(j.StartedAt), nullUnix(j.FinishedAt), nullUnix(j.PickedUpAt), j.UserID, store.CompressText(j.Request),
+		j.ID, sqlrow.ToUnix(j.CreatedAt), j.Kind, sqlrow.NullStr(j.ItemID), sqlrow.NullStr(j.DraftID), text(j.Title), j.Status, nullText(j.Origin), nullText(j.Error),
+		sqlrow.NullUnix(j.StartedAt), sqlrow.NullUnix(j.FinishedAt), sqlrow.NullUnix(j.PickedUpAt), j.UserID, store.CompressText(j.Request),
 		compressedOrNil(j.Result))
 	return err
 }
@@ -114,8 +107,8 @@ func (t *tx) ListAIJobs(f store.AIJobFilter) ([]store.AIJob, error) {
 func (t *tx) UpdateAIJob(j *store.AIJob) error {
 	res, err := t.exec(`UPDATE ai_jobs SET item_id = $1, draft_id = $2, title = $3, status = $4, origin = $5, result = $6, error = $7,
 		started_at = $8, finished_at = $9, picked_up_at = $10 WHERE id = $11`,
-		nullStr(j.ItemID), nullStr(j.DraftID), text(j.Title), j.Status, nullText(j.Origin), compressedOrNil(j.Result), nullText(j.Error),
-		nullUnix(j.StartedAt), nullUnix(j.FinishedAt), nullUnix(j.PickedUpAt), j.ID)
+		sqlrow.NullStr(j.ItemID), sqlrow.NullStr(j.DraftID), text(j.Title), j.Status, nullText(j.Origin), compressedOrNil(j.Result), nullText(j.Error),
+		sqlrow.NullUnix(j.StartedAt), sqlrow.NullUnix(j.FinishedAt), sqlrow.NullUnix(j.PickedUpAt), j.ID)
 	if err != nil {
 		return err
 	}
@@ -135,7 +128,7 @@ func (t *tx) DeleteAIJob(id string) (bool, error) {
 }
 
 func (t *tx) PruneAIJobs(finishedBefore time.Time, keep int) (int, error) {
-	res, err := t.exec(`DELETE FROM ai_jobs WHERE finished_at IS NOT NULL AND finished_at < $1`, toUnix(finishedBefore))
+	res, err := t.exec(`DELETE FROM ai_jobs WHERE finished_at IS NOT NULL AND finished_at < $1`, sqlrow.ToUnix(finishedBefore))
 	if err != nil {
 		return 0, err
 	}
