@@ -524,13 +524,14 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxTestCaseNameChars", "maxDraftTextChars", "maxInstructionChars", "maxPreviousDraftBytes", "maxGeneratedTestCases",
 		"maxLargeInputBytes", "maxLargeTestCases", "maxStylePresets", "maxStyleNameChars", "maxStyleInstructionsChars", "maxSystemPromptChars", "maxModelIdChars", "maxApiKeyChars",
 		"maxAiProviders", "maxAiProviderNameChars", "minAiTimeoutSeconds", "maxAiTimeoutSeconds", "maxBundleNameChars", "maxBundleDescriptionChars", "maxImportUncompressedBytes", "maxImportEntries", "maxPageSize",
-		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars", "maxNotesChars", "maxLinksPerItem"} {
+		"maxRequestBytes", "maxImportCollections", "maxSolutionsPerItem", "maxSolutionNameChars", "maxSolutionNotesChars", "maxNotesChars", "maxLinksPerItem",
+		"minPasswordChars", "maxPasswordBytes", "maxMcpTokens", "maxMcpTokenNameChars", "maxResultTextBytes", "maxAiLogTextBytes"} {
 		if lim[k] == nil {
 			t.Errorf("limits.%s missing", k)
 		}
 	}
-	if len(lim) != 44 {
-		t.Errorf("limits has %d keys, want 44", len(lim))
+	if len(lim) != 50 {
+		t.Errorf("limits has %d keys, want 50", len(lim))
 	}
 	if _, old := lim["maxTestCaseCount"]; old {
 		t.Error("maxTestCaseCount was renamed to maxGeneratedTestCases")
@@ -539,7 +540,9 @@ func TestMetaStatsAndSettings(t *testing.T) {
 		"maxSourceUrlChars": 2048, "maxCollectionNameChars": 200, "maxTestCasesPerItem": 1000, "maxTestDataBytes": 8388608,
 		"maxSolutionsPerItem": 50, "maxSolutionNameChars": 100, "maxSolutionNotesChars": 5000, "maxNotesChars": 4000, "maxLinksPerItem": 30, "maxImportCollections": 10000,
 		"maxImportEntries": 1000000, "maxAiProviders": 20, "maxAiProviderNameChars": 60,
-		"minAiTimeoutSeconds": 10, "maxAiTimeoutSeconds": 300, "maxSourceBytes": 1024, "maxRequestBytes": 33554432} {
+		"minAiTimeoutSeconds": 10, "maxAiTimeoutSeconds": 300, "maxSourceBytes": 1024, "maxRequestBytes": 33554432,
+		"minPasswordChars": 8, "maxPasswordBytes": 72, "maxMcpTokens": 20, "maxMcpTokenNameChars": 60,
+		"maxResultTextBytes": 65536, "maxAiLogTextBytes": 262144} {
 		if lim[k] != want {
 			t.Errorf("limits.%s = %v, want %v", k, lim[k], want)
 		}

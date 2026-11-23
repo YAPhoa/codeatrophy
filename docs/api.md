@@ -391,7 +391,13 @@ to show.
     "maxSolutionNameChars": 100,
     "maxSolutionNotesChars": 5000,
     "maxNotesChars": 4000,
-    "maxLinksPerItem": 30
+    "maxLinksPerItem": 30,
+    "minPasswordChars": 8,
+    "maxPasswordBytes": 72,
+    "maxMcpTokens": 20,
+    "maxMcpTokenNameChars": 60,
+    "maxResultTextBytes": 65536,
+    "maxAiLogTextBytes": 262144
   }
 }
 ```
@@ -447,6 +453,13 @@ to show.
   and saves. `maxSystemPromptChars` bounds a
   [custom system prompt](#system-prompt) and a
   [custom test case prompt](#test-case-prompt).
+  `minPasswordChars` (in characters) and `maxPasswordBytes` (in UTF-8
+  bytes) bound an account's password, and `maxMcpTokens` and
+  `maxMcpTokenNameChars` its [MCP tokens](#mcp-tokens). Two more are what
+  the server keeps rather than what it accepts: `maxResultTextBytes` is how
+  much of each stream of a [submission](#submissions)'s result is kept, and
+  `maxAiLogTextBytes` how much of a request or response the
+  [AI activity log](#ai-activity-log) keeps.
 - `mcp.url` is the full public URL of the MCP endpoint when the operator has
   set `CODEATROPHY_PUBLIC_URL`, otherwise `null`; a client then derives it
   from its own origin plus `mcp.path`. `mcp.authRequired` is `true` when

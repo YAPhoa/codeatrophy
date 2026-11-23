@@ -157,6 +157,17 @@ export interface Limits {
   maxNotesChars: number;
   /** How many items one item can be linked to, unavailable ones included. */
   maxLinksPerItem: number;
+  /** An account's password: at least this many code points… */
+  minPasswordChars: number;
+  /** …and at most this many UTF-8 bytes. */
+  maxPasswordBytes: number;
+  /** MCP tokens one account may hold. */
+  maxMcpTokens: number;
+  maxMcpTokenNameChars: number;
+  /** How much of each stream of a submission's result the server keeps. */
+  maxResultTextBytes: number;
+  /** How much of a request or response the AI activity log keeps (`truncated` beyond it). */
+  maxAiLogTextBytes: number;
 }
 
 export interface Stats {

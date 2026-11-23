@@ -5,15 +5,10 @@
 
 import type { AuthSession, BrowserSession, McpToken, McpTokenCreated } from '../../api/types';
 import type { MockDb, StoredMcpToken } from '../db';
-import { MOCK_ACCOUNT } from '../db';
+import { LIMITS, MOCK_ACCOUNT } from '../db';
 import type { Handler, Req } from '../http';
 import { HttpError, badRequest, conflict, created, invalid, noContent, notFound, objectBody, ok } from '../http';
 import { uuid } from '../util';
-
-const MIN_PASSWORD_CHARS = 8;
-const MAX_PASSWORD_BYTES = 72;
-const MAX_MCP_TOKENS = 20;
-const MAX_MCP_TOKEN_NAME = 60;
 
 const offline = () => badRequest('sign-in is turned off on this server');
 const unauthorized = () => new HttpError(401, 'unauthorized', 'sign in to continue');
@@ -75,8 +70,8 @@ function changePassword(db: MockDb, req: Req) {
   // The session is enough: a `currentPassword` from an older client is ignored.
   const pw = objectBody(req).newPassword;
   const text = typeof pw === 'string' ? pw : '';
-  if ([...text].length < MIN_PASSWORD_CHARS) throw invalid('newPassword', `must be at least ${MIN_PASSWORD_CHARS} characters`);
-  if (new TextEncoder().encode(text).length > MAX_PASSWORD_BYTES) throw invalid('newPassword', `must be at most ${MAX_PASSWORD_BYTES} bytes`);
+  if ([...text].length < LIMITS.minPasswordChars) throw invalid('newPassword', `must be at least ${LIMITS.minPasswordChars} characters`);
+  if (new TextEncoder().encode(text).length > LIMITS.maxPasswordBytes) throw invalid('newPassword', `must be at most ${LIMITS.maxPasswordBytes} bytes`);
   db.account.password = text;
   db.account.sessions = db.account.sessions.filter((s) => s.current);
   return noContent();
@@ -91,10 +86,10 @@ function createToken(db: MockDb, req: Req) {
   const raw = objectBody(req).name;
   const name = typeof raw === 'string' ? raw.trim() : '';
   if (name === '') throw invalid('name', 'is required');
-  if ([...name].length > MAX_MCP_TOKEN_NAME) throw invalid('name', `must be at most ${MAX_MCP_TOKEN_NAME} characters`);
+  if ([...name].length > LIMITS.maxMcpTokenNameChars) throw invalid('name', `must be at most ${LIMITS.maxMcpTokenNameChars} characters`);
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001F\u007F\u2028\u2029]/.test(name)) throw invalid('name', 'must be a single line');
-  if (db.account.mcpTokens.length >= MAX_MCP_TOKENS) throw conflict(`an account may hold at most ${MAX_MCP_TOKENS} MCP tokens; revoke one first`);
+  if (db.account.mcpTokens.length >= LIMITS.maxMcpTokens) throw conflict(`an account may hold at most ${LIMITS.maxMcpTokens} MCP tokens; revoke one first`);
   const token = `cat_${Array.from({ length: 43 }, () => TOKEN_CHARS[Math.floor(Math.random() * TOKEN_CHARS.length)]).join('')}`;
   const stored: StoredMcpToken = { id: uuid().replace(/-/g, '').slice(0, 16), name, hint: token.slice(-4), token, createdAt: db.now(), lastUsedAt: null };
   db.account.mcpTokens.unshift(stored);

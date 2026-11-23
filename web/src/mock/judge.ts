@@ -17,6 +17,7 @@
 // program; the comparison with the starter code is of the source alone.
 
 import type { SubmissionResult, Verdict } from '../api/types';
+import { LIMITS } from './db';
 
 export type Behaviour = 'accepted' | 'starter' | 'wrong' | 'tle' | 'mle' | 're' | 'ce' | 'ie';
 
@@ -212,18 +213,16 @@ export function wrongAnswerHits(index: number, total: number): boolean {
   return total === 1 || index % 3 === 1;
 }
 
-/** Each stream of a result is cut to this many bytes, as by the server. */
-export const RESULT_STREAM_BYTES = 64 * 1024;
-
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** A stream as a result carries it: at most `RESULT_STREAM_BYTES`, never ending in half a character. */
+/** A stream as a result carries it: at most `maxResultTextBytes`, never ending in half a character. */
 export function clipStream(text: string): string {
-  if (text.length * 3 <= RESULT_STREAM_BYTES) return text;
+  const max = LIMITS.maxResultTextBytes;
+  if (text.length * 3 <= max) return text;
   const bytes = encoder.encode(text);
-  if (bytes.length <= RESULT_STREAM_BYTES) return text;
-  return decoder.decode(bytes.subarray(0, RESULT_STREAM_BYTES)).replace(/\uFFFD$/, '');
+  if (bytes.length <= max) return text;
+  return decoder.decode(bytes.subarray(0, max)).replace(/\uFFFD$/, '');
 }
 
 /** The result of one case under a behaviour, with its streams cut to size. */

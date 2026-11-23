@@ -78,6 +78,12 @@ type MetaLimits struct {
 	MaxLinksPerItem            int   `json:"maxLinksPerItem"`
 	MaxPageSize                int   `json:"maxPageSize"`
 	MaxRequestBytes            int   `json:"maxRequestBytes"`
+	MinPasswordChars           int   `json:"minPasswordChars"`
+	MaxPasswordBytes           int   `json:"maxPasswordBytes"`
+	MaxMCPTokens               int   `json:"maxMcpTokens"`
+	MaxMCPTokenNameChars       int   `json:"maxMcpTokenNameChars"`
+	MaxResultTextBytes         int   `json:"maxResultTextBytes"`
+	MaxAILogTextBytes          int   `json:"maxAiLogTextBytes"`
 }
 
 // Meta returns the instance capabilities.
@@ -152,6 +158,12 @@ func (a *App) metaLimits() MetaLimits {
 		MaxLinksPerItem:            a.limits.MaxLinksPerItem,
 		MaxPageSize:                domain.MaxPageSize,
 		MaxRequestBytes:            domain.MaxRequestBytes,
+		MinPasswordChars:           MinPasswordChars,
+		MaxPasswordBytes:           MaxPasswordBytes,
+		MaxMCPTokens:               MaxMCPTokens,
+		MaxMCPTokenNameChars:       maxMCPTokenName,
+		MaxResultTextBytes:         domain.MaxResultTextBytes,
+		MaxAILogTextBytes:          maxLogTextBytes,
 	}
 }
 
