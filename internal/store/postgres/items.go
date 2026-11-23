@@ -42,8 +42,8 @@ func scanItem(sc interface{ Scan(...any) error }) (itemRow, error) {
 	if err != nil {
 		return r, err
 	}
-	it.CreatedBy = changeSource(by[0], by[1], by[2])
-	it.LastUpdatedBy = changeSource(by[3], by[4], by[5])
+	it.CreatedBy = sqlrow.ChangeSource(by[0], by[1], by[2])
+	it.LastUpdatedBy = sqlrow.ChangeSource(by[3], by[4], by[5])
 	if difficulty.Valid {
 		d := domain.Difficulty(difficulty.String)
 		it.Difficulty = &d
@@ -158,24 +158,6 @@ func (t *tx) ExistingItemIDs(ids []string) (map[string]bool, error) {
 }
 
 // itemArgs are the values of every item column after id, in table order.
-// sourceArgs are the via, client and model columns of a change source, all
-// NULL for an unknown one.
-func sourceArgs(c *domain.ChangeSource) []any {
-	if c == nil {
-		return []any{nil, nil, nil}
-	}
-	return []any{c.Via, sqlrow.NullStr(c.Client), sqlrow.NullStr(c.Model)}
-}
-
-// changeSource reads a change source from its columns: nil when via is
-// NULL, whatever the others hold.
-func changeSource(via, client, model sql.NullString) *domain.ChangeSource {
-	if !via.Valid {
-		return nil
-	}
-	return &domain.ChangeSource{Via: via.String, Client: sqlrow.StrPtr(client), Model: sqlrow.StrPtr(model)}
-}
-
 func itemArgs(it *domain.Item) []any {
 	var difficulty, timeLimit, memLimit, compareMode, starter, iface, harness any
 	if it.Difficulty != nil {
@@ -208,7 +190,7 @@ func itemArgs(it *domain.Item) []any {
 
 func (t *tx) InsertItem(it *domain.Item) error {
 	args := append([]any{it.ID}, itemArgs(it)...)
-	args = append(append(args, sourceArgs(it.CreatedBy)...), sourceArgs(it.LastUpdatedBy)...)
+	args = append(append(args, sqlrow.SourceArgs(it.CreatedBy)...), sqlrow.SourceArgs(it.LastUpdatedBy)...)
 	var seq int64
 	err := t.queryRow(`INSERT INTO items (id, type, title, summary, body, difficulty,
 		raw_input, source_url, source_note, variant_of, revision, time_limit_ms, memory_limit_kb, compare_mode,
@@ -234,7 +216,7 @@ func (t *tx) InsertItem(it *domain.Item) error {
 
 func (t *tx) UpdateItem(it *domain.Item) error {
 	// The type is immutable, and so is who created the item.
-	args := append(append(itemArgs(it)[1:], sourceArgs(it.LastUpdatedBy)...), it.ID)
+	args := append(append(itemArgs(it)[1:], sqlrow.SourceArgs(it.LastUpdatedBy)...), it.ID)
 	var seq int64
 	err := t.queryRow(`UPDATE items SET title = $1, summary = $2, body = $3, difficulty = $4,
 		raw_input = $5, source_url = $6, source_note = $7, variant_of = $8,

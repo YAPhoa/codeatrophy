@@ -3,7 +3,6 @@ package postgres
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 
 	"codeatrophy/internal/store"
@@ -32,23 +31,12 @@ func scanDraft(sc interface{ Scan(...any) error }, extra ...any) (store.Draft, e
 	return d, nil
 }
 
-func decompressedOrNil(b []byte, id, what string) (*string, error) {
-	if b == nil {
-		return nil, nil
-	}
-	s, err := store.DecompressText(b)
-	if err != nil {
-		return nil, fmt.Errorf("draft %s: %s: %w", id, what, err)
-	}
-	return &s, nil
-}
-
 func (t *tx) InsertDraft(d *store.Draft) error {
 	_, err := t.exec(`INSERT INTO drafts (`+draftColumns+`, request, generation, content)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		d.ID, sqlrow.ToUnix(d.CreatedAt), sqlrow.ToUnix(d.UpdatedAt), d.Kind, sqlrow.NullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle),
 		d.Revision, d.Edited, sqlrow.NullStr(d.JobID), nullText(d.Error), d.GenerationSeq, d.BasedOn,
-		d.UserID, compressedOrNil(d.Request), compressedOrNil(d.Generation), compressedOrNil(d.Content))
+		d.UserID, sqlrow.CompressedOrNil(d.Request), sqlrow.CompressedOrNil(d.Generation), sqlrow.CompressedOrNil(d.Content))
 	return err
 }
 
@@ -62,13 +50,13 @@ func (t *tx) GetDraft(id string) (store.Draft, error) {
 	if err != nil {
 		return d, err
 	}
-	if d.Request, err = decompressedOrNil(req, id, "request"); err != nil {
+	if d.Request, err = sqlrow.DecompressedOrNil(req, id, "request"); err != nil {
 		return d, err
 	}
-	if d.Generation, err = decompressedOrNil(gen, id, "generation"); err != nil {
+	if d.Generation, err = sqlrow.DecompressedOrNil(gen, id, "generation"); err != nil {
 		return d, err
 	}
-	d.Content, err = decompressedOrNil(content, id, "content")
+	d.Content, err = sqlrow.DecompressedOrNil(content, id, "content")
 	return d, err
 }
 
@@ -96,8 +84,8 @@ func (t *tx) UpdateDraft(d *store.Draft) error {
 		edited = $6, request = $7, job_id = $8, error = $9, generation = $10, generation_seq = $11, content = $12,
 		based_on = $13 WHERE id = $14`,
 		sqlrow.ToUnix(d.UpdatedAt), sqlrow.NullStr(d.VariantOf), text(d.Title), nullText(d.ClientTitle), d.Revision, d.Edited,
-		compressedOrNil(d.Request), sqlrow.NullStr(d.JobID), nullText(d.Error), compressedOrNil(d.Generation), d.GenerationSeq,
-		compressedOrNil(d.Content), d.BasedOn, d.ID)
+		sqlrow.CompressedOrNil(d.Request), sqlrow.NullStr(d.JobID), nullText(d.Error), sqlrow.CompressedOrNil(d.Generation), d.GenerationSeq,
+		sqlrow.CompressedOrNil(d.Content), d.BasedOn, d.ID)
 	if err != nil {
 		return err
 	}

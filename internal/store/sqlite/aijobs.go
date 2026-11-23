@@ -33,18 +33,11 @@ func scanAIJob(sc interface{ Scan(...any) error }, extra ...any) (store.AIJob, e
 	return j, nil
 }
 
-func compressedOrNil(p *string) any {
-	if p == nil {
-		return nil
-	}
-	return store.CompressText(*p)
-}
-
 func (t *tx) InsertAIJob(j *store.AIJob) error {
 	_, err := t.exec(`INSERT INTO ai_jobs (`+aiJobColumns+`, request, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, sqlrow.ToUnix(j.CreatedAt), j.Kind, sqlrow.NullStr(j.ItemID), sqlrow.NullStr(j.DraftID), j.Title, j.Status, sqlrow.NullStr(j.Origin), sqlrow.NullStr(j.Error),
 		sqlrow.NullUnix(j.StartedAt), sqlrow.NullUnix(j.FinishedAt), sqlrow.NullUnix(j.PickedUpAt), j.UserID, store.CompressText(j.Request),
-		compressedOrNil(j.Result))
+		sqlrow.CompressedOrNil(j.Result))
 	return err
 }
 
@@ -107,7 +100,7 @@ func (t *tx) ListAIJobs(f store.AIJobFilter) ([]store.AIJob, error) {
 func (t *tx) UpdateAIJob(j *store.AIJob) error {
 	res, err := t.exec(`UPDATE ai_jobs SET item_id = ?, draft_id = ?, title = ?, status = ?, origin = ?, result = ?, error = ?,
 		started_at = ?, finished_at = ?, picked_up_at = ? WHERE id = ?`,
-		sqlrow.NullStr(j.ItemID), sqlrow.NullStr(j.DraftID), j.Title, j.Status, sqlrow.NullStr(j.Origin), compressedOrNil(j.Result), sqlrow.NullStr(j.Error),
+		sqlrow.NullStr(j.ItemID), sqlrow.NullStr(j.DraftID), j.Title, j.Status, sqlrow.NullStr(j.Origin), sqlrow.CompressedOrNil(j.Result), sqlrow.NullStr(j.Error),
 		sqlrow.NullUnix(j.StartedAt), sqlrow.NullUnix(j.FinishedAt), sqlrow.NullUnix(j.PickedUpAt), j.ID)
 	if err != nil {
 		return err

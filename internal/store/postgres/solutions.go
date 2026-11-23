@@ -28,14 +28,6 @@ func scanSolution(sc interface{ Scan(...any) error }) (domain.ItemSolution, erro
 	return s, err
 }
 
-// lastRunArgs are the values of the last_run_* columns, in column order.
-func lastRunArgs(r *domain.SolutionRun) []any {
-	if r == nil {
-		return []any{nil, nil, nil, nil, nil}
-	}
-	return []any{r.Passed, r.Total, sqlrow.NullInt(r.TimeMs), sqlrow.NullInt(r.MemoryKb), sqlrow.ToUnix(r.RanAt)}
-}
-
 func (t *tx) ListSolutions(itemID string) ([]domain.ItemSolution, error) {
 	rows, err := t.query(`SELECT `+solutionColumns+` FROM solutions WHERE item_id = $1 ORDER BY is_reference DESC, seq`, itemID)
 	if err != nil {
@@ -63,7 +55,7 @@ func (t *tx) GetSolution(id string) (domain.ItemSolution, error) {
 
 func (t *tx) InsertSolution(s *domain.ItemSolution) error {
 	args := append([]any{s.ID, s.ItemID, s.Name, s.Language, text(s.Source), text(s.Notes), s.IsReference,
-		sqlrow.ToUnix(s.CreatedAt), sqlrow.ToUnix(s.UpdatedAt)}, lastRunArgs(s.LastRun)...)
+		sqlrow.ToUnix(s.CreatedAt), sqlrow.ToUnix(s.UpdatedAt)}, sqlrow.LastRunArgs(s.LastRun)...)
 	_, err := t.exec(`INSERT INTO solutions (`+solutionColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`, args...)
 	return err
@@ -71,7 +63,7 @@ func (t *tx) InsertSolution(s *domain.ItemSolution) error {
 
 func (t *tx) UpdateSolution(s *domain.ItemSolution) error {
 	args := append([]any{s.Name, s.Language, text(s.Source), text(s.Notes), s.IsReference, sqlrow.ToUnix(s.UpdatedAt)},
-		lastRunArgs(s.LastRun)...)
+		sqlrow.LastRunArgs(s.LastRun)...)
 	res, err := t.exec(`UPDATE solutions SET name = $1, language = $2, source = $3, notes = $4, is_reference = $5, updated_at = $6,
 		last_run_passed = $7, last_run_total = $8, last_run_time_ms = $9, last_run_memory_kb = $10, last_run_at = $11
 		WHERE id = $12`, append(args, s.ID)...)

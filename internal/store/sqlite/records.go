@@ -25,7 +25,7 @@ func scanTestCase(sc interface{ Scan(...any) error }) (domain.TestCase, error) {
 	err := sc.Scan(&tc.ID, &tc.ItemID, &tc.Position, &tc.Name, &tc.Stdin, &tc.ExpectedStdout, &sample, &tc.Origin,
 		&verified, &created, &updated, &genLang, &genSrc)
 	tc.IsSample, tc.Verified = sample != 0, verified != 0
-	tc.Generator = generatorOf(genLang, genSrc)
+	tc.Generator = sqlrow.GeneratorOf(genLang, genSrc)
 	tc.CreatedAt, tc.UpdatedAt = sqlrow.FromUnix(created), sqlrow.FromUnix(updated)
 	return tc, err
 }
@@ -61,14 +61,6 @@ func (t *tx) InsertTestCase(tc *domain.TestCase) error {
 		tc.ID, tc.ItemID, tc.Position, tc.Name, tc.Stdin, tc.ExpectedStdout, boolInt(tc.IsSample), tc.Origin,
 		boolInt(tc.Verified), sqlrow.ToUnix(tc.CreatedAt), sqlrow.ToUnix(tc.UpdatedAt), lang, src)
 	return err
-}
-
-// generatorOf reads a test case's generator columns.
-func generatorOf(lang, src sql.NullString) *domain.GeneratorSpec {
-	if !lang.Valid || !src.Valid {
-		return nil
-	}
-	return &domain.GeneratorSpec{Language: lang.String, Source: src.String}
 }
 
 // generatorCols are the column values of a test case's generator.
@@ -285,14 +277,6 @@ func scanSubmission(sc interface{ Scan(...any) error }) (domain.Submission, erro
 	return s, err
 }
 
-func harnessArg(h *domain.HarnessCode) any {
-	if h == nil {
-		return nil
-	}
-	b, _ := json.Marshal(h)
-	return string(b)
-}
-
 func (t *tx) InsertSubmission(s *domain.Submission) error {
 	ids := s.CaseIDs
 	if ids == nil {
@@ -300,17 +284,10 @@ func (t *tx) InsertSubmission(s *domain.Submission) error {
 	}
 	caseIDs, _ := json.Marshal(ids)
 	_, err := t.exec(`INSERT INTO submissions (`+submissionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.ItemID, s.Mode, s.Language, s.Source, sqlrow.NullStr(s.Stdin), string(caseIDs), s.Status, verdictArg(s.Verdict), s.PassedCount,
+		s.ID, s.ItemID, s.Mode, s.Language, s.Source, sqlrow.NullStr(s.Stdin), string(caseIDs), s.Status, sqlrow.VerdictArg(s.Verdict), s.PassedCount,
 		s.TotalCount, sqlrow.NullInt(s.TimeMs), sqlrow.NullInt(s.MemoryKb), s.CompileOutput, sqlrow.NullStr(s.Error), sqlrow.ToUnix(s.CreatedAt),
-		sqlrow.NullUnix(s.FinishedAt), s.LineOffset, harnessArg(s.Harness), s.UserID)
+		sqlrow.NullUnix(s.FinishedAt), s.LineOffset, sqlrow.HarnessArg(s.Harness), s.UserID)
 	return err
-}
-
-func verdictArg(v *domain.Verdict) any {
-	if v == nil {
-		return nil
-	}
-	return string(*v)
 }
 
 func (t *tx) GetSubmission(id string) (domain.Submission, error) {
@@ -375,7 +352,7 @@ func (t *tx) ListSubmissions(userID, itemID string, mode domain.SubmissionMode, 
 func (t *tx) UpdateSubmission(s *domain.Submission) error {
 	res, err := t.exec(`UPDATE submissions SET status = ?, verdict = ?, passed_count = ?, total_count = ?, time_ms = ?,
 		memory_kb = ?, compile_output = ?, error = ?, finished_at = ? WHERE id = ?`,
-		s.Status, verdictArg(s.Verdict), s.PassedCount, s.TotalCount, sqlrow.NullInt(s.TimeMs), sqlrow.NullInt(s.MemoryKb),
+		s.Status, sqlrow.VerdictArg(s.Verdict), s.PassedCount, s.TotalCount, sqlrow.NullInt(s.TimeMs), sqlrow.NullInt(s.MemoryKb),
 		s.CompileOutput, sqlrow.NullStr(s.Error), sqlrow.NullUnix(s.FinishedAt), s.ID)
 	if err != nil {
 		return err

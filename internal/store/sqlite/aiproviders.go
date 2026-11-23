@@ -22,14 +22,6 @@ func scanAIProvider(sc interface{ Scan(...any) error }) (store.AIProvider, error
 	return p, err
 }
 
-// effortArg stores the model's default effort, "", as NULL.
-func effortArg(effort string) any {
-	if effort == "" {
-		return nil
-	}
-	return effort
-}
-
 func (t *tx) ListAIProviders() ([]store.AIProvider, error) {
 	rows, err := t.query(`SELECT ` + aiProviderColumns + ` FROM ai_providers ORDER BY name_key, seq`)
 	if err != nil {
@@ -58,14 +50,14 @@ func (t *tx) GetAIProvider(id string) (store.AIProvider, error) {
 func (t *tx) InsertAIProvider(p *store.AIProvider) error {
 	_, err := t.exec(`INSERT INTO ai_providers (id, name, name_key, kind, model, base_url, api_key, api_key_origin,
 		effort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.ID, p.Name, domain.AIProviderNameKey(p.Name),
-		p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), sqlrow.ToUnix(p.CreatedAt), sqlrow.ToUnix(p.UpdatedAt))
+		p.Kind, p.Model, p.BaseURL, p.APIKey, p.APIKeyOrigin, sqlrow.EffortArg(p.Effort), sqlrow.ToUnix(p.CreatedAt), sqlrow.ToUnix(p.UpdatedAt))
 	return err
 }
 
 func (t *tx) UpdateAIProvider(p *store.AIProvider) error {
 	res, err := t.exec(`UPDATE ai_providers SET name = ?, name_key = ?, model = ?, base_url = ?, api_key = ?,
 		api_key_origin = ?, effort = ?, updated_at = ? WHERE id = ?`, p.Name, domain.AIProviderNameKey(p.Name), p.Model,
-		p.BaseURL, p.APIKey, p.APIKeyOrigin, effortArg(p.Effort), sqlrow.ToUnix(p.UpdatedAt), p.ID)
+		p.BaseURL, p.APIKey, p.APIKeyOrigin, sqlrow.EffortArg(p.Effort), sqlrow.ToUnix(p.UpdatedAt), p.ID)
 	if err != nil {
 		return err
 	}
