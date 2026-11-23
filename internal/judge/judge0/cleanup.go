@@ -94,8 +94,8 @@ func (e *Engine) requeue(j cleanupJob) {
 	select {
 	case e.clean.queue <- j:
 	default:
-		e.clean.pending.Add(-1)
 		e.log.Debug("judge0: cleanup queue full; the submission stays in Judge0", "token", j.token)
+		e.clean.pending.Add(-1)
 	}
 }
 
@@ -116,12 +116,14 @@ func (e *Engine) cleanOne(j cleanupJob) {
 			select {
 			case e.clean.queue <- j:
 			default:
-				e.clean.pending.Add(-1)
 				e.log.Debug("judge0: cleanup queue full; the submission stays in Judge0", "token", j.token)
+				e.clean.pending.Add(-1)
 			}
 		})
 	default:
-		e.clean.pending.Add(-1)
+		// Done only once logged, so whoever waits for the cleaner sees
+		// the line.
+		defer e.clean.pending.Add(-1)
 		level := e.log.Debug
 		if !e.clean.warned.Swap(true) {
 			level = e.log.Warn

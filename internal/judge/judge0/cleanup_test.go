@@ -261,3 +261,42 @@ func TestNeverFinishedRunIsGivenUp(t *testing.T) {
 		t.Errorf("logs:\n%s", s)
 	}
 }
+
+// heldWriter holds a log write that contains hold until release is closed,
+// and says on held when it starts holding.
+type heldWriter struct {
+	hold    string
+	held    chan struct{}
+	release chan struct{}
+}
+
+func (w *heldWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), w.hold) {
+		close(w.held)
+		<-w.release
+	}
+	return len(p), nil
+}
+
+// A delete that has failed for good still counts as pending until its
+// failure is logged, so whoever waits for the cleaner sees the log line.
+func TestFailedDeleteIsPendingUntilLogged(t *testing.T) {
+	f, srv := newFake(t)
+	f.deleteStatus = func(string) int { return http.StatusBadRequest }
+	w := &heldWriter{hold: "could not delete", held: make(chan struct{}), release: make(chan struct{})}
+	e := newEngine(t, srv.URL, Config{AuthzToken: "wrong",
+		Logger: slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))})
+	if _, err := e.Execute(context.Background(), pyReq); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-w.held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the failed delete was never logged")
+	}
+	if n := e.clean.pending.Load(); n != 1 {
+		t.Errorf("%d pending while the failure is being logged, want 1", n)
+	}
+	close(w.release)
+	waitCleaned(t, e)
+}
