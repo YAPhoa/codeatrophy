@@ -1,8 +1,8 @@
 # Contributing to Codeatrophy
 
-These rules apply to every change, whoever makes it: the maintainer, another
-person, or an AI assistant working in the repository. The first part holds for
-any project; the second is what this one adds.
+These rules apply to every change, whoever makes it: the maintainer, a
+contributor, or an AI assistant working in the repository. The first part
+holds for any project; the second is what this one adds.
 
 ## Rules for every change
 
@@ -67,7 +67,7 @@ any project; the second is what this one adds.
 ### History
 
 15. **The subject says what is now true**, in plain words, as a user or
-    operator would put it, usually after the area it concerns:
+    operator would put it, usually starting with the area it concerns:
 
     ```
     MCP: the session cap counts only initialized sessions
@@ -104,16 +104,16 @@ any project; the second is what this one adds.
     merged, so the whole pull request stays within rule 1. A series is
     merged by rebase, each commit as it is, so each one follows these rules
     by itself.
-22. **The title and description are the commit message** (rules 15 and 16):
-    a squash uses them as written. The description also says which checks
-    you ran.
+22. **The pull request's title and description are the commit message**
+    (rules 15 and 16): a squash uses them as written. List the checks you
+    ran in the description.
 23. **Only the maintainer merges**, and only with CI green. For their own
     work the maintainer may instead move `dev` forward to a commit CI has
     passed. Expect to be asked to split a pull request that does more than
     one thing.
 24. **`main` moves only by promotion.** It is fast-forwarded to a commit of
-    `dev` that has been tried on staging, and the release tag goes on that
-    commit. Nothing reaches `main` that is not already on `dev`.
+    `dev` that has been verified on staging, and the release tag goes on
+    that commit. Nothing reaches `main` that is not already on `dev`.
 25. **There are no hotfix branches.** An urgent fix lands on `dev` like any
     other change, and `dev` is promoted. So `main` can never get ahead of
     `dev`, and `dev` has to stay fit to release at every commit (rule 2).
@@ -135,10 +135,11 @@ An exception that keeps coming back means the rule is wrong. Change it here.
 ### Before you start
 
 - **A small fix** (a bug, wording, a test) needs no discussion. Make it.
-- **Propose first** anything that adds or changes a schema migration, an API
-  route, an MCP tool, a bundle field, a configuration variable, a dependency,
-  or a part of the UI that every screen shares. Open an issue that says what
-  the user will see, and wait for an answer before writing the code.
+- **Propose first** any change that adds or alters a schema migration, an
+  API route, an MCP tool, a bundle field, a configuration variable, a
+  dependency, or a part of the UI that every screen shares. Open an issue
+  that says what the user will see, and wait for an answer before writing
+  the code.
 - **Pull requests are welcome**, from a branch of your fork, against `dev`.
   For anything on the list above, the issue comes first.
 - **Terms for a contribution.** By opening a pull request you state that you
@@ -161,7 +162,7 @@ the part you are changing.
 
 CI (`.github/workflows/ci.yml`) runs all of these on every push and every
 pull request, builds the Docker image and starts it, and looks for known
-vulnerabilities in the Go dependencies. Run them yourself first all the same:
+vulnerabilities in the Go dependencies. Run them yourself before committing:
 a red run on `dev` or `main` is a broken branch, and rule 17 puts mending it
 before any other work.
 
@@ -190,8 +191,8 @@ before any other work.
 ### Code
 
 - **Go:** `gofmt` and `go vet` clean; the standard library first (`net/http`,
-  `log/slog`, `testing`); dependencies point inward as "Server packages" in
-  `docs/architecture.md` describes; no dependency that needs cgo.
+  `log/slog`, `testing`); dependencies point inward as described in "Server
+  packages" in `docs/architecture.md`; no dependency that needs cgo.
 - **TypeScript:** strict, ESLint clean, and the conventions in
   [`web/README.md`](web/README.md). Colours and motion come from the tokens
   and are checked in light and dark. Text in the UI is short: a hint is one
