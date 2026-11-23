@@ -299,7 +299,7 @@ func setupExposed(addr string, st app.AuthStatus) bool {
 func healthcheck() error {
 	addr := os.Getenv("CODEATROPHY_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8484"
+		addr = config.DefaultAddr
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {

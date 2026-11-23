@@ -116,6 +116,10 @@ type MCPConfig struct {
 	PrettyJSON bool
 }
 
+// DefaultAddr is the listen address when CODEATROPHY_ADDR is unset:
+// loopback only.
+const DefaultAddr = "127.0.0.1:8484"
+
 // Load reads the configuration from the environment.
 func Load() (Config, error) { return LoadFrom(os.Getenv) }
 
@@ -178,7 +182,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Addr:            get("CODEATROPHY_ADDR", "127.0.0.1:8484"),
+		Addr:            get("CODEATROPHY_ADDR", DefaultAddr),
 		DataDir:         get("CODEATROPHY_DATA_DIR", "./data"),
 		SecretKey:       getenv("CODEATROPHY_SECRET_KEY"),
 		LogFormat:       strings.ToLower(get("CODEATROPHY_LOG_FORMAT", "text")),
