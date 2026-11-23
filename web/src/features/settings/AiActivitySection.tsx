@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
-import { qk, useAiLog, useAiLogEntry, useAiSettings } from '../../api/queries';
+import { qk, useAiLog, useAiLogEntry, useAiSettings, useLimits } from '../../api/queries';
 import type { AiLogDetail, AiLogEntry, AiLogFilters, AiLogStatus, AiOperation } from '../../api/types';
 import { OPERATIONS, OPERATION_LABEL, entryFacts, exportName, filterParams, filtersFrom, logProviders, rawRequest, rawResponse, thirtyDaysBefore, type RawText } from '../../lib/aiLog';
 import { saveJson } from '../../lib/download';
 import { parsePage, setPageSize, usePageSize, withPage } from '../../lib/paging';
 import { errorLine, sentence } from '../../lib/errors';
-import { absoluteTime, formatDuration, formatTokens, relativeTime } from '../../lib/format';
+import { absoluteTime, formatBytes, formatDuration, formatTokens, relativeTime } from '../../lib/format';
 import { Button, cx } from '../../ui/Button';
 import { CodeEditor } from '../../ui/CodeEditor';
 import { Collapse, ExpandChevron } from '../../ui/Collapse';
@@ -256,9 +256,10 @@ function LinkedEntry({ id, onClose }: { id: string; onClose: () => void }) {
 
 /** What was sent and what came back. Raw text, never rendered: it holds pasted input and model output. */
 function RawMessages({ detail }: { detail: AiLogDetail }) {
+  const limits = useLimits();
   return (
     <>
-      {detail.truncated && <p className="muted">Cut off at 256&nbsp;KiB.</p>}
+      {detail.truncated && <p className="muted">{limits ? `Cut off at ${formatBytes(limits.maxAiLogTextBytes)}.` : 'Cut off.'}</p>}
       <Raw label="Request" raw={rawRequest(detail.request)}>
         <Button size="sm" variant="ghost" icon={<Download size={14} />} onClick={() => saveJson(detail, exportName(detail))}>
           Export

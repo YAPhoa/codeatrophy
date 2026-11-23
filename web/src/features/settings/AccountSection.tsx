@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogOut, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { api, isApiError, validationFields } from '../../api/client';
+import { useLimits } from '../../api/queries';
 import type { BrowserSession } from '../../api/types';
 import { useAuth, useSignOut } from '../../app/AuthGate';
 import { absoluteTime, relativeTime } from '../../lib/format';
@@ -175,6 +176,7 @@ function Sessions() {
 
 function PasswordForm() {
   const qc = useQueryClient();
+  const limits = useLimits();
   const toast = useToast();
   const email = useAuth().session?.user?.email ?? '';
   const [next, setNext] = useState('');
@@ -222,7 +224,7 @@ function PasswordForm() {
         </Callout>
       )}
       <div className="account-fields">
-        <Field label="New password" error={errors.next} hint="At least 8 characters.">
+        <Field label="New password" error={errors.next} hint={limits && `At least ${limits.minPasswordChars} characters.`}>
           {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />}
         </Field>
         <Field label="Repeat the new password" error={errors.confirm}>

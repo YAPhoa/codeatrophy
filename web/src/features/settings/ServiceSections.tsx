@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Plus } from 'lucide-react';
 import { api, validationFields } from '../../api/client';
+import { useLimits } from '../../api/queries';
 import type { McpTokenCreated, Meta } from '../../api/types';
 import { useAuth } from '../../app/AuthGate';
 import { absoluteTime, relativeTime } from '../../lib/format';
@@ -141,6 +142,7 @@ const TOKENS_KEY = ['auth', 'mcp-tokens'] as const;
  */
 function McpTokens({ url }: { url: string }) {
   const qc = useQueryClient();
+  const limits = useLimits();
   const confirm = useConfirm();
   const toast = useToast();
   const tokens = useQuery({ queryKey: TOKENS_KEY, queryFn: ({ signal }) => api.auth.mcpTokens.list(signal) });
@@ -210,7 +212,7 @@ function McpTokens({ url }: { url: string }) {
               {...p}
               className="input"
               placeholder="Name, e.g. Laptop – Claude Code"
-              maxLength={60}
+              maxLength={limits?.maxMcpTokenNameChars}
               value={name}
               onChange={(e) => {
                 setName(e.target.value);

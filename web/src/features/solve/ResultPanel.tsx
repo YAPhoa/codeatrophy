@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { BookmarkCheck, BookmarkPlus, Check, CircleCheck, Clock, Cpu, Eye, EyeOff, Loader2, Minus, X } from 'lucide-react';
+import { useLimits } from '../../api/queries';
 import type { CompareMode, Submission, SubmissionResult, Verdict } from '../../api/types';
-import { VERDICT_LABEL, describeRun, formatMemoryKb, formatRunTime, verdictTone } from '../../lib/format';
+import { VERDICT_LABEL, describeRun, formatBytes, formatMemoryKb, formatRunTime, verdictTone } from '../../lib/format';
 import { isLargeText, textFilename } from '../../lib/largeText';
 import { titleIfCut } from '../../lib/titleIfCut';
 import { Button, cx } from '../../ui/Button';
@@ -49,9 +50,6 @@ export function Output({ label, note, text, tone, wrap, filename, concealed }: O
   );
 }
 
-/** The server returns at most this much of each input and output stream. */
-const SHOWN_BYTES = 64 * 1024;
-
 /**
  * For a "Solution only" problem the program that ran has runner code around
  * the solver's. The server rewrites line numbers to the solver's own lines
@@ -84,7 +82,9 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
   const failedCompare = result.verdict === 'wrong_answer' && result.expectedStdout !== null;
   // After a crash the error output is the first thing to read; otherwise it is a footnote.
   const crashed = result.verdict === 'runtime_error';
-  const cut = [result.stdin, result.expectedStdout ?? '', result.stdout, result.stderr].some((text) => text.length >= SHOWN_BYTES / 4 && new Blob([text]).size >= SHOWN_BYTES);
+  // The server keeps at most this much of each input and output stream.
+  const shown = useLimits()?.maxResultTextBytes;
+  const cut = shown !== undefined && [result.stdin, result.expectedStdout ?? '', result.stdout, result.stderr].some((text) => text.length >= shown / 4 && new Blob([text]).size >= shown);
   const stderr = result.stderr !== '' ? <Output label="Error output (stderr)" note={lineOffsetNote(lineOffset)} text={result.stderr} tone="danger" wrap /> : null;
   return (
     <div className="case-detail">
@@ -113,7 +113,7 @@ function CaseDetail({ result, number, compare, timeLimitMs, reveal, lineOffset }
         <CaseIo result={result} number={number} compare={compare} failedCompare={failedCompare} />
       )}
       {!crashed && stderr}
-      {!concealed && cut && <p className="case-help">Long input and output are cut off at 64&nbsp;KiB here; the judge compared the complete output.</p>}
+      {!concealed && cut && <p className="case-help">Long input and output are cut off at {formatBytes(shown)} here; the judge compared the complete output.</p>}
     </div>
   );
 }

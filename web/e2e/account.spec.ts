@@ -40,6 +40,8 @@ test('changing the password asks only for the new one, twice', async ({ page }) 
   const form = page.getByRole('form', { name: 'Change password' });
   const submit = form.getByRole('button', { name: 'Change password' });
   await expect(submit).toBeDisabled();
+  // The bound is the server's, from GET /meta.
+  await expect(form.getByText('At least 8 characters.')).toBeVisible();
 
   await form.getByLabel('New password', { exact: true }).fill('battery staple');
   await form.getByLabel('Repeat the new password').fill('battery stapler');
@@ -174,6 +176,7 @@ test('MCP tokens are made, listed and revoked on the MCP server page', async ({ 
   await tokens.getByRole('button', { name: 'Create token' }).click();
   await expect(tokens.getByText('Give the token a name', { exact: false })).toBeVisible();
 
+  await expect(tokens.getByLabel('New token name')).toHaveAttribute('maxlength', '60');
   await tokens.getByLabel('New token name').fill('Laptop – Claude Code');
   await tokens.getByRole('button', { name: 'Create token' }).click();
   const made = tokens.getByRole('status');
