@@ -475,15 +475,11 @@ func itemQuery(r *http.Request) (app.ItemQuery, error) {
 	} else if off != nil {
 		in.Offset = *off
 	}
-	if b, err := queryBool(r, "recursive"); err != nil {
+	if err := queryFlag(r, "recursive", &in.Recursive); err != nil {
 		return in, err
-	} else if b != nil {
-		in.Recursive = *b
 	}
-	if b, err := queryBool(r, "uncollected"); err != nil {
+	if err := queryFlag(r, "uncollected", &in.Uncollected); err != nil {
 		return in, err
-	} else if b != nil {
-		in.Uncollected = *b
 	}
 	in.Favorite, err = queryBool(r, "favorite")
 	return in, err
@@ -912,15 +908,11 @@ func (s *Server) listAIJobs(w http.ResponseWriter, r *http.Request) error {
 	if q.Limit, err = queryInt(r, "limit"); err != nil {
 		return err
 	}
-	if b, err := queryBool(r, "active"); err != nil {
+	if err := queryFlag(r, "active", &q.Active); err != nil {
 		return err
-	} else if b != nil {
-		q.Active = *b
 	}
-	if b, err := queryBool(r, "pickedUp"); err != nil {
+	if err := queryFlag(r, "pickedUp", &q.PickedUp); err != nil {
 		return err
-	} else if b != nil {
-		q.PickedUp = *b
 	}
 	l, err := s.app.ListAIJobs(r.Context(), q)
 	if err != nil {

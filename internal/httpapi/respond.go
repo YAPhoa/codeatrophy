@@ -173,6 +173,16 @@ func queryBool(r *http.Request, name string) (*bool, error) {
 	return nil, apiError(app.CodeBadRequest, "%s must be true or false", name)
 }
 
+// queryFlag sets *dst from a boolean parameter, and leaves it as it is when
+// the parameter is absent.
+func queryFlag(r *http.Request, name string, dst *bool) error {
+	b, err := queryBool(r, name)
+	if b != nil {
+		*dst = *b
+	}
+	return err
+}
+
 func queryList(r *http.Request, name string) []string {
 	var out []string
 	for _, v := range r.URL.Query()[name] {
