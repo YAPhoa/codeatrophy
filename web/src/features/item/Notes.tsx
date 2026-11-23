@@ -6,6 +6,7 @@ import { qk, useLimits } from '../../api/queries';
 import type { Item } from '../../api/types';
 import { errorLine } from '../../lib/errors';
 import { charCount } from '../../lib/itemForm';
+import { onPageHide } from '../../lib/pageHide';
 import { StatusSwap } from '../../ui/Animated';
 import { Button, cx, IconButton } from '../../ui/Button';
 import { Markdown } from '../../ui/Markdown';
@@ -120,15 +121,9 @@ export function Notes({ item, onClose }: { item: Item; onClose?: () => void }) {
   useEffect(() => {
     const current = latest.current;
     const saveNow = (lastChance: boolean) => void saveRef.current(current.text, lastChance);
-    const flush = () => saveNow(true);
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') flush();
-    };
-    window.addEventListener('pagehide', flush);
-    document.addEventListener('visibilitychange', onHide);
+    const stopFlushing = onPageHide(() => saveNow(true));
     return () => {
-      window.removeEventListener('pagehide', flush);
-      document.removeEventListener('visibilitychange', onHide);
+      stopFlushing();
       const { id, text: left, saved } = current;
       if (left !== saved) unsaved.set(id, left);
       // Closing the notes is a last chance too: there may be no later save.

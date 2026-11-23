@@ -13,6 +13,7 @@ import { VERDICT_LABEL, formatBytes, formatMemoryKb, formatMs, hostOf, plural, v
 import { MOD, useHotkeys } from '../../lib/hotkeys';
 import { LANGUAGES, languageName, sortLanguages } from '../../lib/languages';
 import { isLargeText, textFilename } from '../../lib/largeText';
+import { onPageHide } from '../../lib/pageHide';
 import { readJson, writeJson } from '../../lib/storage';
 import { replaceNeedsConfirm } from '../../lib/submissions';
 import { useUrlChoice, useUrlState } from '../../lib/urlState';
@@ -217,21 +218,15 @@ export function SolveView({ item, workingCopies }: { item: Item; workingCopies: 
   // that outlives the page, and on leaving the problem. Tried again when the
   // browser is back online.
   useEffect(() => {
-    const flush = () => {
+    const stopFlushing = onPageHide(() => {
       record();
       const l = latest.current.language;
       if (l) void saver.send(l, { keepalive: true });
-    };
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') flush();
-    };
+    });
     const retry = () => void saver.sendAll();
-    window.addEventListener('pagehide', flush);
-    document.addEventListener('visibilitychange', onHide);
     window.addEventListener('online', retry);
     return () => {
-      window.removeEventListener('pagehide', flush);
-      document.removeEventListener('visibilitychange', onHide);
+      stopFlushing();
       window.removeEventListener('online', retry);
       record();
       void saver.sendAll();
