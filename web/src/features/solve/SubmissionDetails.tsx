@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, FileQuestion, SquarePen } from 'lucide-react';
-import { api, isApiError } from '../../api/client';
-import { qk } from '../../api/queries';
+import { isApiError } from '../../api/client';
+import { SUBMISSION_POLL_MS, submissionQuery } from '../../api/queries';
 import type { CompareMode, Solution, Submission } from '../../api/types';
 import { VERDICT_LABEL, absoluteTime, relativeTime, verdictTone } from '../../lib/format';
 import { languageName } from '../../lib/languages';
@@ -18,7 +18,6 @@ import type { Reveal } from './useReveal';
 /** Lines of output, and of code, shown before "Show more". */
 const OUTPUT_LINES = 6;
 const CODE_LINES = 15;
-const POLL_MS = 700;
 
 interface SubmissionDetailsProps {
   itemId: string;
@@ -42,12 +41,9 @@ interface SubmissionDetailsProps {
 export function SubmissionDetails(props: SubmissionDetailsProps) {
   const { itemId, submissionId, onBack } = props;
   const query = useQuery({
-    queryKey: qk.submission(submissionId),
-    queryFn: ({ signal }) => api.submissions.get(submissionId, signal),
+    ...submissionQuery(submissionId),
     // One still being judged fills in; a finished one never changes.
-    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'completed' ? POLL_MS : false),
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'completed' ? SUBMISSION_POLL_MS : false),
     retry: (count, error) => !(isApiError(error) && error.code === 'not_found') && count < 2,
   });
   // Another problem's submission is not this page's to show.

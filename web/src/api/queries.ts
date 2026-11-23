@@ -168,6 +168,23 @@ export function useWorkspace(itemId: string, enabled = true) {
   return useQuery({ ...workspaceQuery(itemId), enabled });
 }
 
+/** How often a submission still being judged is read again. */
+export const SUBMISSION_POLL_MS = 700;
+
+/**
+ * How a submission is loaded: shared by the drawer's latest run and a past
+ * submission's details. Once judged it never changes, so it is never read
+ * again on its own; each caller says when to poll.
+ */
+export function submissionQuery(id: string) {
+  return queryOptions({
+    queryKey: qk.submission(id),
+    queryFn: ({ signal }) => api.submissions.get(id, signal),
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+}
+
 /**
  * Record a save of the editor in the cached working copies: `copy` written,
  * or a language's copy `removed`. A read under way may have been answered

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { qk } from '../../api/queries';
+import { SUBMISSION_POLL_MS, qk, submissionQuery } from '../../api/queries';
 import type { Submission, SubmissionMode } from '../../api/types';
-
-const POLL_MS = 700;
 
 /**
  * Starts submissions and follows them to completion. Judging is
@@ -20,12 +18,9 @@ export function useSubmissionRunner(itemId: string) {
   const settled = useRef<string | null>(null);
 
   const query = useQuery({
-    queryKey: qk.submission(activeId ?? ''),
-    queryFn: ({ signal }) => api.submissions.get(activeId ?? '', signal),
+    ...submissionQuery(activeId ?? ''),
     enabled: activeId !== null,
-    refetchInterval: (q) => (q.state.data?.status === 'completed' ? false : POLL_MS),
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
+    refetchInterval: (q) => (q.state.data?.status === 'completed' ? false : SUBMISSION_POLL_MS),
   });
 
   const submission: Submission | null = activeId ? (query.data ?? null) : null;
