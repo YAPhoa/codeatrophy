@@ -304,7 +304,7 @@ func (p *Provider) mapError(err error) error {
 		return ai.Errorf(0, "the Anthropic API did not respond in time")
 	}
 	if errors.Is(err, context.Canceled) {
-		return ai.Errorf(0, "the request was cancelled")
+		return ai.Cancelled()
 	}
 	return ai.Errorf(0, ai.Redact("could not reach the Anthropic API: "+rootCause(err), p.apiKey))
 }
@@ -392,7 +392,7 @@ func (p *Provider) mapListError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return ai.Errorf(0, "the Anthropic API did not list its models in time")
 	case errors.Is(err, context.Canceled):
-		return ai.Errorf(0, "the request was cancelled")
+		return ai.Cancelled()
 	}
 	return ai.Errorf(0, ai.Redact("could not list the Anthropic API's models: "+rootCause(err), p.apiKey))
 }

@@ -194,7 +194,7 @@ func transportError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return ai.Errorf(0, "the Gemini API did not list its models in time")
 	case errors.Is(err, context.Canceled):
-		return ai.Errorf(0, "the request was cancelled")
+		return ai.Cancelled()
 	}
 	return ai.Errorf(0, "could not reach the Gemini API: "+ai.TransportCause(err))
 }

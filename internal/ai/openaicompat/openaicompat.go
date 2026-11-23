@@ -224,7 +224,7 @@ func (p *Provider) call(ctx context.Context, body chatRequest) (chatResponse, in
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return out, resp.StatusCode, errCancelled()
+			return out, resp.StatusCode, ai.Cancelled()
 		}
 		return out, resp.StatusCode, ai.Errorf(0, "could not read the provider's response")
 	}
@@ -260,14 +260,10 @@ func (p *Provider) transportError(err error, late string) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return ai.Errorf(0, late)
 	case errors.Is(err, context.Canceled):
-		return errCancelled()
+		return ai.Cancelled()
 	}
 	return ai.Errorf(0, ai.Redact("could not reach the AI provider: "+ai.TransportCause(err), p.apiKey))
 }
-
-// errCancelled is the error for a request its caller cancelled, worded as
-// the other providers word it.
-func errCancelled() error { return ai.Errorf(0, "the request was cancelled") }
 
 // ListModels implements ai.ModelLister with GET {baseURL}/models, which
 // answers {"data": [{"id": ...}, ...]}. Servers that do not implement it
@@ -302,7 +298,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]string, error) {
 		case errors.Is(err, context.DeadlineExceeded):
 			return nil, ai.Errorf(0, "the AI provider did not list its models in time")
 		case errors.Is(err, context.Canceled):
-			return nil, errCancelled()
+			return nil, ai.Cancelled()
 		}
 		return nil, ai.Errorf(0, "could not read the provider's model list")
 	}

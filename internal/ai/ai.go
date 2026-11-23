@@ -124,6 +124,10 @@ func (e *Error) Error() string { return e.Message }
 // Errorf builds a safe provider error.
 func Errorf(status int, msg string) *Error { return &Error{Message: msg, Status: status} }
 
+// Cancelled is the error of a request its caller cancelled, worded the same
+// by every provider.
+func Cancelled() *Error { return Errorf(0, "the request was cancelled") }
+
 // SafeMessage returns a user-presentable description of err, with every
 // occurrence of the given secrets removed.
 func SafeMessage(err error, secrets ...string) string {
