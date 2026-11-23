@@ -62,9 +62,6 @@ func randomNonce() string {
 	return hex.EncodeToString(b)
 }
 
-// Nonce returns the envelope's nonce.
-func (e Envelope) Nonce() string { return e.nonce }
-
 // Open returns the opening tag of a block.
 func (e Envelope) Open(name string) string { return "<" + name + "-" + e.nonce + ">" }
 

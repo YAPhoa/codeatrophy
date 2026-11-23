@@ -176,11 +176,11 @@ func TestEnvelopeAvoidsNoncesPresentInInput(t *testing.T) {
 	gen := func() string { i++; return seq[i-1] }
 	// Matching is case-insensitive.
 	env := newEnvelope(gen, "contains AAAA here", "and bBbB too")
-	if env.Nonce() != "cccc" || i != 3 {
-		t.Errorf("nonce %q after %d tries, want cccc after 3", env.Nonce(), i)
+	if env.nonce != "cccc" || i != 3 {
+		t.Errorf("nonce %q after %d tries, want cccc after 3", env.nonce, i)
 	}
-	if a, b := NewEnvelope(), NewEnvelope(); a.Nonce() == b.Nonce() || len(a.Nonce()) != 24 {
-		t.Errorf("nonces should be random 24-hex strings: %q %q", a.Nonce(), b.Nonce())
+	if a, b := NewEnvelope(), NewEnvelope(); a.nonce == b.nonce || len(a.nonce) != 24 {
+		t.Errorf("nonces should be random 24-hex strings: %q %q", a.nonce, b.nonce)
 	}
 }
 
