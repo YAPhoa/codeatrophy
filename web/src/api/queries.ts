@@ -363,9 +363,9 @@ function patchLists(qc: QueryClient, id: string, change: Partial<ItemSummary>): 
 }
 
 /**
- * Show a change to several items' personal state (status, favorite) at once,
- * as `useQuickUpdate` does for one; returns what to restore if the server
- * rejects it.
+ * Show a change to items' personal state (status, favorite) at once, before
+ * the server has it (`useQuickUpdate` does so for one); returns what to
+ * restore if the server rejects it.
  */
 export async function patchItemsNow(qc: QueryClient, ids: readonly string[], change: Partial<ItemSummary>): Promise<() => void> {
   await qc.cancelQueries({ queryKey: qk.items });
@@ -396,15 +396,8 @@ export function useQuickUpdate() {
   return useMutation({
     mutationFn: ({ id, change }: { id: string; change: { status?: ItemStatus; favorite?: boolean } }) =>
       api.items.update(id, change),
-    onMutate: async ({ id, change }) => {
-      await qc.cancelQueries({ queryKey: qk.items });
-      const snapshot = qc.getQueriesData<unknown>({ queryKey: qk.items });
-      patchLists(qc, id, change);
-      return { snapshot };
-    },
-    onError: (_err, _vars, ctx) => {
-      for (const [key, data] of ctx?.snapshot ?? []) qc.setQueryData(key, data);
-    },
+    onMutate: async ({ id, change }) => ({ restore: await patchItemsNow(qc, [id], change) }),
+    onError: (_err, _vars, ctx) => ctx?.restore(),
     onSuccess: (item) => {
       qc.setQueryData(qk.item(item.id), item);
     },
